@@ -27,6 +27,7 @@ namespace Services.NasbNiro
         private readonly IDocumentService _documentService;
         private readonly IUnitOfWork _uow;
         private readonly IMapper _mapper;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentService _attachments;
         private readonly DbSet<Tender> _tenders;
         private readonly DbSet<TenderFile> _tendersFiles;
         private readonly DbSet<TenderGuaranty> _tendersGuaranties;
@@ -38,9 +39,11 @@ namespace Services.NasbNiro
             ILogger<TenderService> logger,
             IDocumentService documentService,
             IUnitOfWork uow,
-            IMapper mapper)
+            IMapper mapper,
+            global::Services.NasbNiro.Attachments.IAttachmentService attachments = null)
         {
             _logger = logger;
+            _attachments = attachments;
 
             _documentService = documentService ??
                 throw new ArgumentNullException(nameof(documentService));
@@ -204,7 +207,7 @@ namespace Services.NasbNiro
         }
 
         public async ValueTask<ResponseDto<bool>> DetachFileFromTenderAsync
-            (int tenderId, Guid documentId, CancellationToken cancellationToken)
+            (int tenderId, Guid documentId, string reason, CancellationToken cancellationToken)
         {
             TenderFile result = await _tendersFiles.SingleOrDefaultAsync(
                 tenderFile => tenderFile.DocumentId == documentId && tenderFile.TenderId == tenderId,
@@ -214,20 +217,19 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                          .NotFound<bool>(NasbNiroMessages.TenderFileNotFound);
 
-            EntityEntry<TenderFile> entityEntry = _tendersFiles.Remove(result);
+            // PB3: a file is never deleted; it leaves the list as a voided attachment (reason, user, time)
+            if (_attachments == null) return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.InvalidData);
+            ResponseDto<bool> voided = await _attachments.VoidLegacyFileAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.Tender, tenderId, documentId, reason, cancellationToken);
+            if (!voided.Success) return voided;
+
+            _tendersFiles.Remove(result);
 
             if (!await this.SaveChangesAsync(cancellationToken))
                 return ResponseDtoHelper
                      .BadRequest<bool>(NasbNiroMessages.TenderFileNotDeleted);
 
-            bool deleteDocumentResult = await _documentService.DeleteDocumentAsync(documentId);
-
-            if (!deleteDocumentResult)
-                return ResponseDtoHelper
-                         .BadRequest<bool>(NasbNiroMessages.DocumentNotDeleted);
-
             return ResponseDtoHelper
-                         .Ok(true, message: NasbNiroMessages.TenderFileDeleted);
+                         .Ok(true, message: "فایل ابطال شد و با ذکر دلیل در سوابق مناقصه نگهداری می‌شود.");
         }
 
         public async ValueTask<ResponseDto<PagedList<ResponseTenderDto>>>

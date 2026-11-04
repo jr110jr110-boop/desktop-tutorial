@@ -43,7 +43,7 @@ namespace Services.NasbNiro.Contracts
             AttachFileToEntityDto attachFileDto, CancellationToken cancellationToken);
 
         ValueTask<ResponseDto<bool>> DetachFileAsync(
-            int equipmentProcessId, Guid documentId, CancellationToken cancellationToken);
+            int equipmentProcessId, Guid documentId, string reason, CancellationToken cancellationToken);
 
         Task<ResponseDto<string>> FinalizeDocumentAsync(
             FinalizeEquipmentProcessFileDto dto, CancellationToken cancellationToken);

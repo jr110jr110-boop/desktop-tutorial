@@ -82,9 +82,9 @@ namespace WebApi.Controllers
         [HttpDelete("detach-file-from-tender")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromTenderAsync(
-            int tenderId, Guid fileId, CancellationToken cancellationToken)
+            int tenderId, Guid fileId, string reason, CancellationToken cancellationToken)
         {
-            return Ok(await _tenderService.DetachFileFromTenderAsync(tenderId, documentId: fileId, cancellationToken: cancellationToken));
+            return Ok(await _tenderService.DetachFileFromTenderAsync(tenderId, documentId: fileId, reason: reason, cancellationToken: cancellationToken));
         }
 
         [Authorize(Roles = LegacyRoles.TenderWriters)]

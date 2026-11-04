@@ -25,6 +25,8 @@ namespace ViewModels.NasbNiro.ProcurementDtos
 
     public class SavePurchaseRequestLineDto
     {
+        /// <summary>PB3: the id of an existing line; the line is then updated in place so its attachments stay with it.</summary>
+        public int? Id { get; set; }
         public int? ItemId { get; set; }
         public string Description { get; set; }
         public string Unit { get; set; }

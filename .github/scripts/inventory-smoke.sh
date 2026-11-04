@@ -173,8 +173,8 @@ QC3_TOKEN=$(login qc3.ci 'Ci#Qc3-User-2026')
 # upload_as TOKEN NAME : uploads a small text file as that user and leaves the id of the stored document in UPLOADED. The file that proves an inspection and test plan activity must have been
 # uploaded lately by a QC, QA or engineering user (review M16), so the evidence of the quality scenarios is uploaded with the token of the user who owns the activity.
 upload_as() {
-  printf 'evidence %s %s\n' "$2" "$(date +%s%N)" > "$OUT/$2.txt"
-  curl -s -o "$B" -X POST "$API/Documents?Description=$2&Name=$2&Code=QUA" -H "Authorization: Bearer $1" -F "File=@$OUT/$2.txt"
+  printf '%%PDF-1.4 evidence %s %s\n' "$2" "$(date +%s%N)" > "$OUT/$2.pdf"
+  curl -s -o "$B" -X POST "$API/Documents?Description=$2&Name=$2&Code=QUA" -H "Authorization: Bearer $1" -F "File=@$OUT/$2.pdf"
   UPLOADED=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 }
 LONGREF=$(printf 'R%.0s' $(seq 1 301)); LONG1001=$(printf 'R%.0s' $(seq 1 1001))
@@ -644,8 +644,8 @@ call PUT inventory/trace/operations "{\"id\":$OP2,\"action\":\"finish\",\"result
 call POST inventory/trace/operations/qc "{\"id\":$OP2,\"status\":3}"; check "QC reject without note rejected" '.success == false'
 call POST inventory/trace/operations/qc "{\"id\":$OP2,\"status\":2,\"note\":\"OK\"}"; check "QC accept" '.success and .data.qcStatus == 2'
 call POST inventory/trace/operations/files "{\"partOperationId\":$OP2,\"documentId\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"title\":\"x\"}"; check "file link to unknown upload rejected" '.success == false'
-printf 'balance report G2.5\n' > "$OUT/balance-report.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=balance&Name=balance-report&Code=INV" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/balance-report.txt"
+printf '%%PDF-1.4 balance report G2.5\n' > "$OUT/balance-report.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=balance&Name=balance-report&Code=INV" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/balance-report.pdf"
 DOCID=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$DOCID" ] && ok "file upload (Documents)" || bad "file upload (Documents)"
 call POST inventory/trace/operations/files "{\"partOperationId\":$OP2,\"documentId\":\"$DOCID\",\"title\":\"گزارش بالانس\"}"; check "operation file link" '.success and (.data.files|length) == 1'
@@ -1023,7 +1023,7 @@ as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PO,\"action\":\"release
 call GET "procurement/requests/$PRQ"; check "request marked ordered" '.data.status == 3'
 
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"referenceNumber\":\"حواله الف-1\",\"lines\":[{\"itemId\":$BOLT,\"quantity\":60,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
-D=$(val .data.id); call POST "inventory/documents/$D/confirm"
+D=$(val .data.id); PB3RCPT=$D; call POST "inventory/documents/$D/confirm"
 check "receipt against the order: supplier and order price taken" ".success and .data.providerId == $PA and .data.lines[0].unitPrice == 390000"
 call GET "procurement/orders/$PO"; check "order partly received (60 of 100)" '.data.status == 3 and .data.lines[0].receivedQuantity == 60'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-22T00:00:00\",\"warehouseId\":$W1,\"purchaseOrderId\":$PO,\"lines\":[{\"itemId\":$BOLT,\"quantity\":50,\"locationId\":$L2,\"purchaseOrderLineId\":$POL}]}"
@@ -1219,7 +1219,7 @@ upload_as "$QC_TOKEN" itp-a1-evidence; EV1=$UPLOADED
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A1,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\",\"note\":\"Certificates EN 10204 3.1 reviewed\"}"; check "H point released and proven by the file the QC user uploaded -> activity done, ITP in use (the evidence stays on the activity)" ".success and ([.data.activities[]|select(.id==$A1)|.status][0] == 2) and ([.data.activities[]|select(.id==$A1)|.evidenceDocumentId][0] == \"$EV1\") and .data.status == 3"
 as "$QC_TOKEN" POST quality/itps/release "{\"activityId\":$A6,\"party\":1,\"action\":1,\"personName\":\"Vendor QC\",\"organisation\":\"Vendor Co\",\"reference\":\"V-REL-6\"}"; check "vendor H release on the packing activity" '.success'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"done\",\"evidenceDocumentId\":\"$EV1\"}"; nomsg "r1q M16: the file that proved the first activity cannot prove a second one" "پیش‌تر مدرک فعالیت دیگری شده است"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$EV1" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/itp-a1-evidence.txt"); nomsg "r1q M16: the file that proves an activity cannot be replaced afterwards" "مدرک انجام یک فعالیت برنامه بازرسی"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$EV1" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/itp-a1-evidence.pdf"); nomsg "r1q M16: the file that proves an activity cannot be replaced afterwards" "مدرک انجام یک فعالیت برنامه بازرسی"
 as "$PROD_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"x\"}"; no "production cannot mark an activity not applicable"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\"}"; no "not applicable needs a reason"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A4,\"action\":\"not-applicable\",\"note\":\"No run test for this pump order\",\"reference\":\"$LONGREF\"}"; nomsg "r1q H6: the reference of a not-applicable decision is at most 300 characters" "حداکثر 300 نویسه"
@@ -4884,8 +4884,8 @@ as "$OCHK_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; no
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; nomsg "office: a position other than the signer cannot sign (writer)" "فقط سمت امضاکننده"
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; nomsg "office: the signer needs a stored signature image" "تصویر امضا"
 # R1a2 (L10): a picture becomes somebody's signature only when he uploaded it himself, so every signer uploads his own image with his own token
-printf 'signature image bytes\n' > "$OUT/sig-image.txt"
-osigup() { curl -s -o "$B" -X POST "$API/Documents?Description=sig&Name=signature&Code=SIG" -H "Authorization: Bearer $1" -F "File=@$OUT/sig-image.txt"; SIGDOC=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1); }
+printf '%%PDF-1.4 signature image bytes\n' > "$OUT/sig-image.pdf"
+osigup() { curl -s -o "$B" -X POST "$API/Documents?Description=sig&Name=signature&Code=SIG" -H "Authorization: Bearer $1" -F "File=@$OUT/sig-image.pdf"; SIGDOC=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1); }
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$DOCID\"}"; nomsg "r1a2 l10: a file that somebody else uploaded (the administrator's) is not accepted as the signature of the signer" "خودتان بارگذاری کرده‌اید"
 osigup "$OEMP_TOKEN"; OEMP_SIG=$SIGDOC
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OEMP_SIG\"}"; nomsg "r1a2 l10: nor the picture of a colleague" "خودتان بارگذاری کرده‌اید"
@@ -4896,7 +4896,7 @@ osigup "$OMGR_TOKEN"; OMGR_SIG=$SIGDOC
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; check "office: signature image stored for the signer" '.success and .data.hasSignature == true'
 as "$OMGR_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; check "r1a2 l10: saving the same picture again is accepted and changes nothing" ".success and .data.hasSignature == true and .data.signatureDocumentId == \"$OMGR_SIG\""
 as "$OEMP_TOKEN" POST $OF/me/signature "{\"documentId\":\"$OMGR_SIG\"}"; nomsg "r1a2 l10: and a colleague cannot take the stored picture of the signer as his own" "خودتان بارگذاری کرده‌اید"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OMGR_SIG" -H "Authorization: Bearer $OMGR_TOKEN" -F "File=@$OUT/sig-image.txt"); nomsg "r1a2 l10: the stored signature picture can no longer be replaced, not even by its owner" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OMGR_SIG" -H "Authorization: Bearer $OMGR_TOKEN" -F "File=@$OUT/sig-image.pdf"); nomsg "r1a2 l10: the stored signature picture can no longer be replaced, not even by its owner" "تغییر یا حذف آن مجاز نیست"
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL1,\"action\":\"sign\"}"; check "office: signed: number by the rule pattern of the unit (exact), content hash and signature image stored" ".success and .data.status == 2 and .data.number == \"OUT-$OPY-OPS-0001\" and (.data.contentHash|length) > 0 and .data.signatureDocumentId == \"$OMGR_SIG\" and (.data.signedByName|length) > 0"
 as "$OEMP_TOKEN" POST $OF/letters "{\"id\":$OL1,\"kind\":2,\"subject\":\"تغییر پس از امضا\",\"senderPositionId\":$OP_EMP,\"recipients\":[{\"type\":1,\"partyId\":$OPARTY}]}"; nomsg "office: a signed letter cannot be edited" "قابل ویرایش نیست"
 as "$OMGR_TOKEN" GET $OF/letters/$OL1/verify; check "office: the stored hash equals the hash computed again from the content and the files, and no file changed" '.success and .data.signed == true and .data.valid == true and (.data.storedHash|length) > 0 and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
@@ -5047,36 +5047,36 @@ as "$OCHK_TOKEN" GET "$OF/letters?PageSize=100"; check "office r1 M1: and it is 
 ibx "$OCHK_TOKEN" "referral:$ORM"; check "office r1 M1: and from his inbox" '.success and (.data.data|length) == 0'
 
 # C1: the files of a letter. Upload two files; the first is attached to an internal letter, the second to a secret one
-printf 'attachment bytes C1\n' > "$OUT/letter-att.txt"; printf 'secret attachment bytes\n' > "$OUT/letter-att2.txt"; printf 'forged bytes\n' > "$OUT/letter-evil.txt"; printf 'control bytes\n' > "$OUT/letter-ctl.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att.txt"; OATT=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
-curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.txt"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
-curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.txt"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+printf '%%PDF-1.4 attachment bytes C1\n' > "$OUT/letter-att.pdf"; printf '%%PDF-1.4 secret attachment bytes\n' > "$OUT/letter-att2.pdf"; printf '%%PDF-1.4 forged bytes\n' > "$OUT/letter-evil.pdf"; printf '%%PDF-1.4 control bytes\n' > "$OUT/letter-ctl.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=att&Name=letter-att&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att.pdf"; OATT=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=att2&Name=letter-att2&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-att2.pdf"; OATT2=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+curl -s -o "$B" -X POST "$API/Documents?Description=ctl&Name=letter-ctl&Code=OFC" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-ctl.pdf"; OCTL=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$OATT" ] && [ -n "$OATT2" ] && [ -n "$OCTL" ] && ok "office r1 C1: three test files uploaded" || bad "office r1 C1: three test files uploaded"
 # R1a2 (H3): a loose file (no record refers to it yet) is changed only by the user who uploaded it or by the PMO; a signed-in stranger is refused and the bytes stay
 OCTLF=$(ls src/WebApi/UploadedDocuments/${OCTL}* 2>/dev/null | head -n1)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a signed-in stranger cannot replace the bytes of a file somebody else uploaded" "فقط کاربری که بارگذاری کرده"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: a signed-in stranger cannot replace the bytes of a file somebody else uploaded" "فقط کاربری که بارگذاری کرده"
 { [ -n "$OCTLF" ] && grep -q "control bytes" "$OCTLF"; } && ok "r1a2 h3: and the stored bytes of the file are unchanged" || bad "r1a2 h3: and the stored bytes of the file are unchanged (file '$OCTLF')"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: a user with an office role but not the uploader is refused as well" "فقط کاربری که بارگذاری کرده"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: a user with an office role but not the uploader is refused as well" "فقط کاربری که بارگذاری کرده"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $QC_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"renamed-by-stranger\",\"description\":\"x\",\"code\":\"X\"}"; nomsg "r1a2 h3: nor can a stranger edit the name and description of the file" "فقط کاربری که بارگذاری کرده"
 # control: change-file works for the uploader on an ordinary document (so the refusals below are not caused by the request format)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: the uploader replaces the bytes of his own ordinary document" || bad "office r1 C1: control: the uploader replaces the bytes of his own ordinary document (code $CODE)"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "office r1 C1: control: the uploader replaces the bytes of his own ordinary document" || bad "office r1 C1: control: the uploader replaces the bytes of his own ordinary document (code $CODE)"
 { [ -n "$OCTLF" ] && grep -q "forged bytes" "$OCTLF"; } && ok "r1a2 h3: and the new bytes are stored" || bad "r1a2 h3: and the new bytes are stored (file '$OCTLF')"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $OEMP_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OCTL\",\"name\":\"letter-ctl-renamed\",\"description\":\"ctl\",\"code\":\"OFC\"}"; jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the uploader edits the name and description of his file" || bad "r1a2 h3: the uploader edits the name and description of his file"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-ctl.txt"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the PMO may replace a loose file of somebody else" || bad "r1a2 h3: the PMO may replace a loose file of somebody else (code $CODE)"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OCTL" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-ctl.pdf"); jq -e '.success == true' "$B" >/dev/null 2>&1 && ok "r1a2 h3: the PMO may replace a loose file of somebody else" || bad "r1a2 h3: the PMO may replace a loose file of somebody else (code $CODE)"
 as "$FM_TOKEN" GET "$FAU?EntityType=Document&PageSize=0"; check "r1a2 h3: every replacement of file bytes is in the audit trail with the SHA-256 of the old and the new bytes" '.success and ([.data.data[]|select(.action == "FileReplaced" and ((.beforeJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.afterJson|fromjson).sha256|test("^[A-Za-z0-9+/]{43}=$")) and ((.beforeJson|fromjson).sha256 != (.afterJson|fromjson).sha256))]|length) >= 2'
-as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.txt\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
+as "$OEMP_TOKEN" POST $OF/letters "{\"kind\":3,\"subject\":\"نامه داخلی با پیوست\",\"bodyHtml\":\"<p>متن</p>\",\"senderPositionId\":$OP_EMP,\"signerPositionId\":$OP_MGR,\"recipients\":[{\"type\":1,\"positionId\":$OP_CHK}],\"attachments\":[{\"documentId\":\"$OATT\",\"fileName\":\"letter-att.pdf\"}]}"; check "office r1 C1: internal draft with an attachment saved" '.success and (.data.attachments|length) == 1'
 OL3=$(val .data.id)
 # R1a2 (H3): once a record refers to a file it is changed only through the owner module: even the uploader, even the PMO is refused while the draft carries it (the refusal names the owner)
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: the uploader cannot replace a file that a draft letter already carries" "پیوست شده است"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1a2 h3: nor the PMO" "پیوست شده است"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: the uploader cannot replace a file that a draft letter already carries" "پیوست شده است"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1a2 h3: nor the PMO" "پیوست شده است"
 jq -e '.message | contains("نامه")' "$B" >/dev/null 2>&1 && ok "r1a2 h3: and the refusal names the kind of the owner (a letter)" || bad "r1a2 h3: and the refusal names the kind of the owner (a letter)"
 curl -s -o "$B" -X PUT "$API/Documents" -H "Authorization: Bearer $OEMP_TOKEN" -H 'Content-Type: application/json' -d "{\"id\":\"$OATT\",\"name\":\"renamed\",\"description\":\"x\",\"code\":\"X\"}"; nomsg "r1a2 h3: nor can its name and description be edited through the generic endpoint" "پیوست شده است"
 as "$OEMP_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"submit\"}"; check "office r1 C1: submitted" '.success and .data.status == 1'
 as "$OMGR_TOKEN" POST $OF/letters/action "{\"id\":$OL3,\"action\":\"sign\"}"; check "office r1 H5: the second internal letter of the unit gets the next number of the general rule" ".success and .data.status == 4 and .data.number == \"INN-د-$OPY-2\""
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents?DocumentId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: an anonymous download of a letter file is refused (401)" || bad "office r1 C1: an anonymous download of a letter file is refused (401) got $CODE"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/Documents/get-file-info?fileId=$OATT"); [ "$CODE" = "401" ] && ok "office r1 C1: anonymous file information is refused (401)" || bad "office r1 C1: anonymous file information is refused (401) got $CODE"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: a signed letter's attachment cannot be replaced by anybody (even a signed-in stranger)" "تغییر یا حذف آن مجاز نیست"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "office r1 C1: nor by the writer of the letter" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $QC_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "office r1 C1: a signed letter's attachment cannot be replaced by anybody (even a signed-in stranger)" "تغییر یا حذف آن مجاز نیست"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "office r1 C1: nor by the writer of the letter" "تغییر یا حذف آن مجاز نیست"
 OATTF=$(ls src/WebApi/UploadedDocuments/${OATT}* 2>/dev/null | head -n1)
 [ -n "$OATTF" ] && grep -q "attachment bytes C1" "$OATTF" && ok "office r1 C1: the stored bytes of the attachment are unchanged after the attempts" || bad "office r1 C1: the stored bytes of the attachment are unchanged after the attempts (file '$OATTF')"
 as "$OCHK_TOKEN" GET $OF/letters/$OL3/attachments/$OATT; { [ "$CODE" = "200" ] && grep -q "attachment bytes C1" "$B"; } && ok "office r1 C1: the recipient position downloads the attachment through the letter" || bad "office r1 C1: the recipient position downloads the attachment through the letter got $CODE"
@@ -5087,10 +5087,10 @@ as "$QC_TOKEN" GET "Documents?DocumentId=$OATT"; [ "$CODE" = "404" ] && ok "r1t 
 as "$QC_TOKEN" GET "Documents/get-file-info?fileId=$OATT"; check "r1t d8: the name and hash of a letter file do not reach a stranger" '.success == false'
 
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: verify: signed, valid, the hashes agree and no file changed" '.success and .data.valid == true and .data.storedHash == .data.computedHash and (.data.changedDocumentIds|length) == 0'
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.txt"); nomsg "r1t d8: even the writer cannot replace the file of a signed letter" "تغییر یا حذف آن مجاز نیست"
-printf 'forged bytes\n' > "$OATTF"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$OATT" -H "Authorization: Bearer $OEMP_TOKEN" -F "File=@$OUT/letter-evil.pdf"); nomsg "r1t d8: even the writer cannot replace the file of a signed letter" "تغییر یا حذف آن مجاز نیست"
+printf '%%PDF-1.4 forged bytes\n' > "$OATTF"
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: after the bytes of the attachment are swapped on disk verify fails and names the file" ".success and .data.valid == false and (.data.changedDocumentIds|index(\"$OATT\")) != null"
-printf 'attachment bytes C1\n' > "$OATTF"
+printf '%%PDF-1.4 attachment bytes C1\n' > "$OATTF"
 as "$OMGR_TOKEN" GET $OF/letters/$OL3/verify; check "office r1 C1: with the original bytes back the letter is valid again (the check reads the files, it is not a flag)" '.success and .data.valid == true and (.data.changedDocumentIds|length) == 0'
 
 # H5: numbering rules that can produce the same number are refused; a duplicate number is skipped forward
@@ -5160,8 +5160,8 @@ as "$OSEC_TOKEN" POST $OF/letters "{\"kind\":1,\"subject\":\"وارده مناق
 as "$OSEC_TOKEN" GET "$OF/letters?Number=$(enc "INN-OFTND1405-$OPY-2")"; check "office R2: the search by number finds the tender letter and lists its link code" ".success and (.data.data|length) == 1 and .data.data[0].id == $OR2 and .data.data[0].linkCode == \"OFTND1405\""
 
 # --- answer 2: the secretariat reads the content of a Confidential letter, including its attachment; a Secret one stays register data only
-printf 'confidential attachment bytes R2\n' > "$OUT/letter-att3.txt"
-curl -s -o "$B" -X POST "$API/Documents?Description=att3&Name=letter-att3&Code=OFC" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-att3.txt"; OATT3=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+printf '%%PDF-1.4 confidential attachment bytes R2\n' > "$OUT/letter-att3.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=att3&Name=letter-att3&Code=OFC" -H "Authorization: Bearer $OHR_TOKEN" -F "File=@$OUT/letter-att3.pdf"; OATT3=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
 [ -n "$OATT3" ] && ok "office R2: setup: file of the confidential letter uploaded" || bad "office R2: setup: file of the confidential letter uploaded"
 as "$OHR_TOKEN" POST $OF/letters "{\"kind\":2,\"subject\":\"صادره محرمانه R2\",\"classification\":1,\"bodyHtml\":\"<p>CONFWORD777</p>\",$OREC,\"attachments\":[{\"documentId\":\"$OATT3\",\"fileName\":\"conf.txt\"}]}"; check "office R2: confidential outgoing draft saved" '.success and .data.classification == 1'
 OR4=$(val .data.id)
@@ -10799,6 +10799,41 @@ as "$FM_TOKEN" POST $PC/guarantees/confirm-release "{\"guaranteeId\":$PCG3}"; ch
 # --- R1t D19: every pass-through of the legacy CSV actions (2 inventory exports, 1 events export, 1 events/mark) left one audit row, all by the finance manager
 TOKEN=$ADMIN_TOKEN
 as "$FM_TOKEN" GET "finance/audit?EntityType=SepidarLegacyCsv&Action=LegacyCsv&PageSize=0"; check "r1t d19: the legacy CSV pass-throughs are in the audit trail (5 rows: 2 inventory exports, 2 events exports - one is the finance manager's check of the protected labour event - and 1 events/mark, one user)" '.success and (.data.data|length) == 5 and ([.data.data[].userId]|unique|length) == 1'
+# --- PB3: attachments through the whole chain, void instead of delete, and the request dossier
+TOKEN=$ADMIN_TOKEN
+printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/pb3-spec.pdf"; printf 'MZ not a pdf' > "$OUT/pb3-fake.pdf"; printf 'plain' > "$OUT/pb3-bad.exe"
+attach() { CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/attachments" -H "Authorization: Bearer $TOKEN" -F "OwnerType=$1" -F "OwnerId=$2" -F "Kind=${3:-3}" -F "Title=$4" -F "Revision=${5:-A}" -F "File=@$6"); }
+attach 1 $PRQ 3 "مشخصات فنی پیچ" A "$OUT/pb3-spec.pdf"; check "pb3: a technical document is attached to the purchase request" '.success and .data.revision == "A" and .data.kindTitle != null'
+PB3ATT=$(val .data.id)
+attach 1 $PRQ 3 "فایل اجرایی" A "$OUT/pb3-bad.exe"; check "pb3: an executable is refused in Persian" '.success == false'
+attach 1 $PRQ 3 "پی‌دی‌اف قلابی" A "$OUT/pb3-fake.pdf"; check "pb3: a file that only carries a PDF name is refused (magic bytes)" '.success == false'
+call GET "attachments?ownerType=1&ownerId=$PRQ"; check "pb3: the request lists its attachment" '.success and ([.data.items[]|select(.current)]|length) == 1'
+call GET "attachments?ownerType=5&ownerId=$PO"; check "pb3: the purchase order shows the request documents by link (exactly 1, read only, none of its own)" '.success and ([.data.propagated[].items[]]|length) == 1 and ([.data.items[]]|length) == 0'
+call GET "attachments?ownerType=6&ownerId=$PB3RCPT"; check "pb3: the receipt of the order shows the request documents by link (exactly 1)" '.success and ([.data.propagated[].items[]]|length) == 1'
+call GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: the supplier invoice shows the request documents by link (exactly 1)" '.success and ([.data.propagated[].items[]]|length) == 1'
+call DELETE "attachments/$PB3ATT"; nomsg "pb3: after the request is approved the file cannot be removed (the answer says to void it)" "تایید شده"
+call POST attachments/void "{\"id\":$PB3ATT,\"reason\":\"\"}"; nomsg "pb3: voiding needs a reason" "دلیل ابطال"
+call POST attachments/void "{\"id\":$PB3ATT,\"reason\":\"نقشه اشتباه بارگذاری شد\"}"; check "pb3: the file is voided with a reason, never deleted" '.success and .data.voided == true and .data.voidReason == "نقشه اشتباه بارگذاری شد"'
+call GET "attachments?ownerType=1&ownerId=$PRQ"; check "pb3: the voided file stays in the history with its reason" '.success and ([.data.items[]|select(.voided and .voidReason != null)]|length) == 1 and ([.data.items[]|select(.current)]|length) == 0'
+call GET "attachments?ownerType=5&ownerId=$PO"; check "pb3: a voided document no longer propagates (0)" '.success and ([.data.propagated[].items[]]|length) == 0'
+# no delete route exists for a stored file: the only ways to touch its bytes are refused for a file that an attachment points at
+PB3DOC=$(jq -r '.data.items[0].documentId // empty' <(curl -s "$API/attachments?ownerType=1&ownerId=$PRQ" -H "Authorization: Bearer $TOKEN"))
+if [ -n "$PB3DOC" ]; then
+  CODE=$(curl -s -o "$B" -w '%{http_code}' -X DELETE "$API/Documents/$PB3DOC" -H "Authorization: Bearer $TOKEN"); { [ "$CODE" = "404" ] || [ "$CODE" = "405" ]; } && ok "pb3: there is no route that deletes a stored file (HTTP $CODE)" || bad "pb3: there is no route that deletes a stored file (HTTP $CODE)"
+  CODE=$(curl -s -o "$B" -w '%{http_code}' -X PUT "$API/Documents/change-file?documentId=$PB3DOC" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/pb3-spec.pdf"); nomsg "pb3: the bytes of the file of a voided attachment cannot be replaced (the referrer lock)" "پیوست شده است"
+else
+  bad "pb3: the document id of the voided attachment was found"
+fi
+attach 1 $PRQ 3 "مشخصات فنی پیچ" B "$OUT/pb3-spec.pdf"; check "pb3: a new revision is attached after the void" '.success and .data.revision == "B"'
+# a file that carries money: finance adds it to the invoice; QC (a reader of the invoice) never sees it
+TOKEN=$FIN_TOKEN attach 11 $SINV 9 "تصویر فاکتور اسکن" A "$OUT/pb3-spec.pdf"; check "pb3: finance attaches an invoice image to the supplier invoice" '.success and .data.kind == 9'
+as "$QC_TOKEN" GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: QC reads the invoice record but sees none of the money files (0 of kind 9 or 10)" '.success and ([.data.items[]|select(.kind == 9 or .kind == 10)]|length) == 0'
+as "$FIN_TOKEN" GET "attachments?ownerType=11&ownerId=$SINV"; check "pb3: finance sees exactly 1 money file on the invoice" '.success and ([.data.items[]|select(.kind == 9 and .current)]|length) == 1'
+call GET "procurement/orders/$PO"; PB3PONO=$(val .data.number)
+call GET "dossier?number=$PB3PONO"; check "pb3: the dossier by the order number lists exactly the steps of the chain, in order" '.success and ([.data.steps[].code | select(. != "QcInspection" and . != "Ncr" and . != "FinalReceipt")] == ["PurchaseRequest","Inquiry","Quote","PurchaseOrder","TemporaryReceipt","SupplierInvoice","PaymentRequest","TreasuryPayment"]) and .data.stepCount == (.data.steps|length) and .data.hiddenStepCount == 0'
+as "$QC_TOKEN" GET "dossier?number=$PB3PONO"; check "pb3: QC reads the dossier without the treasury step, which is only counted (1 step without access)" '.success and ([.data.steps[].code]|index("TreasuryPayment")) == null and .data.hiddenStepCount == 1 and .data.hiddenStepsText == "1 مرحله بدون دسترسی"'
+call GET "dossier?number=nonexistent-pb3"; nomsg "pb3: an unknown number gives no dossier" "پیدا نشد"
+TOKEN=$ADMIN_TOKEN
 # --- R1t D20: the whole audit trail of this run fits the hash chain
 as "$FM_TOKEN" GET finance/audit/verify; check "r1t d20: the audit trail fits the hash chain from the first sealed row to the last" '.success and .data.ok == true and .data.checked > 0'
 [ "$AIMOCK_STARTED" = 1 ] && { pkill -f mock_llm.py 2>/dev/null || true; }

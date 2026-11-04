@@ -41,6 +41,7 @@ namespace Services.NasbNiro
         private readonly IWorkOrderService _workOrderService;
         private readonly IWorkflowStationService _workflowStationService;
         private readonly DbSet<ProcessEntity> _processs;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentService _attachments;
         private readonly DbSet<ProcessFile> _processFiles;
         private readonly IDateTimeService _dateTimeService;
         private readonly global::Services.NasbNiro.Production.IMfDraftingService _productionDrafting;
@@ -57,8 +58,10 @@ namespace Services.NasbNiro
                             IWorkOrderService workOrderService,
                             IWorkflowStationService workflowStationService,
                             IDateTimeService dateTimeService,
-                            global::Services.NasbNiro.Production.IMfDraftingService productionDrafting = null)
+                            global::Services.NasbNiro.Production.IMfDraftingService productionDrafting = null,
+                            global::Services.NasbNiro.Attachments.IAttachmentService attachments = null)
         {
+            _attachments = attachments;
             _productionDrafting = productionDrafting;
             _unitOfWork = unitOfWork.ThrowIfNull(nameof(unitOfWork));
             _bomService = bomService.ThrowIfNull(nameof(bomService));
@@ -807,7 +810,7 @@ namespace Services.NasbNiro
             return ResponseDtoHelper.Ok(processFile.Id.ToString());
         }
 
-        public async ValueTask<ResponseDto<bool>> DetachFileFromProcessAsync(int processId, Guid documentId, CancellationToken cancellationToken)
+        public async ValueTask<ResponseDto<bool>> DetachFileFromProcessAsync(int processId, Guid documentId, string reason, CancellationToken cancellationToken)
         {
             ProcessEntity process = await GetProcessByIdAsync(processId, cancellationToken);
 
@@ -829,19 +832,19 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<bool>(NasbNiroMessages.ProcessFileNotFound);
             }
 
-            EntityEntry<ProcessFile> entityEntry = _processFiles.Remove(result);
+            // PB3: a file is never deleted; it leaves the list as a voided attachment (reason, user, time)
+            if (_attachments == null) return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.InvalidData);
+            ResponseDto<bool> voided = await _attachments.VoidLegacyFileAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.Process, processId, documentId, reason, cancellationToken);
+            if (!voided.Success) return voided;
+
+            _processFiles.Remove(result);
 
             if (!await this.SaveChangesAsync(cancellationToken))
             {
                 return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.ProcessFileNotDeleted);
             }
 
-            bool deleteDocumentResult = await _documentService.DeleteDocumentAsync(documentId);
-
-            if (!deleteDocumentResult)
-                return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.DocumentNotDeleted);
-
-            return ResponseDtoHelper.Ok(true, message: NasbNiroMessages.ProcessFileDeleted);
+            return ResponseDtoHelper.Ok(true, message: "فایل ابطال شد و با ذکر دلیل در سوابق فرایند نگهداری می‌شود.");
         }
 
         private async ValueTask<bool> ProcessExistsAsync(int processId, CancellationToken cancellationToken)

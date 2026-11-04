@@ -68,7 +68,7 @@ namespace Services.NasbNiro.Contracts
         ValueTask<ResponseDto<string>> AttachFileToBuyOrderAsync(
             AttachFileToEntityDto attachFileDto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<bool>> DetachFileFromBuyOrderAsync(
-            int buyOrderId, Guid documentId, CancellationToken cancellationToken);
+            int buyOrderId, Guid documentId, string reason, CancellationToken cancellationToken);
         Task<ResponseDto<ResponseBuyOrderDto>> UpdateBuyOrderWarehouseFinallyAcceptedAsync(
             UpdateBuyOrderWarehouseFinallyAccepted dto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<ResponseBuyOrderDto>> UpdateBuyOrderEngineeringSaysNeedsFixesAsync(

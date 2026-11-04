@@ -288,9 +288,9 @@ namespace WebApi.Controllers
         [HttpDelete("detach-file-from-buyOrder")]
         [ProducesResponseType(typeof(ResponseDto<bool>), (int)HttpStatusCode.OK)]
         public async ValueTask<ActionResult<ResponseDto<bool>>> DetachFileFromBuyOrderAsync(
-            int buyOrderId, Guid fileId, CancellationToken cancellationToken)
+            int buyOrderId, Guid fileId, string reason, CancellationToken cancellationToken)
         {
-            return Ok(await _buyOrderService.DetachFileFromBuyOrderAsync(buyOrderId, documentId: fileId, cancellationToken: cancellationToken));
+            return Ok(await _buyOrderService.DetachFileFromBuyOrderAsync(buyOrderId, documentId: fileId, reason: reason, cancellationToken: cancellationToken));
         }
     }
 }

@@ -33,7 +33,7 @@ namespace Services.NasbNiro.Contracts
         ValueTask<ProcessEntity> GetProcessByIdAsync(int processId, CancellationToken cancellationToken);
         bool ValidateInputDto(ProcessDtoBase processDtoBase, out string message);
         ValueTask<ResponseDto<string>> AttachFileToProcessAsync(AttachfileToProcessDto attachFileDto, CancellationToken cancellationToken);
-        ValueTask<ResponseDto<bool>> DetachFileFromProcessAsync(int processId, Guid documentId, CancellationToken cancellationToken);
+        ValueTask<ResponseDto<bool>> DetachFileFromProcessAsync(int processId, Guid documentId, string reason, CancellationToken cancellationToken);
         ValueTask<bool> ProcessExistsAsync(int processId, CancellationToken cancellationToken, Expression<Func<ProcessEntity, bool>> where = null);
         Task<ResponseDto<IEnumerable<ResponseProcessFileStatusDto>>> GetProcessesFileStatusAsync(int bomId, CancellationToken cancellationToken);
     }

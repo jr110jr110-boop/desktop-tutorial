@@ -44,6 +44,7 @@ namespace Services.NasbNiro
         private readonly IApplicationUserManager _userManager;
         private readonly DbSet<Bom> _boms;
         private readonly IDocumentService _documentService;
+        private readonly global::Services.NasbNiro.Attachments.IAttachmentService _attachments;
 
         private IQueryable<BuyOrder> _buyOrdersQueryable
             => _buyOrders.AsNoTracking().AsQueryable();
@@ -54,8 +55,10 @@ namespace Services.NasbNiro
             ILogger<BuyOrderService> logger,
             IWorkOrderService workOrderService,
             IApplicationUserManager userManager,
-            IDocumentService documentService)
+            IDocumentService documentService,
+            global::Services.NasbNiro.Attachments.IAttachmentService attachments = null)
         {
+            _attachments = attachments;
             _unitOfWork = unitOfWork.ThrowIfNull(nameof(unitOfWork));
             _mapper = mapper.ThrowIfNull(nameof(mapper));
             _logger = logger.ThrowIfNull(nameof(logger));
@@ -1189,7 +1192,7 @@ namespace Services.NasbNiro
             return ResponseDtoHelper.BadRequest<string>(NasbNiroMessages.FileNotAdded);
         }
 
-        public async ValueTask<ResponseDto<bool>> DetachFileFromBuyOrderAsync(int buyOrderId, Guid documentId, CancellationToken cancellationToken)
+        public async ValueTask<ResponseDto<bool>> DetachFileFromBuyOrderAsync(int buyOrderId, Guid documentId, string reason, CancellationToken cancellationToken)
         {
 
             BuyOrderFile result = await _buyOrderFiles.SingleOrDefaultAsync(x =>
@@ -1200,21 +1203,19 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<bool>("فایل دستورخرید یافت نشد.");
             }
 
-            EntityEntry<BuyOrderFile> entityEntry = _buyOrderFiles.Remove(result);
+            // PB3: a file is never deleted; it leaves the list as a voided attachment (reason, user, time)
+            if (_attachments == null) return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.InvalidData);
+            ResponseDto<bool> voided = await _attachments.VoidLegacyFileAsync(Entities.Model.NasbNiro.Attachments.AttachmentOwnerType.BuyOrder, buyOrderId, documentId, reason, cancellationToken);
+            if (!voided.Success) return voided;
+
+            _buyOrderFiles.Remove(result);
 
             if (!await this.SaveChangesAsync(cancellationToken))
             {
                 return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.ProcessFileNotDeleted);
             }
 
-            bool deleteDocumentResult = await _documentService.DeleteDocumentAsync(documentId);
-
-            if (!deleteDocumentResult)
-            {
-                return ResponseDtoHelper.BadRequest<bool>(NasbNiroMessages.DocumentNotDeleted);
-            }
-
-            return ResponseDtoHelper.Ok(true, message: "فایل دستور خرید حذف شد.");
+            return ResponseDtoHelper.Ok(true, message: "فایل ابطال شد و با ذکر دلیل در سوابق دستور خرید نگهداری می‌شود.");
         }
 
         public async Task<ResponseDto<ResponseBuyOrderDto>> UpdateBuyOrderAssemblerAssembledAsync(

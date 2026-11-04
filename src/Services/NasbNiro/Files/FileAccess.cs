@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Office;
 using Microsoft.EntityFrameworkCore;
 using Services.Identity.AccountServices;
+using Services.NasbNiro.Attachments;
 using Services.NasbNiro.Inventory;
 using Services.Services;
 using Services.NasbNiro.Office;
@@ -286,6 +287,14 @@ namespace Services.NasbNiro.Files
 
             int me = _user.UserId;
             if (stopAtUploader && me > 0 && uploader == me) return facts;
+
+            // PB3: a file that a record attachment holds is read by whoever may read the owner record (a purchase request's technical documents: everyone downstream of it); prices stay with the price readers
+            bool? attachment = await AttachmentAccess.CanReadFileAsync(_uow, _user, id, ct);
+            if (attachment.HasValue)
+            {
+                facts.Owners.Add(new FileOwner(nameof(Entities.Model.NasbNiro.Attachments.RecordAttachment), FileOwnerRule.Record, attachment.Value));
+                if (attachment.Value) return facts;
+            }
 
             // the stored signature picture of a user is read by that user
             int? signer = await _uow.Set<OfUserSignature>().AsNoTracking().Where(s => s.ImageDocumentId == id).Select(s => (int?)s.UserId).FirstOrDefaultAsync(ct);

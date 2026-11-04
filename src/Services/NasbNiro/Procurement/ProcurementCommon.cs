@@ -79,6 +79,7 @@ namespace Services.NasbNiro.Procurement
             yield return new ProcurementSetting { Key = EvalWeightDelivery, Value = 30m, Title = "وزن تحویل به‌موقع در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
             yield return new ProcurementSetting { Key = EvalWeightPrice, Value = 20m, Title = "وزن قیمت در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
             yield return new ProcurementSetting { Key = EvalWeightService, Value = 10m, Title = "وزن خدمات در ارزیابی امتیازی تامین‌کننده", Source = "★ تصمیم موقت؛ شرکت تایید کند (WI-PO-003)" };
+            yield return new ProcurementSetting { Key = global::Services.NasbNiro.Attachments.AttachmentSettingKeys.MaxMegabytes, Value = global::Services.NasbNiro.Attachments.AttachmentRules.DefaultMaxMegabytes, Title = "حداکثر حجم هر فایل پیوست (مگابایت)", Source = "★ PB3؛ شرکت تایید کند" };
         }
 
         public static async Task<Dictionary<string, decimal>> LoadAsync(IUnitOfWork uow, CancellationToken cancellationToken)
