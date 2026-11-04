@@ -111,6 +111,12 @@ namespace Services.NasbNiro.Files
         }
     }
 
+    /// <summary>P-B7a: the read rule of the task module for the files attached to a task (the task's own visibility decides).</summary>
+    public interface IFileTaskRules
+    {
+        Task<bool> CanReadTaskAsync(int taskId, CancellationToken cancellationToken);
+    }
+
     /// <summary>The signed-in user, as the decision needs to know him.</summary>
     internal sealed class FileCaller
     {
@@ -200,12 +206,14 @@ namespace Services.NasbNiro.Files
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IFileOfficeRules _office;
+        private readonly IFileTaskRules _tasks;
 
-        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office)
+        public FileAccessService(IUnitOfWork uow, IInventoryUserContext user, IFileOfficeRules office, IFileTaskRules tasks = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _office = office ?? throw new ArgumentNullException(nameof(office));
+            _tasks = tasks;
         }
 
         private static readonly HashSet<string> Special = new HashSet<string>(FileOwners.Special, StringComparer.Ordinal);
@@ -309,6 +317,14 @@ namespace Services.NasbNiro.Files
             {
                 bool may = await _office.CanReadMeetingAsync(meetingId, ct);
                 facts.Owners.Add(new FileOwner(nameof(OfDecision), FileOwnerRule.Record, may));
+                if (may) return facts;
+            }
+
+            // a file attached to a task is read by whoever may see the task (a confidential task is seen by its parties only); without the task rules the file fails closed
+            foreach (int taskId in await _uow.Set<Entities.Model.NasbNiro.Tasks.TmTaskAttachment>().AsNoTracking().Where(a => a.DocumentId == id).Select(a => a.TaskId).Distinct().ToListAsync(ct))
+            {
+                bool may = _tasks != null && await _tasks.CanReadTaskAsync(taskId, ct);
+                facts.Owners.Add(new FileOwner("TmTaskAttachment", FileOwnerRule.Record, may));
                 if (may) return facts;
             }
 

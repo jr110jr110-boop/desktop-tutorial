@@ -17,6 +17,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
         public static void AddProjectControlConfigurations(this ModelBuilder builder)
         {
             builder.AddProjectControlR1Configurations(); // R1c: new tables and columns
+            builder.AddProjectControlP7Configurations(); // P-B7a: progress approval, registers, daily report extension
 
             // ------------------------------------------------------------------ settings, calendars
             builder.Entity<PcSetting>(b =>

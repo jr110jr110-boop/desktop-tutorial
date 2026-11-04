@@ -252,6 +252,12 @@ namespace IocConfig
             services.AddScoped<IInventoryCodingService, InventoryCodingService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProjectService, Services.NasbNiro.ProjectControl.PcProjectService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressService, Services.NasbNiro.ProjectControl.PcProgressService>();
+            services.AddScoped<Services.NasbNiro.Tasks.ITaskService, Services.NasbNiro.Tasks.TaskService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcProgressApprovalService, Services.NasbNiro.ProjectControl.PcProgressApprovalService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcRegistersService, Services.NasbNiro.ProjectControl.PcRegistersService>();
+            services.AddScoped<Services.NasbNiro.Office.INotificationGateway, Services.NasbNiro.Office.DisabledNotificationGateway>();
+            services.AddScoped<Services.NasbNiro.Office.IWorkflowNotifier, Services.NasbNiro.Office.WorkflowNotifier>();
+            services.AddScoped<Services.NasbNiro.Files.IFileTaskRules, Services.NasbNiro.Tasks.FileTaskRules>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcCommercialService, Services.NasbNiro.ProjectControl.PcCommercialService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcMdrService, Services.NasbNiro.ProjectControl.PcMdrService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();

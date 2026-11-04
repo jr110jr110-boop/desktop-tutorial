@@ -322,5 +322,21 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int State { get; set; }
         public DateTimeOffset? ConfirmedAt { get; set; }
         public List<PcDailyLineDto> Lines { get; set; } = new List<PcDailyLineDto>();
+
+        // P-B7a (appendix 5): the extended site report
+        public string ReportDateText { get; set; }
+        public string ConfirmedByName { get; set; }
+        public string ConfirmedAtText { get; set; }
+        public string CreatorName { get; set; }
+        public string Weather { get; set; }
+        public string Notes { get; set; }
+        public List<PcDailyManpowerDto> Manpower { get; set; } = new List<PcDailyManpowerDto>();
+        public List<PcDailyMaterialDto> Materials { get; set; } = new List<PcDailyMaterialDto>();
+        public List<PcDailyMachineryDto> Machinery { get; set; } = new List<PcDailyMachineryDto>();
+        public List<PcDailyObstacleDto> Obstacles { get; set; } = new List<PcDailyObstacleDto>();
+        public List<PcDailyHseDto> HseEvents { get; set; } = new List<PcDailyHseDto>();
+
+        /// <summary>The caller may confirm this report (a person who wrote or edited it may not).</summary>
+        public bool CanConfirm { get; set; }
     }
 }

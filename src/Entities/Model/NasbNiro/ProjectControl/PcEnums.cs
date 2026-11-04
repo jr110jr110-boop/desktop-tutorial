@@ -87,6 +87,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         ItpPoints = 6,
         Quantity = 7,
         Milestone = 8,
+
+        /// <summary>P-B7a: the percent is rolled up from the tasks linked to the activity, weighted by their estimated hours.</summary>
+        Tasks = 9,
     }
 
     public enum PcActivityStatus { NotStarted = 0, InProgress = 1, Done = 2, OnHold = 3 }

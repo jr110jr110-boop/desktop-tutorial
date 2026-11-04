@@ -285,6 +285,15 @@ namespace WebApi.Controllers.ProjectControl
         [HttpPost("daily-report")]
         public async Task<IActionResult> SaveDailyAsync([FromBody] PcDailyReportDto dto, CancellationToken ct) => Ok(await _progress.SaveDailyAsync(dto, ct));
 
+        /// <summary>P-B7a: the daily reports of a project (list) and one report by id (with manpower, materials, machinery, obstacles and HSE rows).</summary>
+        [HttpGet("daily-reports")]
+        [Authorize(Roles = ProjectControlRoles.Readers)]
+        public async Task<IActionResult> DailyListAsync([FromQuery] PcDailyListQuery query, CancellationToken ct) => Ok((await _progress.GetDailyListAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("daily-report/{id:int}")]
+        [Authorize(Roles = ProjectControlRoles.Readers)]
+        public async Task<IActionResult> DailyByIdAsync(int id, CancellationToken ct) => Ok(await _progress.GetDailyByIdAsync(id, ct));
+
         [HttpPost("daily-report/{id:int}/confirm")]
         public async Task<IActionResult> ConfirmDailyAsync(int id, CancellationToken ct) => Ok(await _progress.ConfirmDailyAsync(id, ct));
     }

@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using LegacyContracts = Entities.Model.NasbNiro.Contracts;
 using Pc = Entities.Model.NasbNiro.ProjectControl;
 using Proc = Entities.Model.NasbNiro.Procurement;
+using Tm = Entities.Model.NasbNiro.Tasks;
 
 namespace DataLayer.Context
 {
@@ -206,12 +207,43 @@ namespace DataLayer.Context
             { typeof(Proc.PaymentRequest), new[] { "Number", "Type", "Status", "RequestDate", "ProviderId", "PurchaseOrderId", "InvoiceId", "Amount", "Deductions", "DeductionNote", "QcApproved", "ApprovedAt", "ApprovedByUserId", "PaidAt", "PaidByUserId", "PaymentReference", "RejectedAt", "RejectReason", "Deleted" } },
             // R1c (M12): the technical judgement of a quote (who accepted it and when); the quotes of an open inquiry are rewritten when the buyer edits it
             { typeof(Proc.SupplierQuote), new[] { "InquiryId", "ProviderId", "QuoteNumber", "TotalAmount", "TechnicallyAccepted", "TechnicalScore", "TechnicalNote", "TechnicalReviewedByUserId", "TechnicalReviewedAt" } },
+            // P-B7a: tasks (status, due date and links; the text of the description and comments is in the task history itself), the referral rows, the progress-approval cartable and the registers
+            { typeof(Tm.TmTask), new[] { "Number", "Title", "Kind", "Priority", "Confidentiality", "DueDate", "EstimatedHours", "PercentComplete", "Status", "StatusReason", "ParentTaskId", "ContractId", "WbsNodeId", "ActivityId", "RiskId", "IssueId", "DecisionId", "CompletedByUserId", "ClosedByUserId", "Deleted" } },
+            { typeof(Tm.TmTaskAssignee), new[] { "TaskId", "UserId", "PositionId", "Role", "State", "Reason", "AssignedByUserId", "ParentId", "EndedByUserId", "EndReason" } },
+            { typeof(Tm.TmTaskAttachment), new[] { "TaskId", "DocumentId", "UploadedByUserId", "IsVoid", "VoidReason", "VoidedByUserId" } },
+            { typeof(Pc.PcProgressChainLevel), null },
+            { typeof(Pc.PcProgressSubmission), new[] { "Number", "ContractId", "Target", "ActivityId", "TaskId", "Percent", "PreviousPercent", "ActualStart", "ActualFinish", "ActualCost", "State", "Round", "CurrentLevel", "SubmittedByUserId", "ResultNote", "ManualProgressId", "CostEntryId" } },
+            { typeof(Pc.PcProgressApproval), new[] { "SubmissionId", "Round", "Level", "State", "DecidedByUserId", "DecidedAt", "Note" } },
+            { typeof(Pc.PcRisk), new[] { "Number", "ContractId", "Title", "Probability", "Impact", "Score", "OwnerPositionId", "Response", "Status", "ReviewDate", "ResidualScore", "ClosedByUserId", "ClosureNote", "Deleted" } },
+            { typeof(Pc.PcIssue), new[] { "Number", "ContractId", "Title", "Priority", "OwnerPositionId", "DueDate", "Status", "ActivityId", "Resolution", "ResolvedByUserId", "ClosedByUserId", "Deleted" } },
+            { typeof(Pc.PcStakeholder), new[] { "ContractId", "Name", "Organization", "RoleTitle", "Influence", "Interest", "EngagementCurrent", "EngagementDesired", "IsActive", "Deleted" } },
+            { typeof(Pc.PcLesson), new[] { "Number", "ContractId", "Phase", "State", "DecidedByUserId", "DecisionNote", "Deleted" } },
+            { typeof(Pc.PcProjectDeliverable), new[] { "ContractId", "Code", "Title", "DueDate", "Status", "DeliveredByUserId", "AcceptedByUserId", "AcceptanceNote", "Deleted" } },
+            { typeof(Pc.PcProjectPhoto), new[] { "ContractId", "DocumentId", "TakenDate", "IsVoid", "VoidReason", "VoidedByUserId" } },
+            { typeof(Pc.PcPartyEvaluation), new[] { "Number", "ContractId", "PartyKind", "ProviderId", "PartyName", "State", "TotalScore", "Grade", "EvaluatorUserId", "Deleted" } },
+            { typeof(Pc.PcWeeklyReport), new[] { "Number", "ContractId", "WeekStart", "State", "LastEditorUserId", "ReleasedByUserId", "ReleasedAt", "Deleted" } },
+            { typeof(Pc.PcPhaseEvaluation), new[] { "ContractId", "Phase", "OverallScore", "Decision", "State", "DecidedByUserId", "DecisionNote", "Deleted" } },
         };
 
         /// <summary>Persian label of the record types added in R1a, put in front of the number or code in the summary of the trail row.</summary>
         private static readonly Dictionary<Type, string> Labels = new Dictionary<Type, string>
         {
             { typeof(LegacyContracts.ContractEntity), "قرارداد" },
+            { typeof(Tm.TmTask), "وظیفه" },
+            { typeof(Tm.TmTaskAssignee), "ارجاع وظیفه" },
+            { typeof(Tm.TmTaskAttachment), "پیوست وظیفه" },
+            { typeof(Pc.PcProgressChainLevel), "زنجیره تایید پیشرفت" },
+            { typeof(Pc.PcProgressSubmission), "گزارش پیشرفت" },
+            { typeof(Pc.PcProgressApproval), "سطح تایید پیشرفت" },
+            { typeof(Pc.PcRisk), "ریسک" },
+            { typeof(Pc.PcIssue), "مشکل پروژه" },
+            { typeof(Pc.PcStakeholder), "ذی‌نفع" },
+            { typeof(Pc.PcLesson), "درس آموخته" },
+            { typeof(Pc.PcProjectDeliverable), "تحویلی پروژه" },
+            { typeof(Pc.PcProjectPhoto), "عکس پروژه" },
+            { typeof(Pc.PcPartyEvaluation), "ارزیابی پیمانکار/مشاور" },
+            { typeof(Pc.PcWeeklyReport), "گزارش هفتگی" },
+            { typeof(Pc.PcPhaseEvaluation), "ارزیابی فاز" },
             { typeof(LegacyContracts.ProvisionalStatement), "صورت‌وضعیت" },
             { typeof(Entities.Model.Document), "فایل" },
             { typeof(Pc.PcSetting), "تنظیم کنترل پروژه" },

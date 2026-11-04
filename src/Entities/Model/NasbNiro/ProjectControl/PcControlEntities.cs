@@ -82,6 +82,18 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? ConfirmedByUserId { get; set; }
         public DateTimeOffset? ConfirmedAt { get; set; }
         public ICollection<PcDailyReportLine> Lines { get; set; }
+
+        // P-B7a (appendix 5): the extended site report
+        public string Weather { get; set; }
+        public string Notes { get; set; }
+
+        /// <summary>The users who created or edited the report (",5,7,"); none of them confirms it.</summary>
+        public string EditorUserIds { get; set; }
+        public ICollection<PcDailyManpower> Manpower { get; set; }
+        public ICollection<PcDailyMaterial> Materials { get; set; }
+        public ICollection<PcDailyMachinery> Machinery { get; set; }
+        public ICollection<PcDailyObstacle> Obstacles { get; set; }
+        public ICollection<PcDailyHse> HseEvents { get; set; }
     }
 
     public class PcDailyReportLine
