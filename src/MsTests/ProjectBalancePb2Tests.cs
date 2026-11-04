@@ -28,7 +28,7 @@ namespace MsTests
     /// All names are generic.
     /// </summary>
     [TestClass]
-    public class ProjectBalancePb2Tests
+    public partial class ProjectBalancePb2Tests
     {
         private static readonly ClaimsPrincipal Pmo = AppHost.Principal(1, "pmo.one", "PMO");
         private static readonly ClaimsPrincipal Eng1 = AppHost.Principal(11, "engineer.one", "ENGINEERING");
@@ -66,7 +66,7 @@ namespace MsTests
         {
             var rows = new List<DemandRow> { new DemandRow { Required = 10m, UseBy = new DateTime(2030, 1, 10) }, new DemandRow { Required = 20m, UseBy = new DateTime(2030, 2, 10) } };
             var pos = new List<PoArrival> { new PoArrival { Date = new DateTime(2030, 1, 20), Quantity = 4m }, new PoArrival { Date = new DateTime(2030, 3, 1), Quantity = 100m } };
-            var a = BalanceRules.Allocate(rows, 2m, 3m, 6m, true, 5m, pos);
+            var a = BalanceRules.Allocate(rows, 2m, 3m, 0m, 6m, true, 5m, pos);
             // row 1: 2 issued, 3 reserved, 5 free; nothing else is needed
             Assert.AreEqual(2m, a[0].Issued);
             Assert.AreEqual(3m, a[0].ReservedExisting);
@@ -95,7 +95,7 @@ namespace MsTests
 
         private sealed class Project
         {
-            public int ContractId, WorkOrderId, OtherContractId, OtherWorkOrderId, ScrewItem, BoltItem, SubBomId, TopBomId, General, Quarantine;
+            public int ContractId, WorkOrderId, OtherContractId, OtherWorkOrderId, ScrewItem, BoltItem, SubBomId, TopBomId, General, Quarantine, ProductId;
         }
 
         private static SavePbBomLineDto Line(int no, string pn, string name, decimal qty, PbMakeOrBuy mob, decimal? scrap = null, int? child = null) =>
@@ -144,7 +144,7 @@ namespace MsTests
             var (otherContract, otherWo) = NewWorkOrder(host, "B", 1);
             var res = await Run(host, Plan1, p => p.GetRequiredService<IPbProductService>().InstantiateAsync(new PbInstantiateDto { WorkOrderId = wo, ProductId = product.Data.Id }, Ct));
             Assert.IsTrue(res.Success, res.Message);
-            var pr = new Project { ContractId = contract, WorkOrderId = wo, OtherContractId = otherContract, OtherWorkOrderId = otherWo, SubBomId = sub.Id, TopBomId = top.Id };
+            var pr = new Project { ProductId = product.Data.Id, ContractId = contract, WorkOrderId = wo, OtherContractId = otherContract, OtherWorkOrderId = otherWo, SubBomId = sub.Id, TopBomId = top.Id };
             host.Write(u =>
             {
                 pr.ScrewItem = u.Set<InventoryItem>().Single(i => i.Code == Screw).Id;
@@ -181,7 +181,7 @@ namespace MsTests
             host.Write(u =>
             {
                 u.Set<ProjectReservation>().Add(new ProjectReservation { ContractId = pr.OtherContractId, WorkOrderId = pr.OtherWorkOrderId, BaselineId = 9999, ItemId = pr.ScrewItem, Quantity = 4m, Status = ReservationStatus.Active, IsHard = true, Reason = "other project" });
-                var req = AppHost.Add(u, new PurchaseRequest { Number = "PR-X1", Source = PurchaseRequestSource.AdHoc, Kind = PurchaseKind.Goods, Status = PurchaseRequestStatus.Submitted, RequestDate = DateTime.Today });
+                var req = AppHost.Add(u, new PurchaseRequest { Number = "PR-X1", Source = PurchaseRequestSource.AdHoc, Kind = PurchaseKind.Goods, Status = PurchaseRequestStatus.Submitted, RequestDate = DateTime.Today, WorkOrderId = pr.WorkOrderId, ContractId = pr.ContractId });
                 u.SaveChanges();
                 u.Set<PurchaseRequestLine>().Add(new PurchaseRequestLine { PurchaseRequestId = req.Id, RowNumber = 1, ItemId = pr.ScrewItem, Quantity = 5m, Unit = "عدد", Description = "screws" });
                 u.SaveChanges();
@@ -189,18 +189,18 @@ namespace MsTests
 
             BalanceRunDto run = await BalanceAsync(host, pr);
             Assert.AreEqual(2, run.RunNumber, "run 1 was made by taking the product from the bank");
-            // screws: direct 2 x 3 = 6 (scrap 0.6) plus 4 x 2 x 3 = 24 through the sub assemblies
+            // screws: direct 2 x 3 = 6 (scrap 0.6) plus 4 x 2 x 3 = 24 through the sub assemblies; pieces are whole numbers, rounded UP: 30.6 -> 31 (scrap 1)
             Assert.AreEqual(30m, Sum(run, pr.ScrewItem, l => l.GrossQty));
-            Assert.AreEqual(0.6m, Sum(run, pr.ScrewItem, l => l.ScrapQty));
-            Assert.AreEqual(30.6m, Sum(run, pr.ScrewItem, l => l.RequiredQty));
-            // 10 on hand (quarantine left out) - 4 held by another project = 6 free; 5 on an open request; the rest is short: 30.6 - 6 - 5 = 19.6
+            Assert.AreEqual(1m, Sum(run, pr.ScrewItem, l => l.ScrapQty));
+            Assert.AreEqual(31m, Sum(run, pr.ScrewItem, l => l.RequiredQty));
+            // 10 on hand (quarantine left out) - 4 held by another project = 6 free; 5 on an open request; the rest is short: 31 - 6 - 5 = 20
             Assert.AreEqual(6m, Sum(run, pr.ScrewItem, l => l.ReservedQty));
             Assert.AreEqual(5m, Sum(run, pr.ScrewItem, l => l.OnOrderPrQty));
-            Assert.AreEqual(19.6m, Sum(run, pr.ScrewItem, l => l.ShortQty));
-            // bolts: 1 x 2 x 3 = 6 with 25 percent scrap = 1.5, no stock at all
+            Assert.AreEqual(20m, Sum(run, pr.ScrewItem, l => l.ShortQty));
+            // bolts: 1 x 2 x 3 = 6 with 25 percent scrap = 1.5 -> 7.5 -> 8 whole pieces, no stock at all
             Assert.AreEqual(6m, Sum(run, pr.BoltItem, l => l.GrossQty));
-            Assert.AreEqual(1.5m, Sum(run, pr.BoltItem, l => l.ScrapQty));
-            Assert.AreEqual(7.5m, Sum(run, pr.BoltItem, l => l.ShortQty));
+            Assert.AreEqual(2m, Sum(run, pr.BoltItem, l => l.ScrapQty));
+            Assert.AreEqual(8m, Sum(run, pr.BoltItem, l => l.ShortQty));
             // the run keeps its header: project, BOM revision and the settings it used
             Assert.AreEqual(pr.WorkOrderId, run.WorkOrderId);
             Assert.AreEqual(0, run.BomRevision);
@@ -220,16 +220,16 @@ namespace MsTests
             BalanceRunDto second = await BalanceAsync(host, pr);
             Assert.AreEqual(3, second.RunNumber);
             Assert.AreEqual(first.Id, second.PreviousRunId);
-            Assert.AreEqual(7.5m, Sum(first, pr.BoltItem, l => l.ShortQty));
-            Assert.AreEqual(4.5m, Sum(second, pr.BoltItem, l => l.ShortQty));
+            Assert.AreEqual(8m, Sum(first, pr.BoltItem, l => l.ShortQty));
+            Assert.AreEqual(5m, Sum(second, pr.BoltItem, l => l.ShortQty));
             var diff = await Run(host, Plan1, p => p.GetRequiredService<IProjectBalanceService>().GetDiffAsync(second.Id, null, Ct));
             Assert.IsTrue(diff.Success, diff.Message);
             Assert.AreEqual(1, diff.Data.Changed);
             Assert.AreEqual(0, diff.Data.Added);
             Assert.AreEqual(0, diff.Data.Removed);
             var row = diff.Data.Rows.Single();
-            Assert.AreEqual(7.5m, row.OldShort);
-            Assert.AreEqual(4.5m, row.NewShort);
+            Assert.AreEqual(8m, row.OldShort);
+            Assert.AreEqual(5m, row.NewShort);
         }
 
         [TestMethod]
@@ -259,7 +259,7 @@ namespace MsTests
             Assert.AreEqual(SubstituteStatus.Proposed, proposed.Data.Status);
 
             BalanceRunDto before = await BalanceAsync(host, pr);
-            Assert.AreEqual(30.6m, Sum(before, pr.ScrewItem, l => l.ShortQty), "a proposal is not used");
+            Assert.AreEqual(31m, Sum(before, pr.ScrewItem, l => l.ShortQty), "a proposal is not used");
 
             var self = await Run(host, Eng1, p => p.GetRequiredService<IItemSubstituteService>().DecideAsync(new SubstituteDecisionDto { Id = proposed.Data.Id, Action = "approve" }, Ct));
             Assert.IsFalse(self.Success, "the proposer never approves");
@@ -269,9 +269,9 @@ namespace MsTests
             Assert.IsTrue(approved.Success, approved.Message);
 
             BalanceRunDto after = await BalanceAsync(host, pr);
-            // 30.6 short is covered by 61.2 units of the substitute (ratio 2): the item is not short any more and the line says which substitute
+            // 31 short is covered by 62 units of the substitute (ratio 2): the item is not short any more and the line says which substitute
             Assert.AreEqual(0m, Sum(after, pr.ScrewItem, l => l.ShortQty));
-            Assert.AreEqual(61.2m, Sum(after, pr.ScrewItem, l => l.SubstituteQty));
+            Assert.AreEqual(62m, Sum(after, pr.ScrewItem, l => l.SubstituteQty));
             Assert.IsTrue(after.Lines.Where(l => l.ItemId == pr.ScrewItem).Any(l => l.SubstituteItemId == spare.Data.Id));
         }
 
@@ -300,8 +300,8 @@ namespace MsTests
             Assert.IsTrue(requests.All(r => r.Status == PurchaseRequestStatus.Draft && r.Source == PurchaseRequestSource.Bom && r.ContractId == pr.ContractId), "drafts only, for the project");
             int lines = host.Read(u => u.Set<PurchaseRequestLine>().Count(l => l.PurchaseRequest.ProjectBaselineId != null));
             Assert.AreEqual(2, lines, "one line per short item");
-            Assert.AreEqual(30.6m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.ScrewItem).Quantity));
-            Assert.AreEqual(7.5m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.BoltItem).Quantity));
+            Assert.AreEqual(31m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.ScrewItem).Quantity));
+            Assert.AreEqual(8m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.BoltItem).Quantity));
             Assert.IsTrue(host.Read(u => u.Set<RecordAttachment>().Any(a => a.DocumentId == bomDoc && a.OwnerType == AttachmentOwnerType.PurchaseRequest && a.RemovedAt == null)), "the BOM document is linked to the request");
             Assert.IsTrue(host.Read(u => u.Set<RecordAttachment>().Any(a => a.DocumentId == drawing && a.OwnerType == AttachmentOwnerType.PurchaseRequestLine && a.RemovedAt == null)), "the drawing is linked to the line");
 
@@ -325,7 +325,7 @@ namespace MsTests
             var updated = await Run(host, Plan1, p => p.GetRequiredService<IProjectBalanceService>().CreateDraftsAsync(run2.Id, Ct));
             Assert.IsTrue(updated.Success, updated.Message);
             Assert.AreEqual(0, updated.Data.Created);
-            Assert.AreEqual(4.5m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.BoltItem).Quantity));
+            Assert.AreEqual(5m, host.Read(u => u.Set<PurchaseRequestLine>().Single(l => l.ItemId == pr.BoltItem).Quantity));
 
             // once planning sends a request it is left alone; the next run counts it as on order and drafts nothing new for it
             host.Write(u => { foreach (var r in u.Set<PurchaseRequest>().Where(r => r.ProjectBaselineId != null).ToList()) r.Status = PurchaseRequestStatus.Submitted; u.SaveChanges(); }, Plan1);

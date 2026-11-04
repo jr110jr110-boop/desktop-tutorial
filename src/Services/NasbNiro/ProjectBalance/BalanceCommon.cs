@@ -19,6 +19,9 @@ namespace Services.NasbNiro.ProjectBalance
         /// <summary>Runs the balance, makes the draft purchase requests, edits and asks to release reservations, sets the settings.</summary>
         public const string Planning = "PMO,PLANNING";
 
+        /// <summary>Who reads the balance, the reservations, the substitutes and the kits: project, planning, engineering, warehouse, procurement, QC and management. An AI seat is read-only and sees the balance only where it is granted one of these roles; the drawings are a separate grant (see the attachment owner rules).</summary>
+        public const string Readers = "PMO,CEO,PLANNING,PROJECTMANAGER,COMMERCIAL,ENGINEERING,ENGINEER,WAREHOUSE,WHSUPERVISOR,QC,CONSTRUCTION";
+
         /// <summary>Proposes a substitute; approves it (never the proposer).</summary>
         public const string SubstituteProposers = "PMO,PLANNING,ENGINEERING,ENGINEER";
         public const string SubstituteApprovers = "ENGINEERING,PMO";
@@ -33,6 +36,8 @@ namespace Services.NasbNiro.ProjectBalance
         public const string SameUser = "درخواست‌کننده یا ویرایش‌کننده خودش تایید نمی‌کند؛ تایید باید با فرد دیگری باشد.";
         public const string NoBaseline = "برای این پروژه هنوز از بانک محصول BOM گرفته نشده است؛ ابتدا «گرفتن از بانک» را بزنید.";
         public const string Concurrent = "همزمان کس دیگری همین رکورد را تغییر داد؛ صفحه را دوباره بارگذاری کنید.";
+        public const string RunBusy = "اجرای بالانس این پروژه هم‌اکنون توسط کار دیگری در حال ذخیره است؛ چند لحظه بعد دوباره اجرا کنید.";
+        public const string RunEmpty = "این اجرا ردیفی ندارد یا ذخیره نشده است؛ پیش‌نویس درخواست خرید از آن ساخته نمی‌شود.";
         public const string ReasonRequired = "دلیل تغییر را بنویسید.";
     }
 
@@ -244,6 +249,9 @@ namespace Services.NasbNiro.ProjectBalance
         public decimal ReservedExisting { get; set; }
         public decimal ReservedNew { get; set; }
 
+        /// <summary>Covered by stock of an approved substitute that is already reserved for the project (in units of the item itself).</summary>
+        public decimal Credit { get; set; }
+
         /// <summary>Covered by free stock (equals <see cref="ReservedNew"/> when the run reserves).</summary>
         public decimal FromFree { get; set; }
         public decimal Pr { get; set; }
@@ -256,6 +264,26 @@ namespace Services.NasbNiro.ProjectBalance
     public static class BalanceRules
     {
         public static decimal Round(decimal v) => Math.Round(v, 4, MidpointRounding.AwayFromZero);
+
+        private static readonly HashSet<string> CountUnits = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "عدد", "تعداد", "قطعه", "دستگاه", "جفت", "ست", "no", "no.", "nos", "pc", "pcs", "piece", "pieces", "ea", "each", "set", "number", "unit", "units" };
+
+        /// <summary>A unit that counts whole things (pieces, sets): quantities of it are whole numbers.</summary>
+        public static bool IsCountUnit(string unit) => !string.IsNullOrWhiteSpace(unit) && CountUnits.Contains(unit.Trim());
+
+        /// <summary>The precision of the unit: pieces are whole numbers rounded UP (you cannot buy 7.5 bolts); every other unit keeps four decimals.</summary>
+        public static decimal RoundUnit(decimal v, string unit) => IsCountUnit(unit) ? Math.Ceiling(Round(v)) : Round(v);
+
+        /// <summary>The unit of the BOM line and the unit of the item are different things (no conversion is defined anywhere): kg and kilogram are the same, any two count units are the same.</summary>
+        public static bool UnitsDiffer(string bomUnit, string itemUnit)
+        {
+            if (string.IsNullOrWhiteSpace(bomUnit) || string.IsNullOrWhiteSpace(itemUnit)) return false;
+            string a = bomUnit.Trim().ToLowerInvariant(), b = itemUnit.Trim().ToLowerInvariant();
+            if (a == b) return false;
+            if (IsWeightUnit(a) && IsWeightUnit(b)) return false;
+            if (IsCountUnit(a) && IsCountUnit(b)) return false;
+            return true;
+        }
 
         /// <summary>The scrap factor of a BOM line: the entered one, else gross / net - 1 from the weights, else zero.</summary>
         public static decimal ScrapFactor(decimal? entered, decimal? net, decimal? gross)
@@ -292,9 +320,9 @@ namespace Services.NasbNiro.ProjectBalance
         /// Covers the rows of one item, earliest first: what has been issued to the project, then the stock reserved for the project, then free stock (reserved now when the run reserves), then the open purchase requests, then the
         /// purchase order lines that arrive by the day the row is used. What is left is the shortage. The pools are shared by the rows in order, so the part that is needed first is covered first.
         /// </summary>
-        public static List<RowAllocation> Allocate(IReadOnlyList<DemandRow> rows, decimal issued, decimal reservedExisting, decimal free, bool reserveNew, decimal prQty, IEnumerable<PoArrival> pos)
+        public static List<RowAllocation> Allocate(IReadOnlyList<DemandRow> rows, decimal issued, decimal reservedExisting, decimal credit, decimal free, bool reserveNew, decimal prQty, IEnumerable<PoArrival> pos)
         {
-            decimal issuedLeft = Math.Max(0m, issued), reservedLeft = Math.Max(0m, reservedExisting), freeLeft = Math.Max(0m, free), prLeft = Math.Max(0m, prQty);
+            decimal issuedLeft = Math.Max(0m, issued), reservedLeft = Math.Max(0m, reservedExisting), creditLeft = Math.Max(0m, credit), freeLeft = Math.Max(0m, free), prLeft = Math.Max(0m, prQty);
             List<PoArrival> arrivals = (pos ?? Enumerable.Empty<PoArrival>()).Where(p => p.Quantity > 0).OrderBy(p => p.Date ?? DateTime.MinValue).Select(p => new PoArrival { Date = p.Date, Quantity = p.Quantity }).ToList();
             var result = new List<RowAllocation>();
             foreach (DemandRow row in rows)
@@ -303,6 +331,7 @@ namespace Services.NasbNiro.ProjectBalance
                 decimal need = Math.Max(0m, row.Required);
                 decimal take = Math.Min(need, issuedLeft); a.Issued = take; issuedLeft -= take; need -= take;
                 take = Math.Min(need, reservedLeft); a.ReservedExisting = take; reservedLeft -= take; need -= take;
+                take = Math.Min(need, creditLeft); a.Credit = take; creditLeft -= take; need -= take;
                 take = Math.Min(need, freeLeft); a.FromFree = take; if (reserveNew) a.ReservedNew = take; freeLeft -= take; need -= take;
                 take = Math.Min(need, prLeft); a.Pr = take; prLeft -= take; need -= take;
                 foreach (PoArrival p in arrivals)

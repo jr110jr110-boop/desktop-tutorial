@@ -51,6 +51,12 @@ namespace ViewModels.NasbNiro.AttachmentDtos
         public int? SupersededById { get; set; }
         /// <summary>Not voided and not superseded: the file in force.</summary>
         public bool Current { get; set; }
+
+        /// <summary>This row is a link to a document of another record (a drawing linked to a purchase request).</summary>
+        public bool IsLink { get; set; }
+
+        /// <summary>The document it was linked from was voided or replaced: it is not in force any more and is shown as obsolete.</summary>
+        public bool LinkObsolete { get; set; }
         /// <summary>The owner is approved (or otherwise locked): the file can only be voided or superseded.</summary>
         public bool Locked { get; set; }
         public bool Legacy { get; set; }

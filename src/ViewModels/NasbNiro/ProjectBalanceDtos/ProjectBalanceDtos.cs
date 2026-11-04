@@ -83,6 +83,9 @@ namespace ViewModels.NasbNiro.ProjectBalanceDtos
         public decimal OnOrderPoQty { get; set; }
         public decimal SubstituteQty { get; set; }
         public int? SubstituteItemId { get; set; }
+
+        /// <summary>The BOM unit differs from the unit of the item and no conversion is defined: check the quantity by hand.</summary>
+        public bool UnitMismatch { get; set; }
         public string SubstituteItemCode { get; set; }
         public decimal ShortQty { get; set; }
         public int? PurchaseRequestId { get; set; }
@@ -231,6 +234,11 @@ namespace ViewModels.NasbNiro.ProjectBalanceDtos
         public bool CanEdit { get; set; }
         public bool CanRequestRelease { get; set; }
         public bool CanApproveRelease { get; set; }
+
+        /// <summary>The reservation was released: the balance does not reserve this item for this project again until a planner enables it.</summary>
+        public bool AutoReserveBlocked { get; set; }
+        public string ReEnableReason { get; set; }
+        public bool CanReEnable { get; set; }
     }
 
     public class ReservationQuery
@@ -346,6 +354,8 @@ namespace ViewModels.NasbNiro.ProjectBalanceDtos
     public class KitRunResultDto
     {
         public int Activities { get; set; }
+        /// <summary>Kits drafted for an activity whose date had already passed.</summary>
+        public int Late { get; set; }
         public int Drafted { get; set; }
         public int Skipped { get; set; }
         public List<string> Requests { get; set; } = new List<string>();

@@ -22,8 +22,10 @@ namespace Services.NasbNiro.ProjectBalance
 {
     public sealed partial class ProjectBalanceService
     {
-        /// <summary>Every attachment this layer links to a request starts with this text, so a re-run can tell its own links from the files people attached.</summary>
+        /// <summary>The title of a link starts with this text only to show it to the reader; whether an attachment IS a link is the flag <see cref="RecordAttachment.LinkedFromAttachmentId"/>, never the title.</summary>
         public const string LinkPrefix = "[پیوند] ";
+
+        private static bool IsLink(RecordAttachment a) => a.LinkedFromAttachmentId.HasValue;
 
         public async Task<ResponseDto<BalanceDraftsDto>> CreateDraftsAsync(int runId, CancellationToken ct)
         {
@@ -43,6 +45,9 @@ namespace Services.NasbNiro.ProjectBalance
         {
             ProjectMaterialBalance run = await Uow.Set<ProjectMaterialBalance>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == runId && !r.Deleted, ct);
             if (run == null) return ResponseDtoHelper.NotFound<BalanceDraftsDto>(BalanceMessages.NotFound);
+            // a run that is empty, or that was only half saved, is not a basis for purchase requests
+            int storedLines = await Uow.Set<ProjectMaterialBalanceLine>().AsNoTracking().CountAsync(l => l.BalanceId == runId && !l.Deleted, ct);
+            if (storedLines == 0 || storedLines != run.LineCount) return ResponseDtoHelper.BadRequest<BalanceDraftsDto>(BalanceMessages.RunEmpty);
             int latest = await Uow.Set<ProjectMaterialBalance>().AsNoTracking().Where(x => x.BaselineId == run.BaselineId && !x.Deleted).MaxAsync(x => x.RunNumber, ct);
             if (run.RunNumber != latest) return ResponseDtoHelper.BadRequest<BalanceDraftsDto>("پیش‌نویس خرید فقط از آخرین اجرای بالانس ساخته می‌شود؛ بالانس را دوباره اجرا کنید.");
             PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().AsNoTracking().FirstAsync(x => x.Id == run.BaselineId, ct);
@@ -67,6 +72,17 @@ namespace Services.NasbNiro.ProjectBalance
             List<PurchaseRequest> drafts = await Uow.Set<PurchaseRequest>().Include(r => r.Lines)
                 .Where(r => r.ProjectBaselineId == b.Id && r.Status == PurchaseRequestStatus.Draft && !r.Deleted).OrderBy(r => r.Id).ToListAsync(ct);
 
+            // which draft requests and lines carry a file somebody attached by hand (one query for all of them)
+            var humanOwners = new HashSet<(AttachmentOwnerType, int)>();
+            {
+                List<int> lineIds = drafts.SelectMany(d => d.Lines).Select(l => l.Id).ToList();
+                List<int> requestIds = drafts.Select(d => d.Id).ToList();
+                var files = await Uow.Set<RecordAttachment>().AsNoTracking().Where(a => !a.Deleted && a.RemovedAt == null && !a.Voided && a.SupersededById == null && a.LinkedFromAttachmentId == null
+                    && ((a.OwnerType == AttachmentOwnerType.PurchaseRequestLine && lineIds.Contains(a.OwnerId)) || (a.OwnerType == AttachmentOwnerType.PurchaseRequest && requestIds.Contains(a.OwnerId))))
+                    .Select(a => new { a.OwnerType, a.OwnerId }).ToListAsync(ct);
+                foreach (var f in files) humanOwners.Add((f.OwnerType, f.OwnerId));
+            }
+
             string woCode = await Uow.Set<Entities.Model.NasbNiro.Contracts.WorkOrder>().AsNoTracking().Where(w => w.Id == run.WorkOrderId).Select(w => w.Code).FirstOrDefaultAsync(ct);
             var handled = new HashSet<PurchaseRequest>();
             var createdSet = new HashSet<PurchaseRequest>();
@@ -86,18 +102,17 @@ namespace Services.NasbNiro.ProjectBalance
                     Uow.Set<PurchaseRequest>().Add(pr);
                     createdSet.Add(pr);
                 }
-                else if (Me != 0 && pr.CreatorUserId != Me)
-                {
-                    // the person who changes the draft is its maker from now on: the maker never approves it
-                    pr.CreatorUserId = Me;
-                }
+                // the maker of a draft stays the maker: a later automatic update does not change who created it
                 handled.Add(pr);
 
                 var byItem = group.GroupBy(l => l.ItemId.Value).ToDictionary(g => g.Key, g => g.OrderBy(l => l.UseByDate ?? DateTime.MaxValue).ThenBy(l => l.SortOrder).ToList());
                 // lines of items that are no longer short go (a line that carries a file somebody attached stays and is reported)
-                foreach (PurchaseRequestLine old in pr.Lines.Where(l => !l.ItemId.HasValue || !byItem.ContainsKey(l.ItemId.Value)).ToList())
+                // only the lines this layer made (they point at a balance line) and nobody edited are removed; a line added or edited by a person stays
+                foreach (PurchaseRequestLine old in pr.Lines.Where(l => (!l.ItemId.HasValue || !byItem.ContainsKey(l.ItemId.Value))).ToList())
                 {
-                    if (await HasHumanFileAsync(old.Id, ct)) { dto.Notes.Add("ردیف " + old.RowNumber + " درخواست " + pr.Number + " دیگر کمبود نیست ولی پیوند دستی دارد و نگه داشته شد."); continue; }
+                    if (old.BalanceLineId == null) continue;
+                    if (old.ManuallyEdited) { dto.Notes.Add("ردیف " + old.RowNumber + " درخواست " + pr.Number + " دیگر کمبود نیست ولی دستی ویرایش شده و نگه داشته شد."); continue; }
+                    if (humanOwners.Contains((AttachmentOwnerType.PurchaseRequestLine, old.Id))) { dto.Notes.Add("ردیف " + old.RowNumber + " درخواست " + pr.Number + " دیگر کمبود نیست ولی پیوند دستی دارد و نگه داشته شد."); continue; }
                     await RemoveLinksAsync(AttachmentOwnerType.PurchaseRequestLine, old.Id, now, ct);
                     Uow.Set<PurchaseRequestLine>().Remove(old);
                     pr.Lines.Remove(old);
@@ -107,14 +122,21 @@ namespace Services.NasbNiro.ProjectBalance
                     ItemFacts item = items[kv.Key];
                     List<ProjectMaterialBalanceLine> rows = kv.Value;
                     PurchaseRequestLine line = pr.Lines.FirstOrDefault(l => l.ItemId == kv.Key);
+                    if (line != null && (line.ManuallyEdited || line.BalanceLineId == null))
+                    {
+                        // a person added or changed this line: the quantity and the dates are theirs; the run only points at it
+                        line.BalanceLineId = line.BalanceLineId ?? rows[0].Id;
+                        if (line.Quantity < BalanceRules.Round(rows.Sum(r => r.ShortQty))) dto.Notes.Add("ردیف کالای " + item.Code + " درخواست " + pr.Number + " دستی ویرایش شده و کمتر از کمبود امروز است (" + BalanceRules.Num(rows.Sum(r => r.ShortQty)) + ").");
+                        continue;
+                    }
                     if (line == null) { line = new PurchaseRequestLine(); pr.Lines.Add(line); }
                     DateTime? needed = rows.Where(r => r.NeedDate.HasValue).Select(r => r.NeedDate).Min();
                     string parts = string.Join("، ", rows.Where(r => r.PartNumber != null).Select(r => r.PartNumber).Distinct().Take(8));
                     line.ItemId = kv.Key;
                     line.Description = item.Title;
                     line.Unit = item.Unit ?? "عدد";
-                    line.Quantity = BalanceRules.Round(rows.Sum(r => r.ShortQty));
-                    line.NeededBy = needed;
+                    line.Quantity = BalanceRules.RoundUnit(rows.Sum(r => r.ShortQty), line.Unit);
+                    line.NeededBy = needed; // the day the part is used minus the lead time of the item (each balance line carries it as its need date)
                     line.WbsNodeId = rows.Select(r => r.WbsNodeId).FirstOrDefault(n => n.HasValue);
                     line.BalanceLineId = rows[0].Id;
                     if (!line.EstimatedUnitPrice.HasValue && costs.TryGetValue(kv.Key, out decimal c) && c > 0) line.EstimatedUnitPrice = c;
@@ -135,8 +157,10 @@ namespace Services.NasbNiro.ProjectBalance
             // a draft of a group that has no shortage any more is withdrawn (its own lines only; a draft with a hand-attached file stays)
             foreach (PurchaseRequest old in drafts.Where(d => !handled.Contains(d)).ToList())
             {
-                bool humanFile = await HasHumanFileAsync(old.Id, ct, true);
-                foreach (PurchaseRequestLine l in old.Lines.ToList()) humanFile |= await HasHumanFileAsync(l.Id, ct);
+                bool humanFile = humanOwners.Contains((AttachmentOwnerType.PurchaseRequest, old.Id)) || old.Lines.Any(l => humanOwners.Contains((AttachmentOwnerType.PurchaseRequestLine, l.Id)));
+                // a request with a line that a person added or edited is theirs now
+                bool humanLine = old.Lines.Any(l => l.ManuallyEdited || l.BalanceLineId == null);
+                if (humanLine) { dto.Notes.Add("درخواست " + old.Number + " دیگر کمبودی ندارد ولی ردیف دستی دارد و نگه داشته شد."); continue; }
                 if (humanFile) { dto.Notes.Add("درخواست " + old.Number + " دیگر کمبودی ندارد ولی پیوند دستی دارد و نگه داشته شد."); continue; }
                 foreach (PurchaseRequestLine l in old.Lines.ToList()) await RemoveLinksAsync(AttachmentOwnerType.PurchaseRequestLine, l.Id, now, ct);
                 await RemoveLinksAsync(AttachmentOwnerType.PurchaseRequest, old.Id, now, ct);
@@ -162,17 +186,10 @@ namespace Services.NasbNiro.ProjectBalance
             return ResponseDtoHelper.Ok(dto);
         }
 
-        private async Task<bool> HasHumanFileAsync(int ownerId, CancellationToken ct, bool requestLevel = false)
-        {
-            AttachmentOwnerType type = requestLevel ? AttachmentOwnerType.PurchaseRequest : AttachmentOwnerType.PurchaseRequestLine;
-            List<RecordAttachment> rows = await Uow.Set<RecordAttachment>().AsNoTracking().Where(a => a.OwnerType == type && a.OwnerId == ownerId && !a.Deleted && a.RemovedAt == null && !a.Voided && a.SupersededById == null).ToListAsync(ct);
-            return rows.Any(a => a.Title == null || !a.Title.StartsWith(LinkPrefix, StringComparison.Ordinal));
-        }
-
         private async Task RemoveLinksAsync(AttachmentOwnerType type, int ownerId, DateTimeOffset now, CancellationToken ct)
         {
             List<RecordAttachment> rows = await Uow.Set<RecordAttachment>().Where(a => a.OwnerType == type && a.OwnerId == ownerId && !a.Deleted && a.RemovedAt == null).ToListAsync(ct);
-            foreach (RecordAttachment a in rows.Where(a => a.Title != null && a.Title.StartsWith(LinkPrefix, StringComparison.Ordinal))) { a.RemovedAt = now; a.RemovedByUserId = Me; }
+            foreach (RecordAttachment a in rows.Where(IsLink)) { a.RemovedAt = now; a.RemovedByUserId = Me; }
         }
 
         /// <summary>
@@ -213,7 +230,7 @@ namespace Services.NasbNiro.ProjectBalance
         {
             List<RecordAttachment> existing = await Uow.Set<RecordAttachment>().Where(a => a.OwnerType == type && a.OwnerId == ownerId && !a.Deleted).ToListAsync(ct);
             var wanted = new HashSet<Guid>(sources.Select(a => a.DocumentId));
-            foreach (RecordAttachment link in existing.Where(a => InForce(a) && a.Title != null && a.Title.StartsWith(LinkPrefix, StringComparison.Ordinal) && !wanted.Contains(a.DocumentId)))
+            foreach (RecordAttachment link in existing.Where(a => InForce(a) && IsLink(a) && !wanted.Contains(a.DocumentId)))
             {
                 link.RemovedAt = now; link.RemovedByUserId = Me;
             }
@@ -224,7 +241,7 @@ namespace Services.NasbNiro.ProjectBalance
                 if (existing.Any(a => a.DocumentId == src.DocumentId && InForce(a) && a.RemovedAt == null) || !added.Add(src.DocumentId)) continue;
                 Uow.Set<RecordAttachment>().Add(new RecordAttachment
                 {
-                    OwnerType = type, OwnerId = ownerId, DocumentId = src.DocumentId, Kind = src.Kind, Title = Cut(LinkPrefix + label + ": " + (src.Title ?? src.FileName), 300), Revision = src.Revision,
+                    OwnerType = type, OwnerId = ownerId, DocumentId = src.DocumentId, LinkedFromAttachmentId = src.Id, LinkObsolete = false, Kind = src.Kind, Title = Cut(LinkPrefix + label + ": " + (src.Title ?? src.FileName), 300), Revision = src.Revision,
                     FileName = src.FileName, SizeBytes = src.SizeBytes, UploadedByUserId = Me, UploadedAt = now, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
                 });
                 count++;

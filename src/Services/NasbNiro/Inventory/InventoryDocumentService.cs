@@ -1690,6 +1690,9 @@ namespace Services.NasbNiro.Inventory
                 await Sales.SlFulfilment.ApplyCancelAsync(_uow, _user.UserId, document, cancellationToken);
             }
 
+            // PB2: what the issue used up of the reservations of its work order goes back to them
+            await global::Services.NasbNiro.ProjectBalance.ProjectReservationRules.UndoIssueAsync(_uow, document, _user.UserId, cancellationToken);
+
             document.Status = InventoryDocumentStatus.Cancelled;
             document.CancelledAt = now;
             document.CancelledByUserId = _user.UserId;

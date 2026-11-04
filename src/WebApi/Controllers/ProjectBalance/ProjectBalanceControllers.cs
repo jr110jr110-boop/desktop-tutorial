@@ -8,11 +8,11 @@ using ViewModels.NasbNiro.ProjectBalanceDtos;
 namespace WebApi.Controllers
 {
     // PB2: the automatic material balance, project reservations, substitutes and the draft purchase requests.
-    // Every signed-in user can read; changes need the roles of BalanceRoles, which the services check again (an AI seat never approves).
+    // Reading needs one of BalanceRoles.Readers (project, planning, engineering, warehouse, procurement, QC, management); changes need the roles of BalanceRoles, which the services check again (an AI seat never approves).
     // All answers are ResponseDto { success, message, data } with HTTP 200, like the rest of the API.
 
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = BalanceRoles.Readers)]
     [Route("api/v1/project-balance")]
     public class ProjectBalanceController : ControllerBase
     {
@@ -63,7 +63,7 @@ namespace WebApi.Controllers
     }
 
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = BalanceRoles.Readers)]
     [Route("api/v1/project-balance/reservations")]
     public class ProjectReservationController : ControllerBase
     {
@@ -84,10 +84,14 @@ namespace WebApi.Controllers
         [HttpPost("release-decision")]
         [Authorize(Roles = BalanceRoles.Planning)]
         public async Task<IActionResult> DecideReleaseAsync([FromBody] ReservationActionDto dto, CancellationToken ct) => Ok(await _service.DecideReleaseAsync(dto, ct));
+
+        [HttpPost("re-enable")]
+        [Authorize(Roles = BalanceRoles.Planning)]
+        public async Task<IActionResult> ReEnableAsync([FromBody] ReservationActionDto dto, CancellationToken ct) => Ok(await _service.ReEnableAsync(dto, ct));
     }
 
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = BalanceRoles.Readers)]
     [Route("api/v1/project-balance/substitutes")]
     public class ItemSubstituteController : ControllerBase
     {

@@ -363,10 +363,14 @@ namespace Entities.Model.NasbNiro.ProductBank
         public int? ItemId { get; set; }
         public string PartName { get; set; }
 
-        /// <summary>Quantity for ONE product.</summary>
+        /// <summary>PB2: the project line of the assembly this line belongs to (empty for a top-level line and for lines copied before PB2). The tree gives the effective quantity.</summary>
+        public int? ParentLineId { get; set; }
+        public PbProjectBomLine ParentLine { get; set; }
+
+        /// <summary>Quantity for ONE unit of the parent assembly (for a top-level line: for one product). PB2: with a parent, the quantity per parent, so a change of the assembly scales its parts.</summary>
         public decimal Qty { get; set; }
 
-        /// <summary>Quantity for the whole work order (Qty x Count), changed by a deviation.</summary>
+        /// <summary>Quantity for the whole work order (the tree product of the quantities x Count), kept up to date by the deviations.</summary>
         public decimal TotalQty { get; set; }
 
         public string Unit { get; set; }

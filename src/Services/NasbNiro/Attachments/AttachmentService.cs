@@ -150,7 +150,7 @@ namespace Services.NasbNiro.Attachments
                     Kind = r.Kind, KindTitle = AttachmentText.KindTitle(r.Kind), Title = r.Title, Revision = r.Revision, FileName = r.FileName, SizeBytes = r.SizeBytes,
                     UploadedByUserId = r.UploadedByUserId, UploadedByName = names.Name(r.UploadedByUserId), UploadedAt = r.UploadedAt,
                     Voided = r.Voided, VoidedByName = names.Name(r.VoidedByUserId), VoidedAt = r.VoidedAt, VoidReason = r.VoidReason, SupersededById = r.SupersededById,
-                    Current = !r.Voided && !superseded, Locked = facts.Locked, CanRemove = actions.CanRemove, CanVoid = actions.CanVoid, CanSupersede = actions.CanSupersede,
+                    Current = !r.Voided && !superseded, IsLink = r.LinkedFromAttachmentId.HasValue, LinkObsolete = r.LinkObsolete, Locked = facts.Locked, CanRemove = actions.CanRemove, CanVoid = actions.CanVoid, CanSupersede = actions.CanSupersede,
                 });
             }
             return list;
@@ -331,6 +331,7 @@ namespace Services.NasbNiro.Attachments
             {
                 // one save: the new row and the link on the old one go together, and the link is a concurrency token, so only one of two simultaneous replacements wins
                 replaced.SupersededBy = row;
+                await MarkLinksObsoleteAsync(replaced.Id, ct);
                 Audit(replaced.Id, "Superseded", "جایگزینی پیوست «" + (replaced.Title ?? replaced.FileName) + "» با نسخه جدید در " + AttachmentText.OwnerTitle(form.OwnerType) + " " + facts.Number,
                     new { replaced.Id, replaced.DocumentId, replaced.Revision }, new { newDocumentId = row.DocumentId, row.Revision });
             }
@@ -348,6 +349,16 @@ namespace Services.NasbNiro.Attachments
             await _uow.SaveChangesAsync(ct);
 
             return ResponseDtoHelper.Ok((await ToDtosAsync(new List<RecordAttachment> { row }, new Dictionary<string, OwnerFacts> { [Key(row.OwnerType, row.OwnerId)] = facts }, ct))[0]);
+        }
+
+        /// <summary>
+        /// A document that is voided or replaced at its source: every link made from it (on a purchase request of any status, submitted ones included, and so on every record downstream that shows the request's documents) is marked obsolete,
+        /// so nobody works from a drawing that is no longer in force. The link row stays and is shown as obsolete.
+        /// </summary>
+        private async Task MarkLinksObsoleteAsync(int sourceAttachmentId, CancellationToken ct)
+        {
+            List<RecordAttachment> links = await _uow.Set<RecordAttachment>().Where(a => a.LinkedFromAttachmentId == sourceAttachmentId && !a.LinkObsolete && !a.Deleted).ToListAsync(ct);
+            foreach (RecordAttachment link in links) { link.LinkObsolete = true; link.ModifyDate = DateTimeOffset.Now; link.ModifierUserId = Me; }
         }
 
         private static string Clip(string s, int max) => s == null ? null : (s.Length <= max ? s : s.Substring(0, max));
@@ -384,6 +395,7 @@ namespace Services.NasbNiro.Attachments
             if (reason == null || reason.Length < 3) return Bad<AttachmentDto>(AttachmentText.ReasonRequired);
 
             row.Voided = true; row.VoidedByUserId = Me; row.VoidedAt = DateTimeOffset.Now; row.VoidReason = Clip(reason, 1000);
+            await MarkLinksObsoleteAsync(row.Id, ct);
             Audit(row.Id, "Voided", "ابطال پیوست «" + (row.Title ?? row.FileName) + "» از " + AttachmentText.OwnerTitle(row.OwnerType) + " " + facts.Number + ": " + reason,
                 new { row.Id, row.DocumentId, voided = false }, new { row.Id, row.DocumentId, voided = true, reason });
             await _uow.SaveChangesAsync(ct);

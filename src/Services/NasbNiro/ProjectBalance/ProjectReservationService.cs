@@ -21,6 +21,7 @@ namespace Services.NasbNiro.ProjectBalance
         Task<ResponseDto<ReservationDto>> UpdateAsync(UpdateReservationDto dto, CancellationToken ct);
         Task<ResponseDto<ReservationDto>> RequestReleaseAsync(ReservationActionDto dto, CancellationToken ct);
         Task<ResponseDto<ReservationDto>> DecideReleaseAsync(ReservationActionDto dto, CancellationToken ct);
+        Task<ResponseDto<ReservationDto>> ReEnableAsync(ReservationActionDto dto, CancellationToken ct);
     }
 
     /// <summary>
@@ -76,6 +77,8 @@ namespace Services.NasbNiro.ProjectBalance
                     CanEdit = planner && r.Status == ReservationStatus.Active && !pending,
                     CanRequestRelease = planner && r.Status == ReservationStatus.Active && !pending,
                     CanApproveRelease = planner && pending && r.ReleaseRequestedByUserId != me,
+                    AutoReserveBlocked = r.AutoReserveBlocked, ReEnableReason = r.ReEnableReason,
+                    CanReEnable = planner && r.Status == ReservationStatus.Released && r.AutoReserveBlocked,
                 };
             }).ToList();
             string text = string.IsNullOrWhiteSpace(contains) ? null : contains.Trim();
@@ -171,6 +174,8 @@ namespace Services.NasbNiro.ProjectBalance
                 r.ReleasedQuantity = Remaining(r);
                 r.Status = ReservationStatus.Released;
                 r.ReleasedByUserId = User.UserId; r.ReleasedAt = DateTimeOffset.Now;
+                // released by a decision: the balance does not take this stock for this project again by itself until a planner enables it
+                r.AutoReserveBlocked = true;
             }
             else
             {
@@ -183,62 +188,152 @@ namespace Services.NasbNiro.ProjectBalance
             if (saved != null) return ResponseDtoHelper.BadRequest<ReservationDto>(saved);
             return ResponseDtoHelper.Ok(await OneAsync(r.Id, ct));
         }
+
+        /// <summary>A planner lets the balance reserve the item for the project again after a release (a person, with a reason; never an AI seat).</summary>
+        public async Task<ResponseDto<ReservationDto>> ReEnableAsync(ReservationActionDto dto, CancellationToken ct)
+        {
+            if (!InRole(BalanceRoles.Planning)) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.NotAllowed);
+            if (IsAi) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.AiNeverApproves);
+            string reason = string.IsNullOrWhiteSpace(dto?.Reason) ? null : dto.Reason.Trim();
+            if (reason == null) return ResponseDtoHelper.BadRequest<ReservationDto>(BalanceMessages.ReasonRequired);
+            ProjectReservation r = await Uow.Set<ProjectReservation>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
+            if (r == null) return ResponseDtoHelper.NotFound<ReservationDto>(BalanceMessages.NotFound);
+            if (r.Status != ReservationStatus.Released || !r.AutoReserveBlocked) return ResponseDtoHelper.BadRequest<ReservationDto>("فقط رزرو آزادشده که رزرو خودکار آن بسته است دوباره فعال می‌شود.");
+            r.AutoReserveBlocked = false; r.ReEnabledByUserId = User.UserId; r.ReEnabledAt = DateTimeOffset.Now; r.ReEnableReason = Cut(reason, 500);
+            Stamp(r, false);
+            string saved = await TrySaveAsync(ct);
+            if (saved != null) return ResponseDtoHelper.BadRequest<ReservationDto>(saved);
+            return ResponseDtoHelper.Ok(await OneAsync(r.Id, ct));
+        }
     }
 
     /// <summary>The rules that tie the warehouse documents to the reservations.</summary>
     public static class ProjectReservationRules
     {
+        /// <summary>The documents that take stock out of the counted warehouses: an issue, a send to a contractor, a transfer out, a decrease, a stage conversion, a delivery to the customer and a scrap sale.</summary>
+        public static bool TakesStockOut(InventoryDocumentType t) =>
+            t == InventoryDocumentType.Issue || t == InventoryDocumentType.SubcontractIssue || t == InventoryDocumentType.Transfer || t == InventoryDocumentType.AdjustmentDecrease
+            || t == InventoryDocumentType.StageConversion || t == InventoryDocumentType.CustomerDelivery || t == InventoryDocumentType.ScrapSale;
+
+        /// <summary>The documents that hand the stock to a work order and so use up its reservations.</summary>
+        public static bool UsesReservation(InventoryDocumentType t) => t == InventoryDocumentType.Issue || t == InventoryDocumentType.SubcontractIssue;
+
+        private static IEnumerable<InventoryDocumentLine> OutLines(InventoryDocument document) =>
+            document.Lines.Where(l => document.Type != InventoryDocumentType.StageConversion || l.Direction == DocumentLineDirection.Out);
+
         /// <summary>
-        /// An issue (or a shipment to a contractor) of an item that other projects hold under a hard reservation is refused when it would eat into what they hold. Null when the document may be confirmed.
-        /// A project may always use its own reservation.
+        /// A document that takes stock out of the counted warehouses is refused when it would eat into what another project holds under a hard reservation (a reservation of one lot or one serial unit is held for that lot or unit only).
+        /// Null when the document may be confirmed. A project may always use its own reservation.
         /// </summary>
         public static async Task<string> CheckIssueAsync(IUnitOfWork uow, InventoryDocument document, CancellationToken ct)
         {
-            if (document.Type != InventoryDocumentType.Issue && document.Type != InventoryDocumentType.SubcontractIssue) return null;
-            var wanted = document.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
-            List<int> ids = wanted.Keys.ToList();
-            var held = await uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.IsHard && ids.Contains(r.ItemId))
-                .Select(r => new { r.ItemId, r.ContractId, r.Quantity, r.IssuedQuantity }).ToListAsync(ct);
-            if (held.Count == 0) return null;
-            int? contractId = document.WorkOrderId.HasValue ? await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == document.WorkOrderId.Value).Select(w => (int?)w.ContractId).FirstOrDefaultAsync(ct) : null;
+            if (!TakesStockOut(document.Type)) return null;
             BalanceSettings s = await BalanceSettingKeys.LoadAsync(uow, ct);
             WarehouseKind[] kinds = s.WarehouseKinds.Select(k => (WarehouseKind)k).ToArray();
-            foreach (var item in wanted)
+            // a document that moves stock between two counted warehouses (or takes it from a warehouse that is not counted) does not change what is available
+            WarehouseKind? source = await uow.Set<Warehouse>().AsNoTracking().Where(w => w.Id == document.WarehouseId).Select(w => (WarehouseKind?)w.Kind).FirstOrDefaultAsync(ct);
+            if (source.HasValue && !kinds.Contains(source.Value)) return null;
+            if ((document.Type == InventoryDocumentType.Transfer || document.Type == InventoryDocumentType.SubcontractIssue) && document.DestinationWarehouseId.HasValue)
             {
-                var others = held.Where(h => h.ItemId == item.Key && h.ContractId != contractId).ToList();
-                decimal reserved = others.Sum(h => Math.Max(0m, h.Quantity - h.IssuedQuantity));
-                if (reserved <= 0) continue;
-                decimal onHand = await (from sb in uow.Set<StockBalance>().AsNoTracking() join w in uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
-                                        where sb.ItemId == item.Key && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) select sb.Quantity).SumAsync(ct);
-                if (onHand - reserved >= item.Value) continue;
-                string code = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == item.Key).Select(i => i.Code).FirstOrDefaultAsync(ct);
-                List<int> contracts = others.Select(h => h.ContractId).Distinct().ToList();
-                string projects = string.Join("، ", await uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(c => contracts.Contains(c.Id)).Select(c => c.Code).ToListAsync(ct));
-                return "کالای " + code + " برای پروژه دیگری رزرو شده است (" + projects + ")؛ موجودی " + BalanceRules.Num(onHand) + "، رزرو پروژه‌های دیگر " + BalanceRules.Num(reserved)
-                    + " و مقدار این حواله " + BalanceRules.Num(item.Value) + ". حواله بدون آزادسازی تاییدشدهٔ رزرو (برنامه‌ریزی) ممکن نیست.";
+                WarehouseKind? target = await uow.Set<Warehouse>().AsNoTracking().Where(w => w.Id == document.DestinationWarehouseId.Value).Select(w => (WarehouseKind?)w.Kind).FirstOrDefaultAsync(ct);
+                if (target.HasValue && kinds.Contains(target.Value)) return null;
+            }
+            List<InventoryDocumentLine> lines = OutLines(document).ToList();
+            if (lines.Count == 0) return null;
+            List<int> ids = lines.Select(l => l.ItemId).Distinct().ToList();
+            int? workOrderId = document.WorkOrderId;
+            var held = await uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.IsHard && ids.Contains(r.ItemId) && (workOrderId == null || r.WorkOrderId != workOrderId.Value))
+                .Select(r => new { r.ItemId, r.ContractId, r.LotId, r.SerialUnitId, Left = r.Quantity - r.IssuedQuantity }).ToListAsync(ct);
+            held = held.Where(h => h.Left > 0).ToList();
+            if (held.Count == 0) return null;
+            var stock = await (from sb in uow.Set<StockBalance>().AsNoTracking() join w in uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
+                               where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) select new { sb.ItemId, sb.LotId, sb.Quantity }).ToListAsync(ct);
+            foreach (int itemId in held.Select(h => h.ItemId).Distinct().OrderBy(x => x))
+            {
+                var others = held.Where(h => h.ItemId == itemId).ToList();
+                List<InventoryDocumentLine> mine = lines.Where(l => l.ItemId == itemId).ToList();
+                string Refuse(string why)
+                {
+                    string code = uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == itemId).Select(i => i.Code).FirstOrDefault();
+                    List<int> contracts = others.Select(h => h.ContractId).Distinct().ToList();
+                    string projects = string.Join("، ", uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(c => contracts.Contains(c.Id)).Select(c => c.Code).ToList());
+                    return "کالای " + code + " برای پروژه دیگری رزرو شده است (" + projects + ")؛ " + why + ". حواله بدون آزادسازی تاییدشدهٔ رزرو (برنامه‌ریزی) ممکن نیست.";
+                }
+                // a serial unit reserved for another project is not given to anybody else
+                var unitIds = new HashSet<int>(mine.SelectMany(l => l.Serials ?? new List<InventoryDocumentLineSerial>()).Where(x => x.SerialUnitId.HasValue).Select(x => x.SerialUnitId.Value));
+                if (others.Any(h => h.SerialUnitId.HasValue && unitIds.Contains(h.SerialUnitId.Value))) return Refuse("سریال این حواله برای آن پروژه رزرو شده است");
+                decimal onHand = stock.Where(x => x.ItemId == itemId).Sum(x => x.Quantity);
+                var lotBound = others.Where(h => h.LotId.HasValue && !h.SerialUnitId.HasValue).GroupBy(h => h.LotId.Value).ToDictionary(g => g.Key, g => g.Sum(h => h.Left));
+                decimal unbound = others.Where(h => !h.LotId.HasValue && !h.SerialUnitId.HasValue).Sum(h => h.Left);
+                decimal wantedTotal = mine.Sum(l => l.Quantity), wantedOnReservedLots = 0m;
+                // stock of a lot another project holds: this document takes only what that lot has beyond the reservation
+                foreach (var kv in lotBound)
+                {
+                    decimal q = mine.Where(l => l.LotId == kv.Key).Sum(l => l.Quantity);
+                    wantedOnReservedLots += q;
+                    decimal lotOnHand = stock.Where(x => x.ItemId == itemId && x.LotId == kv.Key).Sum(x => x.Quantity);
+                    if (q > 0 && lotOnHand - kv.Value < q) return Refuse("بچ این حواله برای آن پروژه رزرو شده است؛ موجودی بچ " + BalanceRules.Num(lotOnHand) + "، رزرو " + BalanceRules.Num(kv.Value) + " و مقدار این حواله " + BalanceRules.Num(q));
+                }
+                decimal wantedFree = wantedTotal - wantedOnReservedLots;
+                decimal freeUnbound = onHand - lotBound.Values.Sum() - unbound;
+                if (unbound > 0 && wantedFree > 0 && freeUnbound < wantedFree)
+                    return Refuse("موجودی " + BalanceRules.Num(onHand) + "، رزرو پروژه‌های دیگر " + BalanceRules.Num(unbound + lotBound.Values.Sum()) + " و مقدار این حواله " + BalanceRules.Num(wantedTotal));
             }
             return null;
         }
 
-        /// <summary>A confirmed issue to a work order uses up the reservations of that work order, earliest need first (the stock leaves the reservation and goes to the project).</summary>
+        /// <summary>
+        /// A confirmed issue (or a send to a contractor) to a work order uses up the reservations of that work order, earliest need first (the stock leaves the reservation and goes to the project). A reservation of one lot or one serial unit
+        /// is used only by that lot or unit; a reservation of an item without lot is used by any lot of it.
+        /// </summary>
         public static async Task ApplyIssueAsync(IUnitOfWork uow, InventoryDocument document, int userId, CancellationToken ct)
         {
-            if (document.Type != InventoryDocumentType.Issue || !document.WorkOrderId.HasValue) return;
-            var wanted = document.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
-            List<int> ids = wanted.Keys.ToList();
+            if (!UsesReservation(document.Type) || !document.WorkOrderId.HasValue) return;
+            List<int> ids = document.Lines.Select(l => l.ItemId).Distinct().ToList();
             List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && r.WorkOrderId == document.WorkOrderId.Value && ids.Contains(r.ItemId)).ToListAsync(ct);
             if (mine.Count == 0) return;
             DateTimeOffset now = DateTimeOffset.Now;
-            foreach (var item in wanted)
+            foreach (InventoryDocumentLine line in document.Lines.OrderBy(l => l.RowNumber))
             {
-                decimal left = item.Value;
-                foreach (ProjectReservation r in mine.Where(x => x.ItemId == item.Key).OrderBy(x => x.NeedDate ?? DateTime.MaxValue).ThenBy(x => x.Id))
+                decimal left = line.Quantity;
+                var unitIds = new HashSet<int>((line.Serials ?? new List<InventoryDocumentLineSerial>()).Where(x => x.SerialUnitId.HasValue).Select(x => x.SerialUnitId.Value));
+                IEnumerable<ProjectReservation> candidates = mine.Where(x => x.ItemId == line.ItemId && (x.LotId == null || x.LotId == line.LotId) && (x.SerialUnitId == null || unitIds.Contains(x.SerialUnitId.Value)))
+                    .OrderBy(x => x.LotId == line.LotId && x.LotId.HasValue ? 0 : 1).ThenBy(x => x.NeedDate ?? DateTime.MaxValue).ThenBy(x => x.Id);
+                foreach (ProjectReservation r in candidates)
                 {
                     if (left <= 0) break;
                     decimal take = Math.Min(left, Math.Max(0m, r.Quantity - r.IssuedQuantity));
                     if (take <= 0) continue;
                     r.IssuedQuantity += take; left -= take;
                     if (r.IssuedQuantity >= r.Quantity) r.Status = ReservationStatus.FullyIssued;
+                    r.ModifyDate = now; r.ModifierUserId = userId;
+                }
+            }
+        }
+
+        /// <summary>The issue is cancelled: what it used up of the reservations of its work order goes back to them (the reservation is active again when it had been fully issued).</summary>
+        public static async Task UndoIssueAsync(IUnitOfWork uow, InventoryDocument document, int userId, CancellationToken ct)
+        {
+            if (!UsesReservation(document.Type) || !document.WorkOrderId.HasValue) return;
+            List<InventoryDocumentLine> lines = await uow.Set<InventoryDocumentLine>().Include(l => l.Serials).Where(l => l.DocumentId == document.Id).ToListAsync(ct);
+            List<int> ids = lines.Select(l => l.ItemId).Distinct().ToList();
+            List<ProjectReservation> mine = await uow.Set<ProjectReservation>().Where(r => !r.Deleted && (r.Status == ReservationStatus.Active || r.Status == ReservationStatus.FullyIssued) && r.WorkOrderId == document.WorkOrderId.Value && ids.Contains(r.ItemId) && r.IssuedQuantity > 0).ToListAsync(ct);
+            if (mine.Count == 0) return;
+            DateTimeOffset now = DateTimeOffset.Now;
+            foreach (InventoryDocumentLine line in lines.OrderByDescending(l => l.RowNumber))
+            {
+                decimal left = line.Quantity;
+                var unitIds = new HashSet<int>((line.Serials ?? new List<InventoryDocumentLineSerial>()).Where(x => x.SerialUnitId.HasValue).Select(x => x.SerialUnitId.Value));
+                // the opposite order of the issue: the reservation used last gives back first
+                IEnumerable<ProjectReservation> candidates = mine.Where(x => x.ItemId == line.ItemId && (x.LotId == null || x.LotId == line.LotId) && (x.SerialUnitId == null || unitIds.Contains(x.SerialUnitId.Value)))
+                    .OrderBy(x => x.LotId == line.LotId && x.LotId.HasValue ? 1 : 0).ThenByDescending(x => x.NeedDate ?? DateTime.MaxValue).ThenByDescending(x => x.Id);
+                foreach (ProjectReservation r in candidates)
+                {
+                    if (left <= 0) break;
+                    decimal back = Math.Min(left, r.IssuedQuantity);
+                    if (back <= 0) continue;
+                    r.IssuedQuantity -= back; left -= back;
+                    if (r.Status == ReservationStatus.FullyIssued && r.IssuedQuantity < r.Quantity) r.Status = ReservationStatus.Active;
                     r.ModifyDate = now; r.ModifierUserId = userId;
                 }
             }

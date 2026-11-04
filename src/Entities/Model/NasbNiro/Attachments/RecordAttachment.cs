@@ -42,9 +42,9 @@ namespace Entities.Model.NasbNiro.Attachments
         /// <summary>P-B7a: a photo of the project photo library (the picture is the attachment).</summary>
         PcProjectPhoto = 26,
         /// <summary>PB2: a revision of a product BOM (the BOM document, the drawings and specifications of the bank); linked to the purchase requests the project balance drafts.</summary>
-        PbBomHeader = 27,
+        PbBomHeader = 36,
         /// <summary>PB2: a revision of an OPC routing (process chart documents).</summary>
-        PbOpcRouting = 28,
+        PbOpcRouting = 37,
     }
 
     public enum AttachmentKind
@@ -107,5 +107,11 @@ namespace Entities.Model.NasbNiro.Attachments
         /// <summary>The uploader removed it while the owner was not approved yet (the row is hidden, the file and the log stay).</summary>
         public DateTimeOffset? RemovedAt { get; set; }
         public int? RemovedByUserId { get; set; }
+
+        /// <summary>PB2: this row is a LINK to the file of another record (the source attachment); empty on a file a person attached. Links are kept in step with their source.</summary>
+        public int? LinkedFromAttachmentId { get; set; }
+
+        /// <summary>PB2: the source of the link was voided or replaced; the link stays visible but is marked "obsolete" on the request and everything downstream of it.</summary>
+        public bool LinkObsolete { get; set; }
     }
 }

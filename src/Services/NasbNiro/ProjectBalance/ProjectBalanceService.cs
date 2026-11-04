@@ -66,6 +66,7 @@ namespace Services.NasbNiro.ProjectBalance
             public decimal Scrap;
             public string Note;
             public string AssemblyPartNumber;
+            public bool UnitMismatch;
 
             // filled by the WBS mapping
             public int? NodeId;
@@ -93,9 +94,16 @@ namespace Services.NasbNiro.ProjectBalance
         private sealed class Pools
         {
             public Dictionary<int, decimal> OnHand = new Dictionary<int, decimal>();
-            public Dictionary<int, decimal> ReservedAll = new Dictionary<int, decimal>();
-            public Dictionary<int, decimal> ReservedMine = new Dictionary<int, decimal>();
-            public Dictionary<int, decimal> OpenRequests = new Dictionary<int, decimal>();
+            /// <summary>What other work orders hold of an item: per work order the larger of its reservations and its open material requests (a kit is drafted from a reservation, so the two are one claim), summed.</summary>
+            public Dictionary<int, decimal> HeldOthers = new Dictionary<int, decimal>();
+            /// <summary>All the reservations of this project that are still open, as stock of the reserved item (a substitute's stock included).</summary>
+            public Dictionary<int, decimal> ReservedMineAll = new Dictionary<int, decimal>();
+            /// <summary>This project's reservations of the item for itself (not as a substitute of another item).</summary>
+            public Dictionary<int, decimal> ReservedMinePrimary = new Dictionary<int, decimal>();
+            /// <summary>Stock of a substitute that is reserved for this project in place of the item: item -> (substitute, units of the substitute).</summary>
+            public Dictionary<int, List<(int Sub, decimal Qty)>> Credits = new Dictionary<int, List<(int Sub, decimal Qty)>>();
+            /// <summary>Reserved item (and the item it replaces) whose reservation was released: no automatic reservation until a planner enables it again.</summary>
+            public HashSet<(int Item, int? For)> Blocked = new HashSet<(int Item, int? For)>();
             public Dictionary<int, decimal> SalesHeld = new Dictionary<int, decimal>();
             public Dictionary<int, decimal> PrOpen = new Dictionary<int, decimal>();
             public Dictionary<int, List<PoArrival>> Po = new Dictionary<int, List<PoArrival>>();
@@ -103,8 +111,8 @@ namespace Services.NasbNiro.ProjectBalance
 
             public decimal Get(Dictionary<int, decimal> d, int id) => d.TryGetValue(id, out decimal v) ? v : 0m;
 
-            /// <summary>Stock that is not held by anybody: company stock less every reservation (this project's included), the open material requests of other orders and the sales holds.</summary>
-            public decimal Free(int id) => Math.Max(0m, Get(OnHand, id) - Get(ReservedAll, id) - Get(OpenRequests, id) - Get(SalesHeld, id));
+            /// <summary>Stock that is not held by anybody: company stock less the claims of the other work orders, this project's own reservations and the sales holds.</summary>
+            public decimal Free(int id) => Math.Max(0m, Get(OnHand, id) - Get(HeldOthers, id) - Get(ReservedMineAll, id) - Get(SalesHeld, id));
         }
 
         // ------------------------------------------------------------------------------------------------ the run
@@ -118,6 +126,9 @@ namespace Services.NasbNiro.ProjectBalance
                 .ToListAsync(ct)).ToDictionary(i => i.Id);
         }
 
+        /// <summary>The statuses of a purchase order that is on its way: a draft order already holds the quantity (so it is in both the "ordered against the request" and the "arriving" figures, never in neither).</summary>
+        internal static readonly PurchaseOrderStatus[] ArrivingStatuses = { PurchaseOrderStatus.Draft, PurchaseOrderStatus.Approved, PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived };
+
         private async Task<Pools> LoadPoolsAsync(IEnumerable<int> itemIds, PbProjectBaseline b, int contractId, BalanceSettings s, Dictionary<int, ItemFacts> items, CancellationToken ct)
         {
             List<int> ids = itemIds.Distinct().ToList();
@@ -125,71 +136,100 @@ namespace Services.NasbNiro.ProjectBalance
             if (ids.Count == 0) return pools;
             WarehouseKind[] kinds = s.WarehouseKinds.Select(k => (WarehouseKind)k).ToArray();
 
+            // company stock of the counted warehouses; customer property (lots marked so) is not ours
             var onHand = await (from sb in Uow.Set<StockBalance>().AsNoTracking()
                                 join w in Uow.Set<Warehouse>().AsNoTracking() on sb.WarehouseId equals w.Id
-                                where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && kinds.Contains(w.Kind)
+                                where ids.Contains(sb.ItemId) && !w.Deleted && w.IsActive && kinds.Contains(w.Kind) && (sb.Lot == null || !sb.Lot.IsCustomerProperty)
                                 select new { sb.ItemId, sb.Quantity }).ToListAsync(ct);
             pools.OnHand = onHand.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
-            var res = await Uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && r.Status == ReservationStatus.Active && ids.Contains(r.ItemId))
-                .Select(r => new { r.ItemId, r.BaselineId, r.Quantity, r.IssuedQuantity }).ToListAsync(ct);
-            pools.ReservedAll = res.GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Quantity - r.IssuedQuantity)));
-            pools.ReservedMine = res.Where(r => r.BaselineId == b.Id).GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Quantity - r.IssuedQuantity)));
+            var res = await Uow.Set<ProjectReservation>().AsNoTracking().Where(r => !r.Deleted && (r.Status == ReservationStatus.Active || (r.Status == ReservationStatus.Released && r.AutoReserveBlocked && r.BaselineId == b.Id)) && ids.Contains(r.ItemId))
+                .Select(r => new { r.ItemId, r.BaselineId, r.WorkOrderId, r.Status, r.SubstituteForItemId, Left = r.Quantity - r.IssuedQuantity }).ToListAsync(ct);
+            foreach (var r in res.Where(r => r.Status == ReservationStatus.Released)) pools.Blocked.Add((r.ItemId, r.SubstituteForItemId));
+            var active = res.Where(r => r.Status == ReservationStatus.Active).ToList();
+            pools.ReservedMineAll = active.Where(r => r.BaselineId == b.Id).GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Left)));
+            pools.ReservedMinePrimary = active.Where(r => r.BaselineId == b.Id && r.SubstituteForItemId == null).GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Left)));
+            foreach (var g in active.Where(r => r.BaselineId == b.Id && r.SubstituteForItemId.HasValue && r.Left > 0).GroupBy(r => (For: r.SubstituteForItemId.Value, Sub: r.ItemId)))
+            {
+                if (!pools.Credits.TryGetValue(g.Key.For, out var list)) pools.Credits[g.Key.For] = list = new List<(int Sub, decimal Qty)>();
+                list.Add((g.Key.Sub, g.Sum(r => r.Left)));
+            }
 
             // what open material requests of other orders still have to issue (the requests of this work order are this project's own demand)
             var req = await (from l in Uow.Set<MaterialRequestLine>().AsNoTracking()
                              join r in Uow.Set<MaterialRequest>().AsNoTracking() on l.MaterialRequestId equals r.Id
                              where ids.Contains(l.ItemId) && !r.Deleted && (r.Status == MaterialRequestStatus.Submitted || r.Status == MaterialRequestStatus.Approved)
                                    && (r.WorkOrderId == null || r.WorkOrderId != b.WorkOrderId)
-                             select new { l.ItemId, l.Quantity, l.IssuedQuantity }).ToListAsync(ct);
-            pools.OpenRequests = req.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => Math.Max(0m, x.Quantity - x.IssuedQuantity)));
+                             select new { l.ItemId, WorkOrderId = r.WorkOrderId ?? 0, Left = l.Quantity - l.IssuedQuantity }).ToListAsync(ct);
+            // per other work order: the larger of what it reserved and what it asked for (a kit request is drafted from a reservation; the two are one claim)
+            var othersRes = active.Where(r => r.BaselineId != b.Id).GroupBy(r => (r.ItemId, r.WorkOrderId)).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Left)));
+            var othersReq = req.GroupBy(r => (r.ItemId, r.WorkOrderId)).ToDictionary(g => g.Key, g => g.Sum(r => Math.Max(0m, r.Left)));
+            foreach (var key in othersRes.Keys.Union(othersReq.Keys).GroupBy(k => k.ItemId))
+            {
+                decimal held = 0m;
+                foreach (var k in key) held += Math.Max(othersRes.TryGetValue(k, out decimal a1) ? a1 : 0m, othersReq.TryGetValue(k, out decimal a2) ? a2 : 0m);
+                pools.HeldOthers[key.Key] = held;
+            }
             pools.SalesHeld = await Sales.SlReservations.ReservedAsync(Uow, ids, ct);
 
-            // open purchase requests (submitted or approved, of this project or general) less what is already on orders
+            // supply is counted for ONE project: what is on this work order, and what is on the contract without a work order (given to the first work order of the contract only).
+            // Requests and orders with no contract and no work order are general supply and are not counted for any project.
+            List<int> contractOrders = await Uow.Set<PbProjectBaseline>().AsNoTracking().Where(x => !x.Deleted && x.IsCurrent && Uow.Set<WorkOrder>().Any(w => w.Id == x.WorkOrderId && w.ContractId == contractId)).Select(x => x.WorkOrderId).ToListAsync(ct);
+            bool leadOrder = contractOrders.Count == 0 || contractOrders.Min() == b.WorkOrderId;
+
+            // open purchase requests (submitted or approved) less what is already on orders
             var prLines = await (from l in Uow.Set<PurchaseRequestLine>().AsNoTracking()
                                  join r in Uow.Set<PurchaseRequest>().AsNoTracking() on l.PurchaseRequestId equals r.Id
                                  where l.ItemId != null && ids.Contains(l.ItemId.Value) && !r.Deleted && (r.Status == PurchaseRequestStatus.Submitted || r.Status == PurchaseRequestStatus.Approved)
-                                       && (r.ContractId == null || r.ContractId == contractId)
+                                       && (r.WorkOrderId == b.WorkOrderId || (r.WorkOrderId == null && r.ContractId == contractId && leadOrder))
                                  select new { LineId = l.Id, ItemId = l.ItemId.Value, l.Quantity }).ToListAsync(ct);
             List<int> prLineIds = prLines.Select(l => l.LineId).ToList();
+            // "ordered against the request": every order that is not cancelled; an order that was closed short counts what it received
             var ordered = prLineIds.Count == 0 ? new Dictionary<int, decimal>() : (await (from l in Uow.Set<PurchaseOrderLine>().AsNoTracking()
                                                                                       join p in Uow.Set<PurchaseOrder>().AsNoTracking() on l.PurchaseOrderId equals p.Id
                                                                                       where l.RequestLineId != null && prLineIds.Contains(l.RequestLineId.Value) && !p.Deleted && p.Status != PurchaseOrderStatus.Cancelled
-                                                                                      select new { LineId = l.RequestLineId.Value, l.Quantity }).ToListAsync(ct))
-                .GroupBy(x => x.LineId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+                                                                                      select new { LineId = l.RequestLineId.Value, p.Status, l.Quantity, l.ReceivedQuantity }).ToListAsync(ct))
+                .GroupBy(x => x.LineId).ToDictionary(g => g.Key, g => g.Sum(x => x.Status == PurchaseOrderStatus.Closed ? x.ReceivedQuantity : x.Quantity));
             pools.PrOpen = prLines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => Math.Max(0m, l.Quantity - (ordered.TryGetValue(l.LineId, out decimal o) ? o : 0m))));
 
-            // purchase orders that are placed (approved, sent, partly received) and still to arrive; an order of another project is not ours
-            PurchaseOrderStatus[] open = { PurchaseOrderStatus.Approved, PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived };
+            // purchase orders on their way (draft, approved, sent, partly received) and still to arrive
+            PurchaseOrderStatus[] open = ArrivingStatuses;
             var po = await (from l in Uow.Set<PurchaseOrderLine>().AsNoTracking()
                             join p in Uow.Set<PurchaseOrder>().AsNoTracking() on l.PurchaseOrderId equals p.Id
                             where l.ItemId != null && ids.Contains(l.ItemId.Value) && !p.Deleted && open.Contains(p.Status)
-                                  && ((l.ContractId ?? p.ContractId) == null || (l.ContractId ?? p.ContractId) == contractId)
+                                  && ((l.WorkOrderId ?? p.WorkOrderId) == b.WorkOrderId
+                                      || ((l.WorkOrderId ?? p.WorkOrderId) == null && (l.ContractId ?? p.ContractId) == contractId && leadOrder))
                             select new { ItemId = l.ItemId.Value, Left = l.Quantity - l.ReceivedQuantity, Delivery = l.DeliveryDate ?? p.DeliveryDate, p.OrderDate }).ToListAsync(ct);
             foreach (var row in po.Where(x => x.Left > 0))
             {
-                // no delivery date on the order: the order date plus the lead time of the item (answers table)
+                // no delivery date on the order: the order date plus the lead time of the item
                 DateTime arrival = row.Delivery ?? row.OrderDate.AddDays(items.TryGetValue(row.ItemId, out ItemFacts f) ? s.LeadDays(f.GroupCode) : s.LeadDefaultDays);
                 if (!pools.Po.TryGetValue(row.ItemId, out List<PoArrival> list)) pools.Po[row.ItemId] = list = new List<PoArrival>();
                 list.Add(new PoArrival { Date = arrival.Date, Quantity = row.Left });
             }
 
-            // issued to the work order (confirmed issues less returns from production)
+            // issued to the work order: confirmed issues (a send to a contractor included) less returns from production and from the contractor
             var issued = await (from dl in Uow.Set<InventoryDocumentLine>().AsNoTracking()
                                 join d in Uow.Set<InventoryDocument>().AsNoTracking() on dl.DocumentId equals d.Id
                                 where d.WorkOrderId == b.WorkOrderId && !d.Deleted && d.Status == InventoryDocumentStatus.Confirmed && ids.Contains(dl.ItemId)
-                                      && (d.Type == InventoryDocumentType.Issue || d.Type == InventoryDocumentType.ProductionReturn)
+                                      && (d.Type == InventoryDocumentType.Issue || d.Type == InventoryDocumentType.SubcontractIssue || d.Type == InventoryDocumentType.ProductionReturn || d.Type == InventoryDocumentType.SubcontractReturn)
                                 select new { dl.ItemId, d.Type, dl.Quantity }).ToListAsync(ct);
-            pools.Issued = issued.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => Math.Max(0m, g.Sum(x => x.Type == InventoryDocumentType.Issue ? x.Quantity : -x.Quantity)));
+            pools.Issued = issued.GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => Math.Max(0m, g.Sum(x => x.Type == InventoryDocumentType.Issue || x.Type == InventoryDocumentType.SubcontractIssue ? x.Quantity : -x.Quantity)));
             return pools;
         }
 
         /// <summary>The requirement per item: a bought part is the item itself, a made part is its raw material; assemblies are not ordered, their parts are.</summary>
         private async Task<(List<Req> Rows, int CustomerSupplied)> ExplodeAsync(PbProjectBaseline b, CancellationToken ct)
         {
-            List<PbProjectBomLine> lines = await Uow.Set<PbProjectBomLine>().AsNoTracking().Where(l => l.BaselineId == b.Id && !l.Deleted && !l.IsHeading && !l.IsRemoved).OrderBy(l => l.SortOrder).ThenBy(l => l.Id).ToListAsync(ct);
-            List<int> srcIds = lines.Where(l => l.SourceLineId.HasValue).Select(l => l.SourceLineId.Value).Distinct().ToList();
+            // the whole tree is read (removed lines included): the quantity of a part is the product of its own and its ancestors' quantities, and a removed assembly cuts everything below it
+            List<PbProjectBomLine> all = await Uow.Set<PbProjectBomLine>().AsNoTracking().Where(l => l.BaselineId == b.Id && !l.Deleted && !l.IsHeading).OrderBy(l => l.SortOrder).ThenBy(l => l.Id).ToListAsync(ct);
+            List<PbProjectBomLine> lines = all.Where(l => !l.IsRemoved).ToList();
+            List<int> srcIds = all.Where(l => l.SourceLineId.HasValue).Select(l => l.SourceLineId.Value).Distinct().ToList();
             Dictionary<int, PbBomLine> src = srcIds.Count == 0 ? new Dictionary<int, PbBomLine>() : await Uow.Set<PbBomLine>().AsNoTracking().Where(l => srcIds.Contains(l.Id)).ToDictionaryAsync(l => l.Id, ct);
+            var parentIds = new HashSet<int>(all.Where(l => l.ParentLineId.HasValue).Select(l => l.ParentLineId.Value));
+            bool IsAssembly(PbProjectBomLine l) => parentIds.Contains(l.Id) || (src.TryGetValue(l.SourceLineId ?? 0, out PbBomLine x) && x.ChildBomId.HasValue);
+            // the scrap of an assembly is carried by its parts as well
+            Dictionary<int, decimal> totals = PbBomTree.Totals(all, Math.Max(1, b.Count), l => IsAssembly(l) && src.TryGetValue(l.SourceLineId ?? 0, out PbBomLine x) && x.ScrapFactor.HasValue ? x.ScrapFactor.Value : 0m);
 
             // the first stockable stage of the OPC chart of each part is where its raw material enters the stock
             List<int> routingIds = await Uow.Set<PbProjectRouting>().AsNoTracking().Where(r => r.BaselineId == b.Id && !r.Deleted).Select(r => r.OpcRoutingId).ToListAsync(ct);
@@ -225,10 +265,10 @@ namespace Services.NasbNiro.ProjectBalance
             foreach (PbProjectBomLine l in lines)
             {
                 src.TryGetValue(l.SourceLineId ?? 0, out PbBomLine sl);
-                // an assembly (it has a child BOM) is built from its parts, which follow it in the project copy
-                if (sl != null && sl.ChildBomId.HasValue) continue;
+                // an assembly (it has parts below it) is built from its parts, which are listed after it in the project copy
+                if (IsAssembly(l)) continue;
                 if (l.MakeOrBuy == PbMakeOrBuy.CustomerSupplied) { customerSupplied++; continue; }
-                decimal qty = l.TotalQty;
+                decimal qty = totals.TryGetValue(l.Id, out decimal tq) ? tq : 0m;
                 if (qty <= 0) continue;
                 string pn = l.PartNumber;
 
@@ -242,7 +282,10 @@ namespace Services.NasbNiro.ProjectBalance
                         rows.Add(new Req { Kind = BalanceRequirementKind.NotCoded, PartNumber = pn, PartName = l.PartName, Unit = l.Unit, MakeOrBuy = (int)l.MakeOrBuy, Gross = gross, Scrap = scrap, AssemblyPartNumber = l.AssemblyPartNumber, Note = "کالای این شماره قطعه کدگذاری نشده است؛ پس از کدگذاری دوباره اجرا کنید." });
                         continue;
                     }
-                    rows.Add(new Req { Kind = BalanceRequirementKind.Purchased, ItemId = itemId, PartNumber = pn, PartName = l.PartName, Unit = items[itemId.Value].Unit ?? l.Unit, MakeOrBuy = (int)l.MakeOrBuy, Gross = gross, Scrap = scrap, AssemblyPartNumber = l.AssemblyPartNumber });
+                    string itemUnit = items[itemId.Value].Unit;
+                    bool mismatch = BalanceRules.UnitsDiffer(l.Unit, itemUnit);
+                    rows.Add(new Req { Kind = BalanceRequirementKind.Purchased, ItemId = itemId, PartNumber = pn, PartName = l.PartName, Unit = itemUnit ?? l.Unit, MakeOrBuy = (int)l.MakeOrBuy, Gross = gross, Scrap = scrap, AssemblyPartNumber = l.AssemblyPartNumber,
+                        UnitMismatch = mismatch, Note = mismatch ? "واحد BOM (" + l.Unit + ") با واحد کالا (" + itemUnit + ") فرق دارد و تبدیلی تعریف نشده است؛ مقدار تبدیل نشد، بررسی شود." : null });
                     continue;
                 }
 
@@ -284,7 +327,7 @@ namespace Services.NasbNiro.ProjectBalance
             foreach (Req r in rows)
             {
                 var key = (r.ItemId, r.PartNumber, r.Kind);
-                if (seen.TryGetValue(key, out Req first)) { first.Gross = BalanceRules.Round(first.Gross + r.Gross); first.Scrap = BalanceRules.Round(first.Scrap + r.Scrap); }
+                if (seen.TryGetValue(key, out Req first)) { first.UnitMismatch |= r.UnitMismatch; first.Note = first.Note ?? r.Note; first.Gross = BalanceRules.Round(first.Gross + r.Gross); first.Scrap = BalanceRules.Round(first.Scrap + r.Scrap); }
                 else { seen[key] = r; merged.Add(r); }
             }
             return (merged, customerSupplied);
@@ -338,8 +381,13 @@ namespace Services.NasbNiro.ProjectBalance
         }
 
         /// <summary>One run for one baseline. Reserves what is free (when the setting says so), stores the run and its lines, and returns them. No role check: the callers check the caller.</summary>
-        private async Task<RunOutcome> ExecuteAsync(PbProjectBaseline b, string trigger, BalanceSettings s, CancellationToken ct)
+        private Task<RunOutcome> ExecuteAsync(int baselineId, string trigger, BalanceSettings s, CancellationToken ct) =>
+            // the run, its lines and its reservations are saved in ONE transaction: a run that fails half way leaves nothing behind (the test database has no transactions and runs the work directly)
+            InTransactionAsync(() => ExecuteCoreAsync(baselineId, trigger, s, ct), o => o != null, ct);
+
+        private async Task<RunOutcome> ExecuteCoreAsync(int baselineId, string trigger, BalanceSettings s, CancellationToken ct)
         {
+            PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().FirstAsync(x => x.Id == baselineId, ct);
             WorkOrder wo = await Uow.Set<WorkOrder>().AsNoTracking().FirstAsync(w => w.Id == b.WorkOrderId, ct);
             int contractId = wo.ContractId;
             (List<Req> rows, int customerSupplied) = await ExplodeAsync(b, ct);
@@ -358,19 +406,34 @@ namespace Services.NasbNiro.ProjectBalance
 
             Pools pools = await LoadPoolsAsync(itemIds.Concat(subs.Select(x => x.SubstituteItemId)), b, contractId, s, items, ct);
 
-            // allocation per item, earliest need first
+            // ONE free pool per item shared by every use: the primary demand of all items is covered first, then the substitutes cover the remaining shortages from what is still free.
+            // Stock of a substitute that is already reserved for this project counts for the item it replaces (divided by the ratio) and is not free for anybody else.
+            var freeLeft = new Dictionary<int, decimal>();
+            decimal FreeLeft(int id) { if (!freeLeft.TryGetValue(id, out decimal v)) freeLeft[id] = v = pools.Free(id); return v; }
             var lines = new List<ProjectMaterialBalanceLine>();
+            var built = new List<(ProjectMaterialBalanceLine Line, Req R)>();
             var newReservations = new Dictionary<int, (decimal Qty, Req First)>();
             var substituteReservations = new Dictionary<(int Sub, int For), (decimal Qty, Req First)>();
-            var subUsed = new Dictionary<int, decimal>();
             int sort = 0;
             foreach (var group in rows.Where(r => r.ItemId.HasValue).GroupBy(r => r.ItemId.Value).OrderBy(g => g.Key))
             {
                 int id = group.Key;
                 List<Req> ordered = group.OrderBy(r => r.UseBy ?? DateTime.MaxValue).ThenBy(r => r.PartNumber, StringComparer.Ordinal).ToList();
-                var demand = ordered.Select(r => new DemandRow { Required = BalanceRules.Round(r.Gross + r.Scrap), UseBy = r.UseBy }).ToList();
-                List<RowAllocation> alloc = BalanceRules.Allocate(demand, pools.Get(pools.Issued, id), pools.Get(pools.ReservedMine, id), pools.Free(id), s.ReserveOnRun, pools.Get(pools.PrOpen, id),
+                var demand = ordered.Select(r => new DemandRow { Required = BalanceRules.RoundUnit(r.Gross + r.Scrap, r.Unit), UseBy = r.UseBy }).ToList();
+                // substitute stock reserved for this project, in units of this item
+                var caps = new List<(int Sub, decimal Ratio, decimal Cap)>();
+                if (pools.Credits.TryGetValue(id, out var credits))
+                    foreach (var c in credits)
+                    {
+                        ItemSubstitute sub = subs.FirstOrDefault(x => x.ItemId == id && x.SubstituteItemId == c.Sub);
+                        if (sub != null && sub.Ratio > 0) caps.Add((c.Sub, sub.Ratio, BalanceRules.Round(c.Qty / sub.Ratio)));
+                    }
+                decimal creditTotal = caps.Sum(c => c.Cap);
+                bool blocked = pools.Blocked.Contains((id, (int?)null));
+                decimal freeBefore = FreeLeft(id);
+                List<RowAllocation> alloc = BalanceRules.Allocate(demand, pools.Get(pools.Issued, id), pools.Get(pools.ReservedMinePrimary, id), creditTotal, freeBefore, s.ReserveOnRun && !blocked, pools.Get(pools.PrOpen, id),
                     pools.Po.TryGetValue(id, out List<PoArrival> po) ? po : null);
+                freeLeft[id] = Math.Max(0m, freeBefore - alloc.Sum(x => x.FromFree));
                 decimal onHand = pools.Get(pools.OnHand, id), available = pools.Free(id);
                 for (int i = 0; i < ordered.Count; i++)
                 {
@@ -379,8 +442,8 @@ namespace Services.NasbNiro.ProjectBalance
                     var line = new ProjectMaterialBalanceLine
                     {
                         Kind = r.Kind, ItemId = id, PartNumber = r.PartNumber, PartName = Cut(r.PartName, 300), Unit = r.Unit, MakeOrBuy = r.MakeOrBuy, WbsNodeId = r.NodeId, ActivityId = r.ActivityId,
-                        NeedDate = r.Need, UseByDate = r.UseBy, LeadTimeDays = r.Lead, TotalFloat = r.Float, Priority = r.Priority,
-                        GrossQty = r.Gross, ScrapQty = r.Scrap, RequiredQty = demand[i].Required, IssuedQty = BalanceRules.Round(a.Issued), ReservedQty = BalanceRules.Round(a.Reserved), ReservedNewQty = BalanceRules.Round(a.ReservedNew),
+                        NeedDate = r.Need, UseByDate = r.UseBy, LeadTimeDays = r.Lead, TotalFloat = r.Float, Priority = r.Priority, UnitMismatch = r.UnitMismatch,
+                        GrossQty = r.Gross, ScrapQty = BalanceRules.Round(demand[i].Required - r.Gross), RequiredQty = demand[i].Required, IssuedQty = BalanceRules.Round(a.Issued), ReservedQty = BalanceRules.Round(a.Reserved), ReservedNewQty = BalanceRules.Round(a.ReservedNew),
                         OnHandQty = onHand, AvailableQty = available, OnOrderPrQty = BalanceRules.Round(a.Pr), OnOrderPoQty = BalanceRules.Round(a.Po), ShortQty = a.Short, Note = r.Note,
                     };
                     if (a.ReservedNew > 0)
@@ -388,30 +451,48 @@ namespace Services.NasbNiro.ProjectBalance
                         newReservations.TryGetValue(id, out var cur);
                         newReservations[id] = (cur.Qty + a.ReservedNew, cur.First ?? r);
                     }
-                    // the item itself is short: an approved substitute with free stock covers what it can
-                    if (a.Short > 0)
+                    // the part of the demand covered by substitute stock that is already reserved for the project
+                    decimal creditLeft = a.Credit;
+                    for (int k = 0; k < caps.Count && creditLeft > 0; k++)
                     {
-                        foreach (ItemSubstitute sub in subs.Where(x => x.ItemId == id))
-                        {
-                            if (line.ShortQty <= 0) break;
-                            decimal subFree = Math.Max(0m, pools.Free(sub.SubstituteItemId) - (subUsed.TryGetValue(sub.SubstituteItemId, out decimal used) ? used : 0m));
-                            (decimal covered, decimal units) = BalanceRules.Substitute(line.ShortQty, sub.Ratio, subFree);
-                            if (covered <= 0) continue;
-                            subUsed[sub.SubstituteItemId] = (subUsed.TryGetValue(sub.SubstituteItemId, out decimal u2) ? u2 : 0m) + units;
-                            line.ShortQty = BalanceRules.Round(line.ShortQty - covered);
-                            line.SubstituteQty = BalanceRules.Round(line.SubstituteQty + units);
-                            line.SubstituteItemId = line.SubstituteItemId ?? sub.SubstituteItemId;
-                            string code = subItems.TryGetValue(sub.SubstituteItemId, out ItemFacts sf) ? sf.Code : "#" + sub.SubstituteItemId;
-                            line.Note = (line.Note == null ? "" : line.Note + " | ") + "جایگزین تاییدشده " + code + ": " + BalanceRules.Num(units) + " " + (subItems.TryGetValue(sub.SubstituteItemId, out ItemFacts sf2) ? sf2.Unit : "") + " به‌جای " + BalanceRules.Num(covered) + " (نسبت " + BalanceRules.Num(sub.Ratio) + ")";
-                            if (s.ReserveOnRun)
-                            {
-                                var key = (sub.SubstituteItemId, id);
-                                substituteReservations.TryGetValue(key, out var cs);
-                                substituteReservations[key] = (cs.Qty + units, cs.First ?? r);
-                            }
-                        }
+                        decimal take = Math.Min(creditLeft, caps[k].Cap);
+                        if (take <= 0) continue;
+                        caps[k] = (caps[k].Sub, caps[k].Ratio, caps[k].Cap - take);
+                        creditLeft -= take;
+                        line.SubstituteQty = BalanceRules.Round(line.SubstituteQty + take * caps[k].Ratio);
+                        line.SubstituteItemId = line.SubstituteItemId ?? caps[k].Sub;
+                        string code = subItems.TryGetValue(caps[k].Sub, out ItemFacts cf) ? cf.Code : "#" + caps[k].Sub;
+                        line.Note = (line.Note == null ? "" : line.Note + " | ") + "جایگزین رزروشده " + code + ": " + BalanceRules.Num(BalanceRules.Round(take * caps[k].Ratio)) + " به‌جای " + BalanceRules.Num(take);
                     }
+                    built.Add((line, r));
                     lines.Add(line);
+                }
+            }
+
+            // the shortages that remain: an approved substitute with free stock (what the primary demand of every item left) covers what it can
+            foreach (var (line, r) in built)
+            {
+                if (line.ShortQty <= 0) continue;
+                int id = line.ItemId.Value;
+                foreach (ItemSubstitute sub in subs.Where(x => x.ItemId == id))
+                {
+                    if (line.ShortQty <= 0) break;
+                    decimal subFree = FreeLeft(sub.SubstituteItemId);
+                    (decimal covered, decimal units) = BalanceRules.Substitute(line.ShortQty, sub.Ratio, subFree);
+                    if (BalanceRules.IsCountUnit(line.Unit)) { covered = Math.Floor(covered); units = Math.Min(BalanceRules.Round(covered * sub.Ratio), subFree); }
+                    if (covered <= 0) continue;
+                    freeLeft[sub.SubstituteItemId] = Math.Max(0m, subFree - units);
+                    line.ShortQty = BalanceRules.Round(line.ShortQty - covered);
+                    line.SubstituteQty = BalanceRules.Round(line.SubstituteQty + units);
+                    line.SubstituteItemId = line.SubstituteItemId ?? sub.SubstituteItemId;
+                    string code = subItems.TryGetValue(sub.SubstituteItemId, out ItemFacts sf) ? sf.Code : "#" + sub.SubstituteItemId;
+                    line.Note = (line.Note == null ? "" : line.Note + " | ") + "جایگزین تاییدشده " + code + ": " + BalanceRules.Num(units) + " " + (subItems.TryGetValue(sub.SubstituteItemId, out ItemFacts sf2) ? sf2.Unit : "") + " به‌جای " + BalanceRules.Num(covered) + " (نسبت " + BalanceRules.Num(sub.Ratio) + ")";
+                    if (s.ReserveOnRun && !pools.Blocked.Contains((sub.SubstituteItemId, (int?)id)))
+                    {
+                        var key = (sub.SubstituteItemId, id);
+                        substituteReservations.TryGetValue(key, out var cs);
+                        substituteReservations[key] = (cs.Qty + units, cs.First ?? r);
+                    }
                 }
             }
             // rows with no item code are listed and flagged
@@ -419,7 +500,7 @@ namespace Services.NasbNiro.ProjectBalance
                 lines.Add(new ProjectMaterialBalanceLine
                 {
                     Kind = r.Kind, PartNumber = r.PartNumber, PartName = Cut(r.PartName, 300), Unit = r.Unit, MakeOrBuy = r.MakeOrBuy, WbsNodeId = r.NodeId, ActivityId = r.ActivityId, NeedDate = r.Need, UseByDate = r.UseBy,
-                    LeadTimeDays = r.Lead, TotalFloat = r.Float, Priority = r.Priority, GrossQty = r.Gross, ScrapQty = r.Scrap, RequiredQty = BalanceRules.Round(r.Gross + r.Scrap), Note = r.Note,
+                    LeadTimeDays = r.Lead, TotalFloat = r.Float, Priority = r.Priority, GrossQty = r.Gross, ScrapQty = r.Scrap, RequiredQty = BalanceRules.Round(r.Gross + r.Scrap), Note = r.Note, UnitMismatch = r.UnitMismatch,
                 });
 
             lines = lines.OrderBy(l => l.UseByDate ?? DateTime.MaxValue).ThenBy(l => l.PartNumber, StringComparer.Ordinal).ThenBy(l => l.ItemId ?? 0).ToList();
@@ -489,29 +570,43 @@ namespace Services.NasbNiro.ProjectBalance
 
         // ------------------------------------------------------------------------------------------------ the entry points
 
+        /// <summary>True when the exception is the database refusing a duplicate (a concurrent run took the same run number or created the same reservation) or a concurrent change.</summary>
+        private static bool IsConcurrent(Exception ex) => ex is DbUpdateException;
+
+        private void Reset() { if (Uow is DbContext db) db.ChangeTracker.Clear(); }
+
         public async Task<ResponseDto<BalanceRunBatchDto>> RunAsync(BalanceRunRequestDto dto, CancellationToken ct)
         {
             if (!InRole(BalanceRoles.Planning)) return ResponseDtoHelper.BadRequest<BalanceRunBatchDto>(BalanceMessages.NotAllowed);
             if (dto == null || (!dto.WorkOrderId.HasValue && !dto.ContractId.HasValue)) return ResponseDtoHelper.BadRequest<BalanceRunBatchDto>(BalanceMessages.InvalidData);
-            IQueryable<PbProjectBaseline> q = Uow.Set<PbProjectBaseline>().Where(x => !x.Deleted && x.IsCurrent);
+            IQueryable<PbProjectBaseline> q = Uow.Set<PbProjectBaseline>().AsNoTracking().Where(x => !x.Deleted && x.IsCurrent);
             if (dto.WorkOrderId.HasValue) q = q.Where(x => x.WorkOrderId == dto.WorkOrderId.Value);
             else
             {
                 int cid = dto.ContractId.Value;
                 q = q.Where(x => Uow.Set<WorkOrder>().Any(w => w.Id == x.WorkOrderId && w.ContractId == cid));
             }
-            List<PbProjectBaseline> baselines = await q.OrderBy(x => x.WorkOrderId).ToListAsync(ct);
-            if (baselines.Count == 0) return ResponseDtoHelper.BadRequest<BalanceRunBatchDto>(BalanceMessages.NoBaseline);
+            List<int> baselineIds = await q.OrderBy(x => x.WorkOrderId).Select(x => x.Id).ToListAsync(ct);
+            if (baselineIds.Count == 0) return ResponseDtoHelper.BadRequest<BalanceRunBatchDto>(BalanceMessages.NoBaseline);
             BalanceSettings s = await BalanceSettingKeys.LoadAsync(Uow, ct);
             var batch = new BalanceRunBatchDto();
-            foreach (PbProjectBaseline b in baselines)
+            foreach (int baselineId in baselineIds)
             {
-                RunOutcome outcome = await ExecuteAsync(b, "Manual", s, ct);
-                batch.Runs.Add(await RunDtoAsync(outcome.Run.Id, true, ct));
-                if (dto.CreateDrafts)
+                try
                 {
-                    ResponseDto<BalanceDraftsDto> drafts = await DraftsCoreAsync(outcome.Run.Id, s, ct);
-                    if (drafts.Success) batch.Drafts.Add(drafts.Data); else batch.Notes.Add(drafts.Message);
+                    RunOutcome outcome = await ExecuteAsync(baselineId, "Manual", s, ct);
+                    batch.Runs.Add(await RunDtoAsync(outcome.Run.Id, true, ct));
+                    if (dto.CreateDrafts)
+                    {
+                        ResponseDto<BalanceDraftsDto> drafts = await DraftsCoreAsync(outcome.Run.Id, s, ct);
+                        if (drafts.Success) batch.Drafts.Add(drafts.Data); else batch.Notes.Add(drafts.Message);
+                    }
+                }
+                catch (Exception ex) when (IsConcurrent(ex))
+                {
+                    // another run of the same project is being saved at this moment: nothing of this one was stored
+                    Reset();
+                    return ResponseDtoHelper.Conflict<BalanceRunBatchDto>(BalanceMessages.RunBusy);
                 }
             }
             return ResponseDtoHelper.Ok(batch);
@@ -523,16 +618,16 @@ namespace Services.NasbNiro.ProjectBalance
             {
                 BalanceSettings s = await BalanceSettingKeys.LoadAsync(Uow, ct);
                 if (!s.AutoRunOnChange) return;
-                PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().FirstOrDefaultAsync(x => x.WorkOrderId == workOrderId && !x.Deleted && x.IsCurrent, ct);
-                if (b == null) return;
-                RunOutcome outcome = await ExecuteAsync(b, trigger, s, ct);
+                int baselineId = await Uow.Set<PbProjectBaseline>().AsNoTracking().Where(x => x.WorkOrderId == workOrderId && !x.Deleted && x.IsCurrent).Select(x => x.Id).FirstOrDefaultAsync(ct);
+                if (baselineId == 0) return;
+                RunOutcome outcome = await ExecuteAsync(baselineId, trigger, s, ct);
                 if (s.AutoDraftRequests && outcome.Run != null) await DraftsCoreAsync(outcome.Run.Id, s, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception)
             {
-                // the balance is a help: whatever made it fail must not undo the instantiation or the deviation that triggered it
-                if (Uow is DbContext db) db.ChangeTracker.Clear();
+                // the balance is a help: whatever made it fail (a concurrent run included) must not undo the instantiation or the deviation that triggered it
+                Reset();
             }
         }
 
@@ -546,13 +641,12 @@ namespace Services.NasbNiro.ProjectBalance
             {
                 try
                 {
-                    PbProjectBaseline b = await Uow.Set<PbProjectBaseline>().FirstAsync(x => x.Id == id, ct);
-                    RunOutcome outcome = await ExecuteAsync(b, "Nightly", s, ct);
+                    RunOutcome outcome = await ExecuteAsync(id, "Nightly", s, ct);
                     if (outcome.Stored) stored++;
                     if (s.AutoDraftRequests && outcome.Stored) await DraftsCoreAsync(outcome.Run.Id, s, ct);
                 }
                 catch (OperationCanceledException) { throw; }
-                catch (Exception) { if (Uow is DbContext db) db.ChangeTracker.Clear(); }
+                catch (Exception) { Reset(); }
             }
             return stored;
         }

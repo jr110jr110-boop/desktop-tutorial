@@ -1,3 +1,4 @@
+using Entities.Model.NasbNiro.Attachments;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.ProductBank;
@@ -60,7 +61,10 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.ReleasedQuantity).HasPrecision(18, 4);
                 b.Property(x => x.Reason).HasMaxLength(500);
                 b.Property(x => x.ReleaseReason).HasMaxLength(500);
+                b.Property(x => x.ReEnableReason).HasMaxLength(500);
                 b.HasIndex(x => new { x.ItemId, x.Status });
+                // PB2 (M2): one automatic reservation per project, item, substitute-for, warehouse and lot, so two runs at once cannot double reserve (a second insert fails and is treated as "already done")
+                b.HasIndex(x => new { x.BaselineId, x.ItemId, x.SubstituteForItemId, x.WarehouseId, x.LotId }).IsUnique().HasFilter("[Status] = 1 AND [Deleted] = 0 AND [SerialUnitId] IS NULL");
                 b.HasIndex(x => x.BaselineId);
                 b.HasIndex(x => x.ContractId);
                 b.HasOne<PbProjectBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
@@ -89,7 +93,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.Entity<PurchaseRequest>(b =>
             {
                 b.Property(x => x.BalanceGroupKey).HasMaxLength(60);
-                b.HasIndex(x => new { x.ProjectBaselineId, x.BalanceGroupKey });
+                // PB2 (M2): one open automatic draft per project and group
+                b.HasIndex(x => new { x.ProjectBaselineId, x.BalanceGroupKey }).IsUnique().HasFilter("[ProjectBaselineId] IS NOT NULL AND [Status] = 0 AND [Deleted] = 0");
                 b.HasOne<PbProjectBaseline>().WithMany().HasForeignKey(x => x.ProjectBaselineId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<PurchaseRequestLine>(b =>
@@ -99,8 +104,13 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             });
             builder.Entity<MaterialRequest>(b =>
             {
-                b.HasIndex(x => x.ActivityId);
+                // PB2 (M2): one kit request per activity (a rejected one does not count)
+                b.HasIndex(x => x.ActivityId).IsUnique().HasFilter("[ActivityId] IS NOT NULL AND [Deleted] = 0 AND [Status] <> 3");
                 b.HasOne<PcActivity>().WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<RecordAttachment>(b =>
+            {
+                b.HasIndex(x => x.LinkedFromAttachmentId);
             });
         }
     }

@@ -294,6 +294,10 @@ namespace Services.NasbNiro.Procurement
                     line = new PurchaseRequestLine();
                     request.Lines.Add(line);
                 }
+                // PB2: a line the balance made that a person changes (quantity, date, price, unit, item) is theirs from now on; a later automatic update leaves it alone
+                if (l.Id.HasValue && line.Id != 0 && line.BalanceLineId.HasValue && !line.ManuallyEdited
+                    && (line.ItemId != l.ItemId || line.Quantity != l.Quantity || line.NeededBy?.Date != l.NeededBy?.Date || line.EstimatedUnitPrice != l.EstimatedUnitPrice || (Clean(l.Unit) ?? "عدد") != line.Unit))
+                    line.ManuallyEdited = true;
                 line.RowNumber = rowNumber++; line.ItemId = l.ItemId; line.Description = Clean(l.Description) ?? (l.ItemId.HasValue ? items[l.ItemId.Value].Title : null);
                 line.Unit = Clean(l.Unit) ?? "عدد"; line.Quantity = l.Quantity; line.NeededBy = l.NeededBy?.Date; line.EstimatedUnitPrice = l.EstimatedUnitPrice;
                 line.TechnicalRequirements = Clean(l.TechnicalRequirements); line.BuyOrderId = l.BuyOrderId; line.MaterialRequestLineId = l.MaterialRequestLineId;

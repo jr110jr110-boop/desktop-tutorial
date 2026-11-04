@@ -10962,7 +10962,7 @@ TOKEN=$ADMIN_TOKEN
 # so every needed quantity is a shortage. PLANNING / ENGINEERING / COMMERCIAL users already exist; no new user is created, so no approve_grants is needed.
 PBL=project-balance
 printf '%%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%%%EOF\n' > "$OUT/pb2-bom.pdf"
-CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/attachments" -H "Authorization: Bearer $ADMIN_TOKEN" -F "OwnerType=27" -F "OwnerId=$PBFYBOM" -F "Kind=2" -F "Title=BOM FY" -F "Revision=A" -F "File=@$OUT/pb2-bom.pdf"); check "pb2: the BOM document is attached to the released FY BOM revision (owner type 27)" '.success and .data.revision == "A"'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/attachments" -H "Authorization: Bearer $ADMIN_TOKEN" -F "OwnerType=36" -F "OwnerId=$PBFYBOM" -F "Kind=2" -F "Title=BOM FY" -F "Revision=A" -F "File=@$OUT/pb2-bom.pdf"); check "pb2: the BOM document is attached to the released FY BOM revision (owner type 36)" '.success and .data.revision == "A"'
 call POST Contracts '{"code":"PB2-CT-01","title":"قرارداد آزمون بالانس مواد","status":1,"employer":"کارفرمای آزمون"}'; check "pb2: the test contract is created" '.success and .data.id > 0'; PB2CT=$(val .data.id)
 call POST Equipments '{"code":"PB2-EQ-T","title":"Test turbine PB2"}'; check "pb2: the test equipment is created" '.success and .data.id > 0'; PB2EQ=$(val .data.id)
 call POST ContractEquipments "{\"contractId\":$PB2CT,\"equipmentId\":$PB2EQ,\"count\":1}"; check "pb2: the equipment is attached to the contract" '.success'
@@ -11212,6 +11212,31 @@ as "$PLAN_TOKEN" GET "$PC/daily-report/$P7DR"; check "p7a daily: one report by i
 as "$ADMIN_TOKEN" GET "$P7TK?Cartable=mine&PageSize=0"; [ "$CODE" = "200" ] && ok "p7a notifications: the task list answers for the PMO" || bad "p7a notifications: the task list answers for the PMO"
 as "$ADMIN_TOKEN" POST $P7TK/reminders/run; check "p7a notifications: the reminder job runs without an external call (counts only)" '.success and (.data.reminders|type) == "number"'
 as "$PLAN_TOKEN" POST $P7TK/reminders/run; r403 "p7a notifications: only the PMO or the CEO runs the reminders by hand (403)"
+TOKEN=$ADMIN_TOKEN
+
+# --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
+# The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1}]}"; PB2RC=$(val .data.id)
+call POST "inventory/documents/$PB2RC/confirm"; check "pb2 fix: 1 piece of the bought ring part is received into the main warehouse" '.success and .data.status == 1'
+as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"2026-10-22T00:00:00\",\"description\":\"درخواست پروژه آزمون بالانس\",\"workOrderId\":$PB2WO,\"submit\":true,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":2,\"estimatedUnitPrice\":400000,\"technicalRequirements\":\"آزمون\"}]}"; check "pb2 fix: the project request for 2 is submitted" '.success and .data.status == 1 and .data.workOrderId == '$PB2WO
+PB2RQ=$(val .data.id); PB2RL=$(val '.data.lines[0].id')
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PB2RQ,\"action\":\"approve-planning\"}"; check "pb2 fix: the request is approved by planning" '.success and .data.status == 2'
+as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"2026-10-25T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"2026-11-02T00:00:00\",\"workOrderId\":$PB2WO,\"lines\":[{\"requestLineId\":$PB2RL,\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":400000}]}"; check "pb2 fix: an order covers 1 of the 2 asked (a draft order already holds its quantity)" '.success and .data.lines[0].quantity == 1'
+as "$PLAN_TOKEN" POST $PBL/run "{\"workOrderId\":$PB2WO,\"createDrafts\":true}"
+check "pb2 fix: the ring part: 2 needed, 1 on hand and reserved, 1 still open on the request (2 asked - 1 ordered), 0 from the order, 0 short" '.success and ([.data.runs[0].lines[]|select(.itemId == '$PB2I1')]|length) == 1 and ([.data.runs[0].lines[]|select(.itemId == '$PB2I1')][0] | .requiredQty == 2 and .onHandQty == 1 and .reservedQty == 1 and .onOrderPrQty == 1 and .onOrderPoQty == 0 and .shortQty == 0)'
+PB2RUN3=$(jq -r '.data.runs[0].id' "$B")
+as "$PLAN_TOKEN" POST $PBL/run "{\"workOrderId\":$PB2WO,\"createDrafts\":true}"
+check "pb2 fix: a run again gives exactly the same figures for the ring part (no double use of the stock, the request or the order)" '.success and ([.data.runs[0].lines[]|select(.itemId == '$PB2I1')][0] | .requiredQty == 2 and .reservedQty == 1 and .onOrderPrQty == 1 and .onOrderPoQty == 0 and .shortQty == 0) and .data.drafts[0].created == 0'
+as "$PLAN_TOKEN" GET "$PBL/reservations?workOrderId=$PB2WO&itemId=$PB2I1"; check "pb2 fix: exactly one reservation of the ring part, 1 piece, active, hard" '.success and (.data|length) == 1 and .data[0].quantity == 1 and .data[0].status == 1 and .data[0].isHard == true'
+as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; PB2REQS=$(jq -r '[.data.lines[]|select(.purchaseRequestId != null)|.purchaseRequestId]|unique|.[]' "$B")
+check "pb2 fix: the draft lines of the latest run belong to exactly two requests" '([.data.lines[]|select(.purchaseRequestId != null)|.purchaseRequestId]|unique|length) == 2'
+PB2NREQ=0
+for RID in $PB2REQS; do
+  as "$PLAN_TOKEN" GET procurement/requests/$RID; PB2NREQ=$((PB2NREQ+1))
+  check "pb2 fix: draft request $RID is still a draft made from the BOM for the project, made by a person (not approved), and no longer asks for the ring part" '.success and .data.status == 0 and .data.source == 1 and .data.workOrderId == '$PB2WO' and ([.data.lines[]|select(.itemId == '$PB2I1')]|length) == 0 and (.data.lines|length) > 0'
+done
+[ "$PB2NREQ" = "2" ] && ok "pb2 fix: both draft requests were checked" || bad "pb2 fix: both draft requests were checked (got $PB2NREQ)"
+as "$PLAN_TOKEN" GET procurement/requests/$PB2RQ; check "pb2 fix: the request a person made is untouched by the balance (still approved, still 2)" '.success and .data.status == 2 and .data.lines[0].quantity == 2'
 TOKEN=$ADMIN_TOKEN
 
 finished=1

@@ -101,7 +101,8 @@ namespace Services.NasbNiro.Attachments
                     return AttachmentRoles.Operational;
                 case AttachmentOwnerType.PbBomHeader:
                 case AttachmentOwnerType.PbOpcRouting:
-                    return null;
+                    // the drawings and specifications of a product: project, planning, engineering, warehouse, procurement, QC and management only; an AI seat has none of these roles unless it is granted one
+                    return AttachmentRoles.ProductBankRead;
                 case AttachmentOwnerType.TreasuryPayment:
                     return AttachmentRoles.Finance;
                 case AttachmentOwnerType.PettyCashSettlementLine:
@@ -341,7 +342,7 @@ namespace Services.NasbNiro.Attachments
                     if (h == null) return f;
                     f.Exists = true; f.Number = h.Code + " / R" + h.Revision;
                     f.Locked = h.Status != Entities.Model.NasbNiro.ProductBank.PbBomStatus.Draft; f.Closed = h.Status == Entities.Model.NasbNiro.ProductBank.PbBomStatus.Obsolete;
-                    f.ReadRoles = null; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
+                    f.ReadRoles = AttachmentRoles.ProductBankRead; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
                     f.CreatorUserId = h.CreatorUserId; f.CreatorEditsWhileOpen = true;
                     return f;
                 }
@@ -351,7 +352,7 @@ namespace Services.NasbNiro.Attachments
                     if (h == null) return f;
                     f.Exists = true; f.Number = h.Title + " / R" + h.Revision;
                     f.Locked = h.Status != Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Draft; f.Closed = h.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Superseded;
-                    f.ReadRoles = null; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
+                    f.ReadRoles = AttachmentRoles.ProductBankRead; f.WriteRoles = AttachmentRoles.ProductBankWrite; f.LockedWriteRoles = AttachmentRoles.ProductBankLockedWrite;
                     f.CreatorUserId = h.CreatorUserId; f.CreatorEditsWhileOpen = true;
                     return f;
                 }

@@ -129,6 +129,9 @@ namespace Entities.Model.NasbNiro.ProjectBalance
         public decimal SubstituteQty { get; set; }
         public int? SubstituteItemId { get; set; }
 
+        /// <summary>The unit of the BOM line differs from the unit of the item and no conversion is defined: the quantity is not converted and the line must be checked by a person.</summary>
+        public bool UnitMismatch { get; set; }
+
         public decimal ShortQty { get; set; }
 
         /// <summary>The draft purchase request and its line that buy the shortage (set when the drafts are made).</summary>
@@ -172,6 +175,12 @@ namespace Entities.Model.NasbNiro.ProjectBalance
         public int? ReleasedByUserId { get; set; }
         public DateTimeOffset? ReleasedAt { get; set; }
         public decimal ReleasedQuantity { get; set; }
+
+        /// <summary>PB2 (M6): set when a release is approved: the run does not reserve this item for this project again until a planner re-enables it with a reason.</summary>
+        public bool AutoReserveBlocked { get; set; }
+        public int? ReEnabledByUserId { get; set; }
+        public DateTimeOffset? ReEnabledAt { get; set; }
+        public string ReEnableReason { get; set; }
 
         [Timestamp]
         public byte[] RowVersion { get; set; }

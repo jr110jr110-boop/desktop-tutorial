@@ -93,7 +93,7 @@ namespace Services.NasbNiro.ProjectBalance
                 WbsNodeId = l.WbsNodeId, WbsNodeCode = l.WbsNodeId.HasValue && nodes.TryGetValue(l.WbsNodeId.Value, out var n) ? n.Code : null, WbsNodeTitle = l.WbsNodeId.HasValue && nodes.TryGetValue(l.WbsNodeId.Value, out var n2) ? n2.Title : null,
                 ActivityId = l.ActivityId, ActivityCode = l.ActivityId.HasValue && acts.TryGetValue(l.ActivityId.Value, out string ac) ? ac : null, NeedDate = l.NeedDate, UseByDate = l.UseByDate, LeadTimeDays = l.LeadTimeDays,
                 TotalFloat = l.TotalFloat, Priority = l.Priority, GrossQty = l.GrossQty, ScrapQty = l.ScrapQty, RequiredQty = l.RequiredQty, IssuedQty = l.IssuedQty, ReservedQty = l.ReservedQty, ReservedNewQty = l.ReservedNewQty,
-                OnHandQty = l.OnHandQty, AvailableQty = l.AvailableQty, OnOrderPrQty = l.OnOrderPrQty, OnOrderPoQty = l.OnOrderPoQty, SubstituteQty = l.SubstituteQty, SubstituteItemId = l.SubstituteItemId,
+                OnHandQty = l.OnHandQty, AvailableQty = l.AvailableQty, OnOrderPrQty = l.OnOrderPrQty, OnOrderPoQty = l.OnOrderPoQty, SubstituteQty = l.SubstituteQty, SubstituteItemId = l.SubstituteItemId, UnitMismatch = l.UnitMismatch,
                 SubstituteItemCode = l.SubstituteItemId.HasValue && items.TryGetValue(l.SubstituteItemId.Value, out ItemFacts sf) ? sf.Code : null, ShortQty = l.ShortQty, PurchaseRequestId = l.PurchaseRequestId,
                 PurchaseRequestNumber = l.PurchaseRequestId.HasValue && prs.TryGetValue(l.PurchaseRequestId.Value, out string pn) ? pn : null, PurchaseRequestLineId = l.PurchaseRequestLineId, Note = l.Note,
             }).ToList();

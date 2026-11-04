@@ -128,6 +128,9 @@ namespace Entities.Model.NasbNiro.Procurement
         /// <summary>PB2: the part node of the project WBS this line buys for, and the balance line behind it.</summary>
         public int? WbsNodeId { get; set; }
         public int? BalanceLineId { get; set; }
+
+        /// <summary>PB2: a person changed this line of an automatic draft (quantity or date): the next balance run leaves its quantity alone.</summary>
+        public bool ManuallyEdited { get; set; }
     }
 
     public enum InquiryStatus

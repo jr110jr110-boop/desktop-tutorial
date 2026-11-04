@@ -381,27 +381,29 @@ namespace Services.NasbNiro.ProductBank
                 foreach (PbBomLine l in h.Lines.Where(l => !l.Deleted && l.ChildBomId.HasValue)) queue.Enqueue(l.ChildBomId.Value);
             }
             var output = new List<PbProjectBomLine>();
-            void Walk(PbBomHeader h, decimal multiplier, int depth, HashSet<int> path)
+            void Walk(PbBomHeader h, decimal multiplier, int depth, HashSet<int> path, PbProjectBomLine parent)
             {
                 foreach (PbBomLine l in h.Lines.Where(x => !x.Deleted && x.AlternativeOfLineId == null).OrderBy(x => x.SortOrder).ThenBy(x => x.Id))
                 {
                     if (l.IsHeading && depth > 0) continue;
-                    decimal qty = l.IsHeading ? 0 : l.Qty * multiplier;
+                    decimal local = l.IsHeading ? 0 : l.Qty;
+                    decimal qty = local * multiplier;   // the quantity for one product (tree product); the line itself keeps the quantity per parent
                     var pl = new PbProjectBomLine
                     {
                         BaselineId = baselineId, SourceLineId = l.Id, SortOrder = output.Count + 1, ItemNumber = l.ItemNumber, IsHeading = l.IsHeading, AssemblyPartNumber = h.AssemblyPartNumber,
-                        PartNumber = l.PartNumber, ItemId = l.ItemId, PartName = l.PartName, Qty = qty, TotalQty = qty * count, Unit = l.Unit, Material = l.Material, MakeOrBuy = l.MakeOrBuy,
+                        PartNumber = l.PartNumber, ItemId = l.ItemId, PartName = l.PartName, Qty = local, TotalQty = qty * count, Unit = l.Unit, Material = l.Material, MakeOrBuy = l.MakeOrBuy,
+                        ParentLine = parent,
                     };
                     Stamp(pl, true);
                     output.Add(pl);
                     if (l.ChildBomId.HasValue && depth < 8 && !path.Contains(l.ChildBomId.Value) && loaded.TryGetValue(l.ChildBomId.Value, out PbBomHeader child))
                     {
                         var next = new HashSet<int>(path) { child.Id };
-                        Walk(child, qty, depth + 1, next);
+                        Walk(child, qty, depth + 1, next, pl);
                     }
                 }
             }
-            Walk(loaded[topBomId], 1m, 0, new HashSet<int> { topBomId });
+            Walk(loaded[topBomId], 1m, 0, new HashSet<int> { topBomId }, null);
             return output;
         }
 
@@ -810,18 +812,26 @@ namespace Services.NasbNiro.ProductBank
             {
                 case PbChangeKind.Remove:
                     target.IsRemoved = true; target.ChangedByChangeId = c.Id; Stamp(target, false);
+                    DropDescendants(lines, target, c.Id);
                     break;
                 case PbChangeKind.Quantity:
-                    target.Qty = c.NewQty.Value; target.TotalQty = c.NewQty.Value * count; target.ChangedByChangeId = c.Id; Stamp(target, false);
+                    // the new quantity is per parent assembly: the parts of a changed assembly follow it, and a part keeps the multiplier of its parent
+                    target.Qty = c.NewQty.Value; target.ChangedByChangeId = c.Id; Stamp(target, false);
                     break;
                 case PbChangeKind.Replace:
                     target.IsRemoved = true; target.ChangedByChangeId = c.Id; Stamp(target, false);
-                    AddProjectLine(b, c, target.SortOrder + 1, c.NewQty ?? target.Qty, target.ItemNumber, count);
+                    DropDescendants(lines, target, c.Id);
+                    {
+                        PbProjectBomLine added = AddProjectLine(b, c, target.SortOrder + 1, c.NewQty ?? target.Qty, target.ItemNumber, count, target.ParentLineId);
+                        PbProjectBomLine up = target.ParentLineId.HasValue ? lines.FirstOrDefault(x => x.Id == target.ParentLineId.Value) : null;
+                        if (up != null && up.Qty > 0) added.TotalQty = added.Qty * (up.TotalQty / up.Qty);
+                    }
                     break;
                 case PbChangeKind.Add:
-                    AddProjectLine(b, c, (lines.Count == 0 ? 0 : lines.Max(l => l.SortOrder)) + 1, c.NewQty.Value, null, count);
+                    AddProjectLine(b, c, (lines.Count == 0 ? 0 : lines.Max(l => l.SortOrder)) + 1, c.NewQty.Value, null, count, null);
                     break;
             }
+            RefreshTotals(lines, count);
             c.Status = PbChangeStatus.Applied; c.AppliedAt = DateTimeOffset.Now; c.AppliedByUserId = User.UserId;
             Stamp(c, false);
             string saved = await TrySaveAsync(ct);
@@ -829,15 +839,42 @@ namespace Services.NasbNiro.ProductBank
             return await ChangeResultAsync(c, ct);
         }
 
-        private void AddProjectLine(PbProjectBaseline b, PbProjectBomChange c, int sort, decimal qty, int? itemNumber, int count)
+        /// <summary>PB2 (H2): a removed or replaced assembly takes all its parts with it.</summary>
+        private void DropDescendants(List<PbProjectBomLine> lines, PbProjectBomLine root, int changeId)
+        {
+            var queue = new Queue<int>();
+            queue.Enqueue(root.Id);
+            var seen = new HashSet<int>();
+            while (queue.Count > 0)
+            {
+                int parent = queue.Dequeue();
+                if (!seen.Add(parent)) continue;
+                foreach (PbProjectBomLine ch in lines.Where(l => l.ParentLineId == parent && !l.IsRemoved))
+                {
+                    ch.IsRemoved = true; ch.ChangedByChangeId = changeId; Stamp(ch, false);
+                    queue.Enqueue(ch.Id);
+                }
+            }
+        }
+
+        /// <summary>PB2 (H2): the quantity of every line for the whole work order, from the tree (quantity per parent x the quantities of its ancestors x the count).</summary>
+        private void RefreshTotals(List<PbProjectBomLine> lines, int count)
+        {
+            Dictionary<int, decimal> totals = PbBomTree.Totals(lines, count, null);
+            foreach (PbProjectBomLine l in lines.Where(l => !l.IsRemoved && !l.IsHeading))
+                if (totals.TryGetValue(l.Id, out decimal t) && l.TotalQty != t) { l.TotalQty = t; Stamp(l, false); }
+        }
+
+        private PbProjectBomLine AddProjectLine(PbProjectBaseline b, PbProjectBomChange c, int sort, decimal qty, int? itemNumber, int count, int? parentLineId)
         {
             var l = new PbProjectBomLine
             {
                 BaselineId = b.Id, SortOrder = sort, ItemNumber = itemNumber, AssemblyPartNumber = null, PartNumber = c.PartNumber, PartName = c.PartName ?? c.PartNumber, Qty = qty, TotalQty = qty * count,
-                Unit = c.Unit ?? "عدد", Material = c.Material, MakeOrBuy = c.MakeOrBuy ?? PbMakeOrBuy.Make, ChangedByChangeId = c.Id,
+                Unit = c.Unit ?? "عدد", Material = c.Material, MakeOrBuy = c.MakeOrBuy ?? PbMakeOrBuy.Make, ChangedByChangeId = c.Id, ParentLineId = parentLineId,
             };
             Stamp(l, true);
             Uow.Set<PbProjectBomLine>().Add(l);
+            return l;
         }
     }
 }
