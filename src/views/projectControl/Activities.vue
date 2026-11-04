@@ -6,6 +6,7 @@ import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import ActivityList from "@/components/pc/schedule/ActivityList.vue";
 import DependencyList from "@/components/pc/schedule/DependencyList.vue";
+import ActivityTasks from "@/components/pc/schedule/ActivityTasks.vue";
 import CalendarList from "@/components/pc/schedule/CalendarList.vue";
 import { printPage } from "@/composables/inventory";
 import { pcContractId } from "@/composables/projectControl";
@@ -14,6 +15,7 @@ import { pcContractId } from "@/composables/projectControl";
 const tab = ref("activities");
 const tabs = [
   { key: "activities", title: "فعالیت‌ها" },
+  { key: "tasks", title: "وظایف فعالیت‌ها" },
   { key: "dependencies", title: "وابستگی‌ها" },
   { key: "calendars", title: "تقویم‌های کاری" },
 ];
@@ -34,6 +36,7 @@ const tabs = [
       <CalendarList v-if="tab === 'calendars'" />
       <NeedContract v-else-if="!pcContractId" />
       <ActivityList v-else-if="tab === 'activities'" :contract-id="pcContractId" />
+      <ActivityTasks v-else-if="tab === 'tasks'" :contract-id="pcContractId" />
       <DependencyList v-else :contract-id="pcContractId" />
     </div>
   </div>
