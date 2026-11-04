@@ -40,7 +40,7 @@ namespace Services.NasbNiro.ProjectControl
         /// H3: who reads the whole history of a document (drafts, superseded revisions, reject reasons, every file), the links and the register export: the engineering and document-control side.
         /// The floor roles (ShopFloor) are left out on purpose; they read only the released revision through the shop-floor endpoints.
         /// </summary>
-        public const string DocReaders = "PMO,CEO,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,AUDITOR";
+        public const string DocReaders = "PMO,CEO,PROJECTMANAGER,PLANNING,QA,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,AUDITOR";
 
         /// <summary>Tender documents: commercial and engineering prepare them, the PMO and the CEO read them.</summary>
         public const string TenderWriters = "COMMERCIAL,ENGINEERING,ENGINEER,DCC,PMO";
