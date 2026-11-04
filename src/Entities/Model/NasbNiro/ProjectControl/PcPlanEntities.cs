@@ -129,6 +129,11 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public PcDependencyType Type { get; set; }
         public int LagDays { get; set; }
         public PcDependencyOrigin Origin { get; set; }
+
+        /// <summary>P-B7b: a removed link is hidden, not deleted (ISO 15489). A query filter leaves the hidden rows out.</summary>
+        public bool Deleted { get; set; }
+        public DateTimeOffset? DeletedAt { get; set; }
+        public int? DeletedByUserId { get; set; }
     }
 
     public class PcBaseline : BaseEntity

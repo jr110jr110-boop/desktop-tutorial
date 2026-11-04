@@ -8,6 +8,7 @@ using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.Production;
+using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Attachments;
@@ -19,6 +20,30 @@ namespace Services.NasbNiro.Trace
     public sealed partial class TraceCenterService
     {
         // ------------------------------------------------------------------------------------------ units, level by level
+
+        /// <summary>P-B7b: the documents linked to the part numbers of the tree (a fixed number of queries for the whole tree).</summary>
+        private async Task LoadPartDocumentsAsync(TreeCtx c, List<string> partNumbers, CancellationToken ct)
+        {
+            if (partNumbers == null || partNumbers.Count == 0) return;
+            List<string> pns = partNumbers.Distinct().ToList();
+            var links = await _uow.Set<PcDocumentLink>().AsNoTracking().Where(l => !l.Deleted && l.PartNumber != null && pns.Contains(l.PartNumber)).Select(l => new { l.PartNumber, l.DeliverableId, l.ControlledDocumentId, l.Kind }).ToListAsync(ct);
+            if (links.Count == 0) return;
+            var unique = new Dictionary<string, global::Services.NasbNiro.ProjectControl.EdmsFoundDocument>();
+            var byPart = new List<(string Part, string Key)>();
+            foreach (var l in links)
+            {
+                string key = l.DeliverableId.HasValue ? "d" + l.DeliverableId.Value : "c" + l.ControlledDocumentId.Value;
+                if (!unique.ContainsKey(key))
+                    unique[key] = new global::Services.NasbNiro.ProjectControl.EdmsFoundDocument { Via = l.Kind, ViaText = "قطعه " + l.PartNumber, Deliverable = l.DeliverableId.HasValue ? new PcEngineeringDeliverable { Id = l.DeliverableId.Value } : null, ControlledDocumentId = l.ControlledDocumentId };
+                byPart.Add((l.PartNumber, key));
+            }
+            await global::Services.NasbNiro.ProjectControl.EdmsResolver.FillAsync(_uow, unique.Values.ToList(), ct);
+            foreach (var g in byPart.GroupBy(x => x.Part))
+            {
+                var list = g.Select(x => x.Key).Distinct().Select(k => unique[k]).Where(f => f.Number != null).OrderBy(f => f.Number, StringComparer.Ordinal).ToList();
+                if (list.Count > 0) c.PartDocs[g.Key] = list;
+            }
+        }
 
         private async Task EnsureItemsAsync(TreeCtx c, IEnumerable<int> itemIds, CancellationToken ct)
         {

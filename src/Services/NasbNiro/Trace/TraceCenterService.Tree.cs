@@ -181,6 +181,8 @@ namespace Services.NasbNiro.Trace
             public readonly Dictionary<int, string> Providers = new Dictionary<int, string>();
             public readonly Dictionary<string, List<ReverseDeliveryDto>> Deliveries = new Dictionary<string, List<ReverseDeliveryDto>>();
             public readonly Dictionary<string, string> Stages = new Dictionary<string, string>();
+            /// <summary>P-B7b: the documents linked to each part number, with the revision in force.</summary>
+            public readonly Dictionary<string, List<global::Services.NasbNiro.ProjectControl.EdmsFoundDocument>> PartDocs = new Dictionary<string, List<global::Services.NasbNiro.ProjectControl.EdmsFoundDocument>>();
             public readonly StepMap StepsByPart = new StepMap();
             public List<int> SeedLots = new List<int>();
             public List<int> SeedSerials = new List<int>();

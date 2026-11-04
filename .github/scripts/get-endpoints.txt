@@ -70,3 +70,8 @@ api/v1/tasks/counts
 api/v1/projectcontrol/progress-approval/submissions
 api/v1/projectcontrol/progress-approval/reports/not-updated
 api/v1/projectcontrol/progress-approval/reports/overdue-updates
+api/v1/edms/distribution
+api/v1/edms/approvers
+api/v1/edms/notices
+api/v1/edms/tenders
+api/v1/dashboards

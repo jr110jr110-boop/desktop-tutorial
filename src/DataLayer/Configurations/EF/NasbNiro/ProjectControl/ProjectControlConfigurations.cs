@@ -18,6 +18,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
         {
             builder.AddProjectControlR1Configurations(); // R1c: new tables and columns
             builder.AddProjectControlP7Configurations(); // P-B7a: progress approval, registers, daily report extension
+            builder.AddProjectControlP7bConfigurations(); // P-B7b: engineering document control (EDMS) and the tender register
 
             // ------------------------------------------------------------------ settings, calendars
             builder.Entity<PcSetting>(b =>
@@ -237,8 +238,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
             builder.Entity<PcDependency>(b =>
             {
                 b.ToTable("PcDependencies");
-                b.HasIndex(x => new { x.PredecessorId, x.SuccessorId }).IsUnique();
+                b.HasIndex(x => new { x.PredecessorId, x.SuccessorId }).IsUnique().HasFilter(NotDeleted);
                 b.HasIndex(x => x.ContractId);
+                b.HasQueryFilter(x => !x.Deleted); // P-B7b: a removed link is hidden, never deleted
                 b.HasOne(x => x.Predecessor).WithMany().HasForeignKey(x => x.PredecessorId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Successor).WithMany().HasForeignKey(x => x.SuccessorId).OnDelete(DeleteBehavior.Restrict);
             });
@@ -404,6 +406,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.Revision).HasMaxLength(Code);
                 b.Property(x => x.LastTransmittalNumber).HasMaxLength(Code);
                 b.Property(x => x.ClientResponseCode).HasMaxLength(10);
+                b.Property(x => x.ProgressWeight).HasPrecision(9, 4).HasDefaultValue(1m);
+                b.Property(x => x.CheckOutNote).HasMaxLength(500);
                 b.HasIndex(x => new { x.ContractId, x.WorkOrderId });
                 b.HasIndex(x => new { x.ContractId, x.DocumentNumber });
                 b.HasOne(x => x.Contract).WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
@@ -433,6 +437,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.Property(x => x.ResponseCode).HasMaxLength(10);
                 b.Property(x => x.ResponseNote).HasMaxLength(Text);
                 b.HasIndex(x => x.DeliverableId);
+                b.HasIndex(x => x.RevisionId);
+                b.HasOne<PcDocumentRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.Transmittal).WithMany(x => x.Lines).HasForeignKey(x => x.TransmittalId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(x => x.Deliverable).WithMany().HasForeignKey(x => x.DeliverableId).OnDelete(DeleteBehavior.Restrict);
             });

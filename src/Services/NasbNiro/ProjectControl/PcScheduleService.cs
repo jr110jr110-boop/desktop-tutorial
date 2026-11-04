@@ -644,7 +644,7 @@ namespace Services.NasbNiro.ProjectControl
             if (release != null)
             {
                 List<PcDependency> redundant = await _uow.Set<PcDependency>().Where(d => d.ContractId == dto.ContractId && d.SuccessorId == release.Id && existing.Select(e => e.Id).Contains(d.PredecessorId)).ToListAsync(cancellationToken);
-                _uow.Set<PcDependency>().RemoveRange(redundant);
+                foreach (PcDependency gone in redundant) HideDependency(gone);
             }
             _uow.Set<PcWbsNode>().AddRange(g.Nodes);
             _uow.Set<PcActivity>().AddRange(g.Activities);
@@ -791,7 +791,7 @@ namespace Services.NasbNiro.ProjectControl
             if (await _uow.Set<PcProgressSnapshotLine>().AnyAsync(x => x.ActivityId == id, cancellationToken) || await _uow.Set<PcManualProgress>().AnyAsync(x => x.ActivityId == id, cancellationToken)) return Bad<bool>("برای فعالیت پیشرفت ثبت شده و حذف نمی‌شود.");
             if (await _uow.Set<PcPaymentMilestone>().AnyAsync(x => x.ActivityId == id && !x.Deleted, cancellationToken)) return Bad<bool>("فعالیت به مرحله پرداخت وصل است.");
             List<PcDependency> deps = await _uow.Set<PcDependency>().Where(d => d.PredecessorId == id || d.SuccessorId == id).ToListAsync(cancellationToken);
-            _uow.Set<PcDependency>().RemoveRange(deps);
+            foreach (PcDependency gone in deps) HideDependency(gone);
             a.Delete(); a.ModifyDate = DateTimeOffset.Now; a.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
@@ -921,13 +921,16 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok(await DependencyDtoAsync(d, cancellationToken));
         }
 
+        /// <summary>P-B7b (ISO 15489): a removed link is hidden with the person and the time, never deleted; the query filter leaves it out of every read.</summary>
+        private void HideDependency(PcDependency d) { d.Deleted = true; d.DeletedAt = DateTimeOffset.Now; d.DeletedByUserId = Me; }
+
         public async Task<ResponseDto<bool>> DeleteDependencyAsync(int id, CancellationToken cancellationToken)
         {
             if (!_user.IsInRole(ProjectControlRoles.PlanningOrPm)) return Bad<bool>(PcText.NotAllowed);
             PcDependency d = await _uow.Set<PcDependency>().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (d == null) return PcText.NotFound<bool>("وابستگی پیدا نشد.");
             if (await PlanLockAsync(d.ContractId, cancellationToken) is string removeLocked) return Bad<bool>(removeLocked);
-            _uow.Set<PcDependency>().Remove(d);
+            HideDependency(d);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(true);
         }
@@ -1248,7 +1251,7 @@ namespace Services.NasbNiro.ProjectControl
             // the links: those of a removed activity go; an added activity brings its own (to an activity of the plan or to another added one)
             List<PcDependency> deps = await _uow.Set<PcDependency>().Where(d => d.ContractId == contractId).ToListAsync(cancellationToken);
             var removedSet = new HashSet<int>(removedIds);
-            foreach (PcDependency d in deps.Where(d => removedSet.Contains(d.PredecessorId) || removedSet.Contains(d.SuccessorId)).ToList()) { _uow.Set<PcDependency>().Remove(d); deps.Remove(d); }
+            foreach (PcDependency d in deps.Where(d => removedSet.Contains(d.PredecessorId) || removedSet.Contains(d.SuccessorId)).ToList()) { HideDependency(d); deps.Remove(d); }
             var addedByTemp = added.ToDictionary(x => x.Temp, x => x.Activity);
             var newLinks = new List<PcDependency>();
             foreach (var entry in added)
