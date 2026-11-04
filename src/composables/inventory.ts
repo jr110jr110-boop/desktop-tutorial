@@ -22,7 +22,33 @@ export const warehouseKinds: Record<number, string> = {
   7: "پیمانکار (انبار مجازی)",
   8: "اموال مشتری / مرجوعی",
   9: "مدل‌های ریخته‌گری",
+  10: "انبار پروژه",
+  11: "انبار سکو",
+  12: "انبار متریال",
+  13: "انبار ابزار",
+  14: "انبار ملزومات",
+  15: "انبار ملزومات پروژه",
+  16: "ابزار دقیق",
+  17: "قطعات استاندارد",
+  18: "انبار نقطه مصرف (POU)",
 };
+
+/** Kinds of warehouse that belong to one work order (the API asks for the work order). */
+export const projectBoundKinds = [10, 15, 18];
+
+/** DocumentState of the API: the state a person sees (draft, waiting for an approval, approved, rejected, cancelled). */
+export const documentStates: Record<number, string> = {
+  0: "پیش‌نویس",
+  1: "در انتظار تایید",
+  2: "تاییدشده",
+  3: "ردشده",
+  4: "ابطال‌شده",
+};
+
+export const freightStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تاییدشده", 2: "ابطال‌شده" };
+export const freightBases: Record<number, string> = { 1: "بر پایه وزن", 2: "بر پایه ارزش" };
+export const assetStatuses: Record<number, string> = { 1: "در خدمت", 2: "در تعمیر", 3: "مفقود", 4: "اسقاط‌شده" };
+export const consignmentLevels: Record<number, string> = { 0: "—", 1: "نزدیک موعد (۷ روز)", 2: "نزدیک موعد (۳ روز)", 3: "گذشته از موعد" };
 
 /** InventoryDocumentType of the API. */
 export const documentTypes: Record<number, string> = {
@@ -43,13 +69,15 @@ export const documentTypes: Record<number, string> = {
   15: "موجودی اول دوره",
   16: "ترخیص از قرنطینه",
   17: "رسید اموال مشتری",
+  18: "رسید امانی",
+  19: "برگشت امانی",
 };
 
-export const incomingTypes = [1, 2, 3, 7, 13, 15, 17];
-export const outgoingTypes = [4, 5, 8, 11, 14];
+export const incomingTypes = [1, 2, 3, 7, 13, 15, 17, 18];
+export const outgoingTypes = [4, 5, 8, 11, 14, 19];
 export const transferTypes = [6, 9, 10, 16];
 /** Goods leave the premises: driver, vehicle and receiver are written and the guard checks the exit. */
-export const leavesPremisesTypes = [5, 9, 11, 14];
+export const leavesPremisesTypes = [5, 9, 11, 14, 19];
 /** Adjustments and opening balances need the warehouse supervisor and the planning manager. */
 export const needsApprovalTypes = [7, 8, 15];
 /** Made by the system (inspection or NCR), never typed by a user. */
@@ -57,7 +85,7 @@ export const systemOnlyTypes = [16];
 /** Types that can reference a purchase order. */
 export const purchaseOrderTypes = [1, 5];
 /** Order of the "new document" buttons. */
-export const typeOrder = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 17, 7, 8];
+export const typeOrder = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 7, 8];
 
 /** Not decided by the company: the label stays "to be set by quality assurance". */
 export const NO_FORM_CODE = "کد فرم: (توسط تضمین کیفیت تعیین شود)";
@@ -214,6 +242,7 @@ export function fail(error: any) {
 
 /** Text written into the barcode / QR of a label, read back by the scan boxes. */
 export const labelCode = {
+  asset: (tag: string) => `A/${tag}`,
   item: (itemCode: string) => `I/${itemCode}`,
   serial: (itemCode: string, serial: string) => `S/${itemCode}/${serial}`,
   lot: (itemCode: string, lot: string) => `L/${itemCode}/${lot}`,
@@ -221,7 +250,7 @@ export const labelCode = {
 };
 
 export interface ScanResult {
-  kind: "item" | "serial" | "lot" | "location" | "text";
+  kind: "item" | "serial" | "lot" | "location" | "asset" | "text";
   itemCode?: string;
   value?: string;
   warehouseCode?: string;
@@ -235,6 +264,7 @@ export function parseScan(raw: string): ScanResult {
   if (kind === "S" && parts.length >= 3) return { kind: "serial", itemCode: parts[1], value: parts.slice(2).join("/"), text };
   if (kind === "L" && parts.length >= 3) return { kind: "lot", itemCode: parts[1], value: parts.slice(2).join("/"), text };
   if (kind === "LOC" && parts.length >= 3) return { kind: "location", warehouseCode: parts[1], value: parts.slice(2).join("/"), text };
+  if (kind === "A") return { kind: "asset", value: parts.slice(1).join("/"), text };
   if (kind === "I") return { kind: "item", itemCode: parts.slice(1).join("/"), text };
   return { kind: "text", text };
 }

@@ -98,6 +98,11 @@ export const SensitiveRoles: string[] = ["FINANCEMANAGER", "PAYROLL", "CEO", "AU
 
 /** Warehouse (InventoryRoles in the API). */
 export const InventoryRoles = {
+  /** PB5: reports of the warehouse (WarehouseReportRoles.Readers in the API) */
+  reports: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,WAREHOUSE,WHSUPERVISOR,QC,QA,ENGINEERING,PROJECTMANAGER,PRODUCTIONMANAGER,CONSTRUCTION"),
+  /** PB5: freight and landed cost (FreightRoles.Readers in the API); only FINANCIAL and FINANCEMANAGER approve */
+  freight: list("PMO,WAREHOUSE,WHSUPERVISOR,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,CEO,PLANNING"),
+  freightApprovers: list("FINANCIAL,FINANCEMANAGER"),
   masterData: list("PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING"),
   documents: list("PMO,WAREHOUSE,WHSUPERVISOR"),
   counts: list("PMO,WAREHOUSE,WHSUPERVISOR,PLANNING"),

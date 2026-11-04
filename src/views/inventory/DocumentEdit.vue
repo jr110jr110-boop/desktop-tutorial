@@ -9,12 +9,12 @@ import PrintForm from "@/components/print/PrintForm.vue";
 import { getSlOrder } from "@/api/SalesAPIs";
 import { getSvOrder } from "@/api/ServiceAPIs";
 import {
-  approveDocument, cancelDocument, confirmDocument, deleteDocument, downloadFile, exitCheckDocument, getContracts, getDocument,
+  approveDocument, approveDocumentPrice, cancelDocument, confirmDocument, createCorrection, rejectDocument, deleteDocument, downloadFile, exitCheckDocument, getContracts, getDocument,
   getItemByCode, getLots, getMaterialRequest, getMaterialRequests, getOpenPurchaseOrders, getProviders, getPurchaseOrderForReceipt,
   getSerials, getWarehouses, getWorkOrders, rowsOf, saveDocument, uploadFile,
 } from "@/api/InventoryAPIs";
 import {
-  documentStatuses, documentTypes, fail, formCodes, incomingTypes, jalali, labelCode, leavesPremisesTypes, lineDirections,
+  consignmentLevels, documentStates, documentStatuses, documentTypes, fail, freightStatuses, formCodes, incomingTypes, jalali, labelCode, leavesPremisesTypes, lineDirections,
   needsApprovalTypes, num, ok, openLabels, outgoingTypes, parseScan, printPage, purchaseOrderTypes, rial, sepidarStatuses,
   transferTypes, today, trackingModes, typeOrder, warehouseKinds, distributionText,
 } from "@/composables/inventory";
@@ -91,6 +91,8 @@ function emptyDoc(type: number) {
     providerId: null, workOrderId: null, contractId: null, buyOrderId: null, purchaseOrderId: null, salesOrderId: null as number | null, serviceOrderId: null as number | null, referenceNumber: "", description: "", lines: [],
     materialRequestId: null, driverName: "", vehiclePlate: "", receiverName: "", destination: "", buyerName: "", minutesNumber: "",
     weighbridgeDocumentId: null, depositReference: "", priceQuotes: "",
+    consignmentDueDate: null as string | null, consignmentOfDocumentId: null as number | null, correctsDocumentId: null as number | null,
+    goodsType: "", billOfLadingNumber: "", packingLines: [] as any[],
   };
 }
 
@@ -159,6 +161,12 @@ function toDto() {
     driverName: d.driverName, vehiclePlate: d.vehiclePlate, receiverName: d.receiverName, destination: d.destination,
     buyerName: d.buyerName, minutesNumber: d.minutesNumber, weighbridgeDocumentId: d.weighbridgeDocumentId || null,
     depositReference: d.depositReference, priceQuotes: scrapSale.value ? quotesText() : null,
+    // PB5: consignment, corrective document link, exit slip packing list
+    consignmentDueDate: d.type === 18 ? d.consignmentDueDate || null : null,
+    consignmentOfDocumentId: d.type === 19 ? d.consignmentOfDocumentId || null : null,
+    correctsDocumentId: d.correctsDocumentId || null,
+    goodsType: leaves.value ? d.goodsType || null : null, billOfLadingNumber: leaves.value ? d.billOfLadingNumber || null : null,
+    packingLines: leaves.value ? (d.packingLines || []).filter((p: any) => p.description || p.itemCode || p.quantity) : [],
     lines: d.lines.filter((l: any) => l.item).map((l: any) => ({
       direction: conversion.value ? l.direction : 0,
       sourceRowNumber: conversion.value && l.direction === 2 ? l.sourceRowNumber : null,
@@ -324,6 +332,46 @@ async function cancelDoc() {
   setDoc(data);
   ok("سند باطل شد و موجودی برگشت.");
 }
+
+// PB5: a person (never the one who made or changed the draft) rejects it with a reason; the accountant gives the final price approval; a cancelled document gets a corrective draft
+const rejectReason = ref<string | null>(null);
+
+async function rejectDoc() {
+  const reason = (rejectReason.value || "").trim();
+  if (!reason) return fail("دلیل رد را بنویسید.");
+  busy.value = true;
+  const [data, error] = await rejectDocument(doc.value.id, reason);
+  busy.value = false;
+  if (error) return fail(error);
+  rejectReason.value = null;
+  setDoc(data);
+  ok("سند رد شد؛ سازنده می‌تواند آن را اصلاح و دوباره بفرستد.");
+}
+
+async function approvePrice() {
+  busy.value = true;
+  const [data, error] = await approveDocumentPrice(doc.value.id);
+  busy.value = false;
+  if (error) return fail(error);
+  setDoc(data);
+  ok("قیمت سند تایید شد.");
+}
+
+async function makeCorrection() {
+  busy.value = true;
+  const [data, error] = await createCorrection(doc.value.id);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("پیش‌نویس سند اصلاحی ساخته شد.");
+  router.push({ name: "InventoryDocumentEdit", params: { id: data.id } });
+}
+
+function addPackingLine() {
+  doc.value.packingLines.push({ rowNumber: doc.value.packingLines.length + 1, billOfLadingNumber: doc.value.billOfLadingNumber || "", packageNumber: "", description: "", itemCode: "", quantity: null, packageCount: null, grossWeight: null });
+}
+
+const canFinance = hasRole(InventoryRoles.finance);
+const canApprovePrice = hasRole(InventoryRoles.freightApprovers);
 
 async function removeDoc() {
   if (!confirm("پیش‌نویس حذف شود؟")) return;
@@ -765,6 +813,10 @@ onMounted(async () => {
             <span v-if="doc.number" class="inv-ltr ms-2">{{ doc.number }}</span>
           </h1>
           <span class="inv-badge me-1" :class="{ warn: doc.status === 0, ok: doc.status === 1, bad: doc.status === 2 }">{{ documentStatuses[doc.status] }}</span>
+          <span v-if="doc.state !== undefined && doc.state !== null" class="inv-badge me-1" :class="{ warn: doc.state === 1, bad: doc.state === 3 || doc.state === 4, ok: doc.state === 2 }">{{ documentStates[doc.state] }}</span>
+          <span v-if="doc.type === 18 && doc.status === 1 && doc.consignmentAlertLevel > 0" class="inv-badge bad me-1">{{ consignmentLevels[doc.consignmentAlertLevel] }}</span>
+          <span v-if="doc.correctsDocumentNumber" class="inv-badge me-1">اصلاح سند باطل‌شده {{ doc.correctsDocumentNumber }}</span>
+          <span v-if="doc.correctedByDocumentNumber" class="inv-badge me-1">سند اصلاحی: {{ doc.correctedByDocumentNumber }}</span>
           <span v-if="doc.status > 0" class="inv-badge">سپیدار: {{ sepidarStatuses[doc.sepidarStatus] }}</span>
           <span v-if="source" class="inv-badge ms-1">{{ warehouseKinds[source.kind] }}</span>
           <span v-if="leaves && doc.status === 1" class="inv-badge ms-1" :class="doc.exitCheckedAt ? 'ok' : 'warn'">
@@ -783,6 +835,9 @@ onMounted(async () => {
             <button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="save()">ذخیره پیش‌نویس</button>
             <button :disabled="busy" class="btn btn-sm btn-success" @click="confirmDoc">تایید سند</button>
           </template>
+          <button v-if="isDraft && !isNew && doc.state !== 3" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="rejectReason = ''">رد سند</button>
+          <button v-if="doc.status === 1 && !doc.priceApprovedAt && canApprovePrice && !doc.pricesMasked" :disabled="busy" class="btn btn-sm btn-outline-success" @click="approvePrice">تایید نهایی قیمت (مالی)</button>
+          <button v-if="doc.status === 2 && !doc.correctedByDocumentId && canEdit" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="makeCorrection">ساخت سند اصلاحی</button>
           <button
             v-if="doc.status === 1 && leaves && !doc.exitCheckedAt && canExitCheck"
             :disabled="busy"
@@ -913,6 +968,33 @@ onMounted(async () => {
           <label class="form-label small mb-0">توضیح</label>
           <input v-model="doc.description" :disabled="!isDraft" class="form-control form-control-sm" />
         </div>
+      </div>
+
+      <div v-if="rejectReason !== null" class="alert alert-warning small py-2 d-print-none">
+        <input v-model="rejectReason" class="form-control form-control-sm mb-2" placeholder="دلیل رد سند" />
+        <button :disabled="busy" class="btn btn-sm btn-warning me-2" @click="rejectDoc">ثبت رد</button>
+        <button class="btn btn-sm btn-outline-secondary" @click="rejectReason = null">انصراف</button>
+      </div>
+      <div v-if="doc.rejectedAt && isDraft" class="alert alert-warning small py-2">سند رد شده است: {{ doc.rejectReason }} ({{ doc.rejectedByName }}). با اصلاح و ذخیره، رد برداشته می‌شود.</div>
+      <div v-if="doc.type === 18" class="row g-2 mt-1">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">موعد بازگشت کالای امانی</label>
+          <input v-model="doc.consignmentDueDate" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="date" />
+          <div class="inv-muted small">خالی: تاریخ سند + تنظیم «روز بازگشت امانی» (پیش‌فرض ۳۰ روز)</div>
+        </div>
+        <div v-if="doc.status === 1" class="col-md-3 small pt-4">باز مانده برای برگشت: {{ num(doc.consignmentOpenQuantity) }}</div>
+      </div>
+      <div v-if="doc.type === 19" class="row g-2 mt-1">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">شناسه رسید امانی که تسویه می‌شود *</label>
+          <input v-model.number="doc.consignmentOfDocumentId" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="number" />
+          <div v-if="doc.consignmentOfNumber" class="inv-muted small">{{ doc.consignmentOfNumber }}</div>
+        </div>
+      </div>
+      <div v-if="doc.freights && doc.freights.length" class="small mt-2">
+        کرایه‌های این رسید:
+        <span v-for="f in doc.freights" :key="f.id" class="inv-badge me-1">{{ f.number }} · {{ freightStatuses[f.status] }}<template v-if="f.amount !== null && f.amount !== undefined"> · {{ rial(f.amount) }}</template></span>
+        <router-link :to="{ name: 'InventoryFreight' }">صفحه کرایه</router-link>
       </div>
 
       <!-- goods leave the company: the guard compares the load with the lines -->
@@ -1110,6 +1192,28 @@ onMounted(async () => {
         با اسکن برچسب کالا (I/…) یک واحد، برچسب سریال (S/…) همان قطعه، برچسب بچ (L/…) یک ردیف بچ، و برچسب محل (LOC/…) محل ردیف آخر ثبت می‌شود.
         موجودی فقط با «تایید سند» تغییر می‌کند.
       </p>
+      <div v-if="leaves" class="mt-3">
+        <div class="small fw-bold mb-1">بارنامه و فهرست بسته‌بندی (Packing List)</div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-3"><input v-model="doc.billOfLadingNumber" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" placeholder="شماره بارنامه" /></div>
+          <div class="col-md-3"><input v-model="doc.goodsType" :disabled="!isDraft" class="form-control form-control-sm" placeholder="نوع کالا" /></div>
+          <div class="col-md-3"><button v-if="isDraft" class="btn btn-sm btn-outline-secondary" @click="addPackingLine">افزودن ردیف بسته‌بندی</button></div>
+        </div>
+        <table v-if="doc.packingLines && doc.packingLines.length" class="table table-sm">
+          <thead><tr><th>بارنامه</th><th>شماره بسته</th><th>شرح</th><th>کد کالا</th><th>مقدار</th><th>تعداد بسته</th><th>وزن ناخالص</th></tr></thead>
+          <tbody>
+            <tr v-for="(p, i) in doc.packingLines" :key="i">
+              <td><input v-model="p.billOfLadingNumber" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" /></td>
+              <td><input v-model="p.packageNumber" :disabled="!isDraft" class="form-control form-control-sm" /></td>
+              <td><input v-model="p.description" :disabled="!isDraft" class="form-control form-control-sm" /></td>
+              <td><input v-model="p.itemCode" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" /></td>
+              <td><input v-model.number="p.quantity" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="number" /></td>
+              <td><input v-model.number="p.packageCount" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="number" /></td>
+              <td><input v-model.number="p.grossWeight" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="number" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="doc.status > 0" class="inv-muted mt-2">
         ثبت: {{ doc.creatorName }} {{ jalali(doc.createDate, true) }}
         <span v-if="doc.confirmedAt"> · تایید: {{ doc.confirmedByName }} {{ jalali(doc.confirmedAt, true) }}</span>

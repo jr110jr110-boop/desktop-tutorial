@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getDocuments, getWarehouses } from "@/api/InventoryAPIs";
-import { documentStatuses, documentTypes, typeOrder, fail, jalali, num, sepidarStatuses } from "@/composables/inventory";
+import { documentStates, documentStatuses, documentTypes, typeOrder, fail, jalali, num, sepidarStatuses } from "@/composables/inventory";
 import { hasRole, InventoryRoles } from "@/composables/roles";
 
 const router = useRouter();
@@ -19,7 +19,7 @@ function createFromSelect(e: any) {
   e.target.value = "";
   if (value) create(value);
 }
-const filters = ref({ Contains: "", Type: null as number | null, Status: null as number | null, WarehouseId: null as number | null, From: "", To: "" });
+const filters = ref({ Contains: "", Type: null as number | null, Status: null as number | null, State: null as number | null, WarehouseId: null as number | null, From: "", To: "" });
 
 async function load() {
   loading.value = true;
@@ -87,6 +87,10 @@ onMounted(async () => {
         <select v-model="filters.Status" class="form-select form-select-sm" @change="search">
           <option :value="null">همه وضعیت‌ها</option>
           <option v-for="(t, k) in documentStatuses" :key="k" :value="Number(k)">{{ t }}</option>
+        </select>
+        <select v-model="filters.State" class="form-select form-select-sm" @change="search">
+          <option :value="null">همه حالت‌ها (پیش‌نویس / در انتظار تایید / تاییدشده / ردشده / ابطال)</option>
+          <option v-for="(t, k) in documentStates" :key="k" :value="Number(k)">{{ t }}</option>
         </select>
         <select v-model="filters.WarehouseId" class="form-select form-select-sm" @change="search">
           <option :value="null">همه انبارها</option>

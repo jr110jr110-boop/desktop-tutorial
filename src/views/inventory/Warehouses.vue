@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { deleteLocation, getWarehouses, saveLocation, saveWarehouse } from "@/api/InventoryAPIs";
-import { fail, labelCode, ok, openLabels, warehouseKinds } from "@/composables/inventory";
+import { fail, labelCode, ok, openLabels, projectBoundKinds, warehouseKinds } from "@/composables/inventory";
 
 const router = useRouter();
 const warehouses = ref<any[]>([]);
@@ -22,11 +22,11 @@ async function load() {
 }
 
 function add() {
-  form.value = { id: null, code: "", title: "", kind: 0, description: "", isActive: true, sepidarCode: "" };
+  form.value = { id: null, code: "", title: "", kind: 0, description: "", isActive: true, sepidarCode: "", workOrderId: null, platform: "" };
 }
 
 function edit(w: any) {
-  form.value = { id: w.id, code: w.code, title: w.title, kind: w.kind, description: w.description, isActive: w.isActive, sepidarCode: w.sepidarCode };
+  form.value = { id: w.id, code: w.code, title: w.title, kind: w.kind, description: w.description, isActive: w.isActive, sepidarCode: w.sepidarCode, workOrderId: w.workOrderId ?? null, platform: w.platform || "" };
 }
 
 async function save() {
@@ -151,6 +151,12 @@ onMounted(load);
               <option v-for="(t, k) in warehouseKinds" :key="k" :value="Number(k)">{{ t }}</option>
             </select>
           </div>
+          <div v-if="projectBoundKinds.includes(form.kind)" class="col-md-6">
+            <label class="form-label small">شناسه دستور کار (پروژه) *</label>
+            <input v-model.number="form.workOrderId" class="form-control form-control-sm inv-ltr" type="number" />
+            <div class="inv-muted small">موجودی این انبار در بالانس پروژه «تحویل‌شده به پروژه» حساب می‌شود.</div>
+          </div>
+          <div class="col-md-6"><label class="form-label small">سکو</label><input v-model="form.platform" class="form-control form-control-sm" /></div>
           <div class="col-md-6"><label class="form-label small">کد انبار در سپیدار</label><input v-model="form.sepidarCode" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-12"><label class="form-label small">توضیح</label><textarea v-model="form.description" class="form-control form-control-sm" rows="2"></textarea></div>
           <div class="col-12 form-check ms-2"><input id="whActive" v-model="form.isActive" class="form-check-input" type="checkbox" /><label class="form-check-label small" for="whActive">فعال</label></div>
