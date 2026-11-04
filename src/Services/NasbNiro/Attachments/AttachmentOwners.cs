@@ -12,6 +12,7 @@ using Entities.Model.NasbNiro.Production;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Procurement;
 using Pc = Entities.Model.NasbNiro.ProjectControl;
 
 namespace Services.NasbNiro.Attachments
@@ -32,6 +33,13 @@ namespace Services.NasbNiro.Attachments
 
         /// <summary>Roles that read the record's attachments; null = every signed-in user (the legacy modules are open).</summary>
         public string ReadRoles { get; set; }
+
+        /// <summary>PB6: roles that read the record's attachments only when they are its maker (the unit managers who ask for a purchase read their own request).</summary>
+        public string OwnReadRoles { get; set; }
+
+        public bool CanRead(IInventoryUserContext user) =>
+            ReadRoles == null || user.IsInRole(ReadRoles) ||
+            (OwnReadRoles != null && CreatorUserId.HasValue && CreatorUserId.Value == user.UserId && user.UserId > 0 && (OwnReadRoles == "*" || user.IsInRole(OwnReadRoles)));
 
         /// <summary>Roles of the owning module that add, void and supersede.</summary>
         public string WriteRoles { get; set; }
@@ -106,7 +114,7 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.ProjectCostEntry:
                     return AttachmentRoles.Finance + ",PROJECTMANAGER,PLANNING";
                 default:
-                    return null;
+                    return Pb6AttachmentOwners.ReadRolesOf(type);
             }
         }
 
@@ -125,9 +133,9 @@ namespace Services.NasbNiro.Attachments
                     if (r == null) return f;
                     f.Exists = true; f.Number = r.Number;
                     // a request that was sent no longer loses a file: the creator or the PMO edits a draft; after it is sent only planning and the PMO void or replace, with a reason
-                    f.Locked = r.Status != PurchaseRequestStatus.Draft; f.Closed = r.Status == PurchaseRequestStatus.Rejected;
+                    f.Locked = r.Status != PurchaseRequestStatus.Draft; f.Closed = r.Status == PurchaseRequestStatus.Rejected || r.Status == PurchaseRequestStatus.Returned;
                     f.ReadRoles = AttachmentRoles.Procurement; f.WriteRoles = AttachmentRoles.PurchaseRequestWrite; f.LockedWriteRoles = AttachmentRoles.PurchaseRequestLockedWrite;
-                    f.CreatorUserId = r.CreatorUserId; f.CreatorEditsWhileOpen = true;
+                    f.CreatorUserId = r.CreatorUserId; f.CreatorEditsWhileOpen = true; f.OwnReadRoles = ProcurementRoles.ExtraRequesters;
                     f.PurchaseRequestIds.Add(id);
                     return f;
                 }
@@ -137,9 +145,9 @@ namespace Services.NasbNiro.Attachments
                         .Select(x => new { x.PurchaseRequestId, x.RowNumber, x.PurchaseRequest.Number, x.PurchaseRequest.Status, x.PurchaseRequest.Deleted, x.PurchaseRequest.CreatorUserId }).FirstOrDefaultAsync(ct);
                     if (l == null || l.Deleted) return f;
                     f.Exists = true; f.Number = l.Number + " / " + l.RowNumber;
-                    f.Locked = l.Status != PurchaseRequestStatus.Draft; f.Closed = l.Status == PurchaseRequestStatus.Rejected;
+                    f.Locked = l.Status != PurchaseRequestStatus.Draft; f.Closed = l.Status == PurchaseRequestStatus.Rejected || l.Status == PurchaseRequestStatus.Returned;
                     f.ReadRoles = AttachmentRoles.Procurement; f.WriteRoles = AttachmentRoles.PurchaseRequestWrite; f.LockedWriteRoles = AttachmentRoles.PurchaseRequestLockedWrite;
-                    f.CreatorUserId = l.CreatorUserId; f.CreatorEditsWhileOpen = true;
+                    f.CreatorUserId = l.CreatorUserId; f.CreatorEditsWhileOpen = true; f.OwnReadRoles = ProcurementRoles.ExtraRequesters;
                     f.PurchaseRequestIds.Add(l.PurchaseRequestId);
                     return f;
                 }
@@ -333,7 +341,7 @@ namespace Services.NasbNiro.Attachments
                     return f;
                 }
                 default:
-                    return f;
+                    return await Pb6AttachmentOwners.FactsAsync(uow, type, id, f, ct);
             }
         }
 

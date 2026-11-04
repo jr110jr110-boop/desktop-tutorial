@@ -122,6 +122,34 @@ namespace DataLayer.Context
         public virtual DbSet<Entities.Model.NasbNiro.ProductBank.PbProjectBomChange> PbProjectBomChanges { get; set; }
         #endregion
 
+        #region PB6 (procurement completion, contracts system, progress statements, petty-cash flow)
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.PurchaseRequestRevision> ProcRequestRevisions { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.ProcArchiveRecord> ProcArchive { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.ProcBuyOrderBridge> ProcBuyOrderBridges { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.PurchaseOrderAddendum> ProcAddenda { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.PurchaseOrderAddendumLine> ProcAddendumLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.SupplierGuarantee> ProcGuarantees { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Procurement.PurchaseOrderPaymentTerm> ProcPaymentTerms { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtDealRequest> CtDealRequests { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtDealStep> CtDealSteps { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtHistory> CtHistory { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtTenderRun> CtTenderRuns { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtTenderParticipant> CtTenderParticipants { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtContractDraft> CtContractDrafts { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.CtCbsItem> CtCbsItems { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsStatement> PsStatements { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsStatementLine> PsStatementLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsPreviousPayment> PsPreviousPayments { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsDeduction> PsDeductions { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsLegalRate> PsLegalRates { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.ContractsSystem.PsCashPlanItem> PsCashPlan { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Finance.FnPettyCashRequest> FnPettyCashRequests { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Finance.FnPettyCashSummary> FnPettyCashSummaries { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Finance.FnPettyCashSummaryLine> FnPettyCashSummaryLines { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Finance.FnPettyCashVehicleForm> FnPettyCashVehicleForms { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.Finance.FnPettyCashMiscForm> FnPettyCashMiscForms { get; set; }
+        #endregion
+
         #region BaseClass
 
         public virtual DbSet<AppLogItem> AppLogItems { get; set; }

@@ -31,11 +31,12 @@ namespace Services.NasbNiro.Attachments
                 bool technicalOfRequest = (row.OwnerType == AttachmentOwnerType.PurchaseRequest || row.OwnerType == AttachmentOwnerType.PurchaseRequestLine) && !AttachmentRules.CarriesPrices(row.Kind);
                 if (!technicalOfRequest)
                 {
-                    if (facts.ReadRoles == null || user.IsInRole(facts.ReadRoles)) return true;
+                    if (facts.CanRead(user)) return true;
                     continue;
                 }
                 // the technical files of a request: the procurement readers read them; the shop floor and security only through a record downstream of that request that exists and that they read
                 if (user.IsInRole(AttachmentRoles.Procurement)) return true;
+                if (facts.CanRead(user)) return true;   // PB6: the unit manager who made the request reads its files
                 if (user.IsInRole(AttachmentRoles.Operational) && await HasOperationalRecordAsync(uow, facts.PurchaseRequestIds, ct)) return true;
             }
             return false;

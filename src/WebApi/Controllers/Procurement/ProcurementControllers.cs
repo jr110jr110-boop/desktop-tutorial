@@ -37,12 +37,12 @@ namespace WebApi.Controllers
 
         // purchase requests
         [HttpGet("requests")]
-        [Authorize(Roles = Readers)]
+        [Authorize(Roles = ProcurementRoles.RequestReaders)]
         public async Task<IActionResult> RequestsAsync([FromQuery] PurchaseRequestQuery query, CancellationToken ct) =>
             Ok((await _service.GetRequestsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("requests/{id:int}")]
-        [Authorize(Roles = Readers)]
+        [Authorize(Roles = ProcurementRoles.RequestReaders)]
         public async Task<IActionResult> RequestAsync(int id, CancellationToken ct) => Ok(await _service.GetRequestAsync(id, ct));
 
         [HttpPost("requests")]

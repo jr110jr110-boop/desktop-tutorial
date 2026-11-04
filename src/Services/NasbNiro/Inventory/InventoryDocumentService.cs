@@ -1345,6 +1345,8 @@ namespace Services.NasbNiro.Inventory
             if (!document.PurchaseOrderId.HasValue) return;
             await _procurement.RefreshOrderAsync(document.PurchaseOrderId.Value, cancellationToken);
             await SaveAsync(cancellationToken);
+            if (document.Type == InventoryDocumentType.PurchaseReceipt && document.Status == InventoryDocumentStatus.Confirmed)
+                await _procurement.NotifyOrderEventAsync(document.PurchaseOrderId.Value, "received:" + document.Id, "کالای سفارش شما با رسید " + document.Number + " به انبار رسید", cancellationToken);
         }
 
         /// <summary>

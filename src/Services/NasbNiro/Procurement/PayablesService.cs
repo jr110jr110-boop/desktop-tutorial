@@ -110,6 +110,7 @@ namespace Services.NasbNiro.Procurement
             if (query.Status.HasValue) q = q.Where(i => (int)i.Status == query.Status.Value);
             if (query.ProviderId.HasValue) q = q.Where(i => i.ProviderId == query.ProviderId.Value);
             if (query.PurchaseOrderId.HasValue) q = q.Where(i => i.PurchaseOrderId == query.PurchaseOrderId.Value);
+            q = await ProcArchiveFilter.ApplyAsync(_uow, q, ProcArchiveOwner.SupplierInvoice, query.Archive, cancellationToken);
             string text = Clean(query.Contains);
             if (text != null) q = q.Where(i => i.Number.Contains(text) || i.InvoiceNumber.Contains(text) || i.Provider.Name.Contains(text));
             int total = await q.CountAsync(cancellationToken);
@@ -213,7 +214,19 @@ namespace Services.NasbNiro.Procurement
             invoice.ModifyDate = DateTimeOffset.Now;
             invoice.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncInvoiceGateAsync(invoice, cancellationToken);
+            if (invoice.Status == SupplierInvoiceStatus.Approved)
+                await ProcOrderNotices.SendAsync(_uow, _notify, Me, invoice.PurchaseOrderId, "invoiced", "فاکتور تامین‌کننده سفارش شما تایید شد", cancellationToken);
             return await GetInvoiceAsync(invoice.Id, cancellationToken);
+        }
+
+        /// <summary>PB6: the approver of an invoice sees it in the inbox: finance for a matched invoice, the PMO deputy when the price differs.</summary>
+        private Task SyncInvoiceGateAsync(SupplierInvoice invoice, CancellationToken cancellationToken)
+        {
+            bool waiting = invoice.Status == SupplierInvoiceStatus.Matched || invoice.Status == SupplierInvoiceStatus.NeedsApproval;
+            return global::Services.NasbNiro.Office.OfficeGates.SyncAsync(_notify, "inv:" + invoice.Id, waiting, "procurement", "supplier-invoice", invoice.Id,
+                "تایید فاکتور تامین‌کننده " + invoice.Number, "/procurement/invoices?id=" + invoice.Id,
+                invoice.Status == SupplierInvoiceStatus.NeedsApproval ? ProcurementRoles.OrderApproval : ProcurementRoles.Finance, cancellationToken);
         }
 
         public async Task<ResponseDto<SupplierInvoiceDto>> InvoiceActionAsync(ProcurementActionDto dto, CancellationToken cancellationToken)
@@ -282,6 +295,9 @@ namespace Services.NasbNiro.Procurement
                     return Bad<SupplierInvoiceDto>("عمل نامعتبر است.");
             }
             await _uow.SaveChangesAsync(cancellationToken);
+            await SyncInvoiceGateAsync(invoice, cancellationToken);
+            if (invoice.Status == SupplierInvoiceStatus.Approved)
+                await ProcOrderNotices.SendAsync(_uow, _notify, Me, invoice.PurchaseOrderId, "invoiced", "فاکتور تامین‌کننده سفارش شما تایید شد", cancellationToken);
             return await GetInvoiceAsync(invoice.Id, cancellationToken);
         }
 
@@ -318,6 +334,7 @@ namespace Services.NasbNiro.Procurement
             if (query.Status.HasValue) q = q.Where(p => (int)p.Status == query.Status.Value);
             if (query.ProviderId.HasValue) q = q.Where(p => p.ProviderId == query.ProviderId.Value);
             if (query.PurchaseOrderId.HasValue) q = q.Where(p => p.PurchaseOrderId == query.PurchaseOrderId.Value);
+            q = await ProcArchiveFilter.ApplyAsync(_uow, q, ProcArchiveOwner.PaymentRequest, query.Archive, cancellationToken);
             int total = await q.CountAsync(cancellationToken);
             int size = query.PageSize <= 0 ? Math.Max(total, 1) : query.PageSize, number = query.PageNumber <= 0 ? 1 : query.PageNumber;
             List<PaymentRequestDto> list = await LoadPaymentsAsync(q.OrderByDescending(p => p.Id).Skip((number - 1) * size).Take(size), cancellationToken);

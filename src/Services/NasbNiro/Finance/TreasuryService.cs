@@ -73,8 +73,11 @@ namespace Services.NasbNiro.Finance
         private readonly ICostingService _costing;
         private readonly ICashLegService _legs;
 
-        public TreasuryService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, ICashLegService legs)
+        private readonly global::Services.NasbNiro.Office.INotificationService _notifyPaid;
+
+        public TreasuryService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, ICashLegService legs, global::Services.NasbNiro.Office.INotificationService notify = null)
         {
+            _notifyPaid = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _costing = costing ?? throw new ArgumentNullException(nameof(costing));
@@ -562,6 +565,14 @@ namespace Services.NasbNiro.Finance
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<PaymentDto>(Conflict); }
             catch (DbUpdateException) { return Bad<PaymentDto>("ثبت سند پرداخت ناموفق بود؛ احتمالاً همزمان توسط کاربر دیگری تغییر کرده است."); }
+            if (p.Status == FnDocStatus.Posted)
+            {
+                // PB6: the requesters behind a paid supplier payment request are told
+                List<int> paidOrders = await _uow.Set<PaymentRequest>().Where(r => r.PaymentReference == p.Number && r.Status == PaymentRequestStatus.Paid && r.PurchaseOrderId != null)
+                    .Select(r => r.PurchaseOrderId.Value).Distinct().ToListAsync(ct);
+                foreach (int orderId in paidOrders)
+                    await global::Services.NasbNiro.Procurement.ProcOrderNotices.SendAsync(_uow, _notifyPaid, Me, orderId, "paid", "پرداخت سفارش شما انجام شد", ct);
+            }
             return await GetPaymentAsync(p.Id, ct);
         }
 

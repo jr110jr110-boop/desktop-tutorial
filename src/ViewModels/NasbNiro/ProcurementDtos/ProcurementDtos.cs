@@ -20,6 +20,16 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public int? MaterialRequestId { get; set; }
         public string Description { get; set; }
         public bool Submit { get; set; }
+
+        // PB6
+        public PurchaseRequestPriority? Priority { get; set; }
+        public PurchaseFormType? FormType { get; set; }
+        public DateTime? VehicleDate { get; set; }
+        public string VehicleUnit { get; set; }
+        public string VehicleType { get; set; }
+        public string VehicleOrigin { get; set; }
+        public string VehicleDestination { get; set; }
+        public int? RelatedOrderId { get; set; }
         public List<SavePurchaseRequestLineDto> Lines { get; set; } = new List<SavePurchaseRequestLineDto>();
     }
 
@@ -59,6 +69,12 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         /// </summary>
         public string Reference { get; set; }
 
+        /// <summary>PB6: the budget the planning unit approves (inquiry action "approve-planning"); empty = the highest technically accepted quote.</summary>
+        public decimal? Amount { get; set; }
+
+        /// <summary>PB6: the delivery time in days the planning unit approves (inquiry action "approve-planning").</summary>
+        public int? Days { get; set; }
+
         /// <summary>R1c (M13): payment action "confirm-deductions": the late-penalty and retention lines as finance confirms them (empty = confirm the proposed lines as they are).</summary>
         public List<PaymentDeductionDto> DeductionLines { get; set; }
     }
@@ -68,6 +84,19 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public PurchaseRequestStatus? Status { get; set; }
         public int? WorkOrderId { get; set; }
         public string Contains { get; set; }
+
+        // PB6 filters
+        public PurchaseFormType? FormType { get; set; }
+        public PurchaseKind? Kind { get; set; }
+        public PurchaseRequestSource? Source { get; set; }
+        public int? ContractId { get; set; }
+        public int? ProviderId { get; set; }
+        public DateTime? DateFrom { get; set; }
+        public DateTime? DateTo { get; set; }
+        public PurchaseRequestPriority? Priority { get; set; }
+
+        /// <summary>"only" = the archive; "all" = both; empty = the live documents.</summary>
+        public string Archive { get; set; }
     }
 
     public class PurchaseRequestDto
@@ -105,6 +134,35 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string ManagementApprovedByName { get; set; }
         public DateTimeOffset? RejectedAt { get; set; }
         public string RejectReason { get; set; }
+
+        // PB6
+        public PurchaseRequestPriority Priority { get; set; }
+        public PurchaseFormType FormType { get; set; }
+        public int Revision { get; set; }
+        public int? PreviousRequestId { get; set; }
+        public string PreviousRequestNumber { get; set; }
+        public int? SupersededByRequestId { get; set; }
+        public string SupersededByRequestNumber { get; set; }
+        public DateTimeOffset? ReturnedAt { get; set; }
+        public string ReturnReason { get; set; }
+        public DateTime? VehicleDate { get; set; }
+        public string VehicleUnit { get; set; }
+        public string VehicleType { get; set; }
+        public string VehicleOrigin { get; set; }
+        public string VehicleDestination { get; set; }
+        public int? RelatedOrderId { get; set; }
+        public bool IsArchived { get; set; }
+
+        /// <summary>Progress along the chain, in the units of the lines: asked, ordered, received (physically), accepted (QC released or service accepted), invoiced; and the money invoiced and paid.</summary>
+        public decimal RequestedQuantity { get; set; }
+        public decimal OrderedQuantity { get; set; }
+        public decimal ReceivedQuantity { get; set; }
+        public decimal AcceptedQuantity { get; set; }
+        public decimal InvoicedQuantity { get; set; }
+        public decimal InvoicedAmount { get; set; }
+        public decimal PaidAmount { get; set; }
+        public List<string> SupplierNames { get; set; } = new List<string>();
+        public List<string> OrderNumbers { get; set; } = new List<string>();
         public List<PurchaseRequestLineDto> Lines { get; set; } = new List<PurchaseRequestLineDto>();
     }
 
@@ -213,6 +271,22 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public string CommitteeMinutes { get; set; }
         public int? PurchaseOrderId { get; set; }
         public string PurchaseOrderNumber { get; set; }
+
+        // PB6 (D5): planning approves the budget and the delivery time before the winner is selected
+        public bool PlanningRequired { get; set; }
+        public DateTimeOffset? PlanningApprovedAt { get; set; }
+        public string PlanningApprovedByName { get; set; }
+        public decimal? PlanningBudgetAmount { get; set; }
+        public int? PlanningDeliveryDays { get; set; }
+        public string PlanningNote { get; set; }
+        public int Revision { get; set; }
+        public int? PreviousInquiryId { get; set; }
+        public string PreviousInquiryNumber { get; set; }
+        public int? SupersededByInquiryId { get; set; }
+        public string SupersededByInquiryNumber { get; set; }
+        public DateTimeOffset? ReturnedAt { get; set; }
+        public string ReturnReason { get; set; }
+        public bool IsArchived { get; set; }
         public List<QuoteDto> Quotes { get; set; } = new List<QuoteDto>();
     }
 
@@ -305,6 +379,9 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         /// <summary>Released orders that still have something to receive (warehouse entry permits).</summary>
         public bool? OpenForReceipt { get; set; }
         public string Contains { get; set; }
+
+        /// <summary>PB6: "only" = the archive; "all" = both; empty = the live documents.</summary>
+        public string Archive { get; set; }
     }
 
     public class PurchaseOrderDto
@@ -561,6 +638,9 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public int? ProviderId { get; set; }
         public int? PurchaseOrderId { get; set; }
         public string Contains { get; set; }
+
+        /// <summary>PB6: "only" = the archive; "all" = both; empty = the live documents.</summary>
+        public string Archive { get; set; }
     }
 
     // ---------------------------------------------------------------- suppliers

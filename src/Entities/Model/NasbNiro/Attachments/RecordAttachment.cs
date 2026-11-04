@@ -41,6 +41,19 @@ namespace Entities.Model.NasbNiro.Attachments
         PcProgressSubmission = 25,
         /// <summary>P-B7a: a photo of the project photo library (the picture is the attachment).</summary>
         PcProjectPhoto = 26,
+        /// <summary>PB6: a progress statement (the cheque image, the supporting documents).</summary>
+        ProgressStatement = 27,
+        /// <summary>PB6: a guarantee of a supplier (the scan of the cheque or the bank guarantee).</summary>
+        SupplierGuarantee = 28,
+        /// <summary>PB6: a row of the petty-cash summary (invoice, bank slip, waybill, forms...).</summary>
+        PettyCashSummaryLine = 29,
+        PettyCashRequest = 30,
+        /// <summary>PB6: an addendum of a supplier contract.</summary>
+        ContractAddendum = 31,
+        CtDealRequest = 32,
+        CtTenderParticipant = 33,
+        CtContractDraft = 34,
+        PettyCashSummary = 35,
     }
 
     public enum AttachmentKind

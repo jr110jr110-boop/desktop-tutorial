@@ -15,6 +15,7 @@ using Pc = Entities.Model.NasbNiro.ProjectControl;
 using Proc = Entities.Model.NasbNiro.Procurement;
 using Pb = Entities.Model.NasbNiro.ProductBank;
 using Tm = Entities.Model.NasbNiro.Tasks;
+using Ct = Entities.Model.NasbNiro.ContractsSystem;
 
 namespace DataLayer.Context
 {
@@ -201,9 +202,22 @@ namespace DataLayer.Context
             { typeof(Pc.PcClientResponseCode), null },
             { typeof(Pc.PcCostCheck), new[] { "CostEntryId", "CheckedByUserId", "CheckedAt", "Note" } },
             { typeof(Proc.ProcurementSetting), null },
-            { typeof(Proc.PurchaseRequest), new[] { "Number", "Source", "Kind", "Status", "RequestDate", "WorkOrderId", "ContractId", "CostCenter", "EstimatedAmount", "SubmittedAt", "PlanningApprovedAt", "PlanningApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "BoardResolution", "RejectedAt", "RejectedByUserId", "RejectReason", "Deleted" } },
-            { typeof(Proc.PurchaseInquiry), new[] { "Number", "Status", "PurchaseRequestId", "RequiredQuotes", "FewerQuotesReason", "SelectedQuoteId", "SelectionReason", "SelectedAt", "SelectedByUserId", "FinancialApprovedAt", "FinancialApprovedByUserId", "CommercialApprovedAt", "CommercialApprovedByUserId", "TechnicalApprovedAt", "TechnicalApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "Deleted" } },
+            { typeof(Proc.PurchaseRequest), new[] { "Number", "Source", "Kind", "Status", "RequestDate", "WorkOrderId", "ContractId", "CostCenter", "EstimatedAmount", "SubmittedAt", "PlanningApprovedAt", "PlanningApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "BoardResolution", "RejectedAt", "RejectedByUserId", "RejectReason", "Priority", "FormType", "Revision", "PreviousRequestId", "SupersededByRequestId", "ReturnedAt", "ReturnedByUserId", "ReturnReason", "Deleted" } },
+            { typeof(Proc.PurchaseInquiry), new[] { "Number", "Status", "PurchaseRequestId", "RequiredQuotes", "FewerQuotesReason", "SelectedQuoteId", "SelectionReason", "SelectedAt", "SelectedByUserId", "FinancialApprovedAt", "FinancialApprovedByUserId", "CommercialApprovedAt", "CommercialApprovedByUserId", "TechnicalApprovedAt", "TechnicalApprovedByUserId", "ManagementApprovedAt", "ManagementApprovedByUserId", "PlanningApprovedAt", "PlanningApprovedByUserId", "PlanningBudgetAmount", "PlanningDeliveryDays", "Revision", "PreviousInquiryId", "SupersededByInquiryId", "ReturnedAt", "ReturnedByUserId", "ReturnReason", "Deleted" } },
             { typeof(Proc.PurchaseOrder), new[] { "Number", "Status", "Kind", "OrderDate", "ProviderId", "InquiryId", "WorkOrderId", "ContractId", "Currency", "ExchangeRate", "Incoterms", "PaymentTerms", "VatPercent", "AdvancePercent", "AdvanceGuarantee", "AdvanceGuaranteeExpiry", "PerformanceGuarantee", "RetentionPercent", "ContractNumber", "DeliveryDate", "LatePenaltyPercentPerWeek", "TotalAmount", "ApprovedAt", "ApprovedByUserId", "ReleasedAt", "ReleasedByUserId", "ClosedAt", "CancelledAt", "CancelReason", "Deleted" } },
+            // PB6: addenda, the guarantee register, payment terms, the archive, the contracts system, progress statements and the petty-cash flow
+            { typeof(Proc.PurchaseOrderAddendum), new[] { "Number", "PurchaseOrderId", "Sequence", "Kind", "Status", "Reason", "AmountBefore", "AmountAfter", "DeliveryDateBefore", "DeliveryDateAfter", "MaxVolumeChangePercent", "NeedsCeo", "OrderApprovedAt", "OrderApprovedByUserId", "CeoApprovedAt", "CeoApprovedByUserId", "AppliedAt", "RejectedAt", "RejectedByUserId", "RejectReason", "Deleted" } },
+            { typeof(Proc.SupplierGuarantee), new[] { "Number", "ProviderId", "PurchaseOrderId", "Kind", "Purpose", "Amount", "GuaranteeNumber", "Issuer", "ExpiryDate", "Status", "ReleaseRequestedAt", "ReleaseRequestedByUserId", "ReleaseReason", "ReleasedAt", "ReleasedByUserId", "Deleted" } },
+            { typeof(Proc.PurchaseOrderPaymentTerm), new[] { "PurchaseOrderId", "Kind", "Percent", "Amount", "DueDays", "Status", "PaymentRequestId", "ConditionConfirmedAt", "ConditionConfirmedByUserId" } },
+            { typeof(Proc.ProcArchiveRecord), new[] { "OwnerType", "OwnerId", "IsArchived", "ArchiveReason", "RestoreReason", "RestoredAt", "Times" } },
+            { typeof(Proc.ProcBuyOrderBridge), new[] { "BuyOrderId", "PurchaseRequestId", "PurchaseOrderId", "Note", "Deleted" } },
+            { typeof(Ct.CtDealRequest), new[] { "Number", "FormKind", "Status", "Title", "FundingSource", "OrganisationalUnit", "DealLevel", "EstimatedAmount", "ContractId", "Round", "ReturnReason", "Deleted" } },
+            { typeof(Ct.CtTenderRun), new[] { "Number", "DealRequestId", "Status", "Method", "GuaranteeType", "GuaranteeAmount", "WinnerParticipantId", "WinnerReason", "WinnerSelectedByUserId", "WinnerConfirmedByUserId", "CancelReason", "Deleted" } },
+            { typeof(Ct.CtContractDraft), new[] { "Number", "Status", "DealRequestId", "TenderRunId", "ProviderId", "ContractAmount", "ContractNumber", "SignedByUserId", "ExchangeRound", "PurchaseOrderId", "ContractId", "Deleted" } },
+            { typeof(Ct.PsStatement), new[] { "Number", "Side", "Status", "PurchaseOrderId", "ContractId", "Serial", "PeriodFrom", "PeriodTo", "SendingDate", "CounterpartyStatus", "PayableThisPeriod", "PreparedByUserId", "TechnicalApprovedAmount", "TechnicalApprovedByUserId", "SupervisionApprovedAmount", "SupervisionApprovedByUserId", "PaymentAuthorisedByUserId", "PaymentRequestId", "PaidDate", "ChequeNumber", "ExpectedAmount", "ReceivedAmount", "PaymentVariance", "ReturnReason", "Deleted" } },
+            { typeof(Ct.PsLegalRate), null },
+            { typeof(FnPettyCashRequest), new[] { "Number", "PettyCashId", "Status", "Amount", "Reason", "ControlledByUserId", "ApprovedByUserId", "ToppedUpByUserId", "PaymentReference", "RejectedByUserId", "RejectReason", "Deleted" } },
+            { typeof(FnPettyCashSummary), new[] { "Number", "PettyCashId", "PeriodFrom", "PeriodTo", "Status", "AttachmentsCount", "PreviousBalance", "Charge", "TotalAmount", "Balance", "ControlledByUserId", "ApprovedByUserId", "FinalByUserId", "ReturnReason", "SettlementId", "Deleted" } },
             { typeof(Proc.SupplierInvoice), new[] { "Number", "Status", "ProviderId", "PurchaseOrderId", "InvoiceNumber", "InvoiceDate", "IsOfficial", "NetAmount", "VatAmount", "TotalAmount", "NonRecoverableVatAmount", "PriceVariance", "MatchNote", "ApprovedAt", "ApprovedByUserId", "CancelledAt", "CancelReason", "Deleted" } },
             { typeof(Proc.PaymentRequest), new[] { "Number", "Type", "Status", "RequestDate", "ProviderId", "PurchaseOrderId", "InvoiceId", "Amount", "Deductions", "DeductionNote", "QcApproved", "ApprovedAt", "ApprovedByUserId", "PaidAt", "PaidByUserId", "PaymentReference", "RejectedAt", "RejectReason", "Deleted" } },
             // R1c (M12): the technical judgement of a quote (who accepted it and when); the quotes of an open inquiry are rewritten when the buyer edits it
@@ -295,6 +309,18 @@ namespace DataLayer.Context
             { typeof(Proc.PurchaseRequest), "درخواست خرید" },
             { typeof(Proc.PurchaseInquiry), "استعلام خرید" },
             { typeof(Proc.PurchaseOrder), "سفارش خرید" },
+            { typeof(Proc.PurchaseOrderAddendum), "الحاقیه قرارداد خرید" },
+            { typeof(Proc.SupplierGuarantee), "ضمانت‌نامه تامین‌کننده" },
+            { typeof(Proc.PurchaseOrderPaymentTerm), "مرحله پرداخت قرارداد خرید" },
+            { typeof(Proc.ProcArchiveRecord), "بایگانی سند تدارکات" },
+            { typeof(Proc.ProcBuyOrderBridge), "پل دستور خرید قدیم به زنجیره جدید" },
+            { typeof(Ct.CtDealRequest), "درخواست معامله" },
+            { typeof(Ct.CtTenderRun), "برگزاری معامله" },
+            { typeof(Ct.CtContractDraft), "پیش‌نویس قرارداد" },
+            { typeof(Ct.PsStatement), "صورت‌وضعیت" },
+            { typeof(Ct.PsLegalRate), "نرخ کسور قانونی" },
+            { typeof(FnPettyCashRequest), "درخواست تنخواه" },
+            { typeof(FnPettyCashSummary), "صورت‌خلاصه تنخواه" },
             { typeof(Proc.SupplierInvoice), "فاکتور تأمین‌کننده" },
             { typeof(Proc.PaymentRequest), "درخواست پرداخت" },
             { typeof(FnBankReconciliation), "مغایرت‌گیری بانکی" },
