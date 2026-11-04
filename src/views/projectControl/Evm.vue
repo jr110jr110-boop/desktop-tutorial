@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref, watch } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
@@ -16,6 +18,7 @@ const asOf = ref<string | null>(today());
 const evm = ref<any>(null);
 const cash = ref<any[]>([]);
 const costs = ref<any[]>([]);
+const costFiles = ref<any>(null);
 const form = ref<any>(null);
 const busy = ref(false);
 const canCost = hasRole(ProjectControlRoles.costs);
@@ -119,6 +122,7 @@ watch(pcContractId, load);
             <tr v-if="!costs.length"><td colspan="6" class="text-center inv-muted">هزینه‌ای ثبت نشده است.</td></tr>
             <tr v-for="c in costs" :key="c.id"><td>{{ jalali(c.entryDate) }}</td><td>{{ costKinds[c.kind] }}</td><td>{{ rial(c.amount) }}</td><td>{{ c.sourceType }} {{ c.sourceNumber }}</td><td>{{ c.description }}</td>
               <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary me-1 d-print-none" @click="costFiles = c">پیوست</button>
                 <span v-if="c.needsCheck && c.checked" class="inv-badge ok">بررسی‌شده</span>
                 <template v-else-if="c.needsCheck"><span class="inv-badge warn" title="تا بررسی نفر دوم مالی، هزینه واقعی حساب نمی‌شود">منتظر بررسی</span>
                   <button v-if="canCost" class="btn btn-sm btn-outline-success ms-1 d-print-none" @click="checkCost(c)">تأیید</button></template>
@@ -136,6 +140,12 @@ watch(pcContractId, load);
         <label class="form-label small mb-0">مبلغ (ریال)</label><input v-model.number="form.amount" class="form-control form-control-sm mb-2" type="number" min="0" />
         <label class="form-label small mb-0">شرح</label><input v-model="form.description" class="form-control form-control-sm mb-3" />
         <div class="d-flex gap-2 justify-content-end"><button class="btn btn-sm btn-secondary" @click="form = null">انصراف</button><button :disabled="busy || !form.amount" class="btn btn-sm btn-primary" @click="save">ثبت</button></div>
+      </div>
+    </div>
+    <div v-if="costFiles" class="inv-modal-backdrop screen-only" @click.self="costFiles = null">
+      <div class="inv-modal wide">
+        <AttachmentPanel :owner-type="AttachmentOwner.ProjectCostEntry" :owner-id="costFiles.id" :title="'پیوست هزینه: ' + (costFiles.description || costFiles.sourceNumber || costFiles.id)" />
+        <div class="text-end mt-2"><button class="btn btn-sm btn-outline-secondary" @click="costFiles = null">بستن</button></div>
       </div>
     </div>
   </div>

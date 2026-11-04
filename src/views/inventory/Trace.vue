@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Part traceability: scan or search a serial / lot, see where it came from, what was done to it and where it went.
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -193,6 +195,8 @@ onMounted(() => {
       :subtitle="`${serial.unit.itemCode} - ${serial.unit.itemTitle}`"
       title="شناسنامه ردیابی قطعه" />
     <KsReportHeader v-if="lot" :code="lot.lot.lotNumber" :subtitle="`${lot.lot.itemCode} - ${lot.lot.itemTitle}`" title="شناسنامه ردیابی بچ مواد" />
+    <AttachmentPanel v-if="serial" :owner-type="AttachmentOwner.SerialUnit" :owner-id="serial.unit.id" title="پیوست‌های قطعه سریالی" collapsed />
+    <AttachmentPanel v-if="lot" :owner-type="AttachmentOwner.InventoryLot" :owner-id="lot.lot.id" title="گواهی و پیوست‌های بچ" collapsed />
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <h1 class="inv-title">ردیابی قطعات</h1>

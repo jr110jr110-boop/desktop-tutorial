@@ -16,7 +16,7 @@ async function onFiles(event: any) {
   busy.value = true;
   const next = [...props.modelValue];
   for (const file of files) {
-    const [id, error] = await uploadFile(file, file.name);
+    const [id, error] = await uploadFile(file, file.name, "OFC");
     if (error || !id) {
       fail(error || "بارگذاری فایل انجام نشد.");
       continue;

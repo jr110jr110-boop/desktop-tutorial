@@ -354,6 +354,8 @@ export const ProcurementRoles = {
   finance: list("FINANCIAL,FINANCEMANAGER,TREASURY,PMO"),
   serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO"),
   // the controller adds ASSEMBLER and ENGINEER to the readers of the services
+  /** The request dossier: the same set the API opens it to (procurement readers and the shop floor / security). */
+  dossier: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SECURITY"),
   readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER"),
   // the financial committee approval is by the PMO deputy only (see ProcurementService.InquiryActionAsync)
   committeeFinancial: ["PMO"],

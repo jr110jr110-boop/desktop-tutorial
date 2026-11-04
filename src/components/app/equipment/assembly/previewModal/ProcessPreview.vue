@@ -62,10 +62,16 @@ const openDeleteModal = (id, index) => {
 const removeEquipmentProcessAttachedFileForm = async () => {
   const { id, index } = deleteModal.value;
   if (id) {
+    const reason = (window.prompt("فایل حذف نمی‌شود و باطل می‌شود؛ دلیل ابطال را بنویسید:") || "").trim();
+    if (reason.length < 3) {
+      if (reason.length > 0) window.alert("دلیل ابطال باید حداقل ۳ حرف باشد؛ فایل باطل نشد.");
+      return;
+    }
     loadings.value.deleteBtn = index;
     const [data, error] = await detachFileEquipmentProcess(
       previewModal.process.id,
-      id
+      id,
+      reason
     );
 
     if (!data?.success) showErrorNotification(data?.message || error.message);

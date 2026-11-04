@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import type { Ref } from "vue";
 import { onMounted, ref } from "vue";
 import type { AxiosRequestConfig } from "axios";
@@ -187,10 +189,16 @@ const addGuaranty = () => {
 
 const removeAttachedFileForm = async () => {
   if (deleteFileModal.value.activeId) {
+    const reason = (window.prompt("فایل حذف نمی‌شود و باطل می‌شود؛ دلیل ابطال را بنویسید:") || "").trim();
+    if (reason.length < 3) {
+      if (reason.length > 0) window.alert("دلیل ابطال باید حداقل ۳ حرف باشد؛ فایل باطل نشد.");
+      return;
+    }
     loadings.value.deleteBtnLoading = deleteFileModal.value.activeIndex;
     const [data, error] = await detachFileTender(
       tender.value.id,
-      deleteFileModal.value.activeId
+      deleteFileModal.value.activeId,
+      reason
     );
 
     if (!data?.success) showErrorNotification(data?.message || error.message);
@@ -787,6 +795,7 @@ onMounted(() => {
         </transition-group>
       </template>
     </KsUpdateForm>
+    <AttachmentPanel v-if="tender?.id" :owner-type="AttachmentOwner.Tender" :owner-id="Number(tender.id)" title="مدارک و پیوست‌های مناقصه (نسخه‌ها و ابطال)" />
 
     <!--    DELETE MODAL   -->
     <DeleteModal

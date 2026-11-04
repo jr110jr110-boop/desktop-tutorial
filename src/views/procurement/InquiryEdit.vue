@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AiNotesBox from "@/components/ai/AiNotesBox.vue";
@@ -370,6 +372,10 @@ onMounted(async () => {
       <p class="inv-muted small mt-2 mb-0">کارشناس خرید نمی‌تواند بررسی فنی را ثبت کند؛ فقط مهندسی یا کیفیت.</p>
       <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="review = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="sendReview">ثبت</button></div>
     </div>
+    <AttachmentPanel v-if="inq?.id" :owner-type="AttachmentOwner.Inquiry" :owner-id="inq.id" title="مدارک فنی درخواست و پیوست‌های استعلام" />
+    <template v-if="inq?.id">
+      <AttachmentPanel v-for="q in quotes.filter((x: any) => x.id)" :key="'q' + q.id" :owner-type="AttachmentOwner.Quote" :owner-id="q.id" :title="'پیوست‌های پیشنهاد ' + (q.quoteNumber || q.id)" collapsed />
+    </template>
   </div>
 </template>
 

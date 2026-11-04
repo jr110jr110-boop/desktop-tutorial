@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AiNotesBox from "@/components/ai/AiNotesBox.vue";
@@ -912,6 +914,7 @@ onMounted(async () => {
 
     <!-- notes of the AI seat QC-NCR-ASSIST for this report (it only suggests; the quality gate stays with the people) -->
     <AiNotesBox v-if="!isNew" :target-id="ncr.id" target-type="QualityNcr" />
+    <AttachmentPanel v-if="ncr?.id" :owner-type="AttachmentOwner.Ncr" :owner-id="ncr.id" title="مدارک فنی درخواست و پیوست‌های گزارش عدم انطباق" />
   </div>
 </template>
 

@@ -119,14 +119,17 @@ export async function editFileTender(
 
 export async function detachFileTender(
     tenderId: number | string,
-    fileId
+    fileId,
+  reason: string = ""
 ): Promise<[any, null] | [null, AxiosError] | undefined> {
     try {
         const {data} = await axiosInstance.delete(
             "Tenders/detach-file-from-tender?tenderId=" +
             tenderId +
             "&fileId=" +
-            fileId,
+            fileId +
+        "&reason=" +
+        encodeURIComponent(reason),
             {
                 headers: {
                     Authorization: authToken,

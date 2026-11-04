@@ -391,14 +391,17 @@ export async function buyOrderPMOAcceptGivenToWareHouse(
 
 export async function detachFileBuyOrder(
   buyOrderId: number | string,
-  fileId
+  fileId,
+  reason: string = ""
 ): Promise<[any, null] | [null, AxiosError] | undefined> {
   try {
     const { data } = await axiosInstance.delete(
       "BuyOrders/detach-file-from-buyOrder?buyOrderId=" +
         buyOrderId +
         "&fileId=" +
-        fileId,
+        fileId +
+        "&reason=" +
+        encodeURIComponent(reason),
       {
         headers: {
           Authorization: authToken,

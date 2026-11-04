@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
@@ -279,6 +281,7 @@ onMounted(() => {
     <div v-if="detail" class="inv-modal-backdrop screen-only" @click.self="detail = null">
       <div class="inv-modal wide">
         <h2 class="inv-title mb-2">سند پرداخت <span class="inv-ltr">{{ detail.number }}</span> <span :class="badgeOfDoc(detail.status)" class="inv-badge">{{ docStatuses[detail.status] }}</span></h2>
+        <AttachmentPanel :owner-type="AttachmentOwner.TreasuryPayment" :owner-id="detail.id" title="فیش واریزی و پیوست‌های سند پرداخت" />
         <div class="row g-2 mb-2">
           <div class="col-md-3"><b>تاریخ:</b> {{ jalali(detail.date) }}</div>
           <div class="col-md-3"><b>بابت:</b> {{ paymentPurposes[detail.purpose] }}</div>

@@ -376,14 +376,17 @@ export async function attachFileEquipmentProcess(
 
 export async function detachFileEquipmentProcess(
   equipmentProcessId: number | string,
-  fileId
+  fileId,
+  reason: string = ""
 ): Promise<[any, null] | [null, AxiosError] | undefined> {
   try {
     const { data } = await axiosInstance.delete(
       "EquipmentProcess/detach-file-from-equipmentProcess?equipmentProcessId=" +
         equipmentProcessId +
         "&fileId=" +
-        fileId,
+        fileId +
+        "&reason=" +
+        encodeURIComponent(reason),
       {
         headers: {
           Authorization: authToken,

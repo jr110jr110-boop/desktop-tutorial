@@ -461,10 +461,16 @@ async function uploadconstructorconstructedFile() {
 const removeBuyOrderAttachedFileForm = async () => {
   const { activeId, activeIndex } = deleteModal.value;
   if (activeId) {
+    const reason = (window.prompt("فایل حذف نمی‌شود و باطل می‌شود؛ دلیل ابطال را بنویسید:") || "").trim();
+    if (reason.length < 3) {
+      if (reason.length > 0) window.alert("دلیل ابطال باید حداقل ۳ حرف باشد؛ فایل باطل نشد.");
+      return;
+    }
     loadings.value.deleteBtnLoading = activeIndex;
     const [data, error] = await detachFileBuyOrder(
       currBuyOrder.value.id,
-      activeId
+      activeId,
+      reason
     );
 
     if (!data?.success) showErrorNotification(data?.message || error.message);

@@ -431,6 +431,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/procurement/requests/:id", name: "ProcurementRequestEdit", component: () => import("@/views/procurement/RequestEdit.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/inquiries", name: "ProcurementInquiries", component: () => import("@/views/procurement/Inquiries.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/inquiries/:id", name: "ProcurementInquiryEdit", component: () => import("@/views/procurement/InquiryEdit.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/dossier", name: "ProcurementDossier", component: () => import("@/views/procurement/Dossier.vue"), meta: { roles: ProcurementRoles.dossier } },
   { path: "/procurement/orders", name: "ProcurementOrders", component: () => import("@/views/procurement/Orders.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/orders/:id", name: "ProcurementOrderEdit", component: () => import("@/views/procurement/OrderEdit.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/invoices", name: "ProcurementInvoices", component: () => import("@/views/procurement/Invoices.vue"), meta: { roles: ProcurementRoles.readers } },
