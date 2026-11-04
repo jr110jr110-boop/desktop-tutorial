@@ -53,7 +53,7 @@ namespace Services.NasbNiro.Files
 
             // project control
             ["PcContractTerms"] = ProjectControl.ProjectControlRoles.Readers, ["PcGuaranteeEvent"] = ProjectControl.ProjectControlRoles.Readers,
-            ["PcEngineeringDeliverable"] = ProjectControl.ProjectControlRoles.Readers, ["PcShipment"] = ProjectControl.ProjectControlRoles.Readers, ["PcVariationOrder"] = ProjectControl.ProjectControlRoles.Readers,
+            ["PcEngineeringDeliverable"] = ProjectControl.ProjectControlRoles.Readers, ["PcTenderDocument"] = ProjectControl.ProjectControlRoles.Readers, ["PcShipment"] = ProjectControl.ProjectControlRoles.Readers, ["PcVariationOrder"] = ProjectControl.ProjectControlRoles.Readers,
 
             // procurement, sales, after-sales
             ["ServiceAcceptance"] = Procurement.ProcurementRoles.Readers, ["SupplierInvoice"] = Procurement.ProcurementRoles.Readers, ["SupplierQuote"] = Procurement.ProcurementRoles.Readers,
@@ -69,7 +69,7 @@ namespace Services.NasbNiro.Files
         /// <summary>The record kinds that <see cref="FileAccessService"/> asks one by one because their rule needs the id of the owner.</summary>
         public static readonly string[] Special =
         {
-            nameof(OfLetterAttachment), nameof(OfLetter), nameof(OfUserSignature), nameof(OfLeaveRequest), nameof(OfDecision), nameof(FnOutboxPackage), nameof(Entities.Model.NasbNiro.Attachments.RecordAttachment),
+            nameof(OfLetterAttachment), nameof(OfLetter), nameof(OfUserSignature), nameof(OfLeaveRequest), nameof(OfDecision), nameof(FnOutboxPackage), nameof(Entities.Model.NasbNiro.Attachments.RecordAttachment), nameof(Entities.Model.NasbNiro.ProjectControl.PcDocumentRevisionFile),
         };
 
         /// <summary>The roles that read an outbox package: the payroll packages hold salary data and go to the payroll readers only (the same split as the outbox service).</summary>

@@ -256,7 +256,23 @@ namespace Services.NasbNiro.ProjectControl
             ControlledDocumentId = d.ControlledDocumentId, LastTransmittalNumber = d.LastTransmittalNumber, LastTransmittalDate = d.LastTransmittalDate, ClientResponseCode = d.ClientResponseCode,
             ClientResponseDate = d.ClientResponseDate, ApprovedAt = d.ApprovedAt, RowVersion = d.RowVersion == null ? null : Convert.ToBase64String(d.RowVersion),
             ProgressPercent = d.IssueState == PcIssueState.Approved ? p.Approved : d.IssueState == PcIssueState.SecondIssue ? p.Second : d.IssueState == PcIssueState.FirstIssue ? p.First : 0m,
+            ProgressWeight = d.ProgressWeight, CheckedOutByUserId = d.CheckedOutByUserId, CheckedOutAt = d.CheckedOutAt, ReceivedFromClient = d.ReceivedFromClient,
         };
+
+        /// <summary>P-B7b: the latest revision (any status) and the released revision of each listed document, with two queries for the whole page.</summary>
+        private async Task FillRevisionInfoAsync(List<PcDeliverableDto> dtos, CancellationToken ct)
+        {
+            List<int> ids = dtos.Where(d => d.Id.HasValue).Select(d => d.Id.Value).ToList();
+            if (ids.Count == 0) return;
+            var revs = await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && ids.Contains(r.DeliverableId)).Select(r => new { r.DeliverableId, r.Sequence, r.Code, r.Status }).ToListAsync(ct);
+            foreach (PcDeliverableDto d in dtos)
+            {
+                var mine = revs.Where(r => r.DeliverableId == d.Id).ToList();
+                var latest = mine.OrderByDescending(r => r.Sequence).FirstOrDefault();
+                var released = EdmsRules.LatestReleased(mine, r => r.Status, r => r.Sequence);
+                d.LatestStatus = latest?.Status; d.LatestCode = latest?.Code; d.ReleasedCode = released?.Code;
+            }
+        }
 
         public async Task<ResponseDto<PagedList<PcDeliverableDto>>> GetDeliverablesAsync(PcDeliverableQuery query, CancellationToken cancellationToken)
         {
@@ -271,6 +287,7 @@ namespace Services.NasbNiro.ProjectControl
             PagedList<PcEngineeringDeliverable> page = await PagedList<PcEngineeringDeliverable>.CreateAsync(q.OrderBy(d => d.WorkOrderId).ThenBy(d => d.DocumentNumber).ThenBy(d => d.Id), query.PageNumber, query.PageSize, cancellationToken);
             var p = await EngPercentsAsync(cancellationToken);
             List<PcDeliverableDto> dtos = page.Select(d => ToDto(d, p)).ToList();
+            await FillRevisionInfoAsync(dtos, cancellationToken);
             return ResponseDtoHelper.Ok((PagedList<PcDeliverableDto>)new PcPage<PcDeliverableDto>(dtos, page.TotalCount, page.CurrentPage, page.PageSize));
         }
 
@@ -289,6 +306,13 @@ namespace Services.NasbNiro.ProjectControl
                 d = await _uow.Set<PcEngineeringDeliverable>().FirstOrDefaultAsync(x => x.Id == dto.Id.Value && !x.Deleted, cancellationToken);
                 if (d == null) return PcText.NotFound<PcDeliverableDto>("سند پیدا نشد.");
                 if (d.IssueState != PcIssueState.NotIssued && d.ClientSubmittal != dto.ClientSubmittal) return Bad<PcDeliverableDto>("پس از ارسال، وضعیت «فهرست کارفرما» تغییر نمی‌کند.");
+                if (d.CheckedOutByUserId.HasValue && d.CheckedOutByUserId != Me) return Bad<PcDeliverableDto>(CheckedOutText);
+                if (d.ReceivedFromClient && d.ClientSubmittal != dto.ClientSubmittal) return Bad<PcDeliverableDto>("سند دریافت‌شده از کارفرما در فهرست کارفرما می‌ماند.");
+                // M2: after any release the identity of the document is frozen: the approver matrix, the distribution list and the release gate read these fields
+                if (await EdmsResolver.HasBeenReleasedAsync(_uow, d.Id, cancellationToken)
+                    && (!string.Equals(d.DocumentNumber, number, StringComparison.Ordinal) || !string.Equals(d.Title ?? "", Clean(dto.Title) ?? "", StringComparison.Ordinal)
+                        || !string.Equals(d.Discipline ?? "", Clean(dto.Discipline) ?? "", StringComparison.Ordinal) || !string.Equals(d.DocumentType ?? "", Clean(dto.DocumentType) ?? "", StringComparison.Ordinal)))
+                    return Bad<PcDeliverableDto>(EdmsResolver.FrozenText);
             }
             else
             {
@@ -297,11 +321,15 @@ namespace Services.NasbNiro.ProjectControl
             }
             d.WorkOrderId = dto.WorkOrderId; d.DocumentNumber = number; d.Title = Clean(dto.Title); d.ClientSubmittal = dto.ClientSubmittal; d.StandardSource = Clean(dto.StandardSource);
             d.Discipline = Clean(dto.Discipline); d.DocumentType = Clean(dto.DocumentType); d.Required = dto.Required; d.PlannedDate = dto.PlannedDate?.Date;
+            if (dto.ProgressWeight <= 0 || dto.ProgressWeight > 100) return Bad<PcDeliverableDto>("وزن پیشرفت سند باید بین 0 و 100 باشد.");
+            d.ProgressWeight = dto.ProgressWeight;
             d.ModifyDate = now; d.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcDeliverableDto>(PcText.Concurrency); }
             return ResponseDtoHelper.Ok(ToDto(d, await EngPercentsAsync(cancellationToken)));
         }
+
+        private const string CheckedOutText = "سند برای ویرایش توسط شخص دیگری برداشته شده است (check-out).";
 
         public async Task<ResponseDto<PcDeliverableDto>> DeliverableActionAsync(PcDeliverableActionDto dto, CancellationToken cancellationToken)
         {
@@ -309,7 +337,12 @@ namespace Services.NasbNiro.ProjectControl
             PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, cancellationToken);
             if (d == null) return PcText.NotFound<PcDeliverableDto>("سند پیدا نشد.");
             DateTimeOffset now = DateTimeOffset.Now;
-            switch (dto.Action.Trim().ToLowerInvariant())
+            string act = dto.Action.Trim().ToLowerInvariant();
+            if (d.CheckedOutByUserId.HasValue && d.CheckedOutByUserId != Me) return Bad<PcDeliverableDto>(CheckedOutText);
+            bool hasRevisions = await _uow.Set<PcDocumentRevision>().AnyAsync(r => r.DeliverableId == d.Id && !r.Deleted, cancellationToken);
+            if (hasRevisions && (act == "internal-approve" || act == "link-document" || act == "first-issue" || act == "second-issue")) return Bad<PcDeliverableDto>("سند چرخه‌ی بازنگری دارد؛ صدور، تایید و فایل آن از صفحه‌ی بازنگری‌ها و ترنسمیتال انجام می‌شود.");
+            if (d.ReceivedFromClient && act != "link-document") return Bad<PcDeliverableDto>("سند دریافت‌شده از کارفرما با ثبت دریافت به‌روز می‌شود.");
+            switch (act)
             {
                 case "first-issue":
                     if (!_user.IsInRole(ProjectControlRoles.Dcc)) return Bad<PcDeliverableDto>(PcText.NotAllowed);
@@ -360,7 +393,7 @@ namespace Services.NasbNiro.ProjectControl
                 Lines = lines.OrderBy(l => l.Id).Select(l => new PcTransmittalLineDto
                 {
                     Id = l.Id, DeliverableId = l.DeliverableId, DocumentNumber = docs.FirstOrDefault(d => d.Id == l.DeliverableId)?.DocumentNumber, Title = docs.FirstOrDefault(d => d.Id == l.DeliverableId)?.Title,
-                    Revision = l.Revision, Purpose = l.Purpose, ResponseCode = l.ResponseCode, ResponseDate = l.ResponseDate, ResponseNote = l.ResponseNote,
+                    Revision = l.Revision, RevisionId = l.RevisionId, Purpose = l.Purpose, ResponseCode = l.ResponseCode, ResponseDate = l.ResponseDate, ResponseNote = l.ResponseNote,
                 }).ToList(),
             };
         }
@@ -397,10 +430,17 @@ namespace Services.NasbNiro.ProjectControl
             if (!_user.IsInRole(ProjectControlRoles.DccOnly)) return Bad<PcTransmittalDto>(PcText.NotAllowed);
             if (!Enum.IsDefined(typeof(PcTransmittalDirection), dto.Direction)) return Bad<PcTransmittalDto>("جهت ترنسمیتال را مشخص کنید.");
             if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == dto.ContractId && !c.Deleted, cancellationToken)) return PcText.NotFound<PcTransmittalDto>(PcText.ContractNotFound);
-            List<int> ids = dto.Lines.Select(l => l.DeliverableId).ToList();
+            // E8: on an incoming transmittal a line may carry a document that is not in the register yet (DeliverableId 0 and NewDocument): the MDL row is created on receipt
+            if (dto.Lines.Any(l => l.DeliverableId <= 0 && l.NewDocument == null)) return Bad<PcTransmittalDto>("سند هر ردیف را مشخص کنید.");
+            if (dto.Direction == PcTransmittalDirection.Outgoing && dto.Lines.Any(l => l.NewDocument != null)) return Bad<PcTransmittalDto>("ثبت سند تازه هنگام دریافت فقط برای ترنسمیتال دریافتی است.");
+            List<int> ids = dto.Lines.Where(l => l.DeliverableId > 0).Select(l => l.DeliverableId).ToList();
             if (ids.Distinct().Count() != ids.Count) return Bad<PcTransmittalDto>("سند تکراری در ترنسمیتال است.");
             List<PcEngineeringDeliverable> docs = await _uow.Set<PcEngineeringDeliverable>().Where(d => ids.Contains(d.Id) && d.ContractId == dto.ContractId && !d.Deleted).ToListAsync(cancellationToken);
             if (docs.Count != ids.Count) return Bad<PcTransmittalDto>("سندی متعلق به این قرارداد نیست.");
+            bool requireRevision = (await PcSettingKeys.LoadAsync(_uow, cancellationToken))[PcSettingKeys.EdmsRequireRevision] >= 1m;
+            List<int> revIds = dto.Lines.Where(l => l.RevisionId.HasValue).Select(l => l.RevisionId.Value).ToList();
+            Dictionary<int, PcDocumentRevision> revisions = revIds.Count == 0 ? new Dictionary<int, PcDocumentRevision>() : (await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => revIds.Contains(r.Id) && !r.Deleted).ToListAsync(cancellationToken)).ToDictionary(r => r.Id);
+            HashSet<int> withRevisions = ids.Count == 0 ? new HashSet<int>() : (await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && ids.Contains(r.DeliverableId)).Select(r => r.DeliverableId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
             PcContractTerms terms = await PcContext.TermsAsync(_uow, dto.ContractId, false, cancellationToken);
             DateTime date = (dto.TransmittalDate == default ? DateTime.Today : dto.TransmittalDate).Date;
             DateTimeOffset now = DateTimeOffset.Now;
@@ -410,13 +450,39 @@ namespace Services.NasbNiro.ProjectControl
                 TransmittalDate = date, Reference = Clean(dto.Reference), Note = Clean(dto.Note), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me, Lines = new List<PcTransmittalLine>(),
             };
             if (dto.Direction == PcTransmittalDirection.Outgoing) t.ResponseDue = date.AddDays(terms?.ClientReviewDays ?? 14);
+            var received = new List<(PcTransmittalLine Line, PcDocumentRevision Revision)>();
+            var newNumbers = new HashSet<string>(StringComparer.Ordinal);
+            var replaced = new List<(PcDocumentRevision Old, PcDocumentRevision New)>();
+            if (dto.Lines.Any(l => l.NewDocument != null) && global::Services.NasbNiro.Ai.AiActing.IsActing) return Bad<PcTransmittalDto>("ثبت سند دریافتی از کارفرما با انسان است؛ صندلی هوش مصنوعی آن را ثبت نمی‌کند.");
             foreach (PcTransmittalLineDto l in dto.Lines)
             {
-                PcEngineeringDeliverable d = docs.First(x => x.Id == l.DeliverableId);
                 if (!Enum.IsDefined(typeof(PcTransmittalPurpose), l.Purpose)) return Bad<PcTransmittalDto>("منظور ارسال را مشخص کنید.");
+                if (l.DeliverableId <= 0)
+                {
+                    ResponseDto<(PcEngineeringDeliverable Doc, PcDocumentRevision Rev)> made = await ReceiveNewDocumentAsync(dto.ContractId, l.NewDocument, now, newNumbers, replaced, cancellationToken);
+                    if (!made.Success) return Bad<PcTransmittalDto>(made.Message);
+                    var line = new PcTransmittalLine { Deliverable = made.Data.Doc, Revision = made.Data.Rev.Code, Purpose = l.Purpose };
+                    t.Lines.Add(line);
+                    received.Add((line, made.Data.Rev));
+                    continue;
+                }
+                PcEngineeringDeliverable d = docs.First(x => x.Id == l.DeliverableId);
                 if (dto.Direction == PcTransmittalDirection.Outgoing && !d.ClientSubmittal) return Bad<PcTransmittalDto>("فقط اسناد فهرست کارفرما (MDL) برای کارفرما ارسال می‌شوند: " + d.DocumentNumber);
                 string revision = Clean(l.Revision) ?? d.Revision ?? "A";
-                t.Lines.Add(new PcTransmittalLine { DeliverableId = d.Id, Revision = revision, Purpose = l.Purpose });
+                int? revisionId = null;
+                if (dto.Direction == PcTransmittalDirection.Outgoing)
+                {
+                    // E7: a document with a register of revisions is sent by revision (a released one; for review also one under review or approved), never by free text
+                    if (l.RevisionId.HasValue)
+                    {
+                        if (!revisions.TryGetValue(l.RevisionId.Value, out PcDocumentRevision rev) || rev.DeliverableId != d.Id) return Bad<PcTransmittalDto>("بازنگری انتخاب‌شده متعلق به سند نیست: " + d.DocumentNumber);
+                        if (!EdmsRules.CanSend(rev.Status, l.Purpose)) return Bad<PcTransmittalDto>("بازنگری " + rev.Code + " سند " + d.DocumentNumber + " در وضعیت «" + EdmsRules.StatusText(rev.Status) + "» است و برای این منظور ارسال نمی‌شود.");
+                        revision = rev.Code; revisionId = rev.Id;
+                    }
+                    else if (requireRevision) return Bad<PcTransmittalDto>("بازنگری سند " + d.DocumentNumber + " را از فهرست بازنگری‌ها انتخاب کنید (متن آزاد پذیرفته نمی‌شود).");
+                    else if (withRevisions.Contains(d.Id)) return Bad<PcTransmittalDto>("سند " + d.DocumentNumber + " بازنگری ثبت‌شده دارد؛ بازنگری را انتخاب کنید.");
+                }
+                t.Lines.Add(new PcTransmittalLine { DeliverableId = d.Id, Revision = revision, RevisionId = revisionId, Purpose = l.Purpose });
                 if (dto.Direction == PcTransmittalDirection.Outgoing)
                 {
                     d.Revision = revision; d.LastTransmittalNumber = t.Number; d.LastTransmittalDate = date; d.IssuedByUserId = Me;
@@ -431,8 +497,70 @@ namespace Services.NasbNiro.ProjectControl
             }
             _uow.Set<PcTransmittal>().Add(t);
             await _uow.SaveChangesAsync(cancellationToken);
+            if (received.Count > 0)
+            {
+                foreach (var r in received)
+                {
+                    r.Line.RevisionId = r.Revision.Id;
+                    _uow.Set<PcDocumentEvent>().Add(new PcDocumentEvent { DeliverableId = r.Revision.DeliverableId, RevisionId = r.Revision.Id, Kind = PcDocEventKind.Received, UserId = Me, At = now, Note = r.Revision.Code });
+                }
+                // the copy that this receipt replaces (a received revision that was never accepted) points to the new one
+                foreach (var pair in replaced)
+                {
+                    pair.Old.SupersededByRevisionId = pair.New.Id;
+                    _uow.Set<PcDocumentEvent>().Add(new PcDocumentEvent { DeliverableId = pair.Old.DeliverableId, RevisionId = pair.Old.Id, Kind = PcDocEventKind.Superseded, UserId = Me, At = now, Note = "جایگزین‌شده با " + pair.New.Code });
+                }
+                await _uow.SaveChangesAsync(cancellationToken);
+            }
             await SyncTransmittalGateAsync(t, cancellationToken);
             return ResponseDtoHelper.Ok(await TransmittalDtoAsync(t, cancellationToken));
+        }
+
+        /// <summary>
+        /// E8: a document received from the client. A new number creates the MDL row (ReceivedFromClient) with its first revision; a number that is already a received document gets a new revision
+        /// (the previous one is superseded). The revision is recorded as it came and waits as UnderReview/received: a second, human person accepts it (release action); until then it is not in force for the shop floor or the release gate.
+        /// </summary>
+        private async Task<ResponseDto<(PcEngineeringDeliverable Doc, PcDocumentRevision Rev)>> ReceiveNewDocumentAsync(int contractId, PcReceivedDocumentDto n, DateTimeOffset now, HashSet<string> inThisTransmittal, List<(PcDocumentRevision Old, PcDocumentRevision New)> replaced, CancellationToken ct)
+        {
+            ResponseDto<(PcEngineeringDeliverable, PcDocumentRevision)> Fail(string m) => new ResponseDto<(PcEngineeringDeliverable, PcDocumentRevision)>(false, m);
+            string number = Clean(n.DocumentNumber), title = Clean(n.Title), code = Clean(n.Revision);
+            if (number == null || title == null || code == null) return Fail("شماره، عنوان و کد بازنگری سند دریافتی الزامی است.");
+            if (number.Length > 120 || code.Length > 20) return Fail("شماره یا کد بازنگری سند دریافتی بیش از حد طولانی است.");
+            if (!inThisTransmittal.Add(number)) return Fail("سند تکراری در ترنسمیتال است: " + number);
+            if (n.DocumentId.HasValue && !await _uow.Set<global::Entities.Model.Document>().AnyAsync(x => x.Id == n.DocumentId.Value, ct)) return Fail("فایل سند دریافتی پیدا نشد؛ ابتدا آن را بارگذاری کنید.");
+            PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().FirstOrDefaultAsync(x => x.ContractId == contractId && x.DocumentNumber == number && !x.Deleted, ct);
+            int sequence = 1;
+            var replacedOld = new List<PcDocumentRevision>();
+            bool isNewDoc = d == null;
+            if (d != null)
+            {
+                if (!d.ReceivedFromClient) return Fail("شماره‌ی " + number + " در فهرست شرکت ثبت است؛ همان سند را از فهرست انتخاب کنید.");
+                List<PcDocumentRevision> old = await _uow.Set<PcDocumentRevision>().Where(r => r.DeliverableId == d.Id && !r.Deleted).ToListAsync(ct);
+                if (old.Any(r => string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase))) return Fail("بازنگری " + code + " سند " + number + " قبلاً دریافت شده است.");
+                sequence = (old.Count == 0 ? 0 : old.Max(r => r.Sequence)) + 1;
+                // H2: the revision in force stays in force until the new one is accepted (released); a received copy nobody accepted yet is replaced by this one
+                foreach (PcDocumentRevision r in old.Where(r => r.Status == PcDocStatus.UnderReview && r.ReceivedFromClient)) { r.Status = PcDocStatus.Superseded; r.SupersededAt = now; r.ModifyDate = now; r.ModifierUserId = Me; replacedOld.Add(r); }
+            }
+            else
+            {
+                d = new PcEngineeringDeliverable
+                {
+                    ContractId = contractId, DocumentNumber = number, Title = title, ClientSubmittal = true, Discipline = Clean(n.Discipline), DocumentType = Clean(n.DocumentType), Required = false, IssueState = PcIssueState.NotIssued,
+                    ReceivedFromClient = true, CreateDate = now, CreatorUserId = Me,
+                };
+                _uow.Set<PcEngineeringDeliverable>().Add(d);
+            }
+            if (isNewDoc) d.Revision = code;
+            d.ModifyDate = now; d.ModifierUserId = Me;
+            var rev = new PcDocumentRevision
+            {
+                Deliverable = d, Sequence = sequence, Code = code, Status = PcDocStatus.UnderReview, Reason = "دریافت از کارفرما", PreparedByUserId = Me, SubmittedAt = now,
+                ReceivedFromClient = true, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me, Files = new List<PcDocumentRevisionFile>(),
+            };
+            if (n.DocumentId.HasValue) rev.Files.Add(new PcDocumentRevisionFile { DocumentId = n.DocumentId.Value, Role = PcRevisionFileRole.Native, FileName = Clean(n.FileName) ?? "document", CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+            _uow.Set<PcDocumentRevision>().Add(rev);
+            foreach (PcDocumentRevision o in replacedOld) replaced.Add((o, rev));
+            return new ResponseDto<(PcEngineeringDeliverable, PcDocumentRevision)>(true, null, (d, rev));
         }
 
         public async Task<ResponseDto<PcTransmittalDto>> RecordResponseAsync(PcTransmittalResponseDto dto, CancellationToken cancellationToken)

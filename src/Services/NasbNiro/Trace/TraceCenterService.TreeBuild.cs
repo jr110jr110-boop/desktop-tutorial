@@ -165,6 +165,7 @@ namespace Services.NasbNiro.Trace
 
             // ----- everything around the parts (a fixed number of queries)
             await LoadPartScopeAsync(c, partNumbers, workOrderId, asDesigned ? (int?)null : chosen.Id, product.Id, depth, ct);
+            await LoadPartDocumentsAsync(c, partNumbers, ct);
             if (c.CapNotes.Count > 0) { dto.Truncated = true; dto.Notes.AddRange(c.CapNotes); }
 
             // ----- the nodes
@@ -240,6 +241,7 @@ namespace Services.NasbNiro.Trace
             string itemTitle = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && i.PartNumber == pn && i.StageCode2 == null).Select(i => i.Title).FirstOrDefaultAsync(ct);
             line ??= new StructLine { PartNumber = pn, Name = itemTitle ?? pn, Qty = 1, Mob = PbMakeOrBuy.Make };
             await LoadPartScopeAsync(c, new List<string> { pn }, null, null, null, MaxTreeDepth, ct);
+            await LoadPartDocumentsAsync(c, new List<string> { pn }, ct);
             if (c.CapNotes.Count > 0) { dto.Truncated = true; dto.Notes.AddRange(c.CapNotes); }
 
             TraceNodeDto root = PartNode(c, line, "part");

@@ -21,6 +21,15 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string DocumentType { get; set; }
         public bool Required { get; set; } = true;
         public DateTime? PlannedDate { get; set; }
+
+        /// <summary>P-B7b: weight of the document in the engineering progress (1 = same as the others).</summary>
+        public decimal ProgressWeight { get; set; } = 1m;
+        public int? CheckedOutByUserId { get; set; }
+        public DateTimeOffset? CheckedOutAt { get; set; }
+        public bool ReceivedFromClient { get; set; }
+        public PcDocStatus? LatestStatus { get; set; }
+        public string LatestCode { get; set; }
+        public string ReleasedCode { get; set; }
         public PcIssueState IssueState { get; set; }
         public string Revision { get; set; }
         public Guid? DocumentId { get; set; }
@@ -111,6 +120,12 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string DocumentNumber { get; set; }
         public string Title { get; set; }
         public string Revision { get; set; }
+
+        /// <summary>P-B7b: the revision that is sent. A document with revisions is sent by revision id (a released one; for information also one under review or approved).</summary>
+        public int? RevisionId { get; set; }
+
+        /// <summary>P-B7b (E8): on an incoming transmittal a document that is not in the register yet is created on receipt. DeliverableId is then 0.</summary>
+        public PcReceivedDocumentDto NewDocument { get; set; }
         public PcTransmittalPurpose Purpose { get; set; } = PcTransmittalPurpose.ForApproval;
         public string ResponseCode { get; set; }
         public DateTime? ResponseDate { get; set; }

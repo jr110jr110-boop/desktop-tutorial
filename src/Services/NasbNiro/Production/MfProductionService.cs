@@ -16,6 +16,7 @@ using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
+using Services.NasbNiro.ProjectControl;
 using Services.NasbNiro.Quality;
 using ViewModels.NasbNiro.Pagination;
 using QcRecordDto = ViewModels.NasbNiro.QualityDtos.QcRecordDto;
@@ -289,18 +290,24 @@ namespace Services.NasbNiro.Production
             List<string> rules = (await _uow.Set<MfOperationStandard>().AsNoTracking().Where(s => !s.Deleted && templateIds.Contains(s.OperationTemplateId) && s.DrawingReferenceRule != null)
                 .Select(s => s.DrawingReferenceRule).ToListAsync(ct))
                 .SelectMany(r => r.Split(new[] { ',', ';', '،', '؛' }, StringSplitOptions.RemoveEmptyEntries)).Select(r => r.Trim()).Where(r => r.Length > 0).Distinct().ToList();
+            // P-B7b: the documents of the order come from the real links (part, stage, WBS node, activity, tag) and the register lines of its work order; a document counts when a released revision exists
+            // (a legacy register line without any revision counts when it is approved, a controlled document when it has an effective revision)
+            List<EdmsFoundDocument> found = await EdmsResolver.ForOrderAsync(_uow, order, null, false, true, ct);
+            bool InForce(EdmsFoundDocument f) => f.Released != null || (f.NoRevisions && f.Deliverable != null && f.Deliverable.IssueState == PcIssueState.Approved) || f.ControlledRevision != null;
             var missing = new List<string>();
             foreach (string rule in rules)
             {
                 string word = rule;
-                bool found = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().AnyAsync(d => !d.Deleted && d.WorkOrderId == order.WorkOrderId && d.IssueState == PcIssueState.Approved
-                    && ((d.DocumentType != null && d.DocumentType.Contains(word)) || (d.Title != null && d.Title.Contains(word))), ct);
-                if (!found) missing.Add(word);
+                bool ok = found.Any(f => InForce(f) && ((f.DocumentType != null && f.DocumentType.Contains(word)) || (f.Title != null && f.Title.Contains(word))));
+                if (!ok) missing.Add(word);
             }
+            List<string> unreleased = found.Where(f => !InForce(f) && f.ViaText != "دستور کار" && f.LatestStatus != PcDocStatus.Obsolete).Select(f => f.Number).Distinct().ToList();
             result.Checks.Add(new ReleaseCheckDto
             {
-                Code = "drawings", Title = "نقشه‌های تأییدشده", Passed = missing.Count == 0,
-                Message = rules.Count == 0 ? "مسیر ساخت نقشه‌ای لازم ندارد." : missing.Count == 0 ? "نقشه‌های لازم در MDR تأیید شده‌اند." : "نقشه تأییدشده در MDR دستور کار پیدا نشد برای: " + Join(missing),
+                Code = "drawings", Title = "نقشه‌های منتشرشده", Passed = missing.Count == 0 && unreleased.Count == 0,
+                Message = missing.Count > 0 ? "نقشه منتشرشده (Released) برای قطعه پیدا نشد: " + Join(missing)
+                    : unreleased.Count > 0 ? "سند وصل‌شده به قطعه هنوز نسخه‌ی منتشرشده ندارد: " + Join(unreleased)
+                    : rules.Count == 0 && found.Count == 0 ? "مسیر ساخت نقشه‌ای لازم ندارد." : "نقشه‌های لازم منتشر شده‌اند.",
             });
 
             // 4. the work order has an ITP and it is approved (R1p D19: no ITP at all is a refusal, not a pass; the ITP is drafted from the quality template when the order is drafted)

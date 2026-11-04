@@ -53,6 +53,10 @@ namespace Services.NasbNiro.ProjectControl
         public const int Amendment = 431;
         public const int BookCode = 432;
 
+        // P-B7b: the tender register has its own series (never mixed with the project documents)
+        public const int TenderPackage = 691;
+        public const int TenderDocument = 692;
+
         public static int CategoryKind(PcCategory c) => c == PcCategory.Manufacturing ? CategoryMa : c == PcCategory.SpareParts ? CategorySp : CategorySe;
         public static string CategoryLetters(PcCategory c) => c == PcCategory.Manufacturing ? "MA" : c == PcCategory.SpareParts ? "SP" : "SE";
     }
@@ -116,6 +120,16 @@ namespace Services.NasbNiro.ProjectControl
         /// <summary>The lowest priority sent through the gateway: 0 normal, 1 urgent, 2 immediate.</summary>
         public const string NotifyMinPriority = "NotifyMinPriority";
 
+        // P-B7b (engineering document control)
+        /// <summary>1 = revision codes 00, 01, 02 ...; 2 = A, B, C ... (AA after Z).</summary>
+        public const string EdmsRevisionScheme = "EdmsRevisionScheme";
+        /// <summary>1 = a revision is reviewed by a second person before it is approved; 0 = the approval is the only check.</summary>
+        public const string EdmsReviewRequired = "EdmsReviewRequired";
+        /// <summary>1 = a transmittal line of a document must cite one of its revisions (E7); 0 = a document without revisions may still be sent with a free revision text (migration period).</summary>
+        public const string EdmsRequireRevision = "EdmsRequireRevision";
+        /// <summary>Days after which an unacknowledged release notice is overdue.</summary>
+        public const string EdmsNoticeAckDays = "EdmsNoticeAckDays";
+
         public static IEnumerable<PcSetting> Defaults()
         {
             yield return new PcSetting { Key = AmberThreshold, Value = 0.95m, Title = "آستانه هشدار زرد برای SPI و CPI", Source = "★ تصمیم موقت" };
@@ -157,6 +171,10 @@ namespace Services.NasbNiro.ProjectControl
             yield return new PcSetting { Key = GradeC, Value = 55, Title = "حد نمره درجه C ارزیابی پیمانکار و مشاور (از ۱۰۰)", Source = "★ تصمیم موقت" };
             yield return new PcSetting { Key = NotifySmsEnabled, Value = 0, Title = "ارسال پیامک اطلاع‌رسانی از طریق درگاه آفلاین (۰ خاموش، ۱ روشن)", Source = "★ تصمیم D9: پیش‌فرض خاموش؛ صندوق درون‌برنامه‌ای همیشه روشن است" };
             yield return new PcSetting { Key = NotifyEmailEnabled, Value = 0, Title = "ارسال ایمیل اطلاع‌رسانی از طریق سرور ایمیل داخلی (۰ خاموش، ۱ روشن)", Source = "★ تصمیم D9: پیش‌فرض خاموش؛ صندوق درون‌برنامه‌ای همیشه روشن است" };
+            yield return new PcSetting { Key = EdmsRevisionScheme, Value = 1, Title = "کد بازنگری سند: ۱ عددی (00، 01 ...)، ۲ حرفی (A، B ...)", Source = "★ تصمیم موقت" };
+            yield return new PcSetting { Key = EdmsReviewRequired, Value = 1, Title = "بازنگری سند پیش از تایید توسط نفر دوم لازم است (۱ بله، ۰ خیر)", Source = "★ تصمیم موقت (ISO 19650)" };
+            yield return new PcSetting { Key = EdmsRequireRevision, Value = 0, Title = "ترنسمیتال باید به یک بازنگری ثبت‌شده سند ارجاع دهد (۱ بله؛ ۰ دوره گذار: اسناد بدون بازنگری با متن آزاد؛ سندی که بازنگری دارد همیشه با بازنگری ارسال می‌شود)", Source = "★ تصمیم موقت (E7): پس از ثبت بازنگری اسناد قدیمی به ۱ تغییر دهید" };
+            yield return new PcSetting { Key = EdmsNoticeAckDays, Value = 3, Title = "مهلت تایید دریافت ابلاغ انتشار سند (روز)", Source = "★ تصمیم موقت" };
             yield return new PcSetting { Key = NotifyMinPriority, Value = 1, Title = "کمترین اولویتی که از درگاه ارسال می‌شود (۰ عادی، ۱ فوری، ۲ آنی)", Source = "★ تصمیم D9" };
         }
 
@@ -170,6 +188,8 @@ namespace Services.NasbNiro.ProjectControl
                 case EngFirstIssue: case EngSecondIssue: case EngApproved: case SupplyTemporary: case SupplyAccepted: case SupplyRework: case SupplyReject:
                 case RescheduleDelayPercent: case VoCeoThresholdPercent: return (0m, 100m, false);
                 case PenaltyBasisDefault: return (1m, 2m, true);
+                case EdmsRevisionScheme: return (1m, 2m, true);
+                case EdmsReviewRequired: case EdmsRequireRevision: return (0m, 1m, true);
                 case NotifySmsEnabled: case NotifyEmailEnabled: return (0m, 1m, true);
                 case NotifyMinPriority: return (0m, 2m, true);
                 case RiskHighScore: case RiskCriticalScore: return (1m, 25m, true);

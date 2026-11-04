@@ -269,6 +269,18 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int? ApprovedByUserId { get; set; }
         public int? IssuedByUserId { get; set; }
 
+        // P-B7b (EDMS)
+        /// <summary>Weight of the document in the engineering progress of its work order (1 = every document counts the same, as before).</summary>
+        public decimal ProgressWeight { get; set; } = 1m;
+
+        /// <summary>Check-out: the person who holds the document for editing, and since when. Null when it is checked in.</summary>
+        public int? CheckedOutByUserId { get; set; }
+        public DateTimeOffset? CheckedOutAt { get; set; }
+        public string CheckOutNote { get; set; }
+
+        /// <summary>The line was created on receipt of a client document (no MDR row existed before).</summary>
+        public bool ReceivedFromClient { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -309,6 +321,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public int DeliverableId { get; set; }
         public PcEngineeringDeliverable Deliverable { get; set; }
         public string Revision { get; set; }
+
+        /// <summary>P-B7b: the revision this line sends (E7). The Revision text is then its code.</summary>
+        public int? RevisionId { get; set; }
         public PcTransmittalPurpose Purpose { get; set; }
         public string ResponseCode { get; set; }
         public DateTime? ResponseDate { get; set; }

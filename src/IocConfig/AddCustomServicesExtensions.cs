@@ -281,6 +281,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Attachments.IAttachmentRecordRules, Services.NasbNiro.Tasks.RecordOwnerRules>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcCommercialService, Services.NasbNiro.ProjectControl.PcCommercialService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcMdrService, Services.NasbNiro.ProjectControl.PcMdrService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IEdmsService, Services.NasbNiro.ProjectControl.EdmsService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IEpmDashboardService, Services.NasbNiro.ProjectControl.EpmDashboardService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcBaselineService, Services.NasbNiro.ProjectControl.PcBaselineService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();

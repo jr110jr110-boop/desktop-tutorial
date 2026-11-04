@@ -92,6 +92,21 @@ namespace Services.NasbNiro.Trace
                 if (Full(c)) break;
                 list.Add(NcrNode(c, ncr, null));
             }
+
+            // ----- P-B7b: the documents linked to the part (the revision in force of each)
+            if (c.PartDocs.TryGetValue(pn, out var docs))
+                foreach (var f in docs)
+                {
+                    if (Full(c)) break;
+                    string code = f.Released?.Code ?? f.ControlledRevision?.Revision;
+                    TraceNodeDto n = Node(c, "document", "asDesigned", f.Title, f.Number, code != null ? "بازنگری " + code + " (منتشرشده)" : "بدون نسخه‌ی منتشرشده", code != null ? "ok" : "warn");
+                    Fact(n, "نوع", f.DocumentType);
+                    Fact(n, "دیسیپلین", f.Discipline);
+                    Fact(n, "ارتباط", f.ViaText);
+                    if (f.Released?.ReleasedAt != null) n.Date = f.Released.ReleasedAt.Value.LocalDateTime.Date;
+                    n.Files = f.Files.Select(x => new TraceFileDto { Id = x.Id, DocumentId = x.DocumentId, Title = x.Title ?? x.FileName, FileName = x.FileName, KindTitle = "فایل سند", Revision = code, OwnerTitle = f.Title, OwnerNumber = f.Number }).ToList();
+                    list.Add(n);
+                }
             return list;
         }
 

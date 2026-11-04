@@ -210,7 +210,7 @@ namespace Services.NasbNiro.ProjectControl
             // engineering: the state of the register lines
             List<int> engOrders = calc.Activities.Where(a => a.ProgressMethod == PcProgressMethod.EngineeringIssue && a.WorkOrderId.HasValue).Select(a => a.WorkOrderId.Value).Distinct().ToList();
             var deliverables = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => !d.Deleted && d.Required && d.WorkOrderId != null && engOrders.Contains(d.WorkOrderId.Value))
-                .Select(d => new { WorkOrderId = d.WorkOrderId.Value, d.ClientSubmittal, d.IssueState, d.ApprovedAt, d.ClientResponseDate, d.LastTransmittalDate }).ToListAsync(cancellationToken);
+                .Select(d => new { WorkOrderId = d.WorkOrderId.Value, d.ClientSubmittal, d.IssueState, d.ApprovedAt, d.ClientResponseDate, d.LastTransmittalDate, d.ProgressWeight }).ToListAsync(cancellationToken);
 
             // supply and services
             List<int> poLineIds = calc.Activities.Where(a => (a.ProgressMethod == PcProgressMethod.SupplyReceipt || a.ProgressMethod == PcProgressMethod.ServiceDocs) && a.PurchaseOrderLineId.HasValue).Select(a => a.PurchaseOrderLineId.Value).Distinct().ToList();
@@ -282,7 +282,9 @@ namespace Services.NasbNiro.ProjectControl
                             var lines = deliverables.Where(d => d.WorkOrderId == a.WorkOrderId.Value && (a.SourceId != 1 || d.ClientSubmittal)).ToList();
                             if (lines.Count > 0)
                             {
-                                pct = lines.Average(d => d.IssueState == PcIssueState.Approved ? engApproved : d.IssueState == PcIssueState.SecondIssue ? engSecond : d.IssueState == PcIssueState.FirstIssue ? engFirst : 0m);
+                                // P-B7b: the weight of each document (1 for all = the plain average of before)
+                                decimal weightSum = lines.Sum(d => d.ProgressWeight > 0 ? d.ProgressWeight : 1m);
+                                pct = lines.Sum(d => (d.ProgressWeight > 0 ? d.ProgressWeight : 1m) * (d.IssueState == PcIssueState.Approved ? engApproved : d.IssueState == PcIssueState.SecondIssue ? engSecond : d.IssueState == PcIssueState.FirstIssue ? engFirst : 0m)) / weightSum;
                                 if (lines.Any(d => d.IssueState != PcIssueState.NotIssued)) start = lines.Where(d => d.LastTransmittalDate.HasValue).Select(d => d.LastTransmittalDate).Min();
                                 if (lines.All(d => d.IssueState == PcIssueState.Approved)) finish = lines.Select(d => d.ClientResponseDate ?? d.ApprovedAt?.Date).Max();
                             }

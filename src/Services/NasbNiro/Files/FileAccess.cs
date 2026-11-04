@@ -331,6 +331,19 @@ namespace Services.NasbNiro.Files
                 if (may) return facts;
             }
 
+            // P-B7b: the file of a document revision: the document readers read every revision; the shop floor and the other readers only one in force
+            var revisionStates = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcDocumentRevisionFile>().AsNoTracking().Where(f => f.DocumentId == id)
+                .Select(f => (Entities.Model.NasbNiro.ProjectControl.PcDocStatus?)f.Revision.Status).Distinct().ToListAsync(ct);
+            foreach (var state in revisionStates)
+            {
+                // H3: a draft, a superseded or an obsolete revision only to the document readers; a revision in force (released or as-built) also to the shop floor and the project-control readers
+                bool inForce = state == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.Released || state == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.AsBuilt;
+                bool may = _user.IsInRole(ProjectControl.EdmsRoles.DocReaders)
+                    || (inForce && _user.IsInRole(ProjectControl.EdmsRoles.ShopFloor + "," + ProjectControl.EdmsRoles.Readers));
+                facts.Owners.Add(new FileOwner(nameof(Entities.Model.NasbNiro.ProjectControl.PcDocumentRevisionFile), FileOwnerRule.Record, may));
+                if (may) return facts;
+            }
+
             // every other record that holds the file is found from the model (R1a2's DocumentLinks); the read roles come from the map, a type that is not in it fails closed
             foreach (DocumentLink link in await HoldersAsync(id, ct))
             {

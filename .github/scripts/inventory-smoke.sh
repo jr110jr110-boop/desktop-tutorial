@@ -11326,6 +11326,80 @@ as "$ADMIN_TOKEN" POST "$PB4TR/genealogy/backfill"; check "pb4 genealogy: the ba
 as "$WH_TOKEN" POST "$PB4TR/genealogy/backfill"; r403 "pb4 genealogy: the warehouse keeper cannot start the backfill (403)"
 TOKEN=$ADMIN_TOKEN
 
+# --- PB7B: engineering document control (EDMS) and the management dashboards (EPM). Exact checks; the preparer (DCC), the reviewer (PMO) and the approver (engineering manager) are three different people.
+PB7BNUM="PB7B-DWG-001"
+as "$DCC_TOKEN" POST $PC/mdr "{\"contractId\":$PCT,\"workOrderId\":$PCW1,\"documentNumber\":\"$PB7BNUM\",\"title\":\"General arrangement\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\",\"clientSubmittal\":true}"
+check "pb7b edms: the DCC registers a client document in the register" '.success and .data.id > 0'; PB7BD=$(val .data.id)
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD}"
+check "pb7b edms: the first revision is 00 and a draft" '.success and .data.code == "00" and .data.status == 1'; PB7BR1=$(val .data.id)
+as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"submit\"}"; nomsg "pb7b edms: a revision without a file cannot be submitted" "فایلی ندارد"
+printf '%%PDF-1.4 pb7b general arrangement 00\n' > "$OUT/pb7b-ga.pdf"
+curl -s -o "$B" -X POST "$API/Documents?Description=pb7b-ga&Name=pb7b-ga&Code=INV" -H "Authorization: Bearer $TOKEN" -F "File=@$OUT/pb7b-ga.pdf"
+PB7BF1=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+[ -n "$PB7BF1" ] && ok "pb7b edms: the drawing file is uploaded" || bad "pb7b edms: the drawing file is uploaded"
+as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PB7BR1,\"documentId\":\"$PB7BF1\",\"fileName\":\"ga-00.pdf\",\"title\":\"GA\"}"; check "pb7b edms: the file is added to the draft revision" '.success and (.data.files|length) == 1'
+as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"submit\"}"; check "pb7b edms: the revision goes under review" '.success and .data.status == 2'
+as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"approve\"}"; no "pb7b edms: the preparer cannot approve his own revision"
+as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"reject\"}"; nomsg "pb7b edms: a rejection needs a reason" "علت رد الزامی"
+as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"review\",\"note\":\"checked\"}"; check "pb7b edms: the PMO reviews the revision" '.success and .data.status == 2'
+as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"approve\"}"; nomsg "pb7b edms: the reviewer cannot also approve" "سه نفر جدا"
+as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"approve\"}"; check "pb7b edms: the engineering manager approves" '.success and .data.status == 3'
+as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PB7BR1,\"action\":\"release\"}"; check "pb7b edms: the revision is released" '.success and .data.status == 4 and .data.code == "00"'
+as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PB7BR1,\"documentId\":\"$PB7BF1\",\"fileName\":\"again.pdf\"}"; no "pb7b edms: a released revision is immutable (no file can be added)"
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD}"; nomsg "pb7b edms: a new revision of a released document needs a reason" "علت بازنگری تازه"
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD,\"reason\":\"Nozzle moved\"}"; check "pb7b edms: the second revision is 01 and a draft" '.success and .data.code == "01" and .data.status == 1'; PB7BR2=$(val .data.id)
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PB7BD,\"reason\":\"Second open revision\"}"; nomsg "pb7b edms: only one revision is open at a time" "هنوز باز است"
+as "$DCC_TOKEN" GET "edms/revisions/compare?a=$PB7BR1&b=$PB7BR2"; check "pb7b edms: two revisions are compared (metadata): the code and the status differ" '.success and ([.data.differences[].field]|index("code")) != null and ([.data.differences[].field]|index("status")) != null'
+as "$DCC_TOKEN" POST edms/checkout "{\"deliverableId\":$PB7BD,\"note\":\"editing\"}"; check "pb7b edms: the DCC checks the document out" '.success'
+as "$ADMIN_TOKEN" POST edms/checkout/cancel "{\"deliverableId\":$PB7BD}"; no "pb7b edms: cancelling somebody else's check-out needs a reason"
+as "$ADMIN_TOKEN" POST edms/checkout/cancel "{\"deliverableId\":$PB7BD,\"reason\":\"owner is away\"}"; check "pb7b edms: the PMO cancels the check-out with a reason" '.success'
+as "$DCC_TOKEN" POST edms/checkin "{\"deliverableId\":$PB7BD}"; no "pb7b edms: a document that is not checked out cannot be checked in"
+# links to a tag: only the latest RELEASED revision is found
+as "$DCC_TOKEN" POST edms/tags "{\"contractId\":$PCT,\"code\":\"PB7B-PV-101\",\"title\":\"Relief valve\"}"; check "pb7b edms: an equipment tag is registered" '.success and .data.id > 0'; PB7BT=$(val .data.id)
+as "$DCC_TOKEN" POST edms/tags "{\"contractId\":$PCT,\"code\":\"PB7B-PV-101\",\"title\":\"Duplicate\"}"; no "pb7b edms: a tag code is unique per project"
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PB7BD,\"kind\":6,\"tagId\":$PB7BT}"; check "pb7b edms: the drawing is linked to the tag" '.success and .data.id > 0'; PB7BL=$(val .data.id)
+as "$ADMIN_TOKEN" GET "edms/part-documents?TagId=$PB7BT"; check "pb7b edms: the tag finds one document and its released revision is 00 while 01 is a draft" '.success and (.data|length) == 1 and .data[0].releasedCode == "00" and .data[0].latestStatus == 1'
+as "$DCC_TOKEN" POST edms/links/void "{\"id\":$PB7BL}"; no "pb7b edms: a link is voided with a reason"
+as "$DCC_TOKEN" POST edms/links/void "{\"id\":$PB7BL,\"reason\":\"wrong tag\"}"; check "pb7b edms: the link is voided (not deleted)" '.success'
+as "$ADMIN_TOKEN" GET "edms/part-documents?TagId=$PB7BT"; check "pb7b edms: the tag finds no document after the void" '.success and (.data|length) == 0'
+# transmittals cite a revision (E7) and an incoming document is created on receipt (E8)
+PB7BTR=$(jq -nc --argjson c $PCT --argjson d $PB7BD '{contractId:$c,direction:1,transmittalDate:"2026-10-02T00:00:00",reference:"Letter 2",lines:[{deliverableId:$d,purpose:1}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; nomsg "pb7b edms: a transmittal line without a revision is refused for a document that has revisions (also while the transition setting is 0)" "بازنگری ثبت‌شده دارد"
+PB7BTR=$(jq -nc --argjson c $PCT --argjson d $PB7BD --argjson r $PB7BR1 '{contractId:$c,direction:1,transmittalDate:"2026-10-02T00:00:00",reference:"Letter 2",lines:[{deliverableId:$d,revisionId:$r,purpose:1}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; check "pb7b edms: the transmittal cites the released revision 00" '.success and (.data.lines|length) == 1 and .data.lines[0].revision == "00" and .data.lines[0].revisionId == '"$PB7BR1"
+PB7BIN=$(jq -nc --argjson c $PCT '{contractId:$c,direction:2,transmittalDate:"2026-10-03T00:00:00",reference:"Client letter 1",lines:[{deliverableId:0,revision:"0",purpose:1,newDocument:{documentNumber:"PB7B-CL-001",title:"Client P&ID",discipline:"Process",documentType:"P&ID",revision:"0"}}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BIN"; check "pb7b edms: an incoming transmittal creates the client document on receipt" '.success and (.data.lines|length) == 1 and .data.lines[0].revision == "0"'
+as "$DCC_TOKEN" GET "$PC/mdr?ContractId=$PCT&PageSize=0"; check "pb7b edms: the received document is in the client list (MDL) exactly once" '([.data.data[]|select(.documentNumber == "PB7B-CL-001" and .clientSubmittal == true)]|length) == 1'
+as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; check "pb7b edms: the PMO switches the revision requirement of transmittals on (end of the transition)" '.success'
+PB7BFREE=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-04T00:00:00",reference:"Free text",lines:[{deliverableId:($ids[0]),revision:"Z",purpose:1}]}')
+as "$DCC_TOKEN" POST $PC/transmittals "$PB7BFREE"; nomsg "pb7b edms: with the requirement on, a free revision text is refused" "از فهرست بازنگری"
+as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":0}]}'; check "pb7b edms: the setting is put back to its default (0) for the rest of the script" '.success'
+# the approver matrix is edited by the PMO only; a distribution row notifies on release
+as "$DCC_TOKEN" POST edms/approvers "{\"discipline\":\"Mechanical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":false}"; no "pb7b edms: the DCC cannot edit the approver matrix"
+as "$ADMIN_TOKEN" POST edms/approvers "{\"discipline\":\"Electrical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":true}"; check "pb7b edms: the PMO adds a row to the approver matrix" '.success and .data.id > 0'
+as "$ADMIN_TOKEN" POST edms/distribution "{\"discipline\":\"Mechanical\",\"userId\":$PMID}"; check "pb7b edms: the PMO adds a distribution row" '.success and .data.id > 0'
+# tender register (E1, E2)
+as "$ADMIN_TOKEN" POST edms/tenders '{"title":"PB7B tender package","tenderCode":"PB7B-T1"}'; check "pb7b edms: a tender package gets its own number" '.success and (.data.code|length) > 0 and .data.status == 1'; PB7BTP=$(val .data.id)
+as "$ADMIN_TOKEN" POST edms/tenders/documents "{\"packageId\":$PB7BTP,\"title\":\"Technical offer\",\"discipline\":\"Mechanical\",\"documentType\":\"Offer\",\"revision\":\"00\"}"; check "pb7b edms: a tender document is registered" '.success and (.data.documents|length) == 1 and (.data.documents[0].number|length) > 0'
+as "$ADMIN_TOKEN" POST edms/tenders/action "{\"id\":$PB7BTP,\"action\":\"link-contract\",\"contractId\":$PCT}"; no "pb7b edms: an open tender cannot be linked to a project"
+as "$ADMIN_TOKEN" POST edms/tenders/action "{\"id\":$PB7BTP,\"action\":\"win\"}"; check "pb7b edms: the tender is won" '.success and .data.status == 2'
+as "$ADMIN_TOKEN" POST edms/tenders/action "{\"id\":$PB7BTP,\"action\":\"link-contract\",\"contractId\":$PCT}"; check "pb7b edms: the won tender is linked to the project" ".success and .data.contractId == $PCT"
+as "$ADMIN_TOKEN" GET "edms/tenders/of-contract/$PCT"; check "pb7b edms: the project finds its tender package" '.success and (.data|length) == 1'
+# Excel template of the register
+CODE=$(curl -s -o "$B" -w '%{http_code}' -H "Authorization: Bearer $DCC_TOKEN" "$API/edms/mdr/export?contractId=$PCT&template=true")
+[ "$CODE" = "200" ] && [ "$(head -c 2 "$B")" = "PK" ] && ok "pb7b edms: the Excel template is a real xlsx file" || bad "pb7b edms: the Excel template is a real xlsx file"
+# dashboards: role gate, price masking
+as "$ADMIN_TOKEN" GET dashboards; check "pb7b epm: the PMO is offered all nine dashboards" '.success and (.data|length) == 9'
+as "$ADMIN_TOKEN" GET dashboards/ceo; check "pb7b epm: the CEO dashboard is built for the PMO and carries the KPIs of the dashboards the PMO may see" '.success and .data.key == "ceo" and .data.pricesMasked == false and (.data.kpis|map(.key)|index("projects")) != null'
+as "$WH_TOKEN" GET dashboards/ceo; no "pb7b epm: the warehouse keeper cannot open the CEO dashboard"
+as "$PROD_TOKEN" GET dashboards/portfolio; no "pb7b epm: the production user cannot open the portfolio dashboard"
+as "$ADMIN_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the portfolio EVM has one row per project (no project twice) and its money is the sum of the rows" '.success and .data.pricesMasked == false and .data.projects == (.data.rows|length) and (.data.rows|map(.contractId)|unique|length) == .data.projects and ((.data.ev - ([.data.rows[].ev]|add // 0))|fabs) < 0.01 and ((.data.ac - ([.data.rows[].ac]|add // 0))|fabs) < 0.01'
+as "$PM_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the project manager sees the portfolio EVM without money" '.success and .data.pricesMasked == true and ([.data.rows[]|select(.bac != null or .ac != null)]|length) == 0'
+as "$ADMIN_TOKEN" GET dashboards/commitments; check "pb7b epm: the commitments forecast has 8 weekly buckets and its totals add up (overdue kept apart)" '.success and .data.period == "week" and .data.pricesMasked == false and (.data.buckets|length) == 8 and ((.data.total - ([.data.buckets[].total]|add))|fabs) < 0.01 and ((.data.totalWithOverdue - .data.total - .data.overdue)|fabs) < 0.01'
+as "$ADMIN_TOKEN" GET dashboards/delay-causes; check "pb7b epm: the delay-cause report answers for the PMO" '.success and (.data.byCause|type) == "array"'
+as "$WH_TOKEN" GET dashboards/delay-causes; no "pb7b epm: the warehouse keeper cannot read the delay-cause report"
+TOKEN=$ADMIN_TOKEN
+
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":100000}]}"; check "pb2 fix: the receipt draft of 1 ring part is saved" '.success and .data.id > 0'; PB2RC=$(val .data.id)
