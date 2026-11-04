@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
+import { PbRoles } from "@/composables/productBank";
 import { AccountRoles, AiRoles, currentRole, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
@@ -660,6 +661,16 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/ai/admin/audit", name: "AiAdminAudit", component: () => import("@/views/ai/AdminAudit.vue"), meta: { roles: AiRoles.readers } },
   { path: "/ai/seats", redirect: { name: "AiAdminSeats" } },
   { path: "/fn/ai-anomalies", name: "FnAiAnomalies", component: () => import("@/views/fn/AiAnomalies.vue"), meta: { roles: AiRoles.financeNotes } },
+  // PB1: product bank, BOM with revisions, OPC routings, coding of parts by part number
+  { path: "/product-bank/products", name: "ProductBankProducts", component: () => import("@/views/productBank/Products.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/products/:id", name: "ProductBankProduct", component: () => import("@/views/productBank/Product.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/boms", name: "ProductBankBoms", component: () => import("@/views/productBank/Boms.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/boms/:id", name: "ProductBankBomEdit", component: () => import("@/views/productBank/BomEdit.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/routings", name: "ProductBankRoutings", component: () => import("@/views/productBank/Routings.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/routings/:id", name: "ProductBankRoutingEdit", component: () => import("@/views/productBank/RoutingEdit.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/stages", name: "ProductBankStages", component: () => import("@/views/productBank/Stages.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/mappings", name: "ProductBankMappings", component: () => import("@/views/productBank/Mappings.vue"), meta: { roles: PbRoles.readers } },
+  { path: "/product-bank/deviations", name: "ProductBankDeviations", component: () => import("@/views/productBank/Deviations.vue"), meta: { roles: PbRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },
   {
     path: "/:pathMatch(.*)*",

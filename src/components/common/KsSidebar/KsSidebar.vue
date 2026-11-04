@@ -122,6 +122,23 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.productBank"
+        has-sub
+        route-name="ProductBank"
+        tag="product-bank-collapse"
+        title="بانک محصول و BOM">
+        <CopyIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="
+            String($route.name || '').startsWith('ProductBank')
+              ? Colors.primary
+              : Colors.primaryLight
+          "
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.procurement"
         has-sub
         route-name="Procurement"
@@ -414,6 +431,14 @@ const links = {
     { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
+  ] as Links[],
+  productBank: [
+    { title: "بانک محصول", routeName: "ProductBankProducts" },
+    { title: "فهرست مواد (BOM)", routeName: "ProductBankBoms" },
+    { title: "چارت‌های فرآیند (OPC)", routeName: "ProductBankRoutings" },
+    { title: "مبنای BOM پروژه و انحراف‌ها", routeName: "ProductBankDeviations" },
+    { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
+    { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages" },
   ] as Links[],
   procurement: [
     { title: "درخواست خرید", routeName: "ProcurementRequests", disabled: !hasRole(ProcurementRoles.readers) },
