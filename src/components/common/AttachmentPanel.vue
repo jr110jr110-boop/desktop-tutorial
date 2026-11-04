@@ -169,7 +169,7 @@ defineExpose({ load });
           <tbody>
             <tr v-for="i in g.items" :key="i.id">
               <td>{{ i.kindTitle }}</td>
-              <td>{{ i.title }}</td>
+              <td>{{ i.title }} <span v-if="i.linkObsolete" class="inv-badge bad" title="مدرک مبدأ باطل یا جایگزین شده است؛ از این پیوند برای کار استفاده نکنید">منسوخ</span></td>
               <td class="inv-ltr">{{ i.revision }}</td>
               <td>{{ i.ownerTitle }} <span class="inv-ltr">{{ i.ownerNumber }}</span></td>
               <td><a href="#" @click.prevent="downloadFile(i.documentId, i.fileName)">{{ i.fileName }}</a> <span class="inv-muted small">{{ fileSizeText(i.sizeBytes) }}</span></td>
@@ -185,7 +185,7 @@ defineExpose({ load });
           <tbody>
             <tr v-for="i in current" :key="i.id + '-' + i.documentId">
               <td>{{ i.kindTitle }}</td>
-              <td>{{ i.title }} <span v-if="i.legacy" class="inv-badge">قدیمی</span></td>
+              <td>{{ i.title }} <span v-if="i.legacy" class="inv-badge">قدیمی</span> <span v-if="i.isLink" class="inv-badge">پیوند</span> <span v-if="i.linkObsolete" class="inv-badge bad" title="مدرک مبدأ باطل یا جایگزین شده است؛ از این پیوند برای کار استفاده نکنید">منسوخ</span></td>
               <td class="inv-ltr">{{ i.revision }}</td>
               <td><a href="#" @click.prevent="downloadFile(i.documentId, i.fileName)">{{ i.fileName }}</a> <span class="inv-muted small">{{ fileSizeText(i.sizeBytes) }}</span></td>
               <td class="small">{{ i.uploadedByName }} <span class="inv-muted">{{ jalali(i.uploadedAt, true) }}</span></td>

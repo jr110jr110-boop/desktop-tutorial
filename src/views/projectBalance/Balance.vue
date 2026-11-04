@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
+import KsDatePicker from "@/components/common/KsDatePicker.vue";
 import {
-  createBalanceDrafts, decideReservationRelease, getBalanceDiff, getBalanceProjects, getBalanceRun, getBalanceRuns, getBalanceSettings, getLatestBalance, getReservations, requestReservationRelease,
+  createBalanceDrafts, decideReservationRelease, reEnableReservation, getBalanceDiff, getBalanceProjects, getBalanceRun, getBalanceRuns, getBalanceSettings, getLatestBalance, getReservations, requestReservationRelease,
   runBalance, runKits, saveBalanceSetting, updateReservation,
 } from "@/api/ProjectBalanceAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
@@ -142,6 +143,14 @@ async function decide(r: any, approve: boolean) {
   ok(approve ? "رزرو آزاد شد." : "درخواست آزادسازی رد شد.");
   loadReservations();
 }
+async function enableAgain(r: any) {
+  const reason = window.prompt("دلیل فعال‌سازی دوبارهٔ رزرو خودکار این کالا برای پروژه");
+  if (!reason || !reason.trim()) return;
+  const [, error] = await reEnableReservation(r.id, reason);
+  if (error) return fail(error);
+  ok("رزرو خودکار دوباره فعال شد؛ اجرای بعدی بالانس موجودی آزاد را رزرو می‌کند.");
+  loadReservations();
+}
 async function setSetting(key: string) {
   const [, error] = await saveBalanceSetting(key, settingEdit.value[key]);
   if (error) return fail(error);
@@ -240,6 +249,7 @@ onMounted(async () => {
                     <td>
                       <span class="inv-ltr fw-bold">{{ l.itemCode || l.partNumber }}</span> {{ l.itemTitle || l.partName }}
                       <span class="inv-muted small">({{ requirementKinds[l.kind] }}) {{ l.unit }}</span>
+                      <span v-if="l.unitMismatch" class="inv-badge warn ms-1" title="واحد BOM با واحد کالا فرق دارد و تبدیلی تعریف نشده است">واحد نامتناظر</span>
                       <div v-if="l.note" class="small inv-muted">{{ l.note }}</div>
                     </td>
                     <td class="inv-ltr small">{{ l.wbsNodeCode }}<span v-if="l.activityCode"> · {{ l.activityCode }}</span></td>
@@ -297,14 +307,15 @@ onMounted(async () => {
                     <td>{{ qty(r.issuedQuantity) }}</td>
                     <td>{{ qty(r.remainingQuantity) }}</td>
                     <td><span class="inv-badge" :class="r.isHard ? 'bad' : ''">{{ r.isHard ? "سخت" : "نرم" }}</span></td>
-                    <td><span class="inv-badge" :class="reservationStatusClass[r.status]">{{ reservationStatuses[r.status] }}</span><span v-if="r.releaseRequestedAt" class="inv-badge warn ms-1">درخواست آزادسازی: {{ r.releaseRequestedByName }}</span></td>
+                    <td><span class="inv-badge" :class="reservationStatusClass[r.status]">{{ reservationStatuses[r.status] }}</span><span v-if="r.releaseRequestedAt" class="inv-badge warn ms-1">درخواست آزادسازی: {{ r.releaseRequestedByName }}</span><span v-if="r.autoReserveBlocked" class="inv-badge warn ms-1" title="بالانس خودکار این کالا را دوباره برای پروژه رزرو نمی‌کند تا برنامه‌ریز آن را دوباره فعال کند">رزرو خودکار بسته</span></td>
                     <td class="text-nowrap">{{ jalali(r.needDate) }}</td>
                     <td class="small">{{ r.releaseReason || r.reason }}</td>
                     <td class="d-print-none text-nowrap">
-                      <button v-if="r.canEdit" class="btn btn-sm btn-outline-secondary" @click="edit = { ...r, reason: '' }">ویرایش</button>
+                      <button v-if="r.canEdit" class="btn btn-sm btn-outline-secondary" @click="edit = { ...r, needDate: r.needDate ? String(r.needDate).slice(0, 10) : '', reason: '' }">ویرایش</button>
                       <button v-if="r.canRequestRelease" class="btn btn-sm btn-outline-warning ms-1" @click="askRelease(r)">درخواست آزادسازی</button>
                       <button v-if="r.canApproveRelease" class="btn btn-sm btn-outline-success ms-1" @click="decide(r, true)">تایید آزادسازی</button>
                       <button v-if="r.canApproveRelease" class="btn btn-sm btn-outline-danger ms-1" @click="decide(r, false)">رد</button>
+                      <button v-if="r.canReEnable" class="btn btn-sm btn-outline-primary ms-1" @click="enableAgain(r)">فعال‌سازی دوبارهٔ رزرو خودکار</button>
                     </td>
                   </tr>
                 </tbody>
@@ -336,7 +347,7 @@ onMounted(async () => {
         <div class="row g-2">
           <div class="col-md-4"><label class="form-label small mb-0">مقدار</label><input v-model.number="edit.quantity" type="number" min="0" step="any" class="form-control form-control-sm" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">نوع رزرو</label><select v-model="edit.isHard" class="form-select form-select-sm"><option :value="true">سخت</option><option :value="false">نرم</option></select></div>
-          <div class="col-md-4"><label class="form-label small mb-0">نیاز تا</label><input v-model="edit.needDate" type="date" class="form-control form-control-sm" /></div>
+          <div class="col-md-4"><KsDatePicker v-model="edit.needDate" element-tag="reservation-need-date" placeholder="نیاز تا (تاریخ شمسی)" /></div>
           <div class="col-12"><label class="form-label small mb-0">دلیل تغییر *</label><textarea v-model="edit.reason" rows="2" class="form-control form-control-sm"></textarea></div>
         </div>
         <div class="d-flex gap-2 mt-3">

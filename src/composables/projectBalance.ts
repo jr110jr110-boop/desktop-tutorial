@@ -15,7 +15,7 @@ export const BalanceRoles = {
   substituteProposers: list("PMO,PLANNING,ENGINEERING,ENGINEER"),
   substituteApprovers: list("ENGINEERING,PMO"),
   /** Everyone who opens the balance screens. */
-  readers: list("PMO,PLANNING,ENGINEERING,ENGINEER,PROJECTMANAGER,COMMERCIAL,WAREHOUSE,WHSUPERVISOR,CONSTRUCTION,PRODUCTIONMANAGER,CEO"),
+  readers: list("PMO,PLANNING,ENGINEERING,ENGINEER,PROJECTMANAGER,COMMERCIAL,WAREHOUSE,WHSUPERVISOR,CONSTRUCTION,QC,CEO"),
 };
 
 export const qty = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(Math.round(v * 10000) / 10000));

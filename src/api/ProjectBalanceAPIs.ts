@@ -27,6 +27,8 @@ export const getReservations = (params: any) => call("get", base + "reservations
 export const updateReservation = (dto: any) => call("post", base + "reservations/update", dto);
 export const requestReservationRelease = (id: number, reason: string) => call("post", base + "reservations/release-request", { id, reason });
 /** approve: true releases; false sends the request back (a reason is required). Never the person who asked. */
+/** A planner lets the balance reserve the item for the project again after a release (a reason is required). */
+export const reEnableReservation = (id: number, reason: string) => call("post", base + "reservations/re-enable", { id, reason });
 export const decideReservationRelease = (id: number, approve: boolean, reason?: string) => call("post", base + "reservations/release-decision", { id, approve, reason });
 
 // substitutes
