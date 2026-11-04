@@ -11338,7 +11338,7 @@ PB5RC=$(val .data.id)
 call POST "inventory/documents/$PB5RC/confirm"; check "pb5: the receipt is confirmed and its derived state is Approved (2)" '.success and .data.status == 1 and .data.state == 2'
 # freight 4,000 spread by value: 1,000 and 3,000
 call POST inventory/freight "{\"receiptDocumentId\":$PB5RC,\"freightDate\":\"2026-10-16T00:00:00\",\"vehiclePlate\":\"آزمون\",\"billOfLadingNumber\":\"BL-PB5\",\"amount\":4000}"
-check "pb5 freight: saved as a draft, spread by value over the two lines: 1,000 and 3,000, adding up to 4,000" '.success and .data.status == 0 and .data.amount == 4000 and (.data.allocations|length) == 2 and ([.data.allocations[]|select(.itemId == '$PB5ITA')][0].amount) == 1000 and ([.data.allocations[]|select(.itemId == '$PB5ITB')][0].amount) == 3000 and ([.data.allocations[]|.basis]|unique) == [1]'
+check "pb5 freight: saved as a draft, spread by value over the two lines: 1,000 and 3,000, adding up to 4,000" '.success and .data.status == 0 and .data.amount == 4000 and (.data.allocations|length) == 2 and ([.data.allocations[]|select(.itemId == '$PB5ITA')][0].amount) == 1000 and ([.data.allocations[]|select(.itemId == '$PB5ITB')][0].amount) == 3000 and ([.data.allocations[]|.basis]|unique) == [2]'
 PB5FR=$(val .data.id)
 call POST "inventory/freight/$PB5FR/approve"; PB5no "pb5 freight: the person who prepared it (admin, not an accountant) cannot approve it"
 as "$FM_TOKEN" POST "inventory/freight/$PB5FR/approve"; check "pb5 freight: the finance manager approves it" '.success and .data.status == 1'
@@ -11384,8 +11384,8 @@ call GET "inventory/register/conversions?itemId=$PB5ITB"; check "pb5: exactly on
 call POST inventory/register/ceilings "{\"itemId\":$PB5ITB,\"workOrderId\":$PB2WO,\"maxQuantity\":50}"; check "pb5: consumption ceiling of 50 for the item on the work order" '.success'
 call GET "inventory/register/ceilings?itemId=$PB5ITB"; check "pb5: exactly one ceiling of 50" '.success and (.data|length) == 1 and .data[0].maxQuantity == 50'
 call POST inventory/register/assets "{\"tag\":\"pb5-tag-$$\",\"title\":\"دارایی آزمون\",\"warehouseId\":$W1,\"cost\":5000}"; check "pb5: an asset is saved" '.success and .data.id > 0'
-call GET "inventory/coding/title-check?title=قطعه آزمون پنج الف"; check "pb5 title check: an equal title of an item is an exact match" '.success and .data.hasExact == true'
-call GET "inventory/coding/title-check?title=عنوان کاملا تازه و منحصر به فرد"; check "pb5 title check: a new title has no match" '.success and .data.hasExact == false and (.data.matches|length) == 0'
+call GET "inventory/coding/title-check?title=$(jq -rn --arg t 'قطعه آزمون پنج الف' '$t|@uri')"; check "pb5 title check: an equal title of an item is an exact match" '.success and .data.hasExact == true'
+call GET "inventory/coding/title-check?title=$(jq -rn --arg t 'عنوان کاملا تازه و منحصر به فرد' '$t|@uri')"; check "pb5 title check: a new title has no match" '.success and .data.hasExact == false and (.data.matches|length) == 0'
 call GET "inventory/alerts/reorder"; check "pb5 reorder: the list answers" '.success'
 call POST inventory/alerts/run; check "pb5 alerts: the run answers" '.success'
 TOKEN=$ADMIN_TOKEN
