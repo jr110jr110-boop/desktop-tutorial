@@ -18,8 +18,6 @@ export const taskProgress = (dto: any) => call("post", base + "/progress", dto);
 export const taskChecklist = (dto: any) => call("post", base + "/checklist", dto);
 export const taskComment = (dto: any) => call("post", base + "/comment", dto);
 export const watchTask = (id: number, watch: boolean) => call("post", base + "/" + id + "/watch", undefined, { watch });
-export const attachToTask = (dto: any) => call("post", base + "/attach", dto);
-export const voidTaskAttachment = (dto: any) => call("post", base + "/attach/void", dto);
 export const getTaskBoard = (params?: any) => call("get", base + "/board", undefined, clean(params || {}));
 /** Mode: day, week, month. */
 export const getTaskAgenda = (params?: any) => call("get", base + "/agenda", undefined, clean(params || {}));

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasRole, ProjectControlRoles } from "@/composables/roles";
 import { onMounted, ref, watch } from "vue";
 import { rowsOf } from "@/api/ApiClient";
 import { getIssues, issueAction, saveIssue } from "@/api/ProjectRegistersAPIs";
@@ -7,6 +8,9 @@ import JDate from "@/components/pc/JDate.vue";
 import PositionSelect from "@/components/common/PositionSelect.vue";
 import { fail, ok, today } from "@/composables/inventory";
 import { issueStatuses, priorities } from "@/composables/tasks";
+
+// Writes belong to the unit managers and the PMO (the service checks it again); the others only read
+const canWrite = hasRole(ProjectControlRoles.unitManagers);
 
 // Issue log: category, priority, owner position, due date, resolution (resolver and closer differ), link to an activity and its delay reason code.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -47,7 +51,7 @@ watch(() => props.contractId, load);
 
 <template>
   <div>
-    <button class="btn btn-sm btn-success mb-2 d-print-none" @click="open()">+ مساله جدید</button>
+    <button v-if="canWrite" class="btn btn-sm btn-success mb-2 d-print-none" @click="open()">+ مساله جدید</button>
     <div class="table-responsive">
       <table class="table table-sm table-hover">
         <thead><tr><th>شماره</th><th>عنوان</th><th>دسته</th><th>اولویت</th><th>مالک</th><th>ثبت</th><th>سررسید</th><th>وضعیت</th><th>فعالیت / کد تاخیر</th><th>راه‌حل</th><th class="d-print-none"></th></tr></thead>
@@ -58,11 +62,11 @@ watch(() => props.contractId, load);
             <td>{{ issueStatuses[r.status] }}</td><td><span class="inv-ltr">{{ r.activityCode }}</span> {{ r.delayReasonCode }}</td>
             <td>{{ r.resolution }}<div v-if="r.resolvedByName" class="small inv-muted">حل: {{ r.resolvedByName }} {{ r.resolvedAtText }}</div><div v-if="r.closedByName" class="small inv-muted">بستن: {{ r.closedByName }} {{ r.closedAtText }}</div></td>
             <td class="d-print-none text-nowrap">
-              <button v-if="r.status < 2" class="btn btn-sm btn-outline-primary me-1" @click="open(r)">ویرایش</button>
-              <button v-if="r.status === 0" class="btn btn-sm btn-outline-secondary me-1" @click="act = { a: 'start', row: r }">شروع</button>
-              <button v-if="r.status < 2" class="btn btn-sm btn-outline-success me-1" @click="act = { a: 'resolve', row: r }">حل شد</button>
-              <button v-if="r.status === 2" class="btn btn-sm btn-success me-1" @click="act = { a: 'close', row: r }">بستن</button>
-              <button v-if="r.status >= 2" class="btn btn-sm btn-outline-danger" @click="act = { a: 'reopen', row: r }">بازگشایی</button>
+              <button v-if="canWrite && r.status < 2" class="btn btn-sm btn-outline-primary me-1" @click="open(r)">ویرایش</button>
+              <button v-if="canWrite && r.status === 0" class="btn btn-sm btn-outline-secondary me-1" @click="act = { a: 'start', row: r }">شروع</button>
+              <button v-if="canWrite && r.status < 2" class="btn btn-sm btn-outline-success me-1" @click="act = { a: 'resolve', row: r }">حل شد</button>
+              <button v-if="canWrite && r.status === 2" class="btn btn-sm btn-success me-1" @click="act = { a: 'close', row: r }">بستن</button>
+              <button v-if="canWrite && r.status >= 2" class="btn btn-sm btn-outline-danger" @click="act = { a: 'reopen', row: r }">بازگشایی</button>
             </td>
           </tr>
         </tbody>

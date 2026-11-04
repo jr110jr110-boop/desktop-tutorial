@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasRole, ProjectControlRoles } from "@/composables/roles";
 import { onMounted, ref, watch } from "vue";
 import { rowsOf } from "@/api/ApiClient";
 import { getActivities } from "@/api/ProjectControlAPIs";
@@ -6,6 +7,9 @@ import { getProjDeliverables, projDeliverableAction, saveProjDeliverable } from 
 import JDate from "@/components/pc/JDate.vue";
 import { fail, ok } from "@/composables/inventory";
 import { deliverableStatuses } from "@/composables/tasks";
+
+// Writes belong to the unit managers and the PMO (the service checks it again); the others only read
+const canWrite = hasRole(ProjectControlRoles.unitManagers);
 
 // Deliverables of the project: linked to an activity / WBS node / MDR deliverable. The one who delivers is not the one who accepts.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -46,7 +50,7 @@ watch(() => props.contractId, load);
 
 <template>
   <div>
-    <button class="btn btn-sm btn-success mb-2 d-print-none" @click="open()">+ تحویلی جدید</button>
+    <button v-if="canWrite" class="btn btn-sm btn-success mb-2 d-print-none" @click="open()">+ تحویلی جدید</button>
     <div class="table-responsive">
       <table class="table table-sm">
         <thead><tr><th>کد</th><th>عنوان</th><th>فعالیت</th><th>WBS</th><th>سررسید</th><th>وضعیت</th><th>تحویل‌دهنده</th><th>پذیرنده</th><th class="d-print-none"></th></tr></thead>
@@ -56,11 +60,11 @@ watch(() => props.contractId, load);
             <td class="inv-ltr">{{ r.code }}</td><td>{{ r.title }}</td><td class="inv-ltr">{{ r.activityCode }}</td><td class="inv-ltr">{{ r.wbsNodeCode }}</td><td>{{ r.dueDateText }}</td><td>{{ deliverableStatuses[r.status] }}</td>
             <td>{{ r.deliveredByName }} {{ r.deliveredAtText }}</td><td>{{ r.acceptedByName }} {{ r.acceptedAtText }}<div class="small inv-muted">{{ r.acceptanceNote }}</div></td>
             <td class="d-print-none text-nowrap">
-              <button v-if="r.status < 2" class="btn btn-sm btn-outline-primary me-1" @click="open(r)">ویرایش</button>
-              <button v-if="r.status === 0" class="btn btn-sm btn-outline-secondary me-1" @click="act = { a: 'start', row: r }">شروع</button>
-              <button v-if="r.status < 2" class="btn btn-sm btn-outline-success me-1" @click="act = { a: 'deliver', row: r }">تحویل</button>
-              <button v-if="r.status === 2" class="btn btn-sm btn-success me-1" @click="act = { a: 'accept', row: r }">پذیرش</button>
-              <button v-if="r.status === 2" class="btn btn-sm btn-outline-danger" @click="act = { a: 'reject', row: r }">رد</button>
+              <button v-if="canWrite && r.status < 2" class="btn btn-sm btn-outline-primary me-1" @click="open(r)">ویرایش</button>
+              <button v-if="canWrite && r.status === 0" class="btn btn-sm btn-outline-secondary me-1" @click="act = { a: 'start', row: r }">شروع</button>
+              <button v-if="canWrite && r.status < 2" class="btn btn-sm btn-outline-success me-1" @click="act = { a: 'deliver', row: r }">تحویل</button>
+              <button v-if="canWrite && r.status === 2" class="btn btn-sm btn-success me-1" @click="act = { a: 'accept', row: r }">پذیرش</button>
+              <button v-if="canWrite && r.status === 2" class="btn btn-sm btn-outline-danger" @click="act = { a: 'reject', row: r }">رد</button>
             </td>
           </tr>
         </tbody>

@@ -7,7 +7,8 @@ import JDate from "@/components/pc/JDate.vue";
 import PositionSelect from "@/components/common/PositionSelect.vue";
 import UserSelect from "@/components/quality/UserSelect.vue";
 import ReferralNode from "@/components/tasks/ReferralNode";
-import TaskAttachments from "@/components/tasks/TaskAttachments.vue";
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { fail, ok } from "@/composables/inventory";
 import { contractsCache } from "@/composables/projectControl";
 import { actionTexts, assigneeRoles, assigneeStates, classifications, historyKinds, importances, priorities, recurrences, taskKinds, taskStatusClass, taskStatuses } from "@/composables/tasks";
@@ -261,7 +262,7 @@ onMounted(load);
         </div>
       </div>
 
-      <TaskAttachments v-else-if="tab === 'attach' && task" :task="task" :can-write="can('comment')" @changed="load(); emit('changed')" />
+      <AttachmentPanel v-else-if="tab === 'attach' && task" :owner-type="AttachmentOwner.TmTask" :owner-id="task.id" title="پیوست‌های وظیفه" @changed="load(); emit('changed')" />
 
       <!-- links -->
       <div v-else-if="tab === 'links' && task">

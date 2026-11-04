@@ -40,6 +40,7 @@ const total = () => {
   return w ? Math.round((s.reduce((a: number, x: any) => a + (Number(x.weight) * Number(x.score)) / 5, 0) / w) * 100) : 0;
 };
 async function save(submit: boolean) {
+  if (submit && !form.value.providerId) return fail("برای ارسال، طرف قرارداد را از فهرست تامین‌کنندگان انتخاب کنید.");
   const [, e] = await saveEvaluation({ ...form.value, submit });
   if (e) return fail(e);
   ok(submit ? "برای تصمیم PMO ارسال شد." : "ذخیره شد.");
@@ -76,7 +77,7 @@ watch(() => props.contractId, load);
       <div class="inv-modal wide">
         <h5>پرسشنامه ارزیابی {{ evaluationParties[form.partyKind] }}</h5>
         <div class="row g-2 mb-2">
-          <div class="col-md-5"><label class="form-label small mb-0">طرف قرارداد</label><select v-model.number="form.providerId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name || p.title }}</option></select></div>
+          <div class="col-md-5"><label class="form-label small mb-0">طرف قرارداد (برای ارسال الزامی)</label><select v-model.number="form.providerId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name || p.title }}</option></select></div>
           <div class="col-md-4"><label class="form-label small mb-0">یا نام</label><input v-model="form.partyName" class="form-control form-control-sm" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">تاریخ</label><JDate v-model="form.evaluationDate" /></div>
         </div>

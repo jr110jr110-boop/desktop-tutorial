@@ -8,6 +8,9 @@ import { fail, ok } from "@/composables/inventory";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 import { riskClass, riskLevels, riskResponses, riskStatuses } from "@/composables/tasks";
 
+// Writes belong to the unit managers and the PMO (the service checks it again); the others only read
+const canWrite = hasRole(ProjectControlRoles.unitManagers);
+
 // Risk register (PMBOK): probability x impact 1..5, score, level from the settings, heat map, owner position, response, status, review date.
 const props = defineProps({ contractId: { type: Number, required: true } });
 const rows = ref<any[]>([]);
@@ -15,7 +18,6 @@ const heat = ref<any>(null);
 const form = ref<any>(null);
 const sel = ref<any>(null);
 const stNote = reactive<any>({ status: 0, note: "" });
-const canWrite = hasRole(ProjectControlRoles.readers);
 
 async function load() {
   const [[d, e], [h]] = await Promise.all([getRisks({ ContractId: props.contractId, PageSize: 200 }), getHeatMap(props.contractId)]);
@@ -60,7 +62,7 @@ watch(() => props.contractId, load);
         </table>
         <div class="small inv-muted">سطر = احتمال، ستون = اثر | تهدید باز: {{ heat.openThreats }} | فرصت باز: {{ heat.openOpportunities }}</div>
       </div>
-      <div class="flex-grow-1"><button class="btn btn-sm btn-success d-print-none" @click="form = blank()">+ ریسک جدید</button></div>
+      <div class="flex-grow-1"><button v-if="canWrite" class="btn btn-sm btn-success d-print-none" @click="form = blank()">+ ریسک جدید</button></div>
     </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover">

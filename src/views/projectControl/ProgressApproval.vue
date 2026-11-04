@@ -3,15 +3,15 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { decideSubmission, getChain, getNotUpdated, getOverdueUpdates, getSubmission, getSubmissions, saveChain, saveSubmission } from "@/api/ProjectRegistersAPIs";
 import { getActivities } from "@/api/ProjectControlAPIs";
 import { getTasks } from "@/api/TasksAPIs";
-import { uploadFile } from "@/api/InventoryAPIs";
-import { downloadDocument } from "@/api/OfficeAPIs";
 import { rowsOf } from "@/api/ApiClient";
+import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import JDate from "@/components/pc/JDate.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
 import PositionSelect from "@/components/common/PositionSelect.vue";
+import { AttachmentOwner } from "@/composables/attachments";
 import { fail, ok, printPage, rial } from "@/composables/inventory";
 import { costKinds, manualMethods, pcContractId } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
@@ -34,12 +34,12 @@ const form = reactive<any>({});
 const showForm = ref(false);
 const acts = ref<any[]>([]);
 const tasks = ref<any[]>([]);
-const files = ref<File[]>([]);
 const busy = ref(false);
 const dec = reactive<any>({ note: "", percent: null, actualCost: null, actualStart: null, actualFinish: null });
 const chain = ref<any>(null);
 const report = ref<any[]>([]);
-const canChain = hasRole(ProjectControlRoles.planningOrPm);
+// the chain is set by the PMO only (the service refuses everybody else)
+const canChain = hasRole(ProjectControlRoles.pmo);
 const days = ref(7);
 
 async function load() {
@@ -74,22 +74,15 @@ async function newForm(from?: any) {
   acts.value = rowsOf(a).filter((x: any) => x.status !== 2);
   const [t] = await getTasks({ Cartable: "assigned-to-me", ContractId: pcContractId.value, PageSize: 200 });
   tasks.value = rowsOf(t).filter((x: any) => x.activityId == null);
-  files.value = [];
-  Object.assign(form, { id: from?.id ?? null, contractId: pcContractId.value, target: from?.target ?? 1, activityId: from?.activityId ?? null, taskId: from?.taskId ?? null, percent: from?.percent ?? 0, actualStart: from?.actualStart?.slice(0, 10) ?? null, actualFinish: from?.actualFinish?.slice(0, 10) ?? null, actualCost: from?.actualCost ?? 0, costKind: from?.costKind ?? 0, costNote: from?.costNote ?? "", comment: from?.comment ?? "", attachmentDocumentIds: from?.attachmentDocumentIds ?? [] });
+  Object.assign(form, { id: from?.id ?? null, contractId: pcContractId.value, target: from?.target ?? 1, activityId: from?.activityId ?? null, taskId: from?.taskId ?? null, percent: from?.percent ?? 0, actualStart: from?.actualStart?.slice(0, 10) ?? null, actualFinish: from?.actualFinish?.slice(0, 10) ?? null, actualCost: from?.actualCost ?? 0, costKind: from?.costKind ?? 0, costNote: from?.costNote ?? "", comment: from?.comment ?? "" });
   showForm.value = true;
 }
 async function save(submit: boolean) {
   busy.value = true;
-  const ids = [...form.attachmentDocumentIds];
-  for (const f of files.value) {
-    const [id, err] = await uploadFile(f, "پیوست گزارش پیشرفت");
-    if (err || !id) { busy.value = false; return fail(err); }
-    ids.push(id);
-  }
-  const [d, e] = await saveSubmission({ ...form, attachmentDocumentIds: ids, submit });
+  const [d, e] = await saveSubmission({ ...form, submit });
   busy.value = false;
   if (e) return fail(e);
-  ok(submit ? "گزارش ارسال شد." : "پیش‌نویس ذخیره شد.");
+  ok(submit ? "گزارش ارسال شد." : "پیش‌نویس ذخیره شد؛ فایل‌ها را از پنل پیوست همین گزارش اضافه کنید.");
   showForm.value = false;
   sel.value = d;
   load();
@@ -113,7 +106,6 @@ async function storeChain() {
   ok("زنجیره تایید ذخیره شد.");
 }
 const unitLabel = computed(() => (form.target === 1 ? "فعالیت" : "وظیفه"));
-const openFile = async (id: string) => { const e = await downloadDocument(id, "پیوست پیشرفت"); if (e) fail(e); };
 onMounted(load);
 watch([tab, pcContractId], () => { page.value = 1; sel.value = null; load(); });
 </script>
@@ -184,9 +176,9 @@ watch([tab, pcContractId], () => { page.value = 1; sel.value = null; load(); });
                 <tr><th>ارسال‌کننده</th><td>{{ sel.submittedByName }} {{ sel.submittedAtText }}</td><th>مرحله فعلی</th><td>{{ sel.currentLevelTitle }} (دور {{ sel.round }})</td></tr>
                 <tr v-if="sel.comment"><th>توضیح</th><td colspan="3">{{ sel.comment }}</td></tr>
                 <tr v-if="sel.resultNote"><th>نتیجه</th><td colspan="3">{{ sel.resultNote }}</td></tr>
-                <tr v-if="sel.attachmentDocumentIds.length"><th>پیوست</th><td colspan="3"><button v-for="(a, i) in sel.attachmentDocumentIds" :key="a" class="btn btn-sm btn-link" @click="openFile(a)">پیوست {{ i + 1 }}</button></td></tr>
               </tbody>
             </table>
+            <AttachmentPanel :owner-type="AttachmentOwner.PcProgressSubmission" :owner-id="sel.id" title="پیوست‌های گزارش" class="mb-3" />
             <h6>مراحل تایید</h6>
             <table class="table table-sm"><thead><tr><th>دور</th><th>مرحله</th><th>وضعیت</th><th>تصمیم‌گیرنده</th><th>تاریخ</th><th>توضیح</th></tr></thead>
               <tbody><tr v-for="(s, i) in sel.steps" :key="i"><td>{{ s.round }}</td><td>{{ s.title }} <span class="inv-muted">({{ s.positionTitle || s.role }})</span></td><td>{{ stepStates[s.state] }}</td><td>{{ s.decidedByName }}</td><td>{{ s.decidedAtText }}</td><td>{{ s.note }}</td></tr></tbody></table>
@@ -225,7 +217,7 @@ watch([tab, pcContractId], () => { page.value = 1; sel.value = null; load(); });
               <div v-if="form.actualCost > 0" class="col-md-4"><label class="form-label small mb-0">نوع هزینه</label><select v-model.number="form.costKind" class="form-select form-select-sm"><option :value="0">-</option><option v-for="(t, k) in costKinds" :key="k" :value="Number(k)">{{ t }}</option></select></div>
               <div v-if="form.actualCost > 0" class="col-md-8"><label class="form-label small mb-0">شرح هزینه (ثبت هزینه دستی با کنترل دومین نفر مالی)</label><input v-model="form.costNote" class="form-control form-control-sm" /></div>
               <div class="col-12"><label class="form-label small mb-0">توضیح</label><textarea v-model="form.comment" class="form-control form-control-sm" rows="2"></textarea></div>
-              <div class="col-12"><label class="form-label small mb-0">پیوست‌ها (حداکثر ۲۰ فایل)</label><input class="form-control form-control-sm" type="file" multiple @change="files = Array.from(($event.target as HTMLInputElement).files || [])" /></div>
+              <div class="col-12"><AttachmentPanel v-if="form.id" :owner-type="AttachmentOwner.PcProgressSubmission" :owner-id="form.id" title="پیوست‌های گزارش" /><p v-else class="small inv-muted mb-0">برای افزودن فایل، ابتدا پیش‌نویس را ذخیره کنید؛ سپس همین گزارش را باز کنید و فایل‌ها را در پنل پیوست بارگذاری کنید.</p></div>
             </div>
             <div class="d-flex gap-2 mt-3"><button :disabled="busy" class="btn btn-sm btn-primary" @click="save(true)">ارسال برای تایید</button><button :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="save(false)">ذخیره پیش‌نویس</button><button class="btn btn-sm btn-light" @click="showForm = false">انصراف</button></div>
           </div>

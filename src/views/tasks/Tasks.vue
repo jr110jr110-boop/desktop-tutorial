@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import moment from "moment-jalaali";
 import { onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getContracts, rowsOf } from "@/api/InventoryAPIs";
@@ -47,9 +48,10 @@ async function load() {
 }
 function pick(c: string) { cartable.value = c; page.value = 1; load(); }
 function shift(dir: number) {
-  const d = new Date(agendaDate.value || today());
-  d.setDate(d.getDate() + dir * (mode.value === "month" ? 30 : mode.value === "week" ? 7 : 1));
-  agendaDate.value = d.toISOString().slice(0, 10);
+  // the month is a Persian month: the step goes through the Jalali calendar (the day is kept, or cut to the end of a shorter month), never a fixed number of days
+  const m = moment(agendaDate.value || today(), "YYYY-MM-DD");
+  if (mode.value === "month") m.add(dir, "jMonth"); else m.add(dir * (mode.value === "week" ? 7 : 1), "days");
+  agendaDate.value = m.format("YYYY-MM-DD");
   load();
 }
 const badge = (c: string) => ({ "assigned-to-me": counts.value.assignedToMe, "assigned-by-me": counts.value.assignedByMe, overdue: counts.value.overdue, waiting: counts.value.waitingForMe, unit: counts.value.unit } as any)[c];

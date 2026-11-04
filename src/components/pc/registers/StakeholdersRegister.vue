@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { hasRole, ProjectControlRoles } from "@/composables/roles";
 import { onMounted, ref, watch } from "vue";
 import { rowsOf } from "@/api/ApiClient";
 import { getStakeholderMatrix, getStakeholders, saveStakeholder } from "@/api/ProjectRegistersAPIs";
 import PositionSelect from "@/components/common/PositionSelect.vue";
 import { fail, ok } from "@/composables/inventory";
 import { engagements } from "@/composables/tasks";
+
+// Writes belong to the unit managers and the PMO (the service checks it again); the others only read
+const canWrite = hasRole(ProjectControlRoles.unitManagers);
 
 // Stakeholder register and the power / interest matrix. Only role and organisation are stored, never a personal phone number.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -36,7 +40,7 @@ watch(() => props.contractId, load);
     <div v-if="matrix" class="row g-2 mb-3">
       <div v-for="q in quads" :key="q[0]" class="col-md-6"><div :class="q[2]" class="border border-2 rounded p-2 h-100"><div class="fw-bold small mb-1">{{ q[1] }}</div><span v-for="s in matrix[q[0]]" :key="s.id" class="inv-badge me-1">{{ s.name }}</span><span v-if="!matrix[q[0]].length" class="inv-muted small">-</span></div></div>
     </div>
-    <button class="btn btn-sm btn-success mb-2 d-print-none" @click="form = blank()">+ ذی‌نفع جدید</button>
+    <button v-if="canWrite" class="btn btn-sm btn-success mb-2 d-print-none" @click="form = blank()">+ ذی‌نفع جدید</button>
     <div class="table-responsive">
       <table class="table table-sm">
         <thead><tr><th>نام / سازمان</th><th>نقش</th><th>دسته</th><th>نفوذ</th><th>علاقه</th><th>مشارکت فعلی</th><th>مشارکت مطلوب</th><th>شکاف</th><th>ربع ماتریس</th><th>نیاز ارتباطی</th><th class="d-print-none"></th></tr></thead>
@@ -45,7 +49,7 @@ watch(() => props.contractId, load);
           <tr v-for="s in rows" :key="s.id" :class="{ 'text-muted': !s.isActive }">
             <td>{{ s.name }}<div class="small inv-muted">{{ s.organization }}</div></td><td>{{ s.roleTitle }}</td><td>{{ s.category }}</td><td>{{ s.influence }}</td><td>{{ s.interest }}</td>
             <td>{{ engagements[s.engagementCurrent] }}</td><td>{{ engagements[s.engagementDesired] }}</td><td>{{ s.engagementGap }}</td><td>{{ s.quadrantText }}</td><td>{{ s.communicationNeed }} <span class="inv-muted">{{ s.communicationFrequency }}</span></td>
-            <td class="d-print-none"><button class="btn btn-sm btn-outline-primary" @click="form = { ...s }">ویرایش</button></td>
+            <td class="d-print-none"><button v-if="canWrite" class="btn btn-sm btn-outline-primary" @click="form = { ...s }">ویرایش</button></td>
           </tr>
         </tbody>
       </table>
