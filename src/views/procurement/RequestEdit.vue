@@ -8,8 +8,9 @@ import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getContracts, getWorkOrders, rowsOf } from "@/api/InventoryAPIs";
 import { getInquiries, getPurchaseRequest, purchaseRequestAction, savePurchaseRequest } from "@/api/ProcurementAPIs";
+import { getRequestChain, returnRequest, reviseRequest } from "@/api/Pb6APIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
-import { inquiryStatuses, purchaseKinds, requestSources, requestStatuses } from "@/composables/procurement";
+import { formTypes, inquiryStatuses, isVehicleForm, purchaseKinds, requestPriorities, requestSources, requestStatuses } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
 
 // Purchase request: draft -> submitted -> planning approval (+ CEO approval from the medium purchase limit) -> inquiry.
@@ -24,6 +25,8 @@ const dialog = ref<null | { action: string; title: string; label: string; value:
 
 const isNew = computed(() => !req.value?.id);
 const isDraft = computed(() => req.value && req.value.status === 0);
+const chain = ref<any>(null);
+const isOwner = computed(() => !!req.value && !!req.value.id);
 const canEdit = computed(() => isDraft.value && hasRole(ProcurementRoles.requesters));
 const canPlanning = hasRole(ProcurementRoles.planning);
 const canManagement = hasRole(ProcurementRoles.management);
@@ -36,7 +39,7 @@ function newLine() {
 
 function blank() {
   return {
-    id: null, status: 0, source: 3, kind: 1, requestDate: today(), workOrderId: null, contractId: null, costCenter: "",
+    id: null, status: 0, source: 3, kind: 1, formType: 2, priority: 2, vehicleDate: "", vehicleUnit: "", vehicleType: "", vehicleOrigin: "", vehicleDestination: "", requestDate: today(), workOrderId: null, contractId: null, costCenter: "",
     materialRequestId: route.query.materialRequest ? Number(route.query.materialRequest) : null, description: "", lines: [newLine()],
   };
 }
@@ -45,6 +48,7 @@ function load(dto: any) {
   req.value = {
     ...dto,
     requestDate: (dto.requestDate || "").slice(0, 10),
+    vehicleDate: dto.vehicleDate ? dto.vehicleDate.slice(0, 10) : "",
     lines: dto.lines.map((l: any) => ({
       ...newLine(),
       id: l.id,
@@ -73,6 +77,7 @@ async function save(submit = false): Promise<boolean> {
   const [data, error] = await savePurchaseRequest({
     id: r.id, source: r.source, kind: r.kind, requestDate: r.requestDate, workOrderId: r.workOrderId, contractId: r.contractId,
     costCenter: r.costCenter, materialRequestId: r.materialRequestId, description: r.description, submit,
+    formType: r.formType, priority: r.priority, vehicleDate: r.vehicleDate || null, vehicleUnit: r.vehicleUnit, vehicleType: r.vehicleType, vehicleOrigin: r.vehicleOrigin, vehicleDestination: r.vehicleDestination,
     lines: lines.map((l: any) => ({
       id: l.id || null, itemId: l.item?.id ?? null, description: l.description, unit: l.unit || l.item?.unit, quantity: Number(l.quantity) || 0,
       neededBy: l.neededBy || null, estimatedUnitPrice: l.estimatedUnitPrice === "" ? null : l.estimatedUnitPrice,
@@ -103,6 +108,8 @@ function ask(action: string) {
   if (action === "approve-management" && req.value.needsBoard)
     dialog.value = { action, title: "تایید مدیرعامل — خرید عمده", label: "شماره مصوبه هیئت‌مدیره *", value: "", required: true };
   else if (action === "reject") dialog.value = { action, title: "رد درخواست", label: "دلیل رد *", value: "", required: true };
+  else if (action === "return") dialog.value = { action, title: "برگشت درخواست به درخواست‌کننده", label: "علت برگشت *", value: "", required: true };
+  else if (action === "revise") dialog.value = { action, title: "ساخت نسخه جدید", label: "توضیح تغییرات", value: "", required: false };
   else act(action);
 }
 
@@ -111,7 +118,24 @@ async function confirmDialog() {
   if (d.required && !d.value.trim()) return fail(d.label.replace(" *", "") + " را بنویسید.");
   dialog.value = null;
   if (d.action === "reject") await act("reject", d.value);
+  else if (d.action === "return" || d.action === "revise") {
+    busy.value = true;
+    const [data, error] = d.action === "return" ? await returnRequest(req.value.id, d.value) : await reviseRequest(req.value.id, d.value);
+    busy.value = false;
+    if (error) return fail(error);
+    ok("انجام شد.");
+    if (data.id !== req.value.id) router.replace({ name: "ProcurementRequestEdit", params: { id: data.id } }).then(() => window.location.reload());
+    else {
+      load(data);
+      loadChain();
+    }
+  }
   else await act(d.action, undefined, d.value);
+}
+
+async function loadChain() {
+  const [data] = await getRequestChain(req.value.id);
+  chain.value = data;
 }
 
 async function loadInquiries() {
@@ -138,6 +162,7 @@ onMounted(async () => {
     if (error) return fail(error);
     load(data);
     loadInquiries();
+    loadChain();
   }
 });
 </script>
@@ -198,7 +223,9 @@ onMounted(async () => {
           </template>
           <button v-if="req.status === 1 && !req.planningApprovedAt && canPlanning" :disabled="busy" class="btn btn-sm btn-outline-success" @click="ask('approve-planning')">تایید برنامه‌ریزی</button>
           <button v-if="req.status === 1 && req.needsManagement && !req.managementApprovedAt && canManagement" :disabled="busy" class="btn btn-sm btn-outline-success" @click="ask('approve-management')">تایید مدیرعامل</button>
+          <button v-if="req.status === 1 && (canPlanning || canManagement)" :disabled="busy" class="btn btn-sm btn-outline-warning" @click="ask('return')">برگشت</button>
           <button v-if="req.status === 1 && (canPlanning || canManagement)" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="ask('reject')">رد</button>
+          <button v-if="isOwner && (req.status === 7 || req.status === 9 || req.status === 2) && !req.supersededByRequestId" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="ask('revise')">ساخت نسخه جدید</button>
           <button v-if="(req.status === 2 || req.status === 3) && canPlanning" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="ask('close')">بستن</button>
         </div>
       </div>
@@ -212,6 +239,11 @@ onMounted(async () => {
         <span v-if="req.needsManagement" class="inv-badge" :class="{ ok: req.managementApprovedAt }">مدیرعامل: {{ req.managementApprovedByName || "—" }}</span>
       </div>
       <div v-if="req.status === 9" class="alert alert-danger small py-2">رد شد: {{ req.rejectReason }}</div>
+      <div v-if="req.status === 7" class="alert alert-warning small py-2">برگشت خورد: {{ req.returnReason }}</div>
+      <div v-if="req.supersededByRequestNumber" class="alert alert-info small py-2">نسخه جدیدتر: <router-link :to="{ name: 'ProcurementRequestEdit', params: { id: req.supersededByRequestId } }">{{ req.supersededByRequestNumber }}</router-link></div>
+      <div v-if="chain && chain.items && chain.items.length > 1" class="small mb-2">زنجیره نسخه‌ها:
+        <router-link v-for="c in chain.items" :key="c.id" :to="{ name: 'ProcurementRequestEdit', params: { id: c.id } }" class="ms-2 inv-ltr">{{ c.number }}</router-link>
+      </div>
       <p v-if="req.status === 1" class="inv-muted small">تایید کننده باید غیر از ثبت‌کننده باشد؛ تایید مدیرعامل باید از شخصی غیر از تاییدکننده برنامه‌ریزی باشد.</p>
 
       <div class="row g-2">
@@ -219,6 +251,25 @@ onMounted(async () => {
           <label class="form-label small mb-0">تاریخ</label>
           <input v-model="req.requestDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
         </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">نوع فرم</label>
+          <select v-model="req.formType" :disabled="!canEdit" class="form-select form-select-sm">
+            <option v-for="(t, k) in formTypes" :key="k" :value="Number(k)">{{ t }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">اولویت</label>
+          <select v-model="req.priority" :disabled="!canEdit" class="form-select form-select-sm">
+            <option v-for="(t, k) in requestPriorities" :key="k" :value="Number(k)">{{ t }}</option>
+          </select>
+        </div>
+        <template v-if="isVehicleForm(req.formType)">
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ خودرو</label><input v-model="req.vehicleDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">واحد</label><input v-model="req.vehicleUnit" :disabled="!canEdit" class="form-control form-control-sm" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">نوع خودرو</label><input v-model="req.vehicleType" :disabled="!canEdit" class="form-control form-control-sm" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">مبدأ</label><input v-model="req.vehicleOrigin" :disabled="!canEdit" class="form-control form-control-sm" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">مقصد</label><input v-model="req.vehicleDestination" :disabled="!canEdit" class="form-control form-control-sm" /></div>
+        </template>
         <div class="col-md-2">
           <label class="form-label small mb-0">نوع خرید</label>
           <select v-model="req.kind" :disabled="!canEdit" class="form-select form-select-sm">

@@ -345,6 +345,8 @@ const routes: Array<RouteRecordRaw> = [
     path: "/buyOrder/update/:id?",
     props: true,
     name: "BuyOrderUpdate",
+    // PB6: the creation of legacy buy orders is frozen; a new need goes through the purchase request chain (an existing order can still be opened)
+    beforeEnter: (to: any) => (to.params.id ? true : { name: "ProcurementRequestEdit", params: { id: "new" } }),
     component: () => import("@/views/buyOrder/Update.vue"),
     meta: {
       access: "buyOrder",
@@ -428,8 +430,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.openingImport } },
   // Finance and cost accounting
   { path: "/procurement/settings", name: "ProcurementSettings", component: () => import("@/views/procurement/Settings.vue"), meta: { roles: ProcurementRoles.readers } },
-  { path: "/procurement/requests", name: "ProcurementRequests", component: () => import("@/views/procurement/Requests.vue"), meta: { roles: ProcurementRoles.readers } },
-  { path: "/procurement/requests/:id", name: "ProcurementRequestEdit", component: () => import("@/views/procurement/RequestEdit.vue"), meta: { roles: ProcurementRoles.readers } },
+  { path: "/procurement/requests", name: "ProcurementRequests", component: () => import("@/views/procurement/Requests.vue"), meta: { roles: ProcurementRoles.requestReaders } },
+  { path: "/procurement/requests/:id", name: "ProcurementRequestEdit", component: () => import("@/views/procurement/RequestEdit.vue"), meta: { roles: ProcurementRoles.requestReaders } },
   { path: "/procurement/inquiries", name: "ProcurementInquiries", component: () => import("@/views/procurement/Inquiries.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/inquiries/:id", name: "ProcurementInquiryEdit", component: () => import("@/views/procurement/InquiryEdit.vue"), meta: { roles: ProcurementRoles.readers } },
   { path: "/procurement/dossier", name: "ProcurementDossier", component: () => import("@/views/procurement/Dossier.vue"), meta: { roles: ProcurementRoles.dossier } },
@@ -439,6 +441,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/procurement/payments", name: "ProcurementPayments", component: () => import("@/views/procurement/Payments.vue"), meta: { roles: ProcurementRoles.readers } },
   // inbox links of older API versions were /procurement/payments/:id; the page reads ?id=
   { path: "/procurement/payments/:id(\\d+)", redirect: (to) => ({ name: "ProcurementPayments", query: { ...to.query, id: to.params.id } }) },
+  // PB6
+  { path: "/procurement/tools", name: "ProcurementTools", component: () => import("@/views/pb6/ProcurementTools.vue"), meta: { roles: ProcurementRoles.reports } },
+  { path: "/procurement/contracts-system", name: "ProcurementContractsSystem", component: () => import("@/views/pb6/ContractsSystem.vue"), meta: { roles: ProcurementRoles.contractsSystem } },
+  { path: "/procurement/statements", name: "ProcurementStatements", component: () => import("@/views/pb6/Statements.vue"), meta: { roles: ProcurementRoles.statements } },
+  { path: "/procurement/petty-flow", name: "ProcurementPettyFlow", component: () => import("@/views/pb6/PettyFlow.vue"), meta: { roles: ProcurementRoles.pettyFlow } },
   { path: "/procurement/suppliers", name: "ProcurementSuppliers", component: () => import("@/views/procurement/Suppliers.vue"), meta: { roles: ProcurementRoles.readers } },
   // the old CEO dashboard address (links and bookmarks) opens the CEO home page (release D1)
   { path: "/finance/ceo-dashboard", name: "FinanceCeoDashboard", redirect: { name: "CeoHome" } },

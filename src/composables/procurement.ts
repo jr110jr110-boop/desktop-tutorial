@@ -1,8 +1,8 @@
 // Names for the procurement pages (enums of the API).
 export const requestSources: Record<number, string> = { 1: "BOM محصول", 2: "نقطه سفارش", 3: "درخواست مستقیم", 4: "کسری مواد" };
 export const purchaseKinds: Record<number, string> = { 1: "کالا", 2: "خدمات", 3: "پیمانکاری" };
-export const requestStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ارسال شد", 2: "تایید شد", 3: "سفارش داده شد", 4: "بسته شد", 9: "رد شد" };
-export const inquiryStatuses: Record<number, string> = { 0: "باز", 1: "تامین‌کننده انتخاب شد", 2: "تایید شد", 9: "ابطال" };
+export const requestStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ارسال شد", 2: "تایید شد", 3: "سفارش داده شد", 4: "بسته شد", 7: "برگشت خورد", 9: "رد شد" };
+export const inquiryStatuses: Record<number, string> = { 0: "باز", 1: "تامین‌کننده انتخاب شد", 2: "تایید شد", 5: "برگشت خورد", 9: "ابطال" };
 export const orderStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تایید شد", 2: "ابلاغ شد", 3: "بخشی دریافت شد", 4: "دریافت کامل", 5: "بسته شد", 9: "ابطال" };
 export const invoiceStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "مطابق (تطبیق سه‌طرفه)", 2: "نیازمند تایید", 3: "تایید شد", 9: "ابطال" };
 export const paymentTypes: Record<number, string> = { 1: "پیش‌پرداخت", 2: "صورت‌وضعیت", 3: "فاکتور", 4: "تسویه نهایی" };
@@ -58,3 +58,9 @@ export function gradeOfScore(score: number | null): number {
   if (score === null) return 0;
   return score >= 85 ? 1 : score >= 65 ? 2 : score >= 45 ? 3 : 4;
 }
+
+// PB6: form types of the purchase request and priority
+export const formTypes: Record<number, string> = { 1: "کالا - پروژه", 2: "کالا - متفرقه", 3: "خدمات - پروژه", 4: "خدمات - عمومی", 5: "خودرو - پروژه", 6: "خودرو - عمومی", 7: "پیمانکاری - پروژه", 8: "پیمانکاری - مشاوره", 9: "پیمانکاری - خدمات", 10: "پیمانکاری - عمومی", 11: "صورت‌وضعیت" };
+export const requestPriorities: Record<number, string> = { 1: "کم", 2: "عادی", 3: "زیاد", 4: "فوری" };
+export const isVehicleForm = (f: number) => f === 5 || f === 6;
+export const isProjectForm = (f: number) => f === 1 || f === 3 || f === 5 || f === 7;

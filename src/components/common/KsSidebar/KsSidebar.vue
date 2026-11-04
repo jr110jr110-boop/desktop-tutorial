@@ -441,13 +441,17 @@ const links = {
     { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages" },
   ] as Links[],
   procurement: [
-    { title: "درخواست خرید", routeName: "ProcurementRequests", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "درخواست خرید", routeName: "ProcurementRequests", disabled: !hasRole(ProcurementRoles.requestReaders) },
     { title: "استعلام و کمیته خرید", routeName: "ProcurementInquiries", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "سفارش خرید", routeName: "ProcurementOrders", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "فاکتور تامین‌کننده", routeName: "ProcurementInvoices", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "درخواست پرداخت", routeName: "ProcurementPayments", disabled: !hasRole(ProcurementRoles.readers) },
     { title: "پرونده درخواست", routeName: "ProcurementDossier", disabled: !hasRole(ProcurementRoles.dossier) },
     { title: "لیست تامین‌کنندگان و ارزیابی", routeName: "ProcurementSuppliers", disabled: !hasRole(ProcurementRoles.readers) },
+    { title: "ضمانت‌نامه، الحاقیه، بایگانی و گزارش‌ها", routeName: "ProcurementTools", disabled: !hasRole(ProcurementRoles.reports) },
+    { title: "سامانه قراردادها", routeName: "ProcurementContractsSystem", disabled: !hasRole(ProcurementRoles.contractsSystem) },
+    { title: "صورت‌وضعیت‌ها", routeName: "ProcurementStatements", disabled: !hasRole(ProcurementRoles.statements) },
+    { title: "گردش تنخواه", routeName: "ProcurementPettyFlow", disabled: !hasRole(ProcurementRoles.pettyFlow) },
     { title: "تنظیمات و آستانه‌های خرید", routeName: "ProcurementSettings", disabled: !hasRole(ProcurementRoles.readers) },
   ] as Links[],
   quality: [
