@@ -11950,6 +11950,104 @@ namespace DataLayer.Migrations
                     b.ToTable("InvNumberSequences", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.GenealogyLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("InputItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("InputLotId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("InputSerialUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsShared")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("IssueDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("LinkDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OutputItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OutputLotId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OutputSerialUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProductionOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ReceiptDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InputItemId");
+
+                    b.HasIndex("InputLotId");
+
+                    b.HasIndex("InputSerialUnitId");
+
+                    b.HasIndex("IssueDocumentId");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("OutputItemId");
+
+                    b.HasIndex("OutputLotId");
+
+                    b.HasIndex("OutputSerialUnitId");
+
+                    b.HasIndex("ReceiptDocumentId");
+
+                    b.HasIndex("ProductionOrderId", "OutputItemId", "OutputLotId", "OutputSerialUnitId", "InputItemId", "InputLotId", "InputSerialUnitId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_InvGenealogyLinks_Key")
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("InvGenealogyLinks", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.InventoryDocument", b =>
                 {
                     b.Property<int>("Id")
@@ -31282,6 +31380,83 @@ namespace DataLayer.Migrations
                     b.Navigation("ParentSerialUnit");
 
                     b.Navigation("WorkOrder");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.GenealogyLink", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "InputItem")
+                        .WithMany()
+                        .HasForeignKey("InputItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "InputLot")
+                        .WithMany()
+                        .HasForeignKey("InputLotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.SerialUnit", "InputSerialUnit")
+                        .WithMany()
+                        .HasForeignKey("InputSerialUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", "IssueDocument")
+                        .WithMany()
+                        .HasForeignKey("IssueDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", "Operation")
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryItem", "OutputItem")
+                        .WithMany()
+                        .HasForeignKey("OutputItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryLot", "OutputLot")
+                        .WithMany()
+                        .HasForeignKey("OutputLotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.SerialUnit", "OutputSerialUnit")
+                        .WithMany()
+                        .HasForeignKey("OutputSerialUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfProductionOrder", "ProductionOrder")
+                        .WithMany()
+                        .HasForeignKey("ProductionOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Inventory.InventoryDocument", "ReceiptDocument")
+                        .WithMany()
+                        .HasForeignKey("ReceiptDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("InputItem");
+
+                    b.Navigation("InputLot");
+
+                    b.Navigation("InputSerialUnit");
+
+                    b.Navigation("IssueDocument");
+
+                    b.Navigation("Operation");
+
+                    b.Navigation("OutputItem");
+
+                    b.Navigation("OutputLot");
+
+                    b.Navigation("OutputSerialUnit");
+
+                    b.Navigation("ProductionOrder");
+
+                    b.Navigation("ReceiptDocument");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Inventory.InventoryDocument", b =>
