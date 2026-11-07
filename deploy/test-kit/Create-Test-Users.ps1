@@ -155,43 +155,54 @@ $adminToken = $login.data.accessToken
 $AdminPassword = $null
 Write-Host "Signed in as $AdminUser." -ForegroundColor Green
 
-function Register($u, [string]$pw) {
+function Register($u, [string]$pw, [string]$token) {
     $body = @{ userName = $u.User; name = $u.Title; lastName = $FaTest; email = $u.Email; roleIds = @($u.Roles); password = $pw
                phoneNumber = $u.Phone; birthDate = '1990-01-01T00:00:00+03:30'; nationalCode = $u.Nid }
-    return (Call-Api POST 'Accounts/register-user' $body $adminToken)
+    return (Call-Api POST 'Accounts/register-user' $body $token)
+}
+function Is-Existing($r) {
+    $faInUse = -join ([char[]](0x0627, 0x0633, 0x062A, 0x0641, 0x0627, 0x062F, 0x0647))   # "in use" (the duplicate user name message)
+    $faDup   = -join ([char[]](0x062A, 0x06A9, 0x0631, 0x0627, 0x0631, 0x06CC))         # "duplicate"
+    $text = "$($r.message) $(($r.errors | Out-String)) $(($r.data | Out-String))"
+    return ($text -match ('DuplicateUserName|already exists|' + $faInUse + '|' + $faDup))
 }
 
-# order: the first PMO manager (gets PMO at once while fewer than two PMO managers exist), then the other users, then the sensitive roles
-# (made with a temporary password, the user sets his own, and pmo.test - a second person - approves the role; Admin, who asked, cannot)
-$firstPmo = $users | Where-Object { $_.User -eq 'pmo.test' } | Select-Object -First 1
-$order = @()
-if ($firstPmo) { $order += $firstPmo }
-$order += @($users | Where-Object { $_.User -ne 'pmo.test' -and -not $_.Sens })
-$order += @($users | Where-Object { $_.User -ne 'pmo.test' -and $_.Sens })
-$made = 0; $existing = 0; $failed = 0; $pending = @()
-foreach ($u in $order) {
+# Who does what (two different people for every sensitive role, as the program demands):
+#  1. Admin makes the first PMO user of the file (the first row whose roles include PMO = role 1). While fewer than two PMO users
+#     exist the program gives that role at once (the audited start).
+#  2. That PMO user makes all the other users. A sensitive role (PMO, CEO, finance manager, payroll, HR, secretariat, auditor) is then
+#     only requested: the user signs in once with a temporary password and sets the password of the file himself.
+#  3. Admin - a person other than the one who asked - approves the requested sensitive roles.
+$firstPmo = $users | Where-Object { $_.Roles -contains 1 } | Select-Object -First 1
+$made = 0; $existing = 0; $failed = 0
+$creatorToken = $adminToken
+if ($firstPmo) {
+    $r = Register $firstPmo $firstPmo.Pw $adminToken
+    if ($r.success) { Write-Host ("made: " + $firstPmo.User + " (first PMO user, makes the other users)") -ForegroundColor Green; $made++ }
+    elseif (Is-Existing $r) { Write-Host ("exists already, skipped: " + $firstPmo.User) -ForegroundColor Yellow; $existing++ }
+    else { Write-Host ("FAILED " + $firstPmo.User + " : " + $r.message) -ForegroundColor Red; $failed++ }
+    $p = Sign-In $firstPmo.User $firstPmo.Pw
+    if ($p.success) { $creatorToken = $p.data.accessToken }
+    else { Write-Host ("$($firstPmo.User) could not sign in ($($p.message)); Admin makes the other users, and the sensitive roles must then be approved on screen by $($firstPmo.User).") -ForegroundColor Yellow }
+}
+$requested = @()
+foreach ($u in @($users | Where-Object { $_ -ne $firstPmo })) {
     $pw = $u.Pw
-    $twoStep = $u.Sens -and $u.User -ne 'pmo.test'
-    if ($twoStep) { $pw = 'Tmp-' + [guid]::NewGuid().ToString('N').Substring(0, 12) + 'aA1' }
-    $r = Register $u $pw
+    if ($u.Sens) { $pw = 'Tmp-' + [guid]::NewGuid().ToString('N').Substring(0, 12) + 'aA1' }
+    $r = Register $u $pw $creatorToken
     if (-not $r.success) {
-        $faInUse = -join ([char[]](0x0627, 0x0633, 0x062A, 0x0641, 0x0627, 0x062F, 0x0647))   # "in use" (the duplicate user name message)
-        $faDup   = -join ([char[]](0x062A, 0x06A9, 0x0631, 0x0627, 0x0631, 0x06CC))         # "duplicate"
-        $text = "$($r.message) $(($r.errors | Out-String)) $(($r.data | Out-String))"
-        if ($text -match ('DuplicateUserName|already exists|' + $faInUse + '|' + $faDup)) {
-            Write-Host ("exists already, skipped: " + $u.User) -ForegroundColor Yellow; $existing++; continue
-        }
+        if (Is-Existing $r) { Write-Host ("exists already, skipped: " + $u.User) -ForegroundColor Yellow; $existing++; $requested += $u.User; continue }
         Write-Host ("FAILED " + $u.User + " : " + $r.message) -ForegroundColor Red; $failed++; continue
     }
     $id = $r.data.id
-    if ($twoStep) {
+    if ($u.Sens) {
         $t = Sign-In $u.User $pw
         if (-not $t.success) { Write-Host ("FAILED " + $u.User + " : sign-in with the temporary password: " + $t.message) -ForegroundColor Red; $failed++; continue }
         $c = Call-Api POST 'Accounts/change-password' @{ currentPassword = $pw; newPassword = $u.Pw } $t.data.accessToken
         if (-not $c.success) { Write-Host ("FAILED " + $u.User + " : password change: " + $c.message) -ForegroundColor Red; $failed++; continue }
-        $pending += $u.User
-        Write-Host ("made, waits for the second approval: " + $u.User) -ForegroundColor Cyan
-    } elseif ($ForceChange -and $u.User -ne 'pmo.test') {
+        $requested += $u.User
+        Write-Host ("made, its sensitive role waits for the second approval: " + $u.User) -ForegroundColor Cyan
+    } elseif ($ForceChange) {
         $f = Call-Api POST 'Accounts/admin-reset-password' @{ userId = $id; temporaryPassword = $u.Pw } $adminToken
         if ($f.success) { Write-Host ("made (must change the password at the first sign-in): " + $u.User) -ForegroundColor Green }
         else { Write-Host ("made, but the forced change was not set: " + $u.User + " " + $f.message) -ForegroundColor Yellow }
@@ -199,25 +210,23 @@ foreach ($u in $order) {
     $made++
 }
 
-$approved = 0
-if ($pending.Count -gt 0) {
-    $p = Sign-In 'pmo.test' $firstPmo.Pw
-    if (-not $p.success) {
-        Write-Host 'pmo.test could not sign in, so the sensitive roles were not approved: sign in as pmo.test and approve them in the users page.' -ForegroundColor Yellow
-    } else {
-        $g = Call-Api GET 'Accounts/role-grants' $null $p.data.accessToken
-        foreach ($x in @($g.data)) {
-            if ($pending -notcontains $x.userName) { continue }
-            if ($x.canApprove) {
-                $a = Call-Api POST ("Accounts/role-grants/" + $x.id + "/approve") $null $p.data.accessToken
-                if ($a.success) { $approved++; Write-Host ("sensitive role approved: " + $x.userName) -ForegroundColor Green }
-                else { Write-Host ("not approved: " + $x.userName + " " + $a.message) -ForegroundColor Red }
-            } else { Write-Host ("cannot be approved by pmo.test: " + $x.userName + " " + $x.cannotApproveReason) -ForegroundColor Yellow }
-        }
+# approvals: every open request of a user in the file (also requests of an earlier run)
+$approved = 0; $waiting = 0
+$approverToken = if ($creatorToken -ne $adminToken) { $adminToken } elseif ($firstPmo -and $p.success) { $p.data.accessToken } else { $null }
+$names = @($users | ForEach-Object { $_.User })
+if ($approverToken) {
+    $g = Call-Api GET 'Accounts/role-grants' $null $approverToken
+    foreach ($x in @($g.data)) {
+        if ($names -notcontains $x.userName) { continue }
+        if ($x.canApprove) {
+            $a = Call-Api POST ("Accounts/role-grants/" + $x.id + "/approve") $null $approverToken
+            if ($a.success) { $approved++; Write-Host ("sensitive role approved: " + $x.userName) -ForegroundColor Green }
+            else { $waiting++; Write-Host ("not approved: " + $x.userName + " " + $a.message) -ForegroundColor Red }
+        } else { $waiting++; Write-Host ("waits for approval: " + $x.userName + " (" + $x.cannotApproveReason + ") - approve it in the users page with another PMO user, or run this script again later") -ForegroundColor Yellow }
     }
 }
 Write-Host ''
-Write-Host ("Done. made: $made, existed already: $existing, failed: $failed, sensitive roles approved: $approved of " + $pending.Count) -ForegroundColor White
+Write-Host ("Done. made: $made, existed already: $existing, failed: $failed, sensitive roles approved: $approved, still waiting: $waiting") -ForegroundColor White
 Write-Host 'The passwords are only in Test-Users.xlsx. After the test, disable the test users and delete that file.'
 if ($failed -gt 0) { exit 2 }
 exit 0

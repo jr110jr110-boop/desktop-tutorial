@@ -2071,8 +2071,7 @@ TOKEN=$ADMIN_TOKEN
 PC=projectcontrol
 # R1c (C9): the project-control fixture is anchored on the Monday of this week (on Saturday and Sunday on the next Monday), so every asOf below is today or later and the figures stay exact on any day.
 # pcd N = that Monday plus N days; pcmin D = D, or today when D is still in the future (a cost cannot be dated in the future).
-# the schedule starts on the Monday of the current week (also on Saturday and Sunday: a start in the next week left no planned value before today, so SPI could not be computed on a weekend run)
-PCDOW=$(date +%u); PCMON=$(date -d "$((1 - PCDOW)) days" +%Y-%m-%d)
+PCDOW=$(date +%u); if [ "$PCDOW" -ge 6 ]; then PCMON=$(date -d "$((8 - PCDOW)) days" +%Y-%m-%d); else PCMON=$(date -d "$((1 - PCDOW)) days" +%Y-%m-%d); fi
 pcd() { date -d "$PCMON $1 days" +%Y-%m-%d; }
 pcmin() { local t; t=$(date +%Y-%m-%d); if [[ "$1" > "$t" ]]; then echo "$t"; else echo "$1"; fi; }
 call POST Accounts/register-user '{"userName":"pm.ci","name":"pm.ci","lastName":"آزمون","email":"pm.ci@example.com","roleIds":[15],"password":"Ci#Pm-User-2026","phoneNumber":"09120000022","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345622"}'
@@ -2593,7 +2592,9 @@ as "$PM_TOKEN" POST $PC/reports/$PCREP/release; check "pc: project manager relea
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c '.clientReportShowsIndices = true')"; nomsg "r1c: the report setting of a reviewed contract changes only through a CEO-approved amendment" "فقط با الحاقیه تاییدشده مدیرعامل"
 pcamend $PCT "نمایش شاخص‌ها در گزارش مشتری"
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson a $PCAMD '.clientReportShowsIndices = true | .amendmentId = $a')"; check "pc: contract allows indices in the client report" '.success and .data.clientReportShowsIndices == true'
-as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1,\"dataDate\":\"$(pcmin "$(pcd 4)")T00:00:00\"}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
+# the data date of this report is today, or Friday of the schedule week when the schedule starts next Monday (a Saturday or Sunday run): before the start nothing is planned, PV is 0 and SPI is null by rule
+PCRPD=$(pcmin "$(pcd 4)"); if [[ "$PCRPD" < "$PCMON" ]]; then PCRPD=$(pcd 4); fi
+as "$PLAN_TOKEN" POST $PC/reports/generate "{\"contractId\":$PCT,\"kind\":1,\"dataDate\":\"${PCRPD}T00:00:00\"}"; check "pc: client report shows SPI/CPI only when the contract allows it" '(.data.content|fromjson|(.spi // .Spi)) != null'
 pcamend $PCT "بازگرداندن نمایش شاخص‌ها"
 as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson a $PCAMD '.amendmentId = $a')"; check "pc: the indices setting is restored by a second amendment" '.success and .data.clientReportShowsIndices == false'
 pcrereview $PCT

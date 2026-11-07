@@ -428,7 +428,7 @@ jobs:
           $run1 = Get-Content install-output\4-test-users-run1.txt -Raw; $run2 = Get-Content install-output\4-test-users-run2.txt -Raw
           $lines = @()
           $lines += if ($rc1 -eq 0) { 'PASS run 1 ended with code 0' } else { "FAIL run 1 ended with code $rc1" }
-          $lines += if ($run1 -match 'made: 4, existed already: 0, failed: 0, sensitive roles approved: 1 of 1') { 'PASS run 1 made 4 users and approved the 1 sensitive role' } else { 'FAIL run 1 summary: ' + (($run1 -split "`n") | Select-String 'Done\.' | Out-String).Trim() }
+          $lines += if ($run1 -match 'made: 4, existed already: 0, failed: 0, sensitive roles approved: 1, still waiting: 0') { 'PASS run 1 made 4 users and approved the 1 sensitive role' } else { 'FAIL run 1 summary: ' + (($run1 -split "`n") | Select-String 'Done\.' | Out-String).Trim() }
           $lines += if ($rc2 -eq 0) { 'PASS run 2 ended with code 0' } else { "FAIL run 2 ended with code $rc2" }
           $lines += if ($run2 -match 'made: 0, existed already: 4, failed: 0') { 'PASS run 2 skips the 4 existing users' } else { 'FAIL run 2 summary: ' + (($run2 -split "`n") | Select-String 'Done\.' | Out-String).Trim() }
           foreach ($r in $rows) {
