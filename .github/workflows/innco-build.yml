@@ -300,6 +300,7 @@ jobs:
           grep -q '"Password": "SET-BY-INSTALL-ps1"' package-output/app/appsettings.json || { echo "::error::package appsettings.json must carry the admin password placeholder"; exit 1; }
           if grep -rqF 'Ci#Adm1n-Build-2026' package-output/app; then echo "::error::the CI test password is in the package"; exit 1; fi
           cp deploy/install.ps1 deploy/backup.ps1 deploy/backup-crypto.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
+          mkdir -p package-output/test-kit && cp deploy/test-kit/Create-Test-Users.ps1 deploy/test-kit/Create-Test-Users.cmd package-output/test-kit/
           mkdir -p package-output/installers
           cp deploy/installers/README.txt package-output/installers/
           {
@@ -360,9 +361,16 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
-          # the update runs through the company wrapper: backup first, then install with the existing folders
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\Install-PMIS-Server.ps1 -NoPrompt | Tee-Object -FilePath install-output\2-update-run.txt
+          # the update runs the way IT does it: double-click Install-PMIS-Server.cmd (backup first, then install with the existing folders),
+          # from a copy of the package in a folder whose name has spaces, brackets and Persian letters (a second browser download is named "x (1)")
+          $fa = -join ([char[]](0x0646, 0x0635, 0x0628))
+          $dir = "D:\PMIS Install (1)\$fa\INNCO_Setup"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item .\pkg\package-output\* $dir -Recurse -Force
+          $env:PMIS_NO_PAUSE = '1'
+          & cmd.exe /s /c "`"`"$dir\Install-PMIS-Server.cmd`" -NoPrompt`"" 2>&1 | Tee-Object -FilePath install-output\2-update-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\2-update-run.txt
+          Copy-Item "$dir\install-launch-log.txt" install-output\2-update-launch-log.txt -ErrorAction SilentlyContinue
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 2-update
 
       - name: 3 - Restore the backup and bring over old uploaded files
@@ -385,6 +393,46 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup $import -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\3-restore-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 3-restore
+
+      - name: 4 - Create the test users with Create-Test-Users.cmd (test kit)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          # the test kit's launcher, run from a folder with spaces, brackets and Persian letters, against the restored server; then every user signs in with his own password
+          $ErrorActionPreference = 'Continue'
+          $out = 'install-output\checks-4-test-users.txt'
+          $fa = -join ([char[]](0x0622, 0x0632, 0x0645, 0x0648, 0x0646))
+          $dir = "D:\PMIS Test Kit (1)\$fa"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item .\pkg\package-output\test-kit\* $dir -Force
+          function NewPw { 'Ci' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '7k' }
+          $yes = -join ([char[]](0x0628, 0x0644, 0x0647)); $no = -join ([char[]](0x062E, 0x06CC, 0x0631))
+          $rows = @(
+            [pscustomobject]@{ username = 'pmo.test'; password = (NewPw); roleIds = '1'; displayName = 'PMO test'; sensitive = $yes; phone = '09000000002'; nationalCode = '0012340014'; email = 'pmo-test@example.test' },
+            [pscustomobject]@{ username = 'qc.test'; password = (NewPw); roleIds = '5'; displayName = 'QC test'; sensitive = $no; phone = '09000000010'; nationalCode = '0012340091'; email = 'qc-test@example.test' },
+            [pscustomobject]@{ username = 'wh.test'; password = (NewPw); roleIds = '6'; displayName = 'Warehouse test'; sensitive = $no; phone = '09000000013'; nationalCode = '0012340121'; email = 'wh-test@example.test' },
+            [pscustomobject]@{ username = 'finmgr.test'; password = (NewPw); roleIds = '17'; displayName = 'Finance manager test'; sensitive = $yes; phone = '09000000019'; nationalCode = '0012340189'; email = 'finmgr-test@example.test' }
+          )
+          $rows | Export-Csv -Path "$dir\Test-Users.csv" -NoTypeInformation -Encoding UTF8
+          $env:PMIS_NO_PAUSE = '1'
+          & cmd.exe /s /c "`"`"$dir\Create-Test-Users.cmd`" -BaseUrl http://127.0.0.1 -AdminPassword Own-Chosen-Pass-2026`"" 2>&1 | Tee-Object -FilePath install-output\4-test-users-run1.txt
+          $rc1 = $LASTEXITCODE
+          & cmd.exe /s /c "`"`"$dir\Create-Test-Users.cmd`" -BaseUrl http://127.0.0.1 -AdminPassword Own-Chosen-Pass-2026`"" 2>&1 | Tee-Object -FilePath install-output\4-test-users-run2.txt
+          $rc2 = $LASTEXITCODE
+          $run1 = Get-Content install-output\4-test-users-run1.txt -Raw; $run2 = Get-Content install-output\4-test-users-run2.txt -Raw
+          $lines = @()
+          $lines += if ($rc1 -eq 0) { 'PASS run 1 ended with code 0' } else { "FAIL run 1 ended with code $rc1" }
+          $lines += if ($run1 -match 'made: 4, existed already: 0, failed: 0, sensitive roles approved: 1 of 1') { 'PASS run 1 made 4 users and approved the 1 sensitive role' } else { 'FAIL run 1 summary: ' + (($run1 -split "`n") | Select-String 'Done\.' | Out-String).Trim() }
+          $lines += if ($rc2 -eq 0) { 'PASS run 2 ended with code 0' } else { "FAIL run 2 ended with code $rc2" }
+          $lines += if ($run2 -match 'made: 0, existed already: 4, failed: 0') { 'PASS run 2 skips the 4 existing users' } else { 'FAIL run 2 summary: ' + (($run2 -split "`n") | Select-String 'Done\.' | Out-String).Trim() }
+          foreach ($r in $rows) {
+            try {
+              $resp = Invoke-RestMethod -UseBasicParsing -Method Post -Uri 'http://127.0.0.1/api/v1/Accounts/login' -ContentType 'application/json' -Body (@{ userName = $r.username; password = $r.password } | ConvertTo-Json)
+              $lines += if ($resp.success -and $resp.data.accessToken) { "PASS $($r.username) signs in with the password of the users file" } else { "FAIL $($r.username) sign-in: $($resp.message)" }
+            } catch { $lines += "FAIL $($r.username) sign-in: $($_.Exception.Message)" }
+          }
+          $lines | Set-Content -Path $out -Encoding UTF8
+          $lines
 
       - name: Collect logs
         if: always()

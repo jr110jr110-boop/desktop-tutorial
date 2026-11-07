@@ -25,6 +25,21 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 function Say($text, $color = 'Gray') { Write-Host $text -ForegroundColor $color }
 
+# everything this run shows also goes to install-launch-log.txt next to this script (no password is ever shown except the
+# one-time temporary Admin password of a first installation, which install.ps1 prints at the end - it is kept out of the log below)
+$launchLog = Join-Path $Here 'install-launch-log.txt'
+try { Start-Transcript -Path $launchLog -Append -ErrorAction Stop | Out-Null; $transcript = $true } catch { $transcript = $false }
+# files taken from a ZIP downloaded from the internet carry the "came from the internet" mark; remove it so Windows runs them without asking
+try { Get-ChildItem -Path $Here -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue } catch { }
+trap {
+    Say ''
+    Say ('The installation stopped: ' + $_.Exception.Message) Red
+    Say ('At: ' + $_.InvocationInfo.PositionMessage) DarkGray
+    Say "Nothing after this point was changed. Send $launchLog to support." Yellow
+    if ($transcript) { Stop-Transcript | Out-Null }
+    exit 1
+}
+
 # 1. checks ---------------------------------------------------------------------------------
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -72,6 +87,8 @@ if ($task) {
     Say ("Existing installation: folder {0}, backups {1}, database {2}" -f $params.InstallRoot, $params.BackupFolder, $params.DatabaseName) Cyan
 }
 if ($CertificateThumbprint) { $params.CertificateThumbprint = $CertificateThumbprint }
+# install.ps1 keeps its own log in <install folder>\logs; the launch log stops here so that the one-time Admin password it prints at the end is not written to a file
+if ($transcript) { Stop-Transcript | Out-Null; $transcript = $false }
 Push-Location (Split-Path -Parent $installer)
 try { & $installer @params } finally { Pop-Location }
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { Say 'Installation reported an error. See the log in <install folder>\logs.' Red; exit 1 }
@@ -79,6 +96,8 @@ if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { Say 'Installation reported an erro
 # 4. addresses ------------------------------------------------------------------------------
 Say ''
 Say 'PMIS is ready. Open in Chrome or Edge from any computer in the network (HTTPS):' Green
-Say "   https://$ServerIp/" Green
-Say "   https://$($ServerName.ToLower())/" Green
+$addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { $_.IPAddress })
+foreach ($a in $addresses) { Say "   https://$a/" Green }
+Say "   https://$($env:COMPUTERNAME.ToLower())/" Green
+Say '   On this server itself also: http://127.0.0.1/' Green
 Say 'If the browser warns about the certificate, install <install folder>\certificates\innco-pmis.cer as a trusted root certificate on that computer.' Yellow
