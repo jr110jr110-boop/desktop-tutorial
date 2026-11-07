@@ -1,0 +1,8 @@
+﻿PASS run 1 ended with code 0
+PASS run 1 made 4 users and approved the 1 sensitive role
+PASS run 2 ended with code 0
+PASS run 2 skips the 4 existing users
+PASS pmo.test signs in with the password of the users file
+PASS qc.test signs in with the password of the users file
+PASS wh.test signs in with the password of the users file
+PASS finmgr.test signs in with the password of the users file
