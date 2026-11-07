@@ -367,8 +367,12 @@ jobs:
           $dir = "D:\PMIS Install (1)\$fa\INNCO_Setup"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Copy-Item .\pkg\package-output\* $dir -Recurse -Force
+          $ErrorActionPreference = 'Continue'
           $env:PMIS_NO_PAUSE = '1'
-          & cmd.exe /s /c "`"`"$dir\Install-PMIS-Server.cmd`" -NoPrompt`"" 2>&1 | Tee-Object -FilePath install-output\2-update-run.txt
+          # cmd.exe gets the launcher through an environment variable (Unicode-safe) from a plain ASCII runner, the way Explorer starts it
+          $env:PMIS_TARGET = "$dir\Install-PMIS-Server.cmd"
+          Set-Content -Path "$env:RUNNER_TEMP\run-install.cmd" -Encoding ASCII -Value '@call "%PMIS_TARGET%" -NoPrompt'
+          & cmd.exe /c "$env:RUNNER_TEMP\run-install.cmd" 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath install-output\2-update-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\2-update-run.txt
           Copy-Item "$dir\install-launch-log.txt" install-output\2-update-launch-log.txt -ErrorAction SilentlyContinue
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 2-update
@@ -415,9 +419,11 @@ jobs:
           )
           $rows | Export-Csv -Path "$dir\Test-Users.csv" -NoTypeInformation -Encoding UTF8
           $env:PMIS_NO_PAUSE = '1'
-          & cmd.exe /s /c "`"`"$dir\Create-Test-Users.cmd`" -BaseUrl http://127.0.0.1 -AdminPassword Own-Chosen-Pass-2026`"" 2>&1 | Tee-Object -FilePath install-output\4-test-users-run1.txt
+          $env:PMIS_TARGET = "$dir\Create-Test-Users.cmd"
+          Set-Content -Path "$env:RUNNER_TEMP\run-users.cmd" -Encoding ASCII -Value '@call "%PMIS_TARGET%" -BaseUrl http://127.0.0.1 -AdminPassword Own-Chosen-Pass-2026'
+          & cmd.exe /c "$env:RUNNER_TEMP\run-users.cmd" 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath install-output\4-test-users-run1.txt
           $rc1 = $LASTEXITCODE
-          & cmd.exe /s /c "`"`"$dir\Create-Test-Users.cmd`" -BaseUrl http://127.0.0.1 -AdminPassword Own-Chosen-Pass-2026`"" 2>&1 | Tee-Object -FilePath install-output\4-test-users-run2.txt
+          & cmd.exe /c "$env:RUNNER_TEMP\run-users.cmd" 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath install-output\4-test-users-run2.txt
           $rc2 = $LASTEXITCODE
           $run1 = Get-Content install-output\4-test-users-run1.txt -Raw; $run2 = Get-Content install-output\4-test-users-run2.txt -Raw
           $lines = @()

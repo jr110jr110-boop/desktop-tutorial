@@ -2071,7 +2071,8 @@ TOKEN=$ADMIN_TOKEN
 PC=projectcontrol
 # R1c (C9): the project-control fixture is anchored on the Monday of this week (on Saturday and Sunday on the next Monday), so every asOf below is today or later and the figures stay exact on any day.
 # pcd N = that Monday plus N days; pcmin D = D, or today when D is still in the future (a cost cannot be dated in the future).
-PCDOW=$(date +%u); if [ "$PCDOW" -ge 6 ]; then PCMON=$(date -d "$((8 - PCDOW)) days" +%Y-%m-%d); else PCMON=$(date -d "$((1 - PCDOW)) days" +%Y-%m-%d); fi
+# the schedule starts on the Monday of the current week (also on Saturday and Sunday: a start in the next week left no planned value before today, so SPI could not be computed on a weekend run)
+PCDOW=$(date +%u); PCMON=$(date -d "$((1 - PCDOW)) days" +%Y-%m-%d)
 pcd() { date -d "$PCMON $1 days" +%Y-%m-%d; }
 pcmin() { local t; t=$(date +%Y-%m-%d); if [[ "$1" > "$t" ]]; then echo "$t"; else echo "$1"; fi; }
 call POST Accounts/register-user '{"userName":"pm.ci","name":"pm.ci","lastName":"آزمون","email":"pm.ci@example.com","roleIds":[15],"password":"Ci#Pm-User-2026","phoneNumber":"09120000022","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345622"}'
