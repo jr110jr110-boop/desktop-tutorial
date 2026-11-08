@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Quality;
@@ -202,6 +202,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public int? WpsId { get; set; }
         public string WpsNumber { get; set; }
+
+        /// <summary>Package C: a special process step (finished only with a passed, QA-reviewed run).</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        public int? SpecialProcessTypeId { get; set; }
 
         /// <summary>R1p D12: the weld log the system drafted from the booking when the welding step finished.</summary>
         public int? WeldLogId { get; set; }

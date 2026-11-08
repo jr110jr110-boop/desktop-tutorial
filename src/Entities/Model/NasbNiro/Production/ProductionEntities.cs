@@ -104,6 +104,12 @@ namespace Entities.Model.NasbNiro.Production
         /// <summary>R1p D12: the welding procedure specification (Wps of the quality module) the step is welded by.</summary>
         public int? WpsId { get; set; }
 
+        /// <summary>Package C: a special process step (heat treatment, nitriding, coating ...). It is finished only with a passed, QA-reviewed run under a valid qualification (SpRun).</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        /// <summary>Package C: the kind of special process (SpProcessType) of the step.</summary>
+        public int? SpecialProcessTypeId { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -309,6 +315,12 @@ namespace Entities.Model.NasbNiro.Production
 
         /// <summary>R1p D12: the approved WPS the step is welded by (copied from the standard).</summary>
         public int? WpsId { get; set; }
+
+        /// <summary>Package C: a special process step (copied from the standard when the order is drafted).</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        /// <summary>Package C: the kind of special process (copied from the standard).</summary>
+        public int? SpecialProcessTypeId { get; set; }
 
         /// <summary>R1p D12: the weld log drafted from the booking when the welding step finished.</summary>
         public int? WeldLogId { get; set; }

@@ -260,6 +260,7 @@ namespace Services.NasbNiro.Production
             Dictionary<int, string> suppliers = supplierIds.Count == 0 ? new Dictionary<int, string>()
                 : await _uow.Set<Provider>().AsNoTracking().Where(p => supplierIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
             List<int> wpsIds = rows.Where(r => r.S != null && r.S.WpsId.HasValue).Select(r => r.S.WpsId.Value).Distinct().ToList();
+            Dictionary<int, string> spTypes = await _uow.Set<SpProcessType>().AsNoTracking().ToDictionaryAsync(t => t.Id, t => t.Title, ct);
             Dictionary<int, string> wpsNumbers = wpsIds.Count == 0 ? new Dictionary<int, string>()
                 : (await _uow.Set<Wps>().AsNoTracking().Where(w => wpsIds.Contains(w.Id)).Select(w => new { w.Id, w.Number, w.Revision }).ToListAsync(ct)).ToDictionary(w => w.Id, w => w.Number + "/" + w.Revision);
             return rows.Select(r => new OperationStandardDto
@@ -273,6 +274,7 @@ namespace Services.NasbNiro.Production
                 OutsideLeadDays = r.S?.OutsideLeadDays ?? 0, WorkInstructionDocumentId = r.S?.WorkInstructionDocumentId, DrawingReferenceRule = r.S?.DrawingReferenceRule,
                 RequiredQualificationKind = r.S?.RequiredQualificationKind, RequiredQualificationProcess = r.S?.RequiredQualificationProcess,
                 InspectionRequirement = r.S?.InspectionRequirement ?? MfInspectionRequirement.None, ItpTestType = r.S?.ItpTestType, FirstArticleRequired = r.S?.FirstArticleRequired ?? false,
+                IsSpecialProcess = r.S?.IsSpecialProcess ?? false, SpecialProcessTypeId = r.S?.SpecialProcessTypeId, SpecialProcessTypeTitle = r.S?.SpecialProcessTypeId != null && spTypes.TryGetValue(r.S.SpecialProcessTypeId.Value, out string spt) ? spt : null,
                 IsWelding = r.S?.IsWelding ?? false, WpsId = r.S?.WpsId, WpsNumber = r.S?.WpsId != null && wpsNumbers.TryGetValue(r.S.WpsId.Value, out string wn) ? wn : null,
             }).OrderBy(d => d.ItemCode ?? d.ItemGroupCode).ThenBy(d => d.Sequence).ToList();
         }
@@ -311,6 +313,13 @@ namespace Services.NasbNiro.Production
             if (dto.IsWelding && dto.IsOutside) return Bad<OperationStandardDto>("مرحله جوشکاری بیرونی روی ترمینال شروع نمی‌شود؛ علامت «جوشکاری» فقط برای مرحله داخلی است.");
             if (dto.IsWelding && !dto.WpsId.HasValue) return Bad<OperationStandardDto>("برای مرحله جوشکاری، WPS (دستورالعمل جوشکاری) را انتخاب کنید.");
             if (dto.IsWelding && !await _uow.Set<Wps>().AnyAsync(w => w.Id == dto.WpsId.Value && !w.Deleted, ct)) return Bad<OperationStandardDto>("WPS انتخاب‌شده پیدا نشد.");
+            // Package C (H7): a special process step names its process type; an outside step goes to a supplier approved for it (checked when the material is sent)
+            if (dto.IsSpecialProcess)
+            {
+                if (!dto.SpecialProcessTypeId.HasValue || !await _uow.Set<SpProcessType>().AnyAsync(t => t.Id == dto.SpecialProcessTypeId.Value && !t.Deleted && t.IsActive, ct))
+                    return Bad<OperationStandardDto>("برای مرحله «فرایند ویژه»، نوع فرایند را از فهرست فرایندهای ویژه انتخاب کنید.");
+                if (dto.IsWelding) return Bad<OperationStandardDto>("جوشکاری با قواعد WPS و صلاحیت جوشکار کنترل می‌شود؛ علامت «فرایند ویژه» برای آن لازم نیست.");
+            }
             DateTimeOffset now = DateTimeOffset.Now;
             MfOperationStandard row = await _uow.Set<MfOperationStandard>().FirstOrDefaultAsync(s => s.OperationTemplateId == dto.OperationTemplateId && !s.Deleted, ct);
             if (row == null)
@@ -322,7 +331,7 @@ namespace Services.NasbNiro.Production
             row.IsOutside = dto.IsOutside; row.DefaultSupplierId = dto.DefaultSupplierId; row.OutsideLeadDays = dto.OutsideLeadDays; row.WorkInstructionDocumentId = dto.WorkInstructionDocumentId;
             row.DrawingReferenceRule = Clean(dto.DrawingReferenceRule); row.RequiredQualificationKind = Clean(dto.RequiredQualificationKind);
             row.RequiredQualificationProcess = Clean(dto.RequiredQualificationProcess); row.InspectionRequirement = dto.InspectionRequirement; row.ItpTestType = dto.ItpTestType;
-            row.FirstArticleRequired = dto.FirstArticleRequired; row.IsWelding = dto.IsWelding; row.WpsId = dto.IsWelding ? dto.WpsId : null; row.ModifyDate = now; row.ModifierUserId = Me;
+            row.FirstArticleRequired = dto.FirstArticleRequired; row.IsWelding = dto.IsWelding; row.WpsId = dto.IsWelding ? dto.WpsId : null; row.IsSpecialProcess = dto.IsSpecialProcess; row.SpecialProcessTypeId = dto.IsSpecialProcess ? dto.SpecialProcessTypeId : null; row.ModifyDate = now; row.ModifierUserId = Me;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await StandardRowsAsync(_uow.Set<OperationTemplate>().Where(t => t.Id == dto.OperationTemplateId), ct))[0]);
         }

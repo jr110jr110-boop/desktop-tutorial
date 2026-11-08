@@ -237,6 +237,28 @@ namespace Services.NasbNiro.Quality
             }
             List<AsBuiltFaiDto> fais = (await uow.Set<QcFirstArticle>().AsNoTracking().Where(f => !f.Deleted && f.WorkOrderId == wo.Id && f.Status != FaiStatus.Voided).OrderBy(f => f.Id).ToListAsync(ct))
                 .Select(f => new AsBuiltFaiDto { Number = f.Number, PartNumber = f.PartNumber, FingerprintText = f.FingerprintText, Status = f.Status.ToString() }).ToList();
+            // Package C: the special process runs of the work order (never the voided ones) and, below, the certificates of the lots built in
+            var spRunRows = await (from r in uow.Set<SpRun>().AsNoTracking()
+                                   join t in uow.Set<SpProcessType>().AsNoTracking() on r.TypeId equals t.Id
+                                   where !r.Deleted && r.WorkOrderId == wo.Id && r.Status == SpRunStatus.Recorded
+                                   orderby r.Id
+                                   select new { r, Type = t.Title }).ToListAsync(ct);
+            var spRuns = new List<(SpRun Run, AsBuiltSpecialProcessDto Dto)>();
+            foreach (var row in spRunRows)
+            {
+                SpRun r = row.r;
+                string qualNumber = r.QualificationId.HasValue ? await uow.Set<SpQualification>().AsNoTracking().Where(q => q.Id == r.QualificationId.Value).Select(q => q.Number + " / " + q.ProcedureNumber + " " + q.ProcedureRevisionCode).FirstOrDefaultAsync(ct) : null;
+                string step = r.OperationId.HasValue ? await (from o in uow.Set<MfOperation>().AsNoTracking() join po in uow.Set<MfProductionOrder>().AsNoTracking() on o.OrderId equals po.Id where o.Id == r.OperationId.Value select po.Number + "-" + o.Sequence).FirstOrDefaultAsync(ct) : null;
+                string stamp = r.OperatorPersonId.HasValue ? await uow.Set<QualifiedPerson>().AsNoTracking().Where(p => p.Id == r.OperatorPersonId.Value).Select(p => p.StampId ?? p.PersonnelCode ?? p.Name).FirstOrDefaultAsync(ct) : null;
+                string machine = r.MachineId.HasValue ? await uow.Set<Entities.Model.NasbNiro.Constract.Machine>().AsNoTracking().Where(m => m.Id == r.MachineId.Value).Select(m => m.Title).FirstOrDefaultAsync(ct) : null;
+                string supplier = r.SupplierId.HasValue ? await uow.Set<Entities.Model.NasbNiro.Providers.Provider>().AsNoTracking().Where(p => p.Id == r.SupplierId.Value).Select(p => p.Name).FirstOrDefaultAsync(ct) : null;
+                spRuns.Add((r, new AsBuiltSpecialProcessDto
+                {
+                    RunNumber = r.Number, ProcessType = row.Type, QualificationNumber = qualNumber?.Split(" / ")[0], ProcedureText = qualNumber == null ? null : string.Join(" / ", qualNumber.Split(" / ").Skip(1)), Step = step, SerialNumbers = r.SerialNumbers,
+                    Quantity = r.Quantity, OperatorStamp = stamp, Machine = machine, StartedAt = r.StartedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+                    EndedAt = r.EndedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture), Supplier = supplier, CertificateNumber = r.CertificateNumber, Result = r.Result.ToString(), Review = r.ReviewStatus.ToString(),
+                }));
+            }
             var links = await uow.Set<GenealogyLink>().AsNoTracking().Where(g => !g.Deleted && orderIds.Contains(g.ProductionOrderId))
                 .Select(g => new
                 {
@@ -280,6 +302,21 @@ namespace Services.NasbNiro.Quality
                     foreach (var a in assemblies.Where(x => x.ParentItem == line.ItemId && (serial == null || string.Equals(x.Parent, serial, StringComparison.OrdinalIgnoreCase))))
                         snap.Installed.Add(new AsBuiltInstalledDto { PartNumber = a.ChildPart ?? a.ChildCode, ItemCode = a.ChildCode, ItemTitle = a.ChildTitle, LotNumber = a.Lot, SerialNumber = a.Serial, HeatNumber = a.Heat, CertificateNumber = a.Cert, Quantity = a.Quantity > 0 ? a.Quantity : 1m, Via = "assembly" });
                     snap.Installed = snap.Installed.OrderBy(i => i.PartNumber, StringComparer.Ordinal).ThenBy(i => i.LotNumber, StringComparer.Ordinal).ThenBy(i => i.SerialNumber, StringComparer.Ordinal).ToList();
+                    snap.SpecialProcesses = spRuns.Where(x => serial == null || string.IsNullOrWhiteSpace(x.Run.SerialNumbers) || (x.Run.SerialNumbers ?? string.Empty).Split(new[] { '\n', '\r', ',', '،' }, StringSplitOptions.RemoveEmptyEntries).Any(t => string.Equals(t.Trim(), serial, StringComparison.OrdinalIgnoreCase)))
+                        .Select(x => x.Dto).ToList();
+                    List<string> lotNumbers = snap.Installed.Where(i => !string.IsNullOrEmpty(i.LotNumber)).Select(i => i.LotNumber).Distinct().ToList();
+                    if (lotNumbers.Count > 0)
+                    {
+                        var certs = await (from c in uow.Set<MaterialCertificate>().AsNoTracking()
+                                           where !c.Deleted && c.Result == CertificateResult.Accepted && lotNumbers.Contains(c.Lot.LotNumber)
+                                           orderby c.Lot.LotNumber, c.Number
+                                           select new { c.Lot.LotNumber, ItemCode = c.Lot.Item.Code, c.Lot.HeatNumber, c.Number, c.Type, c.Grade, c.Standard, c.Evaluation, c.InspectorOrganisation, c.InspectorName, c.ManufacturerSignatory }).ToListAsync(ct);
+                        snap.Certificates = certs.Where(c => snap.Installed.Any(i => i.LotNumber == c.LotNumber && i.ItemCode == c.ItemCode)).Select(c => new AsBuiltCertificateDto   // Fix round 1 (Low): the lot of the same item, not just the same lot number
+                        {
+                            LotNumber = c.LotNumber, HeatNumber = c.HeatNumber, Number = c.Number, Type = CertificateRules.TypeText(c.Type), Grade = c.Grade, Standard = c.Standard, Evaluation = c.Evaluation.ToString(),
+                            Inspector = c.Type == CertificateType.T32 ? (c.InspectorOrganisation + " / " + c.InspectorName).Trim(' ', '/') : c.ManufacturerSignatory,
+                        }).ToList();
+                    }
                     string json = Serialize(snap);
                     AsBuiltRecord current = await uow.Set<AsBuiltRecord>().FirstOrDefaultAsync(r => !r.Deleted && r.WorkOrderId == wo.Id && r.ItemId == line.ItemId && r.SerialNumber == serial && r.Status == AsBuiltStatus.Current, ct);
                     int version = (await uow.Set<AsBuiltRecord>().Where(r => r.WorkOrderId == wo.Id && r.ItemId == line.ItemId && r.SerialNumber == serial).Select(r => (int?)r.Version).MaxAsync(ct) ?? 0) + 1;

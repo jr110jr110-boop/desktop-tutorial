@@ -213,6 +213,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.IReleaseService, Services.NasbNiro.Quality.ReleaseService>();
             services.AddScoped<Services.NasbNiro.Quality.ICharacteristicService, Services.NasbNiro.Quality.CharacteristicService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
+            services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
+            services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();
             services.AddScoped<Services.NasbNiro.Quality.IFirstArticleService, Services.NasbNiro.Quality.FirstArticleService>();
             services.AddScoped<Services.NasbNiro.Quality.IAsBuiltService, Services.NasbNiro.Quality.AsBuiltService>();
             services.AddScoped<Services.NasbNiro.Quality.IDocumentControlService, Services.NasbNiro.Quality.DocumentControlService>();

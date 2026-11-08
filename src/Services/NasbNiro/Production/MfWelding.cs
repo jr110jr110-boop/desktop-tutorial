@@ -59,11 +59,26 @@ namespace Services.NasbNiro.Production
             DateTime? last = await uow.Set<WeldLog>().AsNoTracking().Where(w => !w.Deleted && w.WeldDate <= on && w.Qualification.PersonId == person.Id && w.Qualification.Method == wps.Process)
                 .MaxAsync(w => (DateTime?)w.WeldDate, ct);
             string reason = null;
+            bool rangeEnforced = settings[QualitySettingKeys.PkcWeldRange] >= 1;
             foreach (Qualification q in candidates)
             {
                 QualificationState state = QualificationRules.State(q, on, QualificationRules.NeedsContinuity(q.Kind) ? last : null, months, warn);
-                if (QualificationRules.Usable(state)) return (q, null);
-                reason ??= $"گواهی جوشکاری «{who}» برای فرایند {wps.Process} معتبر نیست: {QualificationRules.StateText(state)}.";
+                if (!QualificationRules.Usable(state))
+                {
+                    reason ??= $"گواهی جوشکاری «{who}» برای فرایند {wps.Process} معتبر نیست: {QualificationRules.StateText(state)}.";
+                    continue;
+                }
+                // Package C: a valid qualification is still refused outside its qualified range (P-No, group, F-No, position, thickness, diameter) against the WPS
+                if (rangeEnforced)
+                {
+                    List<string> mismatches = WeldRangeRules.Mismatches(q, wps);
+                    if (mismatches.Count > 0)
+                    {
+                        reason = WeldRangeRules.Message(who, wps.Process, wps, mismatches);
+                        continue;
+                    }
+                }
+                return (q, null);
             }
             return (null, reason);
         }
