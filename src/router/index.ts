@@ -5,7 +5,7 @@ import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
-import { AccountRoles, AiRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, OpsDataRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -686,6 +686,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/ai/seats", redirect: { name: "AiAdminSeats" } },
   { path: "/fn/ai-anomalies", name: "FnAiAnomalies", component: () => import("@/views/fn/AiAnomalies.vue"), meta: { roles: AiRoles.financeNotes } },
   // PB1: product bank, BOM with revisions, OPC routings, coding of parts by part number
+  { path: "/ops-data/quality", name: "OpsDataQuality", component: () => import("@/views/opsData/OpsDataQuality.vue"), meta: { roles: OpsDataRoles.readers } },
   { path: "/product-bank/products", name: "ProductBankProducts", component: () => import("@/views/productBank/Products.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/products/:id", name: "ProductBankProduct", component: () => import("@/views/productBank/Product.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/boms", name: "ProductBankBoms", component: () => import("@/views/productBank/Boms.vue"), meta: { roles: PbRoles.readers } },

@@ -300,7 +300,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
@@ -447,6 +447,7 @@ const links = {
     { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
     { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages" },
+    { title: "کیفیت داده و آمادگی مهندسی", routeName: "OpsDataQuality", disabled: !hasRole(OpsDataRoles.readers) },
   ] as Links[],
   procurement: [
     { title: "درخواست خرید", routeName: "ProcurementRequests", disabled: !hasRole(ProcurementRoles.requestReaders) },

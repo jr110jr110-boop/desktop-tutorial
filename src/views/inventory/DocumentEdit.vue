@@ -6,6 +6,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
+import { requestOpsException } from "@/api/OpsDataAPIs";
 import { getSlOrder } from "@/api/SalesAPIs";
 import { getSvOrder } from "@/api/ServiceAPIs";
 import {
@@ -316,9 +317,26 @@ async function confirmDoc() {
   busy.value = true;
   const [data, error] = await confirmDocument(doc.value.id);
   busy.value = false;
-  if (error) return fail(error);
+  if (error) {
+    fail(error);
+    await save(true); // PB8: reload the plausibility findings (a refused confirmation stores its blocking findings)
+    return;
+  }
   setDoc(data);
   ok(`سند ${data.number} تایید شد.`);
+}
+
+// PB8: plausibility findings of the document; a blocking one needs an exception approved by another supervisor
+const opsJustification = ref<Record<number, string>>({});
+async function requestOpsExc(f: any) {
+  const text = (opsJustification.value[f.id] || "").trim();
+  if (!text) return fail("توجیه را بنویسید.");
+  busy.value = true;
+  const [, error] = await requestOpsException(f.id, text);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("درخواست استثنا ثبت شد؛ سرپرست دیگر واحد باید تایید کند.");
+  await save(true);
 }
 
 async function cancelDoc() {
@@ -1051,6 +1069,21 @@ onMounted(async () => {
             <button v-if="isDraft && quotes.length > 3" class="btn btn-sm btn-link text-danger p-0" @click="quotes.splice(i, 1)">×</button>
           </div>
           <button v-if="isDraft" class="btn btn-sm btn-outline-primary" @click="quotes.push({ buyer: '', amount: null })">+ خریدار</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="doc.opsFindings && doc.opsFindings.length" class="inv-card screen-only">
+      <h2 class="inv-title">هشدارهای کنترل داده</h2>
+      <div v-for="f in doc.opsFindings" :key="f.id ?? f.ruleCode + f.lineId" class="border rounded p-2 mb-2" :class="f.severity === 2 ? 'border-danger' : 'border-warning'">
+        <strong>{{ f.severity === 2 ? "مسدودکننده" : "هشدار" }}</strong> — {{ f.message }}
+        <div v-if="f.severity === 2 && f.id" class="mt-1">
+          <span v-if="f.exceptionStatus === 1" class="small text-success">استثنا تایید شد.</span>
+          <span v-else-if="f.exceptionStatus === 0" class="small inv-muted">درخواست استثنا در انتظار تایید سرپرست دیگر است.</span>
+          <template v-else>
+            <input v-model="opsJustification[f.id]" class="form-control form-control-sm" placeholder="توجیه درخواست استثنا" />
+            <button class="btn btn-sm btn-outline-danger mt-1" :disabled="busy" @click="requestOpsExc(f)">درخواست استثنا</button>
+          </template>
         </div>
       </div>
     </div>

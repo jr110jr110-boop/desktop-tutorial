@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import DashboardWidgets from "@/components/dashboards/DashboardWidgets.vue";
+import OpsWidget from "@/components/opsData/OpsWidget.vue";
 import { getDashboard, getDashboardIndex } from "@/api/DashboardsAPIs";
 import { fail } from "@/composables/inventory";
 import { pcContractId } from "@/composables/projectControl";
@@ -16,6 +17,9 @@ const data = ref<any>(null);
 const busy = ref(false);
 const key = computed(() => (route.params.key as string) || index.value[0]?.key || "");
 const current = computed(() => index.value.find((d) => d.key === key.value));
+// PB8: the data-quality widget of the unit (1 warehouse, 2 production, 3 quality, 4 finance); the CEO and PMO dashboards show all units and the readiness.
+const opsUnits: Record<string, number> = { warehouse: 1, production: 2, quality: 3, finance: 4 };
+const opsAll = computed(() => key.value === "ceo" || key.value === "pmo" || key.value === "portfolio");
 
 async function load() {
   data.value = null;
@@ -51,6 +55,7 @@ const open = (k: string) => router.push("/dashboards/" + k);
       <div class="d-flex flex-wrap gap-1 mb-3 d-print-none">
         <button v-for="d in index" :key="d.key" class="btn btn-sm" :class="d.key === key ? 'btn-primary' : 'btn-outline-secondary'" @click="open(d.key)">{{ d.title }}</button>
       </div>
+      <OpsWidget v-if="opsUnits[key] || opsAll" :key="key" :unit="opsUnits[key] ?? null" :readiness="opsAll" />
       <p v-if="!index.length" class="inv-muted">داشبوردی برای نقش شما تعریف نشده است.</p>
       <p v-else-if="current?.needsContract && !pcContractId" class="inv-muted">برای این داشبورد یک پروژه انتخاب کنید.</p>
       <p v-else-if="busy" class="inv-muted">در حال بارگذاری…</p>

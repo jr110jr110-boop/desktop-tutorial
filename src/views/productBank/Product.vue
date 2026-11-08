@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
+import ReadinessPanel from "@/components/opsData/ReadinessPanel.vue";
 import { approveTemplate, getProductBank, getTemplate, importMspdi } from "@/api/ProductBankAPIs";
 import { fail, ok, printPage } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
@@ -84,6 +85,7 @@ onMounted(load);
 <template>
   <div class="inv-page ks-report">
     <KsReportHeader :title="bank ? bank.product.code + ' — ' + bank.product.title : 'بانک محصول'" subtitle="BOM، چارت‌های OPC و قالب WBS" />
+    <ReadinessPanel v-if="bank" :product-id="bank.product.id" />
     <div v-if="bank" class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title screen-only">{{ bank.product.title }} <small class="inv-ltr inv-muted">{{ bank.product.code }}</small></h1>
