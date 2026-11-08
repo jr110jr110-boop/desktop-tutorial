@@ -237,12 +237,32 @@ namespace DataLayer.Context
             beforeSaveTriggers();
 
             List<FinanceAuditTrail.LateAudit> late = takeLateAuditRows();   // Package D (H1): the entries of new records wait for the generated key
+            if (late.Count > 0 && Database.IsSqlServer() && Database.CurrentTransaction == null)
+            {
+                // The records and their entries are one unit: an own transaction. With the retrying execution strategy a user transaction is allowed only inside
+                // the strategy; the unit is not retried (the first save already accepted its changes), a transient failure is reported to the caller instead.
+                bool started = false;
+                return Database.CreateExecutionStrategy().Execute(() =>
+                {
+                    if (started) throw new InvalidOperationException(SaveInterruptedMessage);
+                    started = true;
+                    using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = Database.BeginTransaction();
+                    int saved = saveWithChain(acceptAllChangesOnSuccess, late);
+                    transaction.Commit();
+                    return saved;
+                });
+            }
+            return saveWithChain(acceptAllChangesOnSuccess, late);
+        }
+
+        private const string SaveInterruptedMessage = "ارتباط با پایگاه داده هنگام ذخیره لحظه‌ای قطع شد و هیچ تغییری ثبت نشد؛ لطفاً دوباره تلاش کنید.";
+
+        private int saveWithChain(bool acceptAllChangesOnSuccess, List<FinanceAuditTrail.LateAudit> late)
+        {
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
             AuditChain.Scope chain = null;
-            Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = null;
             try
             {
-                if (late.Count > 0 && Database.IsSqlServer() && Database.CurrentTransaction == null) transaction = Database.BeginTransaction();   // the records and their entries are one unit
                 chain = AuditChain.Begin(this, late.Count > 0);   // R1t D20: the new audit rows take their place in the hash chain (holds the chain lock until the save is over)
                 int saved = base.SaveChanges(acceptAllChangesOnSuccess);
                 if (late.Count > 0)
@@ -250,18 +270,15 @@ namespace DataLayer.Context
                     AuditChain.PlaceLate(this, FinanceAuditTrail.Resolve(late));
                     base.SaveChanges(true);
                 }
-                transaction?.Commit();
                 return saved;
             }
             catch
             {
-                try { transaction?.Rollback(); } catch { /* the connection is gone: the transaction went with it */ }
                 detachUnsavedAuditRows();
                 throw;
             }
             finally
             {
-                transaction?.Dispose();
                 chain?.Dispose();
                 ChangeTracker.AutoDetectChangesEnabled = true;
             }
@@ -274,12 +291,28 @@ namespace DataLayer.Context
             beforeSaveTriggers();
 
             List<FinanceAuditTrail.LateAudit> late = takeLateAuditRows();   // Package D (H1): see SaveChanges
+            if (late.Count > 0 && Database.IsSqlServer() && Database.CurrentTransaction == null)
+            {
+                bool started = false;   // see SaveChanges: one attempt inside the execution strategy
+                return await Database.CreateExecutionStrategy().ExecuteAsync(async ct =>
+                {
+                    if (started) throw new InvalidOperationException(SaveInterruptedMessage);
+                    started = true;
+                    await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await Database.BeginTransactionAsync(ct);
+                    int saved = await saveWithChainAsync(acceptAllChangesOnSuccess, late, ct);
+                    await transaction.CommitAsync(ct);
+                    return saved;
+                }, cancellationToken);
+            }
+            return await saveWithChainAsync(acceptAllChangesOnSuccess, late, cancellationToken);
+        }
+
+        private async Task<int> saveWithChainAsync(bool acceptAllChangesOnSuccess, List<FinanceAuditTrail.LateAudit> late, CancellationToken cancellationToken)
+        {
             ChangeTracker.AutoDetectChangesEnabled = false; // for performance reasons, to avoid calling DetectChanges() again.
             AuditChain.Scope chain = null;
-            Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = null;
             try
             {
-                if (late.Count > 0 && Database.IsSqlServer() && Database.CurrentTransaction == null) transaction = await Database.BeginTransactionAsync(cancellationToken);
                 chain = await AuditChain.BeginAsync(this, cancellationToken, late.Count > 0);   // R1t D20: see SaveChanges
                 int saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
                 if (late.Count > 0)
@@ -287,18 +320,15 @@ namespace DataLayer.Context
                     await AuditChain.PlaceLateAsync(this, FinanceAuditTrail.Resolve(late), cancellationToken);
                     await base.SaveChangesAsync(true, cancellationToken);
                 }
-                if (transaction != null) await transaction.CommitAsync(cancellationToken);
                 return saved;
             }
             catch
             {
-                try { if (transaction != null) await transaction.RollbackAsync(CancellationToken.None); } catch { /* the connection is gone: the transaction went with it */ }
                 detachUnsavedAuditRows();
                 throw;
             }
             finally
             {
-                if (transaction != null) await transaction.DisposeAsync();
                 if (chain != null) await chain.DisposeAsync();
                 ChangeTracker.AutoDetectChangesEnabled = true;
             }
