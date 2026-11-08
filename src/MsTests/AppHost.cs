@@ -72,8 +72,18 @@ namespace MsTests
             return builder.Options;
         }
 
+        /// <summary>
+        /// Package 9: a host whose context uses the SQL Server provider with a dummy connection and the given interceptors (which swallow the connection and the commands): for tests that only have to see
+        /// that the queries of a service TRANSLATE to SQL Server. Nothing can be saved in such a host.
+        /// </summary>
+        public static AppHost SqlTranslationOnly(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) => new AppHost("p9sql_" + Guid.NewGuid().ToString("N"), null, interceptors);
+
+        public AppHost(string databaseName, IDictionary<string, string> settings) : this(databaseName, settings, null)
+        {
+        }
+
         /// <param name="settings">Extra configuration values (for example <c>Identity:AuditHmacKey</c>) that win over appsettings.json.</param>
-        public AppHost(string databaseName, IDictionary<string, string> settings)
+        private AppHost(string databaseName, IDictionary<string, string> settings, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] sqlInterceptors)
         {
             DatabaseName = databaseName;
             var services = new ServiceCollection();
@@ -128,17 +138,20 @@ namespace MsTests
 
             var siteSettings = services.GetSiteSettings();
             _siteSettings = siteSettings;
-            siteSettings.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
+            bool sql = sqlInterceptors != null && sqlInterceptors.Length > 0;
+            siteSettings.ActiveDatabase = sql ? ActiveDatabase.SqlServer : ActiveDatabase.InMemoryDatabase;
+            if (sql) siteSettings.ConnectionStrings.SqlServer.ApplicationDbContextConnection = "Server=tcp:127.0.0.1,1;Database=p9translation;User Id=x;Password=x;Encrypt=False;Pooling=False;Connect Timeout=1";
             siteSettings.ConnectionStrings.LocalDb = new Localdb { InitialCatalog = databaseName };
             services.AddRequiredEfInternalServices(siteSettings);
             services.AddDbContextPool<ApplicationDbContext>((serviceProvider, optionsBuilder) =>
             {
                 optionsBuilder.SetDbContextOptions(siteSettings);
                 optionsBuilder.UseInternalServiceProvider(serviceProvider);
+                if (sql) optionsBuilder.AddInterceptors(sqlInterceptors);
             });
 
             Provider = services.BuildServiceProvider();
-            Provider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
+            if (!sql) Provider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
             Http = Provider.GetRequiredService<IHttpContextAccessor>();
         }
 

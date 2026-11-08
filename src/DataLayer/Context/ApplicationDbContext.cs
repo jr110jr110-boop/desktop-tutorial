@@ -11,6 +11,7 @@ using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
 using DataLayer.Configurations.EF.NasbNiro.Attachments;
 using DataLayer.Configurations.EF.NasbNiro.EngChange;
+using DataLayer.Configurations.EF.NasbNiro.AuditSeat;
 using DataLayer.Configurations.EF.NasbNiro.Integrity;
 using DataLayer.Configurations.EF.NasbNiro.Inventory;
 using DataLayer.Mappings;
@@ -357,6 +358,7 @@ namespace DataLayer.Context
             validateEntities();
             setShadowProperties();
             this.ApplyCorrectYeKe();
+            AuditorWriteGuard.Check(this, this.GetService<IHttpContextAccessor>());   // Package 9: the AUDIT seat writes only its own tables
             FinanceAuditTrail.Capture(this, this.GetService<IHttpContextAccessor>());
         }
 
@@ -501,6 +503,9 @@ namespace DataLayer.Context
 
             // Package A2: engineering change requests and orders, impact snapshot, dispositions, tasks
             builder.AddEngChangeConfigurations();
+
+            // Package 9: the AI internal auditor (audit programme, runs, findings, reports, process audits)
+            builder.AddAuditSeatConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();

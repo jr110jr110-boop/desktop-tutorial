@@ -281,6 +281,12 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.FinAnomalySeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.OpsData.OpsDataSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.AuditSeat.AuditSeatJob>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusRunService, Services.NasbNiro.AuditSeat.AusRunService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusFindingService, Services.NasbNiro.AuditSeat.AusFindingService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusReportService, Services.NasbNiro.AuditSeat.AusReportService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusProgramService, Services.NasbNiro.AuditSeat.AusProgramService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusAuditService, Services.NasbNiro.AuditSeat.AusAuditService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();

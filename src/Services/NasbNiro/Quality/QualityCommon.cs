@@ -216,6 +216,7 @@ namespace Services.NasbNiro.Quality
             // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
             foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
             foreach (QualitySetting dd in global::Services.NasbNiro.ProductBank.DesignSettingKeys.Defaults()) yield return dd;   // Package A1
+            foreach (QualitySetting ad in global::Services.NasbNiro.AuditSeat.AusSettingKeys.Defaults()) yield return ad;   // Package 9
         }
 
         /// <summary>

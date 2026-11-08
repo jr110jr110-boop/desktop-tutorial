@@ -8153,10 +8153,10 @@ print("%04d/%02d/%02d" % (jy, jm, jd))
 PYJ
 }
 
-AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true"
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true"
 as "$CEO_TOKEN" GET $AI/admin/seats
-check "ai seats: the CEO reads exactly the eight seats (PB8: OPS-DATA is the eighth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
-check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 8'
+check "ai seats: the CEO reads exactly the nine seats (PB8: OPS-DATA is the eighth, P9: AUDIT the ninth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 9'
 as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
 as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
 as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
@@ -12401,6 +12401,149 @@ as "$ADMIN_TOKEN" POST Boms "{\"assemblyId\":$MFASM,\"positionNumber\":9,\"title
 as "$ADMIN_TOKEN" POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":9,\"title\":\"BOM تجهیزات قدیمی\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":9}"; nomsg "pka2: the legacy equipment BOM is read only too" "بانک محصول"
 as "$ADMIN_TOKEN" PUT Boms "{\"id\":$MFBOM,\"assemblyId\":$MFASM,\"positionNumber\":9,\"title\":\"BOM قدیمی\",\"count\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":9}"; nomsg "pka2: editing a legacy BOM is refused as well" "بانک محصول"
 as "$MPM_TOKEN" GET "$MF/orders/$MFORDC"; check "pka2: an order of a project without a baseline says in Persian that its components came from the legacy BOM (read only fallback)" '.success and .data.componentSource == "LEGACY" and (.data.componentNote|contains("BOM قدیمی"))'
+
+# --- P9 (Package 9: the AI internal auditor, CEO decisions D11 and D12). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
+# The AUDIT seat checks 56 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
+# Own user: p9.dual.ci holds QA and PMO (a person who tries to give both proposals). The owner of the process-audit finding is the existing QA user pka2.qa1.ci. The restore test of this server was never made (pbd above),
+# which is the exact known finding AUD-INT-002 of the first run. The background job of the seat is switched off in CI (Audit__Jobs); the runs here are on demand.
+TOKEN=$ADMIN_TOKEN
+user2 p9.dual.ci 14,1 'Ci#P9Dual-User-2026' 09120009201 0012349201
+check "p9: the user who holds QA and PMO is registered (the QA role at once, the PMO role waits for the second PMO user)" '.success and .data.id > 0 and ([.data.roles[]?.name]|index("QA")) != null'
+approve_grants p9.dual.ci
+P9DUAL=$(login p9.dual.ci 'Ci#P9Dual-User-2026'); [ -n "$P9DUAL" ] && ok "p9: login of the user who holds QA and PMO" || bad "p9: login of the user who holds QA and PMO"
+P9AUDID=$(uid "$AUD_TOKEN"); P9OWNID=$(uid "$PKA2QA1"); P9QAID=$(uid "$QA_TOKEN"); TOKEN=$ADMIN_TOKEN
+p9_step() { # p9_step TOKEN FINDINGID STEP [REFUSE true|false] [NOTE] : one step of the closure chain (qa, pmo, ceo)
+  local refuse=${4:-false} note=${5:-"یادداشت کافی برای این مرحله"}
+  as "$1" POST audit/findings/step "{\"findingId\":$2,\"step\":\"$3\",\"refuse\":$refuse,\"note\":\"$note\"}"
+}
+p9_action() { # p9_action TOKEN FINDINGID : root cause, correction and corrective action (the answer stays in $B)
+  as "$1" POST audit/findings/action "{\"findingId\":$2,\"rootCause\":\"ریشه‌ی علت: رویه اجرا نشده بود\",\"correction\":\"اصلاح همان مورد انجام شد\",\"correctiveAction\":\"اقدام برای جلوگیری از تکرار تعریف شد\"}"
+}
+
+# --- the catalogue (read only), who may read, and the auditor who only reads
+as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 56 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 56 and ([.data[]|select(.enabled)]|length) == 56 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
+P9CLAUSES=$(jq '[.data[]|"\(.standard)|\(.clause)"]|unique|length' "$B")
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 56 of 56 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 56 and .data.rulesTotal == 56 and .data.lastRunAtText == null'
+as "$WH_TOKEN" GET audit/rules; no "p9 role: the storekeeper does not read the catalogue"
+as "$WH_TOKEN" GET audit/findings; no "p9 role: the storekeeper does not read the findings"
+as "$WH_TOKEN" POST audit/runs '{}'; no "p9 role: the storekeeper does not start a run"
+as "$AUD_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":1,\"impact\":1}"; no "p9 auditor: the auditor writes nothing outside the audit module (a project risk is refused)"
+
+# --- the audit programme (ISO 19011 5.x): prepared and sent by PMO, approved by QA (another person), never by its preparer
+as "$ADMIN_TOKEN" POST audit/programs/default/1450 '{}'; check "p9 programme: the default programme of the year 1450 is a draft with one automatic daily row and one audit row for each of the 15 processes" '.success and .data.statusValue == 0 and .data.year == 1450 and .data.version == 1 and (.data.items|length) == 30 and ([.data.items[]|select(.frequency == 0)]|length) == 15'
+P9PG=$(val .data.id)
+as "$QA_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; nomsg "p9 programme: a draft that was not sent cannot be approved" "هنوز ارسال نشده"
+as "$ADMIN_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"submit\"}"; check "p9 programme: the PMO preparer sends the programme to the QA manager" '.success and .data.submittedAtText != null and .data.statusValue == 0'
+as "$ADMIN_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; no "p9 programme: the PMO preparer does not approve his own programme (the approval is the QA manager's)"
+as "$QA_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; check "p9 programme: the QA manager approves it and the content is sealed with a SHA-256" '.success and .data.statusValue == 1 and (.data.contentSha256|length) == 64 and (.data.decidedByName|contains("qa.ci"))'
+as "$P9DUAL" POST audit/programs/default/1451 '{}'; check "p9 programme: a person with PMO and QA roles prepares the draft of the next year" '.success and .data.statusValue == 0 and .data.year == 1451'
+P9PG2=$(val .data.id)
+as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"submit\"}"; check "p9 programme: ... and sends it" '.success and .data.submittedAtText != null'
+as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"approve\"}"; no "p9 programme: ... but he cannot approve the programme he prepared, although he holds the QA role (maker-checker)"
+as "$AUD_TOKEN" GET audit/programs; check "p9 programme: the auditor reads exactly the two programmes" '.success and (.data|length) == 2'
+
+# --- the first run: the known finding. The restore test of this server was never made, so the rule AUD-INT-002 reports it (major, due in 7 days); a project risk with a review date in the past is a second known finding (minor)
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -3)\"}"; check "p9 setup: a project risk with a review date three days in the past is saved" '.success and .data.id > 0 and (.data.number|startswith("RK"))'
+P9RK=$(val .data.id); P9RKN=$(val .data.number)
+safety_set Quality Audit.Rule.AUD-MR-002.Enabled 0; check "p9 switch: one rule is switched off (a security-relevant setting: the second PMO user approves)" '.success and .data.status == "Approved" and .data.newValue == "0"'
+as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 55 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 55'
+as "$AUD_TOKEN" POST audit/runs '{}'; check "p9 run 1: the auditor starts a run: 55 rules ran, none failed, the disabled rule is listed as disabled, AUD-INT-002 and AUD-RK-001 each found exactly one object and created one finding, nothing is a recurrence" '.success and .data.rulesRun == 55 and .data.rulesFailed == 0 and .data.statusValue == 1 and .data.recurrences == 0 and ([.data.rules[]|select(.code == "AUD-MR-002")][0].status == "disabled") and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 1) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+safety_set Quality Audit.Rule.AUD-MR-002.Enabled 1; check "p9 switch: the rule is switched on again (two-person change)" '.success and .data.status == "Approved" and .data.newValue == "1"'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-INT-002&Limit=1000"; check "p9 finding: the restore-test finding is exact: major, open, due in 7 days, clause A.8.13, owner role PMO, a number AF-yyyy-nnnn" ".success and (.data|length) == 1 and (.data[0]|.severityValue == 3 and .statusValue == 1 and .clause == \"A.8.13\" and .standard == \"ISO/IEC 27001:2022\" and .ownerRole == \"PMO\" and .processCode == \"INTEGRITY\" and (.dueDate|startswith(\"$(dd 7)\")) and (.number|test(\"^AF-[0-9]{4}-[0-9]{4}\$\")) and .recurrenceCount == 0)"
+P9FI=$(val '.data[0].id')
+as "$AUD_TOKEN" GET audit/findings/$P9FI; P9EV=$(jq -j '.data.evidenceJson' "$B"); P9EVH=$(printf '%s' "$P9EV" | sha256sum | cut -d' ' -f1)
+check "p9 finding: the evidence snapshot is JSON of the rule, the clause and the object RestoreTestResult 0, and its SHA-256 is the hash of exactly that text" ".success and .data.ruleCode == \"AUD-INT-002\" and .data.objectType == \"RestoreTestResult\" and .data.objectId == 0 and (.data.evidenceJson|fromjson|.rule == \"AUD-INT-002\" and .clause == \"A.8.13\" and .object.type == \"RestoreTestResult\") and .data.evidenceSha256 == \"$P9EVH\""
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 finding: the risk with the lapsed review date is exactly one minor open finding, due in 30 days, owner role PMO" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\")][0]|.severityValue == 2 and .statusValue == 1 and .ruleCode == \"AUD-RK-001\" and .ownerRole == \"PMO\" and (.dueDate|startswith(\"$(dd 30)\")))"
+P9F1=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\")|.id" "$B")
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the CEO has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the QA manager has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
+as "$PMO2_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the PMO manager has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
+as "$AUD_TOKEN" GET audit/runs; check "p9 runs: the history holds exactly this one run, started by hand" '.success and (.data|length) == 1 and .data[0].rulesRun == 55'
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=0"; check "p9 chain: the finding has exactly one Added entry in the audit chain and every entry names its user" '.success and ([.data.data[]|select(.action == "Added" and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+
+# --- the closure chain on the rule finding (the risk): the owner role is PMO, so the PMO user who proposes the action is its actioner and can never close it
+p9_step "$QA_TOKEN" "$P9F1" qa; nomsg "p9 chain: QA cannot propose the closure while the action and its re-check are missing" "بازبینی خودکار"
+p9_action "$AUD_TOKEN" "$P9F1"; nomsg "p9 chain: the auditor is not the owner and does not propose the action" "فقط مسئول"
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: the PMO owner proposes the action but the automatic re-check runs the rule again, still sees the lapsed review date and sends the finding back to Open" '.success and .data.statusValue == 1 and (.message|contains("بازبینی خودکار رد شد"))'
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd 20)\"}"; check "p9 chain: the review date of the risk is corrected" '.success and .data.id > 0'
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: the second proposal passes the automatic re-check (the rule no longer sees the object): Rechecked, with a re-check hash" '.success and .data.statusValue == 3 and .data.recheckPassed == true and (.data.recheckSha256|length) == 64'
+p9_step "$ADMIN_TOKEN" "$P9F1" pmo; nomsg "p9 chain: the actioner (a PMO user) does not close it" "پیشنهاد داده است"
+p9_step "$AUD_TOKEN" "$P9F1" qa; no "p9 chain: the auditor, whose role only reads, cannot propose the closure"
+p9_step "$P9DUAL" "$P9F1" pmo; nomsg "p9 chain: the PMO proposal cannot come before the QA proposal" "QA"
+p9_step "$P9DUAL" "$P9F1" qa; check "p9 chain: the user with QA and PMO roles proposes the closure as QA" '.success and .data.statusValue == 4 and (.data.qaName|contains("p9.dual.ci"))'
+p9_step "$P9DUAL" "$P9F1" pmo; nomsg "p9 chain: the same person cannot give the PMO proposal too (two different people)" "دو نفر متفاوت"
+p9_step "$PMO2_TOKEN" "$P9F1" pmo true "رد آزمایشی: مدرک مرور ریسک پیوست نشده است"; check "p9 chain: PMO refuses with a reason: back to Open, the chain starts again" '.success and .data.statusValue == 1 and ([.data.events[].kind]|index("refused")) != null'
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: after the refusal the action is proposed and re-checked again" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
+p9_step "$P9DUAL" "$P9F1" qa; check "p9 chain: QA proposes again" '.success and .data.statusValue == 4'
+p9_step "$PMO2_TOKEN" "$P9F1" pmo; check "p9 chain: the second PMO user, a different person, proposes as PMO" '.success and .data.statusValue == 5 and (.data.pmoName|contains("pmo2.ci"))'
+p9_step "$PMO2_TOKEN" "$P9F1" ceo; no "p9 chain: the final approval is for the CEO role only"
+p9_step "$P9DUAL" "$P9F1" ceo; no "p9 chain: a person who gave a proposal cannot approve as CEO (he has no CEO role)"
+p9_step "$CEO_TOKEN" "$P9F1" ceo; check "p9 chain: the CEO, the third person, approves: Closed, with three different names in the chain" '.success and .data.statusValue == 6 and ([.data.qaName,.data.pmoName,.data.ceoName]|unique|length) == 3 and (.data.ceoName|contains("ceo.ci")) and ([.data.events[].kind]|index("ceo")) != null'
+p9_step "$QA_TOKEN" "$P9F1" qa; nomsg "p9 chain: a closed finding takes no further step" "بسته یا ابطال"
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=0"; check "p9 chain: after the closure the finding still has exactly one Added entry, and every entry of its chain names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+
+# --- recurrence: the same object deviates again after its finding was closed; the new finding is linked and one level more severe (minor to major), due in 7 days, with an immediate alert
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -2)\"}"; check "p9 recurrence setup: the review date lapses again" '.success and .data.id > 0'
+as "$QA_TOKEN" POST audit/runs '{}'; check "p9 run 2: the QA manager starts a run: 56 rules ran, none failed, exactly one recurrence, the restore-test finding is seen again and not created twice" '.success and .data.rulesRun == 56 and .data.rulesFailed == 0 and .data.recurrences == 1 and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 0) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 recurrence: two findings for the risk: the closed one and a new open major one that points to it, with the recurrence count 1, due in 7 days" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 2 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 6)]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)][0]|.severityValue == 3 and .recurrenceOfId == $P9F1 and .recurrenceCount == 1 and (.dueDate|startswith(\"$(dd 7)\")))"
+P9F1R=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)|.id" "$B")
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus:$P9F1R"; check "p9 recurrence: the CEO has exactly one immediate alert of the recurrence (major)" '.success and (.data.data|length) == 1'
+as "$AUD_TOKEN" GET audit/findings/$P9F1R; check "p9 recurrence: the detail lists the earlier finding as related and the evidence names the risk" ".success and (.data.related|map(.id)|index($P9F1)) != null and (.data.evidenceJson|contains(\"$P9RKN\"))"
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd 25)\"}"; check "p9 recurrence: the review date is corrected again (so that this finding too can be closed by the chain)" '.success and .data.id > 0'
+
+# --- the process audit by human auditors (ISO 19011 6): plan, checklist from the catalogue, auditor is not the auditee, the finding goes into the same chain
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9AUDID}"; nomsg "p9 audit: the lead auditor cannot be the auditee (ISO 19011 5.4.4)" "یک نفر باشند"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9QAID,\"auditeeUserId\":$P9OWNID}"; nomsg "p9 audit: the lead auditor must hold the auditor role" "نقش ممیز"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"NOPE\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: an unknown process is refused"
+as "$WH_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: the storekeeper does not plan an audit"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; check "p9 audit: the QA manager plans the audit of the process QUALITY: the checklist is the 4 rules of the process, nothing is checked yet" '.success and .data.statusValue == 0 and .data.checks == 4 and .data.nonConform == 0 and (.data.items|length) == 4 and ([.data.items[]|select(.result == 0)]|length) == 4 and (.data.number|startswith("PA-"))'
+P9PA=$(val .data.id); P9CK1=$(val '.data.items[0].id'); P9CK2=$(val '.data.items[1].id'); P9CK3=$(val '.data.items[2].id'); P9CK4=$(val '.data.items[3].id')
+as "$QA_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; nomsg "p9 audit: only the lead auditor starts the audit" "فقط ممیز ارشد"
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; check "p9 audit: the lead auditor starts it" '.success and .data.statusValue == 1'
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"نتیجه‌ی ممیزی که هنوز بندها بررسی نشده\"}"; nomsg "p9 audit: the audit does not complete while checklist items are unchecked" "فهرست بازبینی"
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK1,\"result\":2,\"note\":\"عدم انطباق\"}"; nomsg "p9 audit: a non-conformity is recorded with a finding, not as a bare result" "ثبت یافته"
+as "$QA_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9OWNID}"; nomsg "p9 audit: only the lead auditor enters the findings of the audit" "فقط ممیز ارشد"
+as "$AUD_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9AUDID}"; nomsg "p9 audit: the auditor cannot be the owner of his own finding" "یک نفر باشند"
+as "$AUD_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9OWNID}"; check "p9 audit: the auditor enters the finding: manual source, open, minor, due in 30 days, owner the auditee" ".success and .data.ruleCode == \"MANUAL\" and .data.statusValue == 1 and .data.severityValue == 2 and .data.ownerUserId == $P9OWNID and (.data.dueDate|startswith(\"$(dd 30)\")) and (.data.number|test(\"^AF-[0-9]{4}-[0-9]{4}\$\")) and .data.processCode == \"QUALITY\""
+P9FM=$(val .data.id)
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK2,\"result\":1}"; check "p9 audit: the second item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 1 and ([.data.items[]|select(.result == 2 and .findingId != null)]|length) == 1'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK3,\"result\":1}"; check "p9 audit: the third item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 2'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK4,\"result\":3}"; check "p9 audit: the fourth item does not apply" '.success and ([.data.items[]|select(.result == 0)]|length) == 0'
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"کوتاه\"}"; no "p9 audit: the summary of the result must be written (at least 20 characters)"
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"چهار بند بررسی شد؛ یک عدم انطباق ثبت شد و پیگیری می‌شود\"}"; check "p9 audit: the audit completes: 4 items, 1 non-conformity" '.success and .data.statusValue == 2 and .data.nonConform == 1 and .data.checks == 4'
+
+# --- the closure chain on the manual finding: owner and re-check by a human auditor (the rule cannot re-check a human finding), refusals of the owner, of the missing re-check, of the same person twice
+p9_step "$QA_TOKEN" "$P9FM" qa; nomsg "p9 manual: QA cannot propose the closure of a finding whose action is missing" "بازبینی خودکار"
+p9_action "$QA_TOKEN" "$P9FM"; nomsg "p9 manual: only the owner proposes the action" "فقط مسئول"
+as "$PKA2QA1" POST audit/findings/action "{\"findingId\":$P9FM,\"rootCause\":\"کوتاه\",\"correction\":\"اصلاح همان مورد انجام شد\",\"correctiveAction\":\"اقدام برای جلوگیری از تکرار تعریف شد\"}"; nomsg "p9 manual: the root cause must be written (at least 10 characters)" "ریشه"
+p9_action "$PKA2QA1" "$P9FM"; check "p9 manual: the owner (who holds the QA role) proposes the action: ActionProposed, waiting for the auditor" '.success and .data.statusValue == 2 and .data.rootCause != null'
+p9_step "$QA_TOKEN" "$P9FM" qa; nomsg "p9 manual: the re-check is missing: QA cannot propose" "بازبینی خودکار"
+as "$PKA2QA1" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":true,\"note\":\"راستی‌آزمایی توسط خود مسئول\"}"; no "p9 manual: the owner cannot verify his own action (only an auditor)"
+as "$AUD_TOKEN" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":false,\"note\":\"اقدام کافی نیست؛ مدرک اجرا ندارد\"}"; check "p9 manual: the auditor finds the action insufficient: back to Open" '.success and .data.statusValue == 1'
+p9_action "$PKA2QA1" "$P9FM"; check "p9 manual: the owner proposes again" '.success and .data.statusValue == 2'
+as "$AUD_TOKEN" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":true,\"note\":\"مدرک اجرا دیده شد و کافی است\"}"; check "p9 manual: the auditor verifies the action: Rechecked" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
+p9_step "$PKA2QA1" "$P9FM" qa; nomsg "p9 manual: the owner cannot propose the closure of his own finding even though he holds the QA role" "خودش آن را ببندد"
+p9_step "$PKA2QA2" "$P9FM" qa; check "p9 manual: another QA user proposes the closure" '.success and .data.statusValue == 4'
+p9_step "$PKA2QA2" "$P9FM" pmo; no "p9 manual: a QA user without the PMO role cannot give the PMO proposal"
+p9_step "$ADMIN_TOKEN" "$P9FM" pmo; check "p9 manual: the PMO manager proposes" '.success and .data.statusValue == 5'
+p9_step "$CEO_TOKEN" "$P9FM" ceo true "رد آزمایشی مدیرعامل: نیاز به مدرک بیشتر"; check "p9 manual: the CEO refuses with a reason: back to Open and the whole chain starts again" '.success and .data.statusValue == 1'
+as "$AUD_TOKEN" GET audit/findings/$P9FM; check "p9 manual: the refusal and its reason are in the history of the finding" '.success and ([.data.events[]|select(.kind == "refused")]|length) == 1 and ([.data.events[]|select(.kind == "refused")][0].note|contains("مدیرعامل"))'
+
+# --- the weekly report: counts agree with the status, the score covers the clauses of the catalogue, the report is stored once and sealed
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 56'
+P9OPEN=$(val .data.open); P9OVER=$(val .data.overdue)
+as "$WH_TOKEN" POST audit/reports '{"kind":2}'; no "p9 report: the storekeeper does not generate a report"
+as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: the weekly report goes to PMO and QA; its counts equal the status; one finding was closed and one recurred; every severity and status adds up; the score covers every clause of the catalogue; sealed with SHA-256" ".success and .data.kindValue == 2 and .data.recipients == \"PMO,QA\" and (.data.sha256|length) == 64 and .data.narrativeSource == \"template\" and (.data.narrative|length) > 20 and (.data.content|.open == $P9OPEN and .overdue == $P9OVER and .open == (.openMajor + .openMinor + .openObservation) and .newInPeriod == (.newMajor + .newMinor + .newObservation) and .closedInPeriod == 1 and .recurrences == 1 and ([.byStatus[].count]|add) == .open and ([.byProcess[].count]|add) == .open and .rulesTotal == 56 and .rulesEnabled == 56 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 56 and (.scores|map(.met + .["not"])|add) == 56)"
+P9REP=$(val .data.id); P9REPH=$(val .data.sha256)
+as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: asking again for the same week returns the stored report (same id and same hash): reports never change" ".success and .data.id == $P9REP and .data.sha256 == \"$P9REPH\""
+as "$PMO2_TOKEN" GET "audit/reports?kind=2"; check "p9 report: the PMO manager lists exactly one weekly report" ".success and (.data|length) == 1 and .data[0].id == $P9REP"
+as "$CEO_TOKEN" GET audit/reports/$P9REP; check "p9 report: the CEO reads it" ".success and .data.id == $P9REP"
+as "$QA_TOKEN" POST audit/reports '{"kind":9}'; no "p9 report: an unknown kind is refused"
+
+# --- the audit chain holds the new records and still fits
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusReport&EntityId=$P9REP&PageSize=0"; check "p9 chain: the report has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusProgram&EntityId=$P9PG&PageSize=0"; check "p9 chain: the programme has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET finance/audit/verify; check "p9 chain: the whole hash chain still fits after the audit records" '.success and .data.ok == true'
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

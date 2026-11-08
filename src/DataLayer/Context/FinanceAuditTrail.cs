@@ -416,6 +416,7 @@ namespace DataLayer.Context
             AddSpecialProcess();      // package C: special process types, qualifications, runs, supplier approvals, material specifications, certificate values (FinanceAuditTrail.SpecialProcess.cs)
             AddDesignControl();       // package A1: design plans, inputs, reviews, findings (FinanceAuditTrail.DesignControl.cs)
             AddEngChange();           // package A2: engineering change requests and orders, impact snapshot, dispositions, tasks (FinanceAuditTrail.EngChange.cs)
+            AddAuditSeat();           // package 9: audit programme, runs, findings, reports, process audits (FinanceAuditTrail.AuditSeat.cs)
             var more = new Dictionary<Type, string[]>
             {
                 { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },
