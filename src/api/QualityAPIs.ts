@@ -1,4 +1,4 @@
-import { call, clean } from "@/api/ApiClient";
+import { call, clean, fileErrorText, http, saveBlob } from "@/api/ApiClient";
 
 // Quality module, QC and QA (api/v1/quality/...): ITP, inspection records, test reports, calibration, personnel and welding,
 // material certificates, CAPA, complaints, audits, management review, release notes, document control and settings.
@@ -151,3 +151,54 @@ export const saveRevision = (dto: any) => call("post", base + "documents/revisio
 export const revisionAction = (id: number, action: string, extra: any = {}) => call("post", base + "documents/revisions/action", { id, action, ...extra });
 export const getRetention = () => call("get", base + "retention");
 export const saveRetention = (dto: any) => call("post", base + "retention", dto);
+
+// Package B (inspection and release integrity): characteristic lists of the drawing revisions, «بدون نقشه» flags, first article inspection, as-built record («پیکربندی ساخته‌شده»)
+export const getCharLists = (params: any) => call("get", base + "characteristics/lists", undefined, clean(params));
+export const getCharList = (id: number) => call("get", base + "characteristics/lists/" + id);
+/** The latest list of a drawing revision (404 text when none is prepared yet). */
+export const getCharListForRevision = (revisionId: number) => call("get", base + "characteristics/for-revision/" + revisionId);
+/** The in-force drawings of a part with the lines of their released lists: what a QC form picks from. */
+export const getPartCharacteristics = (itemId: number) => call("get", base + "characteristics/for-item/" + itemId);
+/** dto { id?, revisionId, reason?, items: [{ no, name, nominal, tolPlus, tolMinus, unit, class (1 critical, 2 major, 3 minor), instrumentClass, method, samplePercent?, operationSeq?, stageCode2? }], rowVersion? } */
+export const saveCharList = (dto: any) => call("post", base + "characteristics/lists", dto);
+/** action: submit, return (note), approve, void (note). A second person approves; the list is released together with the drawing revision. */
+export const charListAction = (id: number, action: string, note?: string, rowVersion?: string) => call("post", base + "characteristics/lists/action", { id, action, note: note || null, rowVersion: rowVersion || null });
+export const importCharacteristics = (fields: Record<string, any>, file: File) => {
+  const form = new FormData();
+  const sent = clean(fields);
+  Object.keys(sent).forEach((k) => form.append(k, String(sent[k])));
+  form.append("file", file);
+  return call("post", base + "characteristics/import", form);
+};
+async function download(url: string, name: string): Promise<string | null> {
+  try {
+    const response = await http.get(url, { responseType: "blob" });
+    const type = response.headers["content-type"] || "";
+    if (type.includes("application/json")) return JSON.parse(await (response.data as Blob).text()).message || "خطا";
+    saveBlob(response.data, name);
+    return null;
+  } catch (error: any) {
+    return fileErrorText(error);
+  }
+}
+export const downloadCharTemplate = () => download(base + "characteristics/template", "characteristics-template.xlsx");
+export const downloadCharList = (id: number) => download(base + `characteristics/lists/${id}/export`, `characteristics-${id}.xlsx`);
+
+export const getNoDrawingFlags = (params: any) => call("get", base + "no-drawing", undefined, clean(params));
+export const requestNoDrawing = (itemId: number, reason: string) => call("post", base + "no-drawing/request", { itemId, reason });
+/** action: approve, reject (note), void (note). A second person activates the flag. */
+export const noDrawingAction = (id: number, action: string, note?: string) => call("post", base + "no-drawing/action", { id, action, note: note || null });
+
+export const getFirstArticles = (params: any) => call("get", base + "first-articles", undefined, clean(params));
+export const getFirstArticle = (id: number) => call("get", base + "first-articles/" + id);
+export const getFirstArticleByOrder = (productionOrderId: number) => call("get", base + "first-articles/by-order/" + productionOrderId);
+export const startFirstArticle = (productionOrderId: number) => call("post", base + "first-articles/start", { productionOrderId });
+/** measurements: [{ characteristicId, measured, equipmentId }] for EVERY characteristic of the list. */
+export const measureFirstArticle = (id: number, measurements: any[], note?: string) => call("post", base + "first-articles/measure", { id, measurements, note: note || null });
+/** action: qc-accept, qa-approve, reject (note), void (note): measurer, QC acceptor and QA approver are three different persons. */
+export const firstArticleAction = (id: number, action: string, note?: string) => call("post", base + "first-articles/action", { id, action, note: note || null });
+
+export const getAsBuiltList = (params: any) => call("get", base + "as-built", undefined, clean(params));
+export const getAsBuilt = (id: number) => call("get", base + "as-built/" + id);
+export const getAsBuiltBySerial = (serial: string, itemId?: number) => call("get", base + "as-built/by-serial", undefined, clean({ serial, itemId }));
+export const reissueAsBuilt = (id: number, reason: string) => call("post", base + "as-built/reissue", { id, reason });

@@ -7,7 +7,7 @@ import { useRoute, useRouter } from "vue-router";
 import DocAttach from "@/components/quality/DocAttach.vue";
 import WorkOrderSelect from "@/components/quality/WorkOrderSelect.vue";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
-import { getEquipmentList, getItpByWorkOrder, getQcRecord, saveQcRecord } from "@/api/QualityAPIs";
+import { getEquipmentList, getItpByWorkOrder, getPartCharacteristics, getQcRecord, saveQcRecord } from "@/api/QualityAPIs";
 import { getLots } from "@/api/InventoryAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, num, ok, today } from "@/composables/inventory";
@@ -44,12 +44,39 @@ function blank() {
   };
 }
 
+// Package B (H5): the characteristics come from the released list of the part's drawing revision; the inspector picks one and types only the measured value (nominal, tolerances and unit are the list's)
+const part = ref<any>(null);
+const lines = computed<any[]>(() => part.value?.lines || []);
+const lineOf = (m: any) => lines.value.find((l: any) => l.id === m.characteristicId);
 const needsMeasurements = computed(() => rec.value && [3, 4].includes(rec.value.type));
 const pass = (m: any) => {
-  const measured = Number(m.measured), nominal = Number(m.nominal);
-  if (m.measured === "" || m.measured === null || isNaN(measured)) return null;
-  return measured >= nominal - Number(m.tolMinus || 0) && measured <= nominal + Number(m.tolPlus || 0);
+  const l = lineOf(m);
+  const measured = Number(m.measured);
+  if (!l || m.measured === "" || m.measured === null || isNaN(measured)) return null;
+  return measured >= l.lower && measured <= l.upper;
 };
+const equipmentFor = (m: any) => {
+  const l = lineOf(m);
+  return !l || l.instrumentClass === 99 ? equipment.value : equipment.value.filter((e: any) => e.type === l.instrumentClass);
+};
+async function loadPart() {
+  part.value = null;
+  rec.value.measurements = [];
+  if (!item.value) return;
+  const [data, error] = await getPartCharacteristics(item.value.id);
+  if (error) return fail(error);
+  part.value = data;
+  rec.value.drawingNumber = (data.drawings || []).map((d: any) => d.number).join("، ");
+  rec.value.drawingRevision = (data.drawings || []).map((d: any) => d.revisionCode).join("، ");
+}
+/** every required characteristic (critical, major, sampled), as many rows as the sampling asks for the quantity of the record */
+function addRequired() {
+  const qty = Math.max(1, Math.ceil(Number(rec.value.quantity) || 1));
+  for (const l of lines.value.filter((x: any) => x.required)) {
+    const n = Math.max(1, Math.ceil((qty * (l.samplePercent || 100)) / 100));
+    for (let i = 0; i < n; i++) rec.value.measurements.push({ characteristicId: l.id, measured: null, equipmentId: null });
+  }
+}
 const failedCount = computed(() => (rec.value?.measurements || []).filter((m: any) => (isNew ? pass(m) === false : m.pass === false)).length);
 
 async function loadActivities() {
@@ -68,7 +95,7 @@ async function loadLots() {
 }
 
 function addMeasurement() {
-  rec.value.measurements.push({ characteristic: "", nominal: 0, tolPlus: 0, tolMinus: 0, measured: null, unit: "mm", equipmentId: null });
+  rec.value.measurements.push({ characteristicId: null, measured: null, equipmentId: null });
 }
 
 async function save() {
@@ -81,10 +108,7 @@ async function save() {
     itpActivityId: r.itpActivityId || null,
     lotId: r.lotId || null,
     measurements: r.measurements.map((m: any) => ({
-      ...m,
-      nominal: Number(m.nominal) || 0,
-      tolPlus: Number(m.tolPlus) || 0,
-      tolMinus: Number(m.tolMinus) || 0,
+      characteristicId: m.characteristicId || null,
       measured: Number(m.measured) || 0,
       equipmentId: m.equipmentId || null,
     })),
@@ -160,7 +184,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-4">
           <label class="form-label small mb-0">کالا / قطعه</label>
-          <ItemPicker v-if="isNew" v-model="item" @select="loadLots" />
+          <ItemPicker v-if="isNew" v-model="item" @select="(loadLots(), loadPart())" />
           <div v-else class="small pt-1"><span class="inv-ltr">{{ rec.itemCode }}</span> {{ rec.itemTitle }}</div>
         </div>
         <div class="col-md-2">
@@ -171,8 +195,8 @@ onMounted(async () => {
         <div class="col-md-3"><label class="form-label small mb-0">سریال</label><input v-model="rec.serialNumber" :disabled="!isNew" class="form-control form-control-sm inv-ltr" /></div>
         <div class="col-md-1"><label class="form-label small mb-0">تعداد</label><input v-model.number="rec.quantity" :disabled="!isNew" class="form-control form-control-sm" type="number" /></div>
         <div class="col-md-3"><label class="form-label small mb-0">عملیات / مرحله</label><input v-model="rec.operation" :disabled="!isNew" class="form-control form-control-sm" /></div>
-        <div class="col-md-3"><label class="form-label small mb-0">شماره نقشه</label><input v-model="rec.drawingNumber" :disabled="!isNew" class="form-control form-control-sm inv-ltr" /></div>
-        <div class="col-md-2"><label class="form-label small mb-0">بازنگری نقشه</label><input v-model="rec.drawingRevision" :disabled="!isNew" class="form-control form-control-sm inv-ltr" /></div>
+        <div class="col-md-3"><label class="form-label small mb-0">شماره نقشه (از مدارک مهندسی)</label><input v-model="rec.drawingNumber" disabled class="form-control form-control-sm inv-ltr" /></div>
+        <div class="col-md-2"><label class="form-label small mb-0">بازنگری نقشه</label><input v-model="rec.drawingRevision" disabled class="form-control form-control-sm inv-ltr" /></div>
         <div class="col-md-4"><label class="form-label small mb-0">پیوست</label><DocAttach v-model="rec.attachmentDocumentId" :disabled="!isNew" title="پیوست بازرسی" /></div>
         <div class="col-md-12"><label class="form-label small mb-0">توضیح</label><input v-model="rec.note" :disabled="!isNew" class="form-control form-control-sm" /></div>
       </div>
@@ -181,38 +205,46 @@ onMounted(async () => {
       <p v-if="isNew" class="inv-muted small mt-1 mb-0">{{ dateHint }}</p>
     </div>
 
-    <div v-if="needsMeasurements || rec.measurements.length" class="inv-card">
+    <div v-if="needsMeasurements || rec.measurements.length || lines.length" class="inv-card">
       <div class="inv-toolbar">
         <h2 class="inv-title">اندازه‌گیری‌ها <span v-if="failedCount" class="inv-badge bad ms-2">{{ failedCount }} مورد خارج از تلرانس</span></h2>
-        <button v-if="isNew" class="btn btn-sm btn-outline-primary" @click="addMeasurement">ردیف جدید</button>
+        <div v-if="isNew" class="d-flex gap-2">
+          <button :disabled="!lines.length" class="btn btn-sm btn-outline-secondary" @click="addRequired">افزودن همه مشخصه‌های الزامی</button>
+          <button :disabled="!lines.length" class="btn btn-sm btn-outline-primary" @click="addMeasurement">ردیف جدید</button>
+        </div>
       </div>
+      <p v-if="isNew && item && part && !lines.length" class="text-danger small">{{ part.message }} اندازه‌گیری با نام و تلرانس دستی پذیرفته نمی‌شود.</p>
       <div class="table-responsive">
         <table class="table table-sm">
-          <thead><tr><th>مشخصه</th><th>اسمی</th><th>+ تلرانس</th><th>− تلرانس</th><th>اندازه‌گیری‌شده</th><th>واحد</th><th>تجهیز</th><th>نتیجه</th><th></th></tr></thead>
+          <thead><tr><th>مشخصه (از فهرست نقشه)</th><th>اسمی</th><th>حدود</th><th>اندازه‌گیری‌شده</th><th>واحد</th><th>تجهیز</th><th>نتیجه</th><th></th></tr></thead>
           <tbody>
-            <tr v-if="!rec.measurements.length"><td colspan="9" class="text-center inv-muted">ردیفی نیست.</td></tr>
+            <tr v-if="!rec.measurements.length"><td colspan="8" class="text-center inv-muted">ردیفی نیست.</td></tr>
             <tr v-for="(m, i) in rec.measurements" :key="i">
               <template v-if="isNew">
-                <td><input v-model="m.characteristic" class="form-control form-control-sm" /></td>
-                <td><input v-model="m.nominal" class="form-control form-control-sm inv-ltr" type="number" step="any" /></td>
-                <td><input v-model="m.tolPlus" class="form-control form-control-sm inv-ltr" type="number" step="any" min="0" /></td>
-                <td><input v-model="m.tolMinus" class="form-control form-control-sm inv-ltr" type="number" step="any" min="0" /></td>
+                <td>
+                  <select v-model="m.characteristicId" class="form-select form-select-sm" @change="m.equipmentId = null">
+                    <option :value="null">— انتخاب —</option>
+                    <option v-for="l in lines" :key="l.id" :value="l.id">{{ l.no }} — {{ l.name }} ({{ l.classText }})</option>
+                  </select>
+                </td>
+                <td class="inv-ltr">{{ lineOf(m) ? num(lineOf(m).nominal) : "" }}</td>
+                <td class="inv-ltr small">{{ lineOf(m) ? num(lineOf(m).lower) + " … " + num(lineOf(m).upper) : "" }}</td>
                 <td><input v-model="m.measured" class="form-control form-control-sm inv-ltr" type="number" step="any" /></td>
-                <td><input v-model="m.unit" class="form-control form-control-sm inv-ltr" style="width: 70px" /></td>
+                <td class="inv-ltr">{{ lineOf(m)?.unit }}</td>
                 <td>
                   <select v-model="m.equipmentId" class="form-select form-select-sm">
                     <option :value="null">-</option>
-                    <option v-for="e in equipment" :key="e.id" :value="e.id">{{ e.code }} - {{ e.name }}</option>
+                    <option v-for="e in equipmentFor(m)" :key="e.id" :value="e.id">{{ e.code }} - {{ e.name }}</option>
                   </select>
+                  <span v-if="lineOf(m) && lineOf(m).instrumentClass !== 99" class="small inv-muted">{{ lineOf(m).instrumentText }}</span>
                 </td>
                 <td><span v-if="pass(m) !== null" :class="pass(m) ? 'ok' : 'bad'" class="inv-badge">{{ pass(m) ? "قبول" : "رد" }}</span></td>
                 <td><button class="btn btn-sm btn-outline-danger" @click="rec.measurements.splice(i, 1)">حذف</button></td>
               </template>
               <template v-else>
-                <td>{{ m.characteristic }}</td>
+                <td><span class="inv-ltr">{{ m.characteristicNo }}</span> {{ m.characteristic }}</td>
                 <td class="inv-ltr">{{ num(m.nominal) }}</td>
-                <td class="inv-ltr">+{{ num(m.tolPlus) }}</td>
-                <td class="inv-ltr">-{{ num(m.tolMinus) }}</td>
+                <td class="inv-ltr small">+{{ num(m.tolPlus) }} / -{{ num(m.tolMinus) }}</td>
                 <td class="inv-ltr">{{ num(m.measured) }}</td>
                 <td class="inv-ltr">{{ m.unit }}</td>
                 <td class="inv-ltr">{{ m.equipmentCode }}</td>
@@ -223,7 +255,7 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
-      <p v-if="isNew" class="inv-muted mb-0">نتیجه هر ردیف را سرور هنگام ثبت محاسبه می‌کند؛ نمایش بالا فقط پیش‌نمایش است. بازرسی ابعادی و نمونه اول حداقل یک ردیف لازم دارد.</p>
+      <p v-if="isNew" class="inv-muted mb-0">نتیجه هر ردیف را سرور از حدود فهرست منتشرشده نقشه محاسبه می‌کند؛ نمایش بالا فقط پیش‌نمایش است. «قبول» فقط وقتی ثبت می‌شود که همه مشخصه‌های الزامی (بحرانی، عمده یا دارای نمونه‌برداری) به تعداد لازم و داخل تلرانس اندازه‌گیری شده باشند و ابزار از کلاس لازم و کالیبره باشد.</p>
     </div>
   </div>
 </template>

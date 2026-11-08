@@ -2,9 +2,10 @@
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import DataBookPrint from "@/components/quality/print/DataBookPrint.vue";
+import AsBuiltPrint from "@/components/quality/print/AsBuiltPrint.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { getDataBook } from "@/api/QualityAPIs";
+import { getAsBuilt, getAsBuiltList, getDataBook } from "@/api/QualityAPIs";
 import { downloadFile } from "@/api/InventoryAPIs";
 import { fail, printPage } from "@/composables/inventory";
 
@@ -13,13 +14,25 @@ const route = useRoute();
 const workOrderId = Number(route.params.workOrderId);
 const variant = ref<"company" | "client">("company");
 const book = ref<any>(null);
+// Package B: the as-built record of every released unit is printed with the data book (section 12)
+const asBuilt = ref<any[]>([]);
+async function loadAsBuilt() {
+  const [list] = await getAsBuiltList({ WorkOrderId: workOrderId, PageSize: 100 });
+  const rows = Array.isArray(list) ? list : list?.data || [];
+  const full: any[] = [];
+  for (const r of rows) {
+    const [one] = await getAsBuilt(r.id);
+    if (one) full.push(one);
+  }
+  asBuilt.value = full;
+}
 async function doPrint() {
   await nextTick();
   printForm();
 }
 const kindNames: Record<string, string> = {
   Itp: "برنامه بازرسی", ItpActivity: "فعالیت ITP", TestReport: "گزارش آزمون", QcRecord: "سابقه بازرسی", Ncr: "عدم انطباق", ReleaseNote: "برگه ترخیص",
-  MaterialCertificate: "گواهی مواد", WeldLog: "گزارش جوشکاری", Wps: "WPS", Pqr: "PQR", Qualification: "گواهی صلاحیت", Equipment: "گواهی کالیبراسیون",
+  MaterialCertificate: "گواهی مواد", AsBuilt: "پیکربندی ساخته‌شده", Mdr: "مدرک مهندسی", WeldLog: "گزارش جوشکاری", Wps: "WPS", Pqr: "PQR", Qualification: "گواهی صلاحیت", Equipment: "گواهی کالیبراسیون",
 };
 const total = computed(() => (book.value?.sections || []).reduce((n: number, s: any) => n + s.entries.length, 0));
 
@@ -37,16 +50,18 @@ const route2 = (e: any) => {
     case "QcRecord": return { name: "QualityRecordEdit", params: { id: e.sourceId } };
     case "Ncr": return { name: "InventoryNcrEdit", params: { id: e.sourceId } };
     case "ReleaseNote": return { name: "QualityReleaseNoteEdit", params: { id: e.sourceId } };
+    case "AsBuilt": return { name: "QualityAsBuilt", query: { id: e.sourceId } };
     default: return null;
   }
 };
 
-onMounted(load);
+onMounted(() => { load(); loadAsBuilt(); });
 </script>
 
 <template>
   <div v-if="book" class="inv-page">
     <DataBookPrint :book="book" :variant="variant" />
+    <AsBuiltPrint v-for="a in asBuilt" :key="a.id" :rec="a" />
     <div class="inv-card">
       <div class="inv-toolbar">
         <div>
@@ -60,7 +75,8 @@ onMounted(load);
             <button :class="variant === 'client' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="(variant = 'client'), load()">نسخه کارفرما</button>
           </div>
           <router-link :to="{ name: 'QualityReleaseNotes', query: { workOrderId } }" class="btn btn-sm btn-outline-secondary">برگه‌های ترخیص</router-link>
-          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ فهرست مطالب</button>
+          <router-link :to="{ name: 'QualityAsBuilt', query: { workOrderId } }" class="btn btn-sm btn-outline-secondary">پیکربندی ساخته‌شده</router-link>
+          <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ فهرست مطالب و پیکربندی ساخته‌شده</button>
         </div>
       </div>
       <div v-for="s in book.sections" :key="s.no" class="mb-3">

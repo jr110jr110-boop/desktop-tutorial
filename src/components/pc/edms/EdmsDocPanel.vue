@@ -142,6 +142,7 @@ onMounted(async () => {
                   </div>
                 </td>
                 <td class="text-nowrap">
+                  <router-link :to="{ name: 'QualityCharacteristicEdit', params: { id: 'new' }, query: { revisionId: r.id } }" class="btn btn-sm btn-outline-secondary me-1 mb-1">فهرست مشخصه‌ها</router-link>
                   <template v-for="a in r.actions" :key="a"><button v-if="actionText[a] && a !== 'add-file' && a !== 'remove-file'" class="btn btn-sm me-1 mb-1" :class="a === 'reject' || a === 'obsolete' ? 'btn-outline-danger' : 'btn-outline-primary'" :disabled="busy" @click="act(r, a)">{{ actionText[a] }}</button></template>
                 </td>
               </tr>
