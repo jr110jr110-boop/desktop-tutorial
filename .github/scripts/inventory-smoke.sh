@@ -11491,7 +11491,7 @@ TOKEN=$ADMIN_TOKEN
 # Placed before the PB2 fix round on purpose: it receives and issues stock of an item of its own (PB8I) and uses no other item, so no figure of the PB2 fix round moves.
 TOKEN=$ADMIN_TOKEN
 OPS=opsdata
-item PB8I "{\"code\":\"01003010060188\",\"title\":\"کالای آزمون کنترل داده\",\"unit\":\"عدد\",\"trackingMode\":0,\"weight\":10,\"requiresIncomingInspection\":false}" "pb8 data-control item (unit weight 10 kg)"
+item PB8I "{\"code\":\"77.10.05.053.1\",\"title\":\"کالای آزمون کنترل داده\",\"unit\":\"عدد\",\"trackingMode\":0,\"weight\":10,\"requiresIncomingInspection\":false}" "pb8 data-control item (unit weight 10 kg)"
 # receipt 1: 100 pieces, the scale says 1200 kg, the item weight says 1000 kg: +20 %, between the warning (10) and the block (100) thresholds
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":100,\"unitPrice\":100000,\"weighedWeightKg\":1200}]}"; check "pb8 gate: the receipt with 1200 kg weighed for 100 pieces of 10 kg shows exactly one finding, the weight warning, in the form" '.success and (.data.opsFindings|length) == 1 and .data.opsFindings[0].ruleCode == "R-RCV-WEIGHT" and .data.opsFindings[0].severity == 1'
 PB8R1=$(val .data.id)
@@ -11528,7 +11528,7 @@ call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=r
 # the baseline of a project is its latest PB2 material-balance run (raw materials, scrap, conversions, substitutes included), not the raw BOM lines: PBWO must have a run, and the run does not contain PB8I
 as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest
 if [ "$(jq -r '.success' "$B")" != "true" ]; then as "$PLAN_TOKEN" POST $PBL/run "{\"workOrderId\":$PBWO}"; check "pb8 baseline: the project PBWO had no balance run yet: the planner runs it" '.success'; fi
-as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest; check "pb8 baseline: the project PBWO has a balance run and 01003010060188 is not one of its lines" '.success and .data.lineCount == (.data.lines|length) and ([.data.lines[]|select(.itemCode == "01003010060188")]|length) == 0'
+as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest; check "pb8 baseline: the project PBWO has a balance run and 77.10.05.053.1 is not one of its lines" '.success and .data.lineCount == (.data.lines|length) and ([.data.lines[]|select(.itemCode == "77.10.05.053.1")]|length) == 0'
 call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"workOrderId\":$PBWO,\"warehouseId\":$W1,\"purpose\":\"آزمون مطابقت با خط‌مبنا\",\"lines\":[{\"itemId\":$PB8I,\"quantity\":5}]}"; check "pb8 baseline: the material request of an item that is not in the project BOM is saved" '.success and .data.id > 0'
 PB8MR=$(val .data.id)
 call POST inventory/material-requests/action "{\"id\":$PB8MR,\"action\":\"submit\"}"; check "pb8 baseline: the request is submitted" '.success'
