@@ -87,6 +87,28 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne(x => x.Revision).WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
             });
+            // P2 part B: live monitoring
+            builder.Entity<MfMachineMonitor>(b =>
+            {
+                b.ToTable("MfMachineMonitors");
+                b.HasIndex(x => x.MachineId).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.Host).HasMaxLength(Name);
+                b.Property(x => x.LastError).HasMaxLength(Text);
+                b.Property(x => x.LastProgramName).HasMaxLength(Name);
+                b.Property(x => x.MismatchAlertOpen).HasMaxLength(20);
+                b.Property(x => x.Note).HasMaxLength(Text);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfMachineStateEvent>(b =>
+            {
+                b.ToTable("MfMachineStateEvents");
+                b.HasIndex(x => new { x.MachineId, x.StartAt });
+                b.HasIndex(x => new { x.MachineId, x.EndAt });
+                b.Property(x => x.AlarmCode).HasMaxLength(Code);
+                b.Property(x => x.AlarmText).HasMaxLength(Text);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfMaintenanceRequest>().WithMany().HasForeignKey(x => x.MaintenanceRequestId).OnDelete(DeleteBehavior.Restrict);
+            });
             builder.Entity<MfNcRun>(b =>
             {
                 b.ToTable("MfNcRuns");

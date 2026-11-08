@@ -234,6 +234,8 @@ namespace IocConfig
             // production P2 part A: DNC (program library, transfers to the machines, runs)
             services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfNcLinkFactory, Services.NasbNiro.Production.Dnc.MfNcLinkFactory>();
             services.AddScoped<Services.NasbNiro.Production.Dnc.IMfDncService, Services.NasbNiro.Production.Dnc.MfDncService>();
+            services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfModbusReader, Services.NasbNiro.Production.Dnc.ModbusTcpReader>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfMonitorService, Services.NasbNiro.Production.Dnc.MfMonitorService>();
             services.AddHostedService<Services.NasbNiro.Production.Dnc.MfDncHostedService>();
             // sales (release S1 part A)
             services.AddScoped<Services.NasbNiro.Sales.ISlCrmService, Services.NasbNiro.Sales.SlCrmService>();

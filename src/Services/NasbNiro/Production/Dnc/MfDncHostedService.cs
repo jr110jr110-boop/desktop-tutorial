@@ -9,8 +9,8 @@ using Microsoft.Extensions.Logging;
 namespace Services.NasbNiro.Production.Dnc
 {
     /// <summary>
-    /// Delivers the queued transfers of the server-driven links (network folder, FTP, serial converter) every few seconds and fetches the programs asked back from the machines. Offline: only machines on the LAN.
-    /// Switch: the same Production:Jobs=false as the nightly production jobs (the smoke test runs the queue itself with POST dnc/transfers/run-pending). Interval: Dnc:PollSeconds (default 10).
+    /// Delivers the queued transfers of the server-driven links (network folder, FTP, serial converter) every few seconds and fetches the programs asked back from the machines; then polls the live monitoring (P2 part B). Offline: only machines on the LAN.
+    /// Switch: the same Production:Jobs=false as the nightly production jobs (the smoke test runs the queue itself with POST dnc/transfers/run-pending). Loop interval: Dnc:PollSeconds (default 2; each monitor keeps its own poll interval, 10 s unless set).
     /// A failure is logged and the loop goes on; it never stops the host.
     /// </summary>
     public class MfDncHostedService : BackgroundService
@@ -28,7 +28,7 @@ namespace Services.NasbNiro.Production.Dnc
 
         private bool Enabled => !string.Equals(_configuration?["Production:Jobs"], "false", StringComparison.OrdinalIgnoreCase);
 
-        private TimeSpan Interval => int.TryParse(_configuration?["Dnc:PollSeconds"], out int s) && s >= 2 && s <= 600 ? TimeSpan.FromSeconds(s) : TimeSpan.FromSeconds(10);
+        private TimeSpan Interval => int.TryParse(_configuration?["Dnc:PollSeconds"], out int s) && s >= 2 && s <= 600 ? TimeSpan.FromSeconds(s) : TimeSpan.FromSeconds(2);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -43,6 +43,15 @@ namespace Services.NasbNiro.Production.Dnc
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                 catch (Exception ex) { _logger?.LogWarning(ex, "DNC transfer job failed; it runs again shortly."); }
+                try
+                {
+                    // P2 part B: the live monitoring (each monitor is polled at its own interval; silent gateways go offline)
+                    using IServiceScope scope = _scopes.CreateScope();
+                    var m = await scope.ServiceProvider.GetRequiredService<IMfMonitorService>().PollAsync(stoppingToken);
+                    if (m.Changed > 0) _logger?.LogInformation("Monitor: {Changed} state changes, {Alarms} alarms, {Offline} offline", m.Changed, m.Alarms, m.Offline);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Machine monitoring poll failed; it runs again shortly."); }
                 try { await Task.Delay(Interval, stoppingToken); }
                 catch (OperationCanceledException) { return; }
             }

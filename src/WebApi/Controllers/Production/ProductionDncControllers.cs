@@ -107,6 +107,42 @@ namespace WebApi.Controllers
         public async Task<IActionResult> TerminalAsync([FromQuery] TerminalNcQuery query, CancellationToken ct) => Ok(await _dnc.GetTerminalAsync(query, ct));
     }
 
+    /// <summary>Live machine monitoring (P2 part B): settings per machine, the input test, the live board, the state periods and the measured utilisation.</summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/production/monitor")]
+    [RolesCheckedInService]
+    public class ProductionMonitorController : ControllerBase
+    {
+        private readonly IMfMonitorService _monitor;
+
+        public ProductionMonitorController(IMfMonitorService monitor)
+        {
+            _monitor = monitor;
+        }
+
+        [HttpGet("machines")]
+        public async Task<IActionResult> MachinesAsync([FromQuery] MachineMonitorQuery query, CancellationToken ct) => Ok((await _monitor.GetMonitorsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("machines")]
+        public async Task<IActionResult> SaveAsync([FromBody] SaveMachineMonitorDto dto, CancellationToken ct) => Ok(await _monitor.SaveMonitorAsync(dto, ct));
+
+        [HttpPost("machines/test")]
+        public async Task<IActionResult> TestAsync([FromBody] MachineIdDto dto, CancellationToken ct) => Ok(await _monitor.TestInputsAsync(dto, ct));
+
+        [HttpPost("poll")]
+        public async Task<IActionResult> PollAsync(CancellationToken ct) => Ok(await _monitor.RunPollAsync(ct));
+
+        [HttpGet("live")]
+        public async Task<IActionResult> LiveAsync([FromQuery] int? workCenterId, CancellationToken ct) => Ok(await _monitor.GetLiveAsync(workCenterId, ct));
+
+        [HttpGet("events")]
+        public async Task<IActionResult> EventsAsync([FromQuery] StateEventQuery query, CancellationToken ct) => Ok((await _monitor.GetEventsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("utilisation")]
+        public async Task<IActionResult> UtilisationAsync([FromQuery] UtilisationQuery query, CancellationToken ct) => Ok(await _monitor.GetUtilisationAsync(query, ct));
+    }
+
     /// <summary>
     /// For an edge box at a machine (pull: the server never connects to it). Headers X-Dnc-Machine (machine id) and X-Dnc-Key; a wrong machine, key or (for a gateway bound to addresses) source address gives 401.
     /// </summary>
@@ -115,10 +151,12 @@ namespace WebApi.Controllers
     public class ProductionDncGatewayController : ControllerBase
     {
         private readonly IMfDncService _dnc;
+        private readonly IMfMonitorService _monitor;
 
-        public ProductionDncGatewayController(IMfDncService dnc)
+        public ProductionDncGatewayController(IMfDncService dnc, IMfMonitorService monitor)
         {
             _dnc = dnc;
+            _monitor = monitor;
         }
 
         private string Machine => Request.Headers["X-Dnc-Machine"].ToString();
@@ -144,6 +182,11 @@ namespace WebApi.Controllers
         [HttpPost("jobs/result")]
         [AllowAnonymous]
         public async Task<IActionResult> ResultAsync([FromBody] GatewayResultDto dto, CancellationToken ct) => Answer(await _dnc.GatewayResultAsync(Machine, Key, Remote, dto, ct));
+
+        /// <summary>The state of the machine (P2 part B), pushed by the box whenever it changes and at least every poll interval.</summary>
+        [HttpPost("status")]
+        [AllowAnonymous]
+        public async Task<IActionResult> StatusAsync([FromBody] GatewayStatusDto dto, CancellationToken ct) => Answer(await _monitor.GatewayStatusAsync(Machine, Key, Remote, dto, ct));
 
         [HttpPost("upload")]
         [AllowAnonymous]
