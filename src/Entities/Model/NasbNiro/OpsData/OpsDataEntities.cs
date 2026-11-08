@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace Entities.Model.NasbNiro.OpsData
 {
@@ -71,6 +72,9 @@ namespace Entities.Model.NasbNiro.OpsData
         public int? ItemId { get; set; }
         public string ItemTitle { get; set; }
 
+        /// <summary>PB8 fix round: tells apart findings of the same rule on the same row and item (weight / quantity / price, typed price / history); null otherwise.</summary>
+        public string Field { get; set; }
+
         public string RuleCode { get; set; }
         public OpsSeverity Severity { get; set; }
         public OpsSource Source { get; set; }
@@ -113,7 +117,15 @@ namespace Entities.Model.NasbNiro.OpsData
         public string DocumentNumber { get; set; }
         public int? LineId { get; set; }
         public int? RowNumber { get; set; }
+
+        /// <summary>PB8 fix round: an exception is keyed by document + row + item + rule + field + value, not by the id of the line.</summary>
+        public int? ItemId { get; set; }
+        public string Field { get; set; }
         public string RuleCode { get; set; }
+
+        /// <summary>Concurrency token: two simultaneous decisions cannot both win.</summary>
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
 
         public decimal? EnteredValue { get; set; }
         public decimal? ReferenceValue { get; set; }
@@ -159,6 +171,10 @@ namespace Entities.Model.NasbNiro.OpsData
     /// </summary>
     public class OpsReadinessException : BaseEntity
     {
+        /// <summary>Concurrency token: a simultaneous PMO and CEO approval cannot leave the request pending forever.</summary>
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+
         public int WorkOrderId { get; set; }
         public int ProductId { get; set; }
 

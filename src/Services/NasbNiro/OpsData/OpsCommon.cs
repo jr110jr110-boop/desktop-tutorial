@@ -141,5 +141,8 @@ namespace Services.NasbNiro.OpsData
     {
         public OpsDocRef Doc { get; set; }
         public List<RuleFinding> Findings { get; set; } = new List<RuleFinding>();
+
+        /// <summary>The rule codes this evaluation looks at (null = all): findings of other rules on the same document are not superseded by it.</summary>
+        public HashSet<string> Scope { get; set; }
     }
 }

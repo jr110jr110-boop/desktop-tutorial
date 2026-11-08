@@ -86,6 +86,17 @@ namespace Services.NasbNiro.OpsData
         public decimal Floor { get; set; }
     }
 
+    /// <summary>
+    /// PB8 fix round (H5): the settings that switch a gate off or move its thresholds. A single user who can save them can bypass the exception (which needs two persons), so Package D's
+    /// "two-person change for security-relevant settings" mechanism is to be wired to this list at merge; PB8 builds no mechanism of its own.
+    /// </summary>
+    public static class OpsSettingKeys
+    {
+        public static IReadOnlyList<string> SecurityRelevant { get; } = OpsRuleCatalog.Defaults().Select(d => d.Key).ToList();
+
+        public static bool IsSecurityRelevant(string key) => key != null && (key.StartsWith(OpsRuleCatalog.KeyPrefix, StringComparison.Ordinal) || key.StartsWith("OpsReady.", StringComparison.Ordinal));
+    }
+
     public static class OpsRuleCatalog
     {
         public const string KeyPrefix = "OpsData.";
@@ -93,6 +104,9 @@ namespace Services.NasbNiro.OpsData
         public const string SeatRepeatCount = "OpsData.SeatRepeatCount";
         public const string SeatDayHours = "OpsData.SeatDayHours";
         public const string MasterSwitch = "OpsData.Enabled";
+
+        /// <summary>PB8 fix round: an approved exception for a running time (an operation that is still being worked) also covers entered hours up to the approved hours plus this margin (percent).</summary>
+        public const string ExceptionMargin = "OpsData.ExceptionMarginPercent";
 
         // ★ every default is an assumption the company confirms; the thresholds are loose enough for normal work and tight enough for a typo of a digit
         public static readonly IReadOnlyList<OpsRuleDef> All = new List<OpsRuleDef>
@@ -150,6 +164,7 @@ namespace Services.NasbNiro.OpsData
                     yield return new QualitySetting { Key = Key(r.Code, "Floor"), Value = r.Floor, Title = t + "کف (ریال یا دقیقه: زیر آن پیامی داده نمی‌شود)", Source = "★ پیشنهاد PMIS (کنترل داده عملیاتی)" };
             }
             yield return new QualitySetting { Key = MasterSwitch, Value = 1, Title = "کنترل داده عملیاتی: کلید کلی (۱=روشن، ۰=خاموش)", Source = "★ پیشنهاد PMIS (کنترل داده عملیاتی)" };
+            yield return new QualitySetting { Key = ExceptionMargin, Value = 25, Title = "استثنای زمان: ساعت تا این درصد بیش از ساعت تأییدشده هم پوشش داده می‌شود (عملیاتی که هنوز ادامه دارد)", Source = "★ پیشنهاد PMIS (کنترل داده عملیاتی)" };
             yield return new QualitySetting { Key = SeatLookbackDays, Value = 7, Title = "صندلی OPS-DATA: بازبینی سندهای تأییدشده در چند روز اخیر", Source = "★ تصمیم مدیرعامل ۱۴۰۵/۰۸/۱۷" };
             yield return new QualitySetting { Key = SeatRepeatCount, Value = 4, Title = "صندلی OPS-DATA: تکرار یک مقدار در این تعداد سند یک کاربر", Source = "★ پیشنهاد PMIS (کنترل داده عملیاتی)" };
             foreach (QualitySetting rd in OpsReadinessCatalog.Defaults()) yield return rd;
@@ -164,6 +179,7 @@ namespace Services.NasbNiro.OpsData
             if (key == null || !key.StartsWith(KeyPrefix, StringComparison.Ordinal)) return false;
             if (key == MasterSwitch) { min = 0; max = 1; return true; }
             if (key == SeatLookbackDays) { min = 1; max = 60; return true; }
+            if (key == ExceptionMargin) { min = 0; max = 100; return true; }
             if (key == SeatRepeatCount) { min = 3; max = 50; return true; }
             if (key == SeatDayHours) { min = 8; max = 24; return true; }
             string part = key.Substring(key.LastIndexOf('.') + 1);
@@ -205,6 +221,13 @@ namespace Services.NasbNiro.OpsData
         }
     }
 
+    /// <summary>The identity of a finding / exception inside one document.</summary>
+    public static class OpsKey
+    {
+        public static string Of(int? row, int? discriminator, int? itemId, string rule, string field) =>
+            (row?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + (discriminator?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + (itemId?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + rule + "|" + (field ?? string.Empty);
+    }
+
     public sealed class RuleFinding
     {
         public string RuleCode { get; set; }
@@ -222,8 +245,14 @@ namespace Services.NasbNiro.OpsData
         public int? ItemId { get; set; }
         public string ItemTitle { get; set; }
 
-        /// <summary>The key a finding and an exception are matched by.</summary>
-        public string Key => (LineId?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + RuleCode;
+        /// <summary>Tells apart two findings of the same rule on the same row and item (quantity / weight / price of the unit rule, typed price / history of the price rule).</summary>
+        public string Field { get; set; }
+
+        /// <summary>
+        /// The key a finding and an exception are matched by (PB8 fix round): the row number and item of the line, never the id of the line (a save recreates the lines), the rule and the field.
+        /// A finding that has no row (an operation, a lot, a person) keeps the number it was given as its discriminator.
+        /// </summary>
+        public string Key => OpsKey.Of(RowNumber, RowNumber.HasValue ? null : LineId, ItemId, RuleCode, Field);
     }
 
     public static class OpsRules
@@ -354,7 +383,7 @@ namespace Services.NasbNiro.OpsData
         /// <summary>R-PRD-TIME: the hours booked on an operation (setup or run) against the standard of the routing; the reference is never below the floor in hours.</summary>
         public static RuleFinding ProductionTime(OpsRuleSetting s, int? line, string operation, string kind, decimal actualHours, decimal plannedHours)
         {
-            if (s == null || !s.Enabled || plannedHours < 0) return null;
+            if (s == null || !s.Enabled || plannedHours <= 0) return null;   // no standard time = nothing to compare with (PB8 fix H4)
             decimal reference = Math.Max(plannedHours, s.Floor / 60m);
             if (reference <= 0 || actualHours <= reference) return null;
             decimal dev = Deviation(actualHours, reference).Value;
@@ -398,6 +427,8 @@ namespace Services.NasbNiro.OpsData
             decimal dev = book > 0 ? Math.Round(diff / book * 100m, 2) : 100m;
             OpsSeverity? sev = Classify(dev, s);
             if (sev == null) return null;
+            // an item without a cost, or without book stock, cannot be valued or measured in percent: it is told, never blocked
+            if (!value.HasValue || book <= 0) sev = OpsSeverity.Warning;
             string valueText = value.HasValue ? $" (ارزش اختلاف حدود {N(Math.Round(value.Value, 0))} ریال)" : string.Empty;
             string maskedText = value.HasValue ? " (ارزش اختلاف بالاست)" : string.Empty;
             return Make(OpsRuleCodes.CntVar, sev.Value, $"{Row(row)}«{title}»: شمارش {N(counted)} {unit} با موجودی دفتری {N(book)} {unit} {P(dev)}٪ اختلاف دارد{valueText}.",

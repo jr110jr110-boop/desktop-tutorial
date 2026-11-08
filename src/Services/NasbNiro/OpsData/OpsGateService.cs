@@ -107,19 +107,43 @@ namespace Services.NasbNiro.OpsData
             if (evaluation == null) return result;
             List<RuleFinding> findings = Effective(evaluation);
             OpsDocRef doc = evaluation.Doc;
+            // the stored finding of the same key gives the draft view its id (the form asks for the exception with it) and its exception
+            List<OpsFinding> stored = findings.Count == 0 ? new List<OpsFinding>()
+                : await _uow.Set<OpsFinding>().AsNoTracking().Where(f => !f.Deleted && f.DocumentType == doc.Type && f.DocumentId == doc.Id && f.Status != OpsFindingStatus.Superseded).ToListAsync(ct);
             List<OpsException> exceptions = findings.Any(f => f.Severity == OpsSeverity.Block)
                 ? await _uow.Set<OpsException>().AsNoTracking().Where(e => !e.Deleted && e.DocumentType == doc.Type && e.DocumentId == doc.Id && e.Status != OpsExceptionStatus.Rejected && e.Status != OpsExceptionStatus.Voided).ToListAsync(ct)
                 : new List<OpsException>();
+            decimal margin = exceptions.Count == 0 ? 0m : await MarginAsync(ct);
             foreach (RuleFinding f in findings)
             {
                 OpsFinding row = ToRow(doc, f, OpsSource.Gate);
                 OpsFindingDto dto = OpsMap.ToDto(row, Masked);
-                OpsException ex = exceptions.FirstOrDefault(e => e.LineId == f.LineId && e.RuleCode == f.RuleCode && OpsMap.Same(e.EnteredValue, f.Entered));
+                OpsFinding old = stored.FirstOrDefault(x => KeyOf(x) == f.Key);
+                if (old != null) dto.Id = old.Id;
+                OpsException ex = exceptions.FirstOrDefault(e => KeyOf(e) == f.Key && Covers(e, f, margin));
                 if (ex != null) dto.ExceptionId = ex.Id;
                 dto.ExceptionStatus = ex?.Status;
                 result.Add(dto);
             }
             return result;
+        }
+
+        internal static string KeyOf(OpsFinding r) => OpsKey.Of(r.RowNumber, r.RowNumber.HasValue ? null : r.LineId, r.ItemId, r.RuleCode, r.Field);
+        internal static string KeyOf(OpsException e) => OpsKey.Of(e.RowNumber, e.RowNumber.HasValue ? null : e.LineId, e.ItemId, e.RuleCode, e.Field);
+
+        /// <summary>The exception covers the entry: the same value, or (time that runs on, like the hours of a running operation) not beyond the approved value plus the margin.</summary>
+        internal static bool Covers(OpsException e, RuleFinding f, decimal marginPercent)
+        {
+            if (OpsMap.Same(e.EnteredValue, f.Entered)) return true;
+            if (f.RuleCode == OpsRuleCodes.PrdTime && e.EnteredValue.HasValue && f.Entered.HasValue)
+                return f.Entered.Value <= e.EnteredValue.Value * (1m + Math.Max(0m, marginPercent) / 100m);
+            return false;
+        }
+
+        private async Task<decimal> MarginAsync(CancellationToken ct)
+        {
+            IReadOnlyDictionary<string, decimal> all = await global::Services.NasbNiro.Quality.QualitySettingKeys.LoadAsync(_uow, ct);
+            return all != null && all.TryGetValue(OpsRuleCatalog.ExceptionMargin, out decimal m) ? m : 25m;
         }
 
         public async Task<List<OpsFindingDto>> StoredAsync(string documentType, int documentId, CancellationToken ct)
@@ -137,8 +161,8 @@ namespace Services.NasbNiro.OpsData
 
         private OpsFinding ToRow(OpsDocRef doc, RuleFinding f, OpsSource source) => new OpsFinding
         {
-            Unit = doc.Unit, DocumentType = doc.Type, DocumentId = doc.Id, DocumentNumber = doc.Number, LineId = f.LineId, RowNumber = f.RowNumber, ItemId = f.ItemId, ItemTitle = f.ItemTitle,
-            RuleCode = f.RuleCode, Severity = f.Severity, Source = source, Status = OpsFindingStatus.Open, Message = Cut(f.Message, 1000), MessageMasked = Cut(f.MessageMasked, 1000),
+            Unit = doc.Unit, DocumentType = doc.Type, DocumentId = doc.Id, DocumentNumber = doc.Number, LineId = f.RowNumber.HasValue ? null : f.LineId, RowNumber = f.RowNumber, ItemId = f.ItemId, ItemTitle = f.ItemTitle,
+            Field = f.Field, RuleCode = f.RuleCode, Severity = f.Severity, Source = source, Status = OpsFindingStatus.Open, Message = Cut(f.Message, 1000), MessageMasked = Cut(f.MessageMasked, 1000),
             EnteredValue = f.Entered, ReferenceValue = f.Reference, DeviationPercent = f.DeviationPercent, IsMoney = f.IsMoney, DetectedAt = DateTimeOffset.Now,
         };
 
@@ -158,10 +182,12 @@ namespace Services.NasbNiro.OpsData
 
             var seen = new HashSet<OpsFinding>();
             var uncovered = new List<RuleFinding>();
+            var selfApproved = new List<RuleFinding>();
             var rows = new List<(RuleFinding Rule, OpsFinding Row)>();
+            decimal margin = exceptions.Count == 0 ? 0m : await MarginAsync(ct);
             foreach (RuleFinding f in findings)
             {
-                OpsFinding row = existing.FirstOrDefault(e => e.LineId == f.LineId && e.RuleCode == f.RuleCode);
+                OpsFinding row = existing.FirstOrDefault(e => KeyOf(e) == f.Key);
                 if (row == null)
                 {
                     row = ToRow(doc, f, OpsSource.Gate);
@@ -180,22 +206,24 @@ namespace Services.NasbNiro.OpsData
                 rows.Add((f, row));
 
                 if (f.Severity != OpsSeverity.Block) continue;
-                OpsException approved = exceptions.FirstOrDefault(e => e.Status == OpsExceptionStatus.Approved && e.LineId == f.LineId && e.RuleCode == f.RuleCode && OpsMap.Same(e.EnteredValue, f.Entered));
+                OpsException approved = exceptions.FirstOrDefault(e => e.Status == OpsExceptionStatus.Approved && KeyOf(e) == f.Key && Covers(e, f, margin));
                 if (approved != null)
                 {
+                    // the supervisor who approved the exception is a second pair of eyes; he cannot also be the one who passes the entry
+                    if (me != 0 && approved.DecidedByUserId == me) { selfApproved.Add(f); uncovered.Add(f); continue; }
                     row.ExceptionId = approved.Id;
                     if (approved.UsedAt == null) approved.UsedAt = now;
                     continue;
                 }
-                OpsException pending = exceptions.FirstOrDefault(e => e.Status == OpsExceptionStatus.Pending && e.LineId == f.LineId && e.RuleCode == f.RuleCode && OpsMap.Same(e.EnteredValue, f.Entered));
+                OpsException pending = exceptions.FirstOrDefault(e => e.Status == OpsExceptionStatus.Pending && KeyOf(e) == f.Key && Covers(e, f, margin));
                 if (pending != null) row.ExceptionId = pending.Id;
                 uncovered.Add(f);
             }
             // an approved exception whose value changed no longer covers the entry
-            foreach (OpsException e in exceptions.Where(e => e.Status == OpsExceptionStatus.Approved && !findings.Any(f => f.LineId == e.LineId && f.RuleCode == e.RuleCode && OpsMap.Same(f.Entered, e.EnteredValue))))
-                if (findings.Any(f => f.LineId == e.LineId && f.RuleCode == e.RuleCode)) e.Status = OpsExceptionStatus.Voided;
-            // findings of this gate that no longer fire are superseded
-            foreach (OpsFinding old in existing.Where(e => !seen.Contains(e) && e.Status == OpsFindingStatus.Open && e.Source == OpsSource.Gate))
+            foreach (OpsException e in exceptions.Where(e => e.Status == OpsExceptionStatus.Approved && !findings.Any(f => f.Key == KeyOf(e) && Covers(e, f, margin))))
+                if (findings.Any(f => f.Key == KeyOf(e))) e.Status = OpsExceptionStatus.Voided;
+            // findings of this gate that no longer fire are superseded (only the rules this evaluation looks at: the production gate and the QC decision share one document)
+            foreach (OpsFinding old in existing.Where(e => !seen.Contains(e) && e.Status == OpsFindingStatus.Open && e.Source == OpsSource.Gate && (evaluation.Scope == null || evaluation.Scope.Contains(e.RuleCode))))
             {
                 old.Status = OpsFindingStatus.Superseded; old.ModifierUserId = me; old.ModifyDate = now;
             }
@@ -207,6 +235,7 @@ namespace Services.NasbNiro.OpsData
                 foreach (RuleFinding f in uncovered.Take(8))
                     text.Append("\n• [").Append(f.RuleCode).Append("] ").Append(Masked && f.IsMoney ? f.MessageMasked ?? f.Message : f.Message);
                 if (uncovered.Count > 8) text.Append("\n• و ").Append((uncovered.Count - 8).ToString(CultureInfo.InvariantCulture)).Append(" مورد دیگر");
+                if (selfApproved.Count > 0) text.Append("\nتوجه: استثنای تأییدشده را شخص دیگری باید ثبت نهایی کند؛ تأییدکننده‌ی استثنا نمی‌تواند خودش سند را تأیید کند.");
                 text.Append("\nاگر داده درست است، برای هر مورد «درخواست استثنا» با توجیه ثبت کنید و سرپرست واحد (غیر از ثبت‌کننده) آن را تأیید کند؛ وگرنه داده را اصلاح کنید.");
                 result.Refusal = text.ToString();
                 await _uow.SaveChangesAsync(ct);   // the blocking findings stay visible for the supervisor and for the exception request
@@ -266,21 +295,29 @@ namespace Services.NasbNiro.OpsData
             if (f == null) return ResponseDtoHelper.NotFound<OpsExceptionDto>("یافته پیدا نشد.");
             if (f.Severity != OpsSeverity.Block || f.Status != OpsFindingStatus.Open) return Bad<OpsExceptionDto>("استثنا فقط برای یافته‌ی مسدودکننده‌ی باز ثبت می‌شود.");
             if (!_user.IsInRole(OpsRoles.Makers(f.Unit) + "," + OpsRoles.Supervisors(f.Unit))) return Bad<OpsExceptionDto>(NotAllowed);
-            if (await _uow.Set<OpsException>().AnyAsync(e => !e.Deleted && e.DocumentType == f.DocumentType && e.DocumentId == f.DocumentId && e.LineId == f.LineId && e.RuleCode == f.RuleCode
-                                                          && e.Status == OpsExceptionStatus.Pending, ct))
-                return Bad<OpsExceptionDto>("برای این مورد درخواست استثنای بازی وجود دارد.");
+            List<OpsException> open = await _uow.Set<OpsException>().AsNoTracking().Where(e => !e.Deleted && e.DocumentType == f.DocumentType && e.DocumentId == f.DocumentId && e.Status == OpsExceptionStatus.Pending).ToListAsync(ct);
+            if (open.Any(e => OpsGateService.KeyOf(e) == OpsGateService.KeyOf(f)))
+                return Bad<OpsExceptionDto>("برای این مورد درخواست استثنای بازی وجود دارد؛ منتظر تصمیم سرپرست بمانید.");
 
             DateTimeOffset now = DateTimeOffset.Now;
             var ex = new OpsException
             {
-                Unit = f.Unit, DocumentType = f.DocumentType, DocumentId = f.DocumentId, DocumentNumber = f.DocumentNumber, LineId = f.LineId, RowNumber = f.RowNumber, RuleCode = f.RuleCode,
+                Unit = f.Unit, DocumentType = f.DocumentType, DocumentId = f.DocumentId, DocumentNumber = f.DocumentNumber, LineId = f.LineId, RowNumber = f.RowNumber, ItemId = f.ItemId, Field = f.Field, RuleCode = f.RuleCode,
                 EnteredValue = f.EnteredValue, ReferenceValue = f.ReferenceValue, DeviationPercent = f.DeviationPercent, IsMoney = f.IsMoney, Message = f.Message, Justification = why,
                 RequestedByUserId = Me, RequestedAt = now, Status = OpsExceptionStatus.Pending, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<OpsException>().Add(ex);
-            await _uow.SaveChangesAsync(ct);
-            f.ExceptionId = ex.Id;
-            await _uow.SaveChangesAsync(ct);
+            try
+            {
+                await _uow.SaveChangesAsync(ct);
+                f.ExceptionId = ex.Id;
+                await _uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                // a double click: the unique index of pending requests refused the second one
+                return Bad<OpsExceptionDto>("برای این مورد درخواست استثنای بازی وجود دارد؛ منتظر تصمیم سرپرست بمانید.");
+            }
             await _notify.NotifyAsync(new NotifyRequest
             {
                 SourceKey = "ods:" + ex.Id, Module = "opsdata", SourceType = "ops-exception", SourceId = ex.Id, Kind = OfInboxKind.Approval, Priority = OfUrgency.Normal,
@@ -305,7 +342,8 @@ namespace Services.NasbNiro.OpsData
             if (reason.Length > 500) return Bad<OpsExceptionDto>("توضیح نباید از ۵۰۰ نویسه بیشتر باشد.");
             ex.Status = dto.Approve ? OpsExceptionStatus.Approved : OpsExceptionStatus.Rejected;
             ex.DecidedByUserId = Me; ex.DecidedAt = DateTimeOffset.Now; ex.DecisionReason = reason.Length == 0 ? null : reason; ex.ModifierUserId = Me; ex.ModifyDate = DateTimeOffset.Now;
-            await _uow.SaveChangesAsync(ct);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return Bad<OpsExceptionDto>("همزمان شخص دیگری درباره این درخواست تصمیم گرفت؛ صفحه را تازه کنید."); }
             await _notify.CloseAsync("ods:" + ex.Id, dto.Approve ? "تأیید شد" : "رد شد", ct);
             return ResponseDtoHelper.Ok(await MapAsync(ex, ct));
         }

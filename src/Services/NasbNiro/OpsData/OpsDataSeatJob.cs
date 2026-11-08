@@ -59,22 +59,16 @@ namespace Services.NasbNiro.OpsData
 
             // 1. the rules again over the documents confirmed in the window
             List<int> docIds = await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => !d.Deleted && d.Status == InventoryDocumentStatus.Confirmed && d.ConfirmedAt != null && d.ConfirmedAt >= fromOffset)
-                .OrderBy(d => d.Id).Select(d => d.Id).Take(500).ToListAsync(ct);
+                .OrderByDescending(d => d.Id).Select(d => d.Id).Take(500).ToListAsync(ct);
             foreach (var kv in await _evaluator.EvaluateInventoryAsync(docIds, asOf, ct))
                 foreach (RuleFinding f in kv.Value.Findings) candidates.Add(new Candidate { Doc = kv.Value.Doc, Finding = f });
 
-            List<int> opIds = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.StartAt >= from && b.EndAt != null).Select(b => b.OperationId).Distinct().OrderBy(i => i).Take(300).ToListAsync(ct);
-            foreach (int id in opIds)
-            {
-                OpsEvaluation ev = await _evaluator.EvaluateOperationAsync(id, null, ct);
-                if (ev != null) foreach (RuleFinding f in ev.Findings) candidates.Add(new Candidate { Doc = ev.Doc, Finding = f });
-            }
-            List<int> invoiceIds = await _uow.Set<SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.InvoiceDate >= from).OrderBy(i => i.Id).Select(i => i.Id).Take(200).ToListAsync(ct);
-            foreach (int id in invoiceIds)
-            {
-                OpsEvaluation ev = await _evaluator.EvaluateInvoiceAsync(id, ct);
-                if (ev != null) foreach (RuleFinding f in ev.Findings) candidates.Add(new Candidate { Doc = ev.Doc, Finding = f });
-            }
+            List<int> opIds = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.StartAt >= from && b.EndAt != null).Select(b => b.OperationId).Distinct().OrderByDescending(i => i).Take(300).ToListAsync(ct);
+            foreach (var kv in await _evaluator.EvaluateOperationsAsync(opIds, null, ct))
+                foreach (RuleFinding f in kv.Value.Findings) candidates.Add(new Candidate { Doc = kv.Value.Doc, Finding = f });
+            List<int> invoiceIds = await _uow.Set<SupplierInvoice>().AsNoTracking().Where(i => !i.Deleted && i.InvoiceDate >= from).OrderByDescending(i => i.Id).Select(i => i.Id).Take(200).ToListAsync(ct);
+            foreach (var kv in await _evaluator.EvaluateInvoicesAsync(invoiceIds, ct))
+                foreach (RuleFinding f in kv.Value.Findings) candidates.Add(new Candidate { Doc = kv.Value.Doc, Finding = f });
 
             // 2. what the gate cannot see at entry
             await LotOverdrawAsync(from, candidates, ct);
@@ -88,20 +82,25 @@ namespace Services.NasbNiro.OpsData
             var existing = new HashSet<string>();
             if (ids.Count > 0)
             {
-                var rows = await _uow.Set<OpsFinding>().AsNoTracking().Where(f => types.Contains(f.DocumentType) && ids.Contains(f.DocumentId)).Select(f => new { f.DocumentType, f.DocumentId, f.LineId, f.RuleCode }).ToListAsync(ct);
-                foreach (var r in rows) existing.Add(r.DocumentType + "|" + r.DocumentId + "|" + (r.LineId?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + r.RuleCode);
+                var rows = await _uow.Set<OpsFinding>().AsNoTracking().Where(f => types.Contains(f.DocumentType) && ids.Contains(f.DocumentId)).Select(f => new { f.DocumentType, f.DocumentId, f.LineId, f.RowNumber, f.ItemId, f.RuleCode, f.Field }).ToListAsync(ct);
+                foreach (var r in rows) existing.Add(r.DocumentType + "|" + r.DocumentId + "|" + OpsKey.Of(r.RowNumber, r.RowNumber.HasValue ? null : r.LineId, r.ItemId, r.RuleCode, r.Field));
             }
+            // the cross-document findings are keyed by their own field (lot, user + item + quantity, person + day): once reported they are not reported again on another document of the group
+            var groupFields = new HashSet<string>(await _uow.Set<OpsFinding>().AsNoTracking().Where(f => f.Field != null && (f.RuleCode == OpsRuleCodes.SeatRepeat || f.RuleCode == OpsRuleCodes.SeatCapacity || f.RuleCode == OpsRuleCodes.SeatLotOverdraw))
+                .Select(f => f.RuleCode + "|" + f.Field).ToListAsync(ct));
 
             int created = 0, notes = 0;
             DateTimeOffset now = DateTimeOffset.Now;
             var fresh = new List<(OpsFinding Row, OpsDocRef Doc)>();
             foreach (Candidate c in candidates)
             {
-                string key = c.Doc.Type + "|" + c.Doc.Id + "|" + (c.Finding.LineId?.ToString(CultureInfo.InvariantCulture) ?? "-") + "|" + c.Finding.RuleCode;
+                string key = c.Doc.Type + "|" + c.Doc.Id + "|" + c.Finding.Key;
+                if (c.Finding.Field != null && groupFields.Contains(c.Finding.RuleCode + "|" + c.Finding.Field)) continue;
                 if (!existing.Add(key)) continue;
+                if (c.Finding.Field != null) groupFields.Add(c.Finding.RuleCode + "|" + c.Finding.Field);
                 var row = new OpsFinding
                 {
-                    Unit = c.Doc.Unit, DocumentType = c.Doc.Type, DocumentId = c.Doc.Id, DocumentNumber = c.Doc.Number, LineId = c.Finding.LineId, RowNumber = c.Finding.RowNumber, ItemId = c.Finding.ItemId,
+                    Unit = c.Doc.Unit, DocumentType = c.Doc.Type, DocumentId = c.Doc.Id, DocumentNumber = c.Doc.Number, LineId = c.Finding.RowNumber.HasValue ? null : c.Finding.LineId, RowNumber = c.Finding.RowNumber, ItemId = c.Finding.ItemId, Field = c.Finding.Field,
                     ItemTitle = c.Finding.ItemTitle, RuleCode = c.Finding.RuleCode, Severity = OpsSeverity.Warning, Source = OpsSource.Seat, Status = OpsFindingStatus.Open,
                     Message = Cut(c.Finding.Message, 1000), MessageMasked = Cut(c.Finding.MessageMasked, 1000), EnteredValue = c.Finding.Entered, ReferenceValue = c.Finding.Reference,
                     DeviationPercent = c.Finding.DeviationPercent, IsMoney = c.Finding.IsMoney, DetectedAt = now, CreateDate = now, ModifyDate = now,
@@ -170,7 +169,7 @@ namespace Services.NasbNiro.OpsData
                     Doc = new OpsDocRef { Type = OpsDocTypes.InventoryDocument, Id = last.DocumentId, Number = last.Number ?? last.DocumentId.ToString(CultureInfo.InvariantCulture), Unit = OpsUnit.Warehouse, Confirmed = true },
                     Finding = new RuleFinding
                     {
-                        RuleCode = OpsRuleCodes.SeatLotOverdraw, Severity = OpsSeverity.Warning, LineId = -s.Lot, ItemId = last.ItemId, ItemTitle = title, Entered = Math.Round(consumed, 4), Reference = Math.Round(s.Received, 4),
+                        RuleCode = OpsRuleCodes.SeatLotOverdraw, Severity = OpsSeverity.Warning, Field = "lot" + s.Lot.ToString(CultureInfo.InvariantCulture), ItemId = last.ItemId, ItemTitle = title, Entered = Math.Round(consumed, 4), Reference = Math.Round(s.Received, 4),
                         DeviationPercent = s.Received > 0 ? Math.Round((consumed - s.Received) / s.Received * 100m, 2) : (decimal?)null,
                         Message = $"بچ شماره {s.Lot.ToString(CultureInfo.InvariantCulture)} ({title}): جمع مصرف در سندهای انبار {consumed:0.####} است ولی جمع دریافت فقط {s.Received:0.####} است. سندهای مصرف را با هم بررسی کنید.",
                         MessageMasked = $"بچ شماره {s.Lot.ToString(CultureInfo.InvariantCulture)}: مصرف از دریافت بیشتر است.",
@@ -190,7 +189,7 @@ namespace Services.NasbNiro.OpsData
                 .OrderBy(l => l.Id).Take(5000).ToListAsync(ct);
             foreach (var g in lines.GroupBy(l => new { l.Creator, l.ItemId, l.Quantity }).Where(g => g.Select(x => x.DocumentId).Distinct().Count() >= repeatCount))
             {
-                var last = g.OrderByDescending(x => x.Id).First();
+                var last = g.OrderBy(x => x.Id).First();   // the oldest line of the group anchors the finding: it does not move (and refire) as the group grows
                 // a round, fixed quantity (a standard pack) typed on purpose is common; the rule only reports it once per item and user, on the newest line
                 string title = await _uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == g.Key.ItemId).Select(i => i.Title).FirstOrDefaultAsync(ct);
                 int docs = g.Select(x => x.DocumentId).Distinct().Count();
@@ -199,7 +198,7 @@ namespace Services.NasbNiro.OpsData
                     Doc = new OpsDocRef { Type = OpsDocTypes.InventoryDocument, Id = last.DocumentId, Number = last.Number ?? last.DocumentId.ToString(CultureInfo.InvariantCulture), Unit = OpsUnit.Warehouse, Confirmed = true },
                     Finding = new RuleFinding
                     {
-                        RuleCode = OpsRuleCodes.SeatRepeat, Severity = OpsSeverity.Warning, LineId = last.Id, RowNumber = last.RowNumber, ItemId = g.Key.ItemId, ItemTitle = title, Entered = g.Key.Quantity,
+                        RuleCode = OpsRuleCodes.SeatRepeat, Severity = OpsSeverity.Warning, Field = $"u{g.Key.Creator}i{g.Key.ItemId}q{g.Key.Quantity:0.####}", RowNumber = last.RowNumber, ItemId = g.Key.ItemId, ItemTitle = title, Entered = g.Key.Quantity,
                         Message = $"«{title}»: مقدار {g.Key.Quantity:0.####} توسط یک کاربر در {docs.ToString(CultureInfo.InvariantCulture)} سند متوالی ثبت شده است. اگر مقدار واقعی هر بار متفاوت بوده، سندها را اصلاح کنید.",
                         MessageMasked = $"«{title}»: یک مقدار در {docs.ToString(CultureInfo.InvariantCulture)} سند متوالی تکرار شده است.",
                     },
@@ -215,7 +214,7 @@ namespace Services.NasbNiro.OpsData
                 .Select(b => new { b.Id, b.EmployeeId, b.OperationId, b.StartAt, b.Hours }).OrderBy(b => b.Id).Take(5000).ToListAsync(ct);
             foreach (var g in bookings.GroupBy(b => new { b.EmployeeId, Day = b.StartAt.Date }).Where(g => g.Sum(x => x.Hours) > dayHours))
             {
-                var last = g.OrderByDescending(x => x.Id).First();
+                var last = g.OrderBy(x => x.Id).First();
                 decimal total = g.Sum(x => x.Hours);
                 string number = await _uow.Set<MfOperation>().AsNoTracking().Where(o => o.Id == last.OperationId).Select(o => o.Title).FirstOrDefaultAsync(ct);
                 into.Add(new Candidate
@@ -223,7 +222,7 @@ namespace Services.NasbNiro.OpsData
                     Doc = new OpsDocRef { Type = OpsDocTypes.Operation, Id = last.OperationId, Number = number ?? last.OperationId.ToString(CultureInfo.InvariantCulture), Unit = OpsUnit.Production, Confirmed = true },
                     Finding = new RuleFinding
                     {
-                        RuleCode = OpsRuleCodes.SeatCapacity, Severity = OpsSeverity.Warning, LineId = last.Id, Entered = Math.Round(total, 2), Reference = dayHours,
+                        RuleCode = OpsRuleCodes.SeatCapacity, Severity = OpsSeverity.Warning, Field = $"e{g.Key.EmployeeId}d{g.Key.Day:yyyyMMdd}", Entered = Math.Round(total, 2), Reference = dayHours,
                         DeviationPercent = Math.Round((total - dayHours) / dayHours * 100m, 2),
                         Message = $"برای یک نفر در تاریخ {InventoryText.PersianDate(g.Key.Day)} جمعاً {total:0.##} ساعت کار ثبت شده، در حالی که سقف روز {dayHours:0.##} ساعت است. ثبت‌ها را بررسی کنید.",
                         MessageMasked = null,

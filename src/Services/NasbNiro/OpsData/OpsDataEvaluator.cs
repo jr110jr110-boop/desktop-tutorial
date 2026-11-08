@@ -44,6 +44,8 @@ namespace Services.NasbNiro.OpsData
         Task<OpsEvaluation> EvaluateQcDecisionAsync(int operationId, QcResult result, int? activityId, IReadOnlyList<OpsQcMeasure> measurements, CancellationToken ct);
         Task<OpsEvaluation> EvaluateInspectionAsync(int inspectionId, decimal? accepted, decimal? rejected, CancellationToken ct);
         Task<OpsEvaluation> EvaluateInvoiceAsync(int invoiceId, CancellationToken ct);
+        Task<Dictionary<int, OpsEvaluation>> EvaluateOperationsAsync(IReadOnlyList<int> operationIds, OpsOperationDelta delta, CancellationToken ct);
+        Task<Dictionary<int, OpsEvaluation>> EvaluateInvoicesAsync(IReadOnlyList<int> invoiceIds, CancellationToken ct);
 
         /// <summary>By document type (the endpoint and the seat).</summary>
         Task<OpsEvaluation> EvaluateAsync(string documentType, int documentId, CancellationToken ct);
@@ -113,10 +115,8 @@ namespace Services.NasbNiro.OpsData
             Dictionary<int, PurchaseOrderLine> poLines = poLineIds.Count == 0 ? new Dictionary<int, PurchaseOrderLine>()
                 : await _uow.Set<PurchaseOrderLine>().AsNoTracking().Where(l => poLineIds.Contains(l.Id)).ToDictionaryAsync(l => l.Id, ct);
 
-            // price history: the last receipts of each item (this document excluded) and the weighted average cost
+            // price history: the last receipts of each item (this document excluded)
             Dictionary<int, List<decimal>> history = await LastReceiptPricesAsync(docs.Where(d => d.Type == InventoryDocumentType.PurchaseReceipt).SelectMany(d => d.Lines).Select(l => l.ItemId).Distinct().ToList(), ids, ct);
-            Dictionary<int, decimal> averageCost = itemIds.Count == 0 ? new Dictionary<int, decimal>()
-                : await _uow.Set<ItemCost>().AsNoTracking().Where(c => itemIds.Contains(c.ItemId) && c.AverageCost > 0).ToDictionaryAsync(c => c.ItemId, c => c.AverageCost, ct);
 
             OpsIssueFacts issueFacts = await LoadIssueFactsAsync(docs, items, ct);
             OpsStageFacts stageFacts = await LoadStageFactsAsync(items.Values, ct);
@@ -131,10 +131,12 @@ namespace Services.NasbNiro.OpsData
                 };
                 foreach (int? u in new[] { (int?)d.CreatorUserId, d.ModifierUserId, d.ConfirmedByUserId }) if (u.HasValue && u.Value > 0) doc.Makers.Add(u.Value);
                 var ev = new OpsEvaluation { Doc = doc };
-                void Add(RuleFinding f) { if (f != null) ev.Findings.Add(f); }
+                void Add(RuleFinding f, string field = null) { if (f != null) { f.Field = field; ev.Findings.Add(f); } }
 
-                Add(OpsRules.DateBack(S(st, OpsRuleCodes.Date), d.DocumentDate, today));
-                Add(OpsRules.DateForward(S(st, OpsRuleCodes.DateFwd), d.DocumentDate, today));
+                // a confirmed document is judged as of the day it was confirmed (otherwise every document is flagged as it ages)
+                DateTime asOfDay = doc.Confirmed && d.ConfirmedAt.HasValue ? d.ConfirmedAt.Value.LocalDateTime.Date : today;
+                Add(OpsRules.DateBack(S(st, OpsRuleCodes.Date), d.DocumentDate, asOfDay));
+                Add(OpsRules.DateForward(S(st, OpsRuleCodes.DateFwd), d.DocumentDate, asOfDay));
 
                 foreach (InventoryDocumentLine l in d.Lines.OrderBy(x => x.RowNumber))
                 {
@@ -157,29 +159,32 @@ namespace Services.NasbNiro.OpsData
                             qty = uom == null && l.Id == d.Lines.Where(x => x.PurchaseOrderLineId == po.Id).OrderBy(x => x.RowNumber).First().Id
                                 ? OpsRules.RcvQty(S(st, OpsRuleCodes.RcvQty), l.Id, l.RowNumber, item.Id, title, unit, mine, open) : null;
                         }
-                        Add(uom); Add(qty);
+                        Add(uom, "qty"); Add(qty);
 
                         // weight
                         decimal? expectedKg = FreightRules.WeightKg(unit, l.Quantity, item.Weight);
                         RuleFinding wUom = l.WeighedWeightKg.HasValue && expectedKg.HasValue
                             ? OpsRules.UnitMismatch(S(st, OpsRuleCodes.Uom), l.Id, l.RowNumber, item.Id, title, "وزن توزین‌شده", l.WeighedWeightKg.Value, expectedKg.Value) : null;
-                        Add(wUom);
+                        Add(wUom, "weight");
                         if (wUom == null) Add(OpsRules.RcvWeight(S(st, OpsRuleCodes.RcvWeight), l.Id, l.RowNumber, item.Id, title, l.WeighedWeightKg, l.CertificateWeightKg, expectedKg));
 
                         if (d.Type == InventoryDocumentType.PurchaseReceipt)
                         {
-                            // price: the order price is the price of the receipt; a typed price that differs is told
-                            decimal? effective = po != null ? po.UnitPrice : l.UnitPrice;
-                            if (po != null && l.UnitPrice.HasValue && l.UnitPrice.Value > 0 && !doc.Confirmed)
-                                Add(OpsRules.TypedPriceDiffersFromOrder(S(st, OpsRuleCodes.RcvPrice), l.Id, l.RowNumber, item.Id, title, l.UnitPrice.Value, po.UnitPrice));
-                            if (effective.HasValue && effective.Value > 0)
+                            // price: on a receipt of an order the order price is the price (the order was approved): only a typed price that differs is told.
+                            // Without an order the typed price is compared with the last receipts of the item, and only when there are enough of them (no fallback to the average cost).
+                            if (po != null)
                             {
-                                (decimal? reference, string text) = ReferencePrice(history, averageCost, item.Id, (int)S(st, OpsRuleCodes.RcvPrice).MinHistory);
+                                if (l.UnitPrice.HasValue && l.UnitPrice.Value > 0 && !doc.Confirmed)
+                                    Add(OpsRules.TypedPriceDiffersFromOrder(S(st, OpsRuleCodes.RcvPrice), l.Id, l.RowNumber, item.Id, title, l.UnitPrice.Value, po.UnitPrice), "typed");
+                            }
+                            else if (l.UnitPrice.HasValue && l.UnitPrice.Value > 0)
+                            {
+                                (decimal? reference, string text) = ReferencePrice(history, item.Id, (int)S(st, OpsRuleCodes.RcvPrice).MinHistory);
                                 if (reference.HasValue)
                                 {
-                                    RuleFinding pUom = OpsRules.UnitMismatch(S(st, OpsRuleCodes.Uom), l.Id, l.RowNumber, item.Id, title, "فی", effective.Value, reference.Value, true);
-                                    Add(pUom);
-                                    if (pUom == null) Add(OpsRules.Price(OpsRuleCodes.RcvPrice, S(st, OpsRuleCodes.RcvPrice), l.Id, l.RowNumber, item.Id, title, effective.Value, reference.Value, text));
+                                    RuleFinding pUom = OpsRules.UnitMismatch(S(st, OpsRuleCodes.Uom), l.Id, l.RowNumber, item.Id, title, "فی", l.UnitPrice.Value, reference.Value, true);
+                                    Add(pUom, "price");
+                                    if (pUom == null) Add(OpsRules.Price(OpsRuleCodes.RcvPrice, S(st, OpsRuleCodes.RcvPrice), l.Id, l.RowNumber, item.Id, title, l.UnitPrice.Value, reference.Value, text), "history");
                                 }
                             }
                             // certificate / material against the specification
@@ -204,8 +209,9 @@ namespace Services.NasbNiro.OpsData
                             if (standard.HasValue)
                             {
                                 RuleFinding u = OpsRules.UnitMismatch(S(st, OpsRuleCodes.Uom), l.Id, l.RowNumber, item.Id, title, "مقدار حواله", mineSum, standard.Value);
-                                Add(u);
-                                if (u == null) Add(OpsRules.IssueAgainstKit(S(st, OpsRuleCodes.IssQty), l.Id, l.RowNumber, item.Id, title, unit, cumulativeKit, standard.Value));
+                                Add(u, "qty");
+                                // the cumulative rules compare the total so far with the standard: on a confirmed document they would blame it for what later documents consumed (the gate judged it when it was entered)
+                                if (u == null && !doc.Confirmed) Add(OpsRules.IssueAgainstKit(S(st, OpsRuleCodes.IssQty), l.Id, l.RowNumber, item.Id, title, unit, cumulativeKit, standard.Value));
                             }
                             // ceiling and BOM quantity: the net consumption of the work order
                             if (woId.HasValue)
@@ -213,13 +219,13 @@ namespace Services.NasbNiro.OpsData
                                 decimal net = issueFacts.NetIssued(woId.Value, item.Id);
                                 decimal cumulative = doc.Confirmed ? net : net + mineSum;
                                 decimal? ceiling = issueFacts.Ceiling(woId.Value, item.Id);
-                                if (ceiling.HasValue) Add(OpsRules.IssueAgainstCeiling(S(st, OpsRuleCodes.IssCeil), l.Id, l.RowNumber, item.Id, title, unit, cumulative, ceiling.Value));
+                                if (ceiling.HasValue && !doc.Confirmed) Add(OpsRules.IssueAgainstCeiling(S(st, OpsRuleCodes.IssCeil), l.Id, l.RowNumber, item.Id, title, unit, cumulative, ceiling.Value));
                                 if (issueFacts.HasBaseline(woId.Value))
                                 {
                                     bool inBom = issueFacts.InBaseline(woId.Value, item);
                                     Add(OpsRules.BomItem(S(st, OpsRuleCodes.BlBomItem), l.Id, l.RowNumber, item.Id, title, wo, inBom));
                                     decimal? bomQty = inBom ? issueFacts.BomQuantity(woId.Value, item.Id) : null;
-                                    if (bomQty.HasValue) Add(OpsRules.BomQuantity(S(st, OpsRuleCodes.BlBomQty), l.Id, l.RowNumber, item.Id, title, unit, cumulative, bomQty.Value));
+                                    if (bomQty.HasValue && !doc.Confirmed) Add(OpsRules.BomQuantity(S(st, OpsRuleCodes.BlBomQty), l.Id, l.RowNumber, item.Id, title, unit, cumulative, bomQty.Value));
                                 }
                             }
                         }
@@ -244,11 +250,10 @@ namespace Services.NasbNiro.OpsData
             return result;
         }
 
-        private static (decimal? Price, string Text) ReferencePrice(Dictionary<int, List<decimal>> history, Dictionary<int, decimal> averageCost, int itemId, int minHistory)
+        private static (decimal? Price, string Text) ReferencePrice(Dictionary<int, List<decimal>> history, int itemId, int minHistory)
         {
             if (history.TryGetValue(itemId, out List<decimal> prices) && prices.Count >= Math.Max(1, minHistory))
                 return (Math.Round(prices.Average(), 2), $"میانگین {prices.Count} رسید آخر");
-            if (averageCost.TryGetValue(itemId, out decimal avg) && avg > 0) return (avg, "میانگین موزون بهای کالا");
             return (null, null);
         }
 

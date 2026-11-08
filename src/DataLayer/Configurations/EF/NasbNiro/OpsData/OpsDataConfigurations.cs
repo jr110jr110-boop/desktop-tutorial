@@ -29,7 +29,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.OpsData
                 b.Property(x => x.DeviationPercent).HasPrecision(18, 2);
                 b.Property(x => x.ResolutionNote).HasMaxLength(500);
                 // one finding per document, line and rule (a null line is one value of its own): re-evaluation updates the row
-                b.HasIndex(x => new { x.DocumentType, x.DocumentId, x.LineId, x.RuleCode }).IsUnique().HasFilter("[Deleted] = 0");
+                b.Property(x => x.Field).HasMaxLength(40);
+                b.HasIndex(x => new { x.DocumentType, x.DocumentId, x.LineId, x.RowNumber, x.ItemId, x.RuleCode, x.Field }).IsUnique().HasFilter("[Deleted] = 0");
                 b.HasIndex(x => new { x.Unit, x.Status });
                 b.HasIndex(x => x.RuleCode);
                 b.HasIndex(x => x.DetectedAt);
@@ -48,7 +49,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.OpsData
                 b.Property(x => x.DeviationPercent).HasPrecision(18, 2);
                 b.Property(x => x.Justification).HasMaxLength(1000).IsRequired();
                 b.Property(x => x.DecisionReason).HasMaxLength(500);
+                b.Property(x => x.Field).HasMaxLength(40);
                 b.HasIndex(x => new { x.DocumentType, x.DocumentId, x.RuleCode });
+                b.HasIndex(x => new { x.DocumentType, x.DocumentId, x.LineId, x.RowNumber, x.ItemId, x.RuleCode, x.Field }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] = 0").HasDatabaseName("IX_OdExceptions_OnePending");
                 b.HasIndex(x => new { x.Unit, x.Status });
                 b.HasIndex(x => x.RequestedByUserId);
             });

@@ -71,17 +71,29 @@ namespace Services.NasbNiro.Production
         private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
 
         /// <summary>PB8: the real-time gate on a production booking or the finish of an operation (time against the routing standard, scrap against history, sequence and work centre of the routing). The Persian refusal or null.</summary>
-        private async Task<string> OpsGateAsync(int operationId, MfBookingKind kind, decimal hours, decimal good, decimal scrap, CancellationToken ct)
-        {
-            if (_opsEvaluator == null || _opsGate == null) return null;
-            var delta = new global::Services.NasbNiro.OpsData.OpsOperationDelta
+        private Task<string> OpsGateAsync(int operationId, MfBookingKind kind, decimal hours, decimal good, decimal scrap, CancellationToken ct) =>
+            OpsGateAsync(operationId, new global::Services.NasbNiro.OpsData.OpsOperationDelta
             {
                 SetupHours = kind == MfBookingKind.Setup ? hours : 0m, RunHours = kind == MfBookingKind.Run ? hours : 0m, Good = good, Scrap = scrap,
-            };
+            }, null, ct);
+
+        /// <summary>PB8 fix round (M4): the same gate for the paths that book hours or scrap without starting or finishing an operation; <paramref name="only"/> limits the rules (null = all).</summary>
+        private async Task<string> OpsGateAsync(int operationId, global::Services.NasbNiro.OpsData.OpsOperationDelta delta, HashSet<string> only, CancellationToken ct)
+        {
+            if (_opsEvaluator == null || _opsGate == null) return null;
             global::Services.NasbNiro.OpsData.OpsEvaluation ev = await _opsEvaluator.EvaluateOperationAsync(operationId, delta, ct);
             if (ev == null) return null;
+            if (only != null)
+            {
+                ev.Findings.RemoveAll(f => !only.Contains(f.RuleCode));
+                ev.Scope = only;
+            }
             return (await _opsGate.CheckAsync(ev, ct)).Refusal;
         }
+
+        private static readonly HashSet<string> OpsTimeOnly = new HashSet<string> { global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdTime };
+        private static readonly HashSet<string> OpsScrapOnly = new HashSet<string> { global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdScrap };
+        private static readonly HashSet<string> OpsTimeAndScrap = new HashSet<string> { global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdTime, global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdScrap };
 
         public MfShopFloorService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IAttendanceService attendance, INotificationService notify = null, IConfiguration configuration = null,
             global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
@@ -403,6 +415,8 @@ namespace Services.NasbNiro.Production
             if (reasonProblem != null) return Bad<TerminalOperationDto>(reasonProblem);
             MfTimeBooking running = await _uow.Set<MfTimeBooking>().FirstOrDefaultAsync(b => !b.Deleted && b.EmployeeId == l.Employee.Id && b.OperationId == l.Op.Id && b.EndAt == null, ct);
             if (running == null) return Bad<TerminalOperationDto>("برای شما روی این عملیات کاری در حال اجرا نیست.");
+            string pauseRefusal = await OpsGateAsync(l.Op.Id, running.Kind, MfText.HoursOf(MinutesBetween(running.StartAt, Now())), 0m, 0m, ct);   // PB8 fix M4: the hours of a pause are booked too
+            if (pauseRefusal != null) return Bad<TerminalOperationDto>(pauseRefusal);
             Close(running, Now());
             running.ReasonCodeId = dto.ReasonCodeId;
             if (Clean(dto.Note) != null) running.Note = Clean(dto.Note);
@@ -535,6 +549,11 @@ namespace Services.NasbNiro.Production
             if (dto.GoodQty == 0 && dto.ScrapQty == 0 && dto.ReworkQty == 0) return Bad<TerminalOperationDto>("تعداد سالم، ضایعات یا دوباره‌کاری را وارد کنید.");
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید تا تعداد روی ثبت زمان شما بنشیند.");
+            if (dto.ScrapQty > 0)
+            {
+                string scrapRefusal = await OpsGateAsync(l.Op.Id, new global::Services.NasbNiro.OpsData.OpsOperationDelta { Good = dto.GoodQty, Scrap = dto.ScrapQty }, OpsScrapOnly, ct);   // PB8 fix M4: scrap is gated before it is queued
+                if (scrapRefusal != null) return Bad<TerminalOperationDto>(scrapRefusal);
+            }
             string problem = await AddQuantityAsync(l, booking, dto, ct);
             if (problem != null) return Bad<TerminalOperationDto>(problem);
             l.Op.ModifyDate = DateTimeOffset.Now;
@@ -940,6 +959,18 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, op, welder, kind, start.Date, ct);
                 if (weld.Error != null) return Bad<BookingDto>(weld.Error);
             }
+            {
+                // PB8 fix M4: a supervisor's edit is gated like the booking it changes (hours: new minus old, scrap: the increase)
+                decimal newHours = MfText.HoursOf(MinutesBetween(start, end));
+                var editDelta = new global::Services.NasbNiro.OpsData.OpsOperationDelta
+                {
+                    SetupHours = (kind == MfBookingKind.Setup ? newHours : 0m) - (b.Kind == MfBookingKind.Setup ? b.Hours : 0m),
+                    RunHours = (kind == MfBookingKind.Run ? newHours : 0m) - (b.Kind == MfBookingKind.Run ? b.Hours : 0m),
+                    Good = good - b.GoodQty, Scrap = Math.Max(0m, scrap - b.ScrapQty),
+                };
+                string editRefusal = await OpsGateAsync(op.Id, editDelta, OpsTimeAndScrap, ct);
+                if (editRefusal != null) return Bad<BookingDto>(editRefusal);
+            }
             if (scrap > b.ScrapQty)
             {
                 string scrapProblem = await QueueScrapAsync(order, op, scrap - b.ScrapQty, scrapReason, dto.ScrapSerials, ct);
@@ -1033,6 +1064,8 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, op, worker, dto.Kind, start.Date, ct);
                 if (weld.Error != null) return Bad<BookingDto>(weld.Error);
             }
+            string correctionRefusal = await OpsGateAsync(op.Id, dto.Kind, MfText.HoursOf(minutes), 0m, 0m, ct);   // PB8 fix M4: the hours of a correction are gated when it is written (its approval adds no new figure)
+            if (correctionRefusal != null) return Bad<BookingDto>(correctionRefusal);
             DateTimeOffset stamp = DateTimeOffset.Now;
             var booking = new MfTimeBooking
             {

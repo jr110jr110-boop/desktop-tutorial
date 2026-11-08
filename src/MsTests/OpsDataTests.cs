@@ -102,7 +102,18 @@ namespace MsTests
             Assert.AreEqual(OpsSeverity.Warning, OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 4m, 2m).Severity, "100 percent");
             Assert.IsNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 3m, 2m));
             Assert.IsNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 0.5m, 0m), "a zero standard uses the floor of 30 minutes (0.5 hour): 0.5 is not beyond it");
-            Assert.IsNotNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 1.1m, 0m));
+            Assert.IsNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 1.1m, 0m), "H4: no standard (planned <= 0) means no finding at all");
+            Assert.IsNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 5m, -1m));
+            Assert.IsNotNull(OpsRules.ProductionTime(s, 1, "تراش", "اجرا", 1.1m, 0.05m), "a tiny standard is protected by the floor, not ignored");
+        }
+
+        [TestMethod]
+        public void Finding_Keys_Do_Not_Depend_On_The_Line_Id_And_Separate_The_Fields()
+        {
+            Assert.AreEqual(OpsKey.Of(2, null, 5, "R-X", "price"), OpsKey.Of(2, null, 5, "R-X", "price"));
+            Assert.AreNotEqual(OpsKey.Of(2, null, 5, "R-X", "price"), OpsKey.Of(2, null, 5, "R-X", "qty"));
+            Assert.AreNotEqual(OpsKey.Of(2, null, 5, "R-X", "price"), OpsKey.Of(3, null, 5, "R-X", "price"));
+            CollectionAssert.Contains(OpsSettingKeys.SecurityRelevant.ToList(), OpsRuleCatalog.ExceptionMargin);
         }
 
         [TestMethod]
@@ -125,6 +136,8 @@ namespace MsTests
             Assert.IsNull(OpsRules.CountVariance(s, 1, 1, 1, "x", "عدد", 100, 99, 1000m), "a tiny value is ignored under the floor");
             Assert.AreEqual(OpsSeverity.Block, OpsRules.CountVariance(s, 1, 1, 1, "x", "عدد", 100, 40, 1_000_000m).Severity, "60 percent and 60 million");
             Assert.AreEqual(OpsSeverity.Warning, OpsRules.CountVariance(s, 1, 1, 1, "x", "عدد", 100, 85, 1_000_000m).Severity);
+            Assert.AreEqual(OpsSeverity.Warning, OpsRules.CountVariance(s, 1, 1, 1, "x", "عدد", 100, 40, null).Severity, "uncosted stock is never a block");
+            Assert.AreEqual(OpsSeverity.Warning, OpsRules.CountVariance(s, 1, 1, 1, "x", "عدد", 0, 40, 1_000_000m).Severity, "a zero book is never a block");
             DateTime today = new DateTime(2026, 11, 8);
             Assert.IsNull(OpsRules.DateBack(S(OpsRuleCodes.Date), today.AddDays(-29), today));
             Assert.AreEqual(OpsSeverity.Warning, OpsRules.DateBack(S(OpsRuleCodes.Date), today.AddDays(-30), today).Severity);
@@ -348,6 +361,29 @@ namespace MsTests
             });
         }
 
+        /// <summary>H1: the price rule needs real history (two confirmed non-PO receipts); there is no average-cost fallback.</summary>
+        private static async Task Prime(AppHost host, Wh w)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                var d = await DraftReceipt(host, w, 10m, 100m, null);
+                Assert.IsTrue(d.Success, d.Message);
+                var c = await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(d.Data.Id, Ct));
+                Assert.IsTrue(c.Success, c.Message);
+            }
+        }
+
+        [TestMethod]
+        public async Task Gate_Price_Without_History_Is_Not_Judged_And_There_Is_No_Average_Cost_Fallback()
+        {
+            AppHost host = NewHost("nohist");
+            Wh w = Seed(host);
+            var saved = await DraftReceipt(host, w, 10m, 1000m, null);
+            Assert.IsTrue(saved.Success, saved.Message);
+            Assert.AreEqual(0, saved.Data.OpsFindings.Count(f => f.RuleCode == OpsRuleCodes.RcvPrice), "the item has an average cost of 100 but no receipt history");
+            Assert.IsTrue((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(saved.Data.Id, Ct))).Success);
+        }
+
         [TestMethod]
         public async Task Gate_Warning_Is_Returned_In_The_Dto_And_Stored_With_The_Document_And_The_Confirmation_Passes()
         {
@@ -373,6 +409,7 @@ namespace MsTests
         {
             AppHost host = NewHost("block");
             Wh w = Seed(host);
+            await Prime(host, w);
             var saved = await DraftReceipt(host, w, 10m, 1000m, null);
             Assert.IsTrue(saved.Success, saved.Message);
             int id = saved.Data.Id;
@@ -411,6 +448,7 @@ namespace MsTests
         {
             AppHost host = NewHost("changed");
             Wh w = Seed(host);
+            await Prime(host, w);
             var saved = await DraftReceipt(host, w, 10m, 1000m, null);
             int id = saved.Data.Id;
             await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct));
@@ -425,6 +463,58 @@ namespace MsTests
             }, Ct));
             Assert.IsTrue(edit.Success, edit.Message);
             Assert.IsFalse((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct))).Success, "the exception was for the earlier price");
+        }
+
+        [TestMethod]
+        public async Task Gate_Real_Ui_Flow_Save_Confirm_Refused_Request_Approve_Save_Again_Confirm_Passes()
+        {
+            AppHost host = NewHost("uiflow");
+            Wh w = Seed(host);
+            await Prime(host, w);
+            var saved = await DraftReceipt(host, w, 10m, 1000m, null);
+            Assert.IsTrue(saved.Success, saved.Message);
+            int id = saved.Data.Id;
+            Assert.AreEqual(1, saved.Data.OpsFindings.Count(f => f.RuleCode == OpsRuleCodes.RcvPrice), "the draft view already shows the block");
+            Assert.IsFalse((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct))).Success);
+            var reloaded = await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().GetDocumentAsync(id, Ct));
+            var draftFinding = reloaded.Data.OpsFindings.Single(f => f.RuleCode == OpsRuleCodes.RcvPrice);
+            Assert.IsTrue(draftFinding.Id.HasValue, "after the refusal the reloaded draft carries the stored finding id (H2)");
+            var req = await host.As(Maker, p => p.GetRequiredService<IOpsExceptionService>().RequestAsync(new RequestOpsExceptionDto { FindingId = draftFinding.Id.Value, Justification = "قیمت جدید طبق پیش‌فاکتور تامین‌کننده است" }, Ct));
+            Assert.IsTrue(req.Success, req.Message);
+            var dup = await host.As(Maker, p => p.GetRequiredService<IOpsExceptionService>().RequestAsync(new RequestOpsExceptionDto { FindingId = draftFinding.Id.Value, Justification = "درخواست تکراری برای همان یافته" }, Ct));
+            Assert.IsFalse(dup.Success, "a second pending request is refused with a message, not an error");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(dup.Message));
+            Assert.IsTrue((await host.As(Supervisor, p => p.GetRequiredService<IOpsExceptionService>().DecideAsync(new DecideOpsExceptionDto { Id = req.Data.Id, Approve = true }, Ct))).Success);
+            // the form saves the same content again: the lines are recreated with new ids
+            int oldLine = host.Read(u => u.Set<InventoryDocumentLine>().First(l => l.DocumentId == id).Id);
+            var again = await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().SaveDraftAsync(new SaveDocumentDto
+            {
+                Id = id, Type = InventoryDocumentType.PurchaseReceipt, DocumentDate = DateTime.Today, WarehouseId = w.Raw, ProviderId = w.Provider, Description = "خرید خرد",
+                Lines = new List<SaveDocumentLineDto> { new SaveDocumentLineDto { ItemId = w.Item, Quantity = 10m, UnitPrice = 1000m } },
+            }, Ct));
+            Assert.IsTrue(again.Success, again.Message);
+            int newLine = host.Read(u => u.Set<InventoryDocumentLine>().Where(l => l.DocumentId == id).Max(l => l.Id));
+            Assert.AreNotEqual(oldLine, newLine, "the save recreated the line");
+            var pass = await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct));
+            Assert.IsTrue(pass.Success, pass.Message);
+            Assert.AreEqual(1, host.Read(u => u.Set<OpsException>().Count(e => e.UsedAt != null)));
+        }
+
+        [TestMethod]
+        public async Task Gate_The_Approver_Of_An_Exception_Cannot_Also_Confirm_The_Document()
+        {
+            AppHost host = NewHost("m1");
+            Wh w = Seed(host);
+            await Prime(host, w);
+            var saved = await DraftReceipt(host, w, 10m, 1000m, null);
+            int id = saved.Data.Id;
+            await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct));
+            OpsFinding f = host.Read(u => u.Set<OpsFinding>().Single(x => x.DocumentId == id && x.RuleCode == OpsRuleCodes.RcvPrice));
+            var req = await host.As(Maker, p => p.GetRequiredService<IOpsExceptionService>().RequestAsync(new RequestOpsExceptionDto { FindingId = f.Id, Justification = "قیمت جدید طبق پیش‌فاکتور تامین‌کننده است" }, Ct));
+            Assert.IsTrue((await host.As(Supervisor, p => p.GetRequiredService<IOpsExceptionService>().DecideAsync(new DecideOpsExceptionDto { Id = req.Data.Id, Approve = true }, Ct))).Success);
+            var byApprover = await host.As(Supervisor, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct));
+            Assert.IsFalse(byApprover.Success, "M1: the exception does not cover a confirmation made by its own approver");
+            Assert.IsTrue((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(id, Ct))).Success);
         }
 
         [TestMethod]
@@ -515,7 +605,12 @@ namespace MsTests
             Assert.AreEqual(OpsReadinessExceptionStatus.Approved, host.Read(u => u.Set<OpsReadinessException>().Single().Status));
             var pass = await host.As(requester, p => p.GetRequiredService<IOpsReadinessService>().GateForBaselineAsync(wo, product, Ct));
             Assert.IsNull(pass.Refusal);
-            Assert.AreEqual(OpsReadinessExceptionStatus.Used, host.Read(u => u.Set<OpsReadinessException>().Single().Status));
+            Assert.AreEqual(OpsReadinessExceptionStatus.Approved, host.Read(u => u.Set<OpsReadinessException>().Single().Status), "the gate itself does not spend the exception");
+            // another product of the same work order is not covered
+            int other = TraceGenealogyPb4Tests.Seed(host, new PbProduct { Code = "P-1B", Title = "محصول دوم", IsActive = true }).Id;
+            Assert.IsNotNull((await host.As(requester, p => p.GetRequiredService<IOpsReadinessService>().GateForBaselineAsync(wo, other, Ct))).Refusal);
+            await host.As(requester, async p => { await p.GetRequiredService<IOpsReadinessService>().AfterBaselineAsync(wo, product, Ct); return 0; });
+            Assert.AreEqual(OpsReadinessExceptionStatus.Used, host.Read(u => u.Set<OpsReadinessException>().Single().Status), "spent only after the baseline was really made");
         }
 
         [TestMethod]

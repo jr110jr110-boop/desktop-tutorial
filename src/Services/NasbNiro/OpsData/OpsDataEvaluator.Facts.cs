@@ -148,15 +148,31 @@ namespace Services.NasbNiro.OpsData
                     : await _uow.Set<PbProjectBomChange>().AsNoTracking().Where(c => !c.Deleted && baselineIds.Contains(c.BaselineId) && (c.Status == PbChangeStatus.Approved || c.Status == PbChangeStatus.Applied) && c.ItemId != null).ToListAsync(ct);
                 DateTime now = DateTime.Today;
                 var subs = await _uow.Set<ItemSubstitute>().AsNoTracking().Where(s => !s.Deleted && s.Status == SubstituteStatus.Approved && (s.ValidFrom == null || s.ValidFrom <= now) && (s.ValidTo == null || s.ValidTo >= now)).ToListAsync(ct);
+                // PB8 fix round (H3): the requirement is the latest material-balance run of the work order (raw materials of made parts, scrap, converted units and substitutes included),
+                // not the raw lines of the project BOM; a work order without a run has nothing to compare with
+                var runs = baselineIds.Count == 0 ? null : await _uow.Set<ProjectMaterialBalance>().AsNoTracking().Where(r => !r.Deleted && baselineIds.Contains(r.BaselineId)).Select(r => new { r.Id, r.BaselineId, r.RunNumber }).ToListAsync(ct);
+                var latestRun = new Dictionary<int, int>();
+                if (runs != null) foreach (var g in runs.GroupBy(r => r.BaselineId)) latestRun[g.Key] = g.OrderByDescending(r => r.RunNumber).First().Id;
+                List<int> runIds = latestRun.Values.ToList();
+                var balanceLines = runIds.Count == 0 ? new List<ProjectMaterialBalanceLine>()
+                    : await _uow.Set<ProjectMaterialBalanceLine>().AsNoTracking().Where(l => !l.Deleted && runIds.Contains(l.BalanceId) && l.ItemId != null).ToListAsync(ct);
                 foreach (var b in baselines)
                 {
                     int wo = b.WorkOrderId;
-                    f.WorkOrdersWithBaseline.Add(wo);
                     var bl = lines.Where(l => l.BaselineId == b.Id).ToList();
-                    var ids = new HashSet<int>(bl.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value));
                     f.BaselineParts[wo] = new HashSet<string>(bl.Where(l => !string.IsNullOrEmpty(l.PartNumber)).Select(l => l.PartNumber));
-                    f.BaselineQty[wo] = bl.Where(l => l.ItemId.HasValue).GroupBy(l => l.ItemId.Value).ToDictionary(g => g.Key, g => g.Sum(x => x.TotalQty));
                     f.BaselineMaterial[wo] = bl.Where(l => l.ItemId.HasValue && !string.IsNullOrWhiteSpace(l.Material)).GroupBy(l => l.ItemId.Value).ToDictionary(g => g.Key, g => g.First().Material);
+                    if (!latestRun.TryGetValue(b.Id, out int runId)) continue;
+                    f.WorkOrdersWithBaseline.Add(wo);
+                    var rl = balanceLines.Where(l => l.BalanceId == runId).ToList();
+                    var ids = new HashSet<int>(rl.Select(l => l.ItemId.Value));
+                    foreach (var l in bl.Where(l => l.ItemId.HasValue)) ids.Add(l.ItemId.Value);   // an item of the BOM itself is in the baseline, with or without a requirement line
+                    var qty = rl.GroupBy(l => l.ItemId.Value).ToDictionary(g => g.Key, g => g.Sum(x => x.RequiredQty));
+                    foreach (var l in rl.Where(l => l.SubstituteItemId.HasValue))
+                    {
+                        ids.Add(l.SubstituteItemId.Value);
+                        qty[l.SubstituteItemId.Value] = (qty.TryGetValue(l.SubstituteItemId.Value, out decimal sq) ? sq : 0m) + l.RequiredQty;
+                    }
                     foreach (var c in changes.Where(c => c.BaselineId == b.Id)) ids.Add(c.ItemId.Value);
                     foreach (var s in subs)
                     {
@@ -164,6 +180,7 @@ namespace Services.NasbNiro.OpsData
                         if (applies && ids.Contains(s.ItemId)) ids.Add(s.SubstituteItemId);
                     }
                     f.BaselineItems[wo] = ids;
+                    f.BaselineQty[wo] = qty;
                 }
             }
 

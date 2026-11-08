@@ -75,7 +75,14 @@ namespace Services.NasbNiro.OpsData
 
         // ================================================================================================ facts
 
-        private async Task<ReadinessFacts> LoadFactsAsync(int productId, int? workOrderId, CancellationToken ct)
+        /// <summary>Data a batch (the daily run, the summary) loads once instead of once per project.</summary>
+        private sealed class BatchCache
+        {
+            public List<ItemUnitConversion> Conversions;
+            public IReadOnlyDictionary<string, decimal> Settings;
+        }
+
+        private async Task<ReadinessFacts> LoadFactsAsync(int productId, int? workOrderId, BatchCache cache, CancellationToken ct)
         {
             var f = new ReadinessFacts { ProductId = productId, WorkOrderId = workOrderId, ProductLink = "/product-bank/products/" + N(productId) };
             PbBomHeader head = await _uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == productId && h.Status == PbBomStatus.Released).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
@@ -86,20 +93,21 @@ namespace Services.NasbNiro.OpsData
             var lines = new List<PbBomLine>();
             if (head != null)
             {
-                var loaded = new HashSet<int>();
-                var queue = new Queue<int>();
-                queue.Enqueue(head.Id);
-                while (queue.Count > 0 && loaded.Count < 200)
+                // level by level: one query per level of the BOM tree, not one per child BOM
+                var loaded = new HashSet<int> { head.Id };
+                var level = new List<int> { head.Id };
+                while (level.Count > 0 && loaded.Count < 200)
                 {
-                    int id = queue.Dequeue();
-                    if (!loaded.Add(id)) continue;
-                    List<PbBomLine> part = await _uow.Set<PbBomLine>().AsNoTracking().Where(l => l.BomHeaderId == id && !l.Deleted && !l.IsHeading && l.AlternativeOfLineId == null).ToListAsync(ct);
-                    foreach (PbBomLine l in part) { lines.Add(l); if (l.ChildBomId.HasValue) queue.Enqueue(l.ChildBomId.Value); }
+                    List<int> ids = level;
+                    List<PbBomLine> part = await _uow.Set<PbBomLine>().AsNoTracking().Where(l => ids.Contains(l.BomHeaderId) && !l.Deleted && !l.IsHeading && l.AlternativeOfLineId == null).ToListAsync(ct);
+                    lines.AddRange(part);
+                    level = part.Where(l => l.ChildBomId.HasValue).Select(l => l.ChildBomId.Value).Distinct().Where(i => loaded.Add(i)).ToList();
                 }
             }
             List<int> itemIds = lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value).Distinct().ToList();
             Dictionary<int, InventoryItem> items = itemIds.Count == 0 ? new Dictionary<int, InventoryItem>() : await _uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
-            List<ItemUnitConversion> conversions = await _uow.Set<ItemUnitConversion>().AsNoTracking().Where(c => !c.Deleted && c.IsActive).ToListAsync(ct);
+            List<ItemUnitConversion> conversions = cache?.Conversions ?? await _uow.Set<ItemUnitConversion>().AsNoTracking().Where(c => !c.Deleted && c.IsActive).ToListAsync(ct);
+            if (cache != null) cache.Conversions = conversions;
 
             // drawings: a Released revision of a deliverable linked to the part number
             List<string> partNumbers = lines.Where(l => !string.IsNullOrWhiteSpace(l.PartNumber)).Select(l => l.PartNumber).Distinct().ToList();
@@ -171,10 +179,12 @@ namespace Services.NasbNiro.OpsData
             return f;
         }
 
-        private async Task<ReadinessResult> ComputeAsync(int productId, int? workOrderId, CancellationToken ct)
+        private async Task<ReadinessResult> ComputeAsync(int productId, int? workOrderId, CancellationToken ct, BatchCache cache = null)
         {
-            ReadinessFacts facts = await LoadFactsAsync(productId, workOrderId, ct);
-            return OpsReadiness.Evaluate(facts, await QualitySettingKeys.LoadAsync(_uow, ct));
+            ReadinessFacts facts = await LoadFactsAsync(productId, workOrderId, cache, ct);
+            IReadOnlyDictionary<string, decimal> settings = cache?.Settings ?? await QualitySettingKeys.LoadAsync(_uow, ct);
+            if (cache != null) cache.Settings = settings;
+            return OpsReadiness.Evaluate(facts, settings);
         }
 
         // ================================================================================================ read
@@ -209,7 +219,7 @@ namespace Services.NasbNiro.OpsData
                     OpsReadinessObligation ob = obligations.FirstOrDefault(o => o.ItemCode == item.Code);
                     if (ob != null && item.Status != OpsReadiness.Ok) { item.DueDate = ob.DueDate; item.DueDateText = InventoryText.PersianDate(ob.DueDate); item.Overdue = ob.DueDate.Date < DateTime.Today; }
                 }
-                OpsReadinessException approved = await FindApprovedAsync(workOrderId.Value, ct);
+                OpsReadinessException approved = await FindApprovedAsync(workOrderId.Value, product.Id, ct);
                 dto.HasApprovedException = approved != null;
                 dto.PendingExceptionId = await _uow.Set<OpsReadinessException>().AsNoTracking().Where(e => !e.Deleted && e.WorkOrderId == workOrderId.Value && e.Status == OpsReadinessExceptionStatus.Pending).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
             }
@@ -217,8 +227,8 @@ namespace Services.NasbNiro.OpsData
             return ResponseDtoHelper.Ok(dto);
         }
 
-        private async Task<OpsReadinessException> FindApprovedAsync(int workOrderId, CancellationToken ct) =>
-            await _uow.Set<OpsReadinessException>().Where(e => !e.Deleted && e.WorkOrderId == workOrderId && e.Status == OpsReadinessExceptionStatus.Approved).OrderByDescending(e => e.Id).FirstOrDefaultAsync(ct);
+        private async Task<OpsReadinessException> FindApprovedAsync(int workOrderId, int productId, CancellationToken ct) =>
+            await _uow.Set<OpsReadinessException>().Where(e => !e.Deleted && e.WorkOrderId == workOrderId && e.ProductId == productId && e.Status == OpsReadinessExceptionStatus.Approved).OrderByDescending(e => e.Id).FirstOrDefaultAsync(ct);
 
         // ================================================================================================ gate
 
@@ -227,16 +237,12 @@ namespace Services.NasbNiro.OpsData
             ReadinessResult r = await ComputeAsync(productId, workOrderId, ct);
             List<ReadinessItemDto> gaps = r.HardGaps;
             if (gaps.Count == 0) return new ReadinessGateResult();
-            OpsReadinessException ex = await FindApprovedAsync(workOrderId, ct);
+            OpsReadinessException ex = await FindApprovedAsync(workOrderId, productId, ct);
             if (ex != null)
             {
                 var covered = (ex.ItemCodes ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
-                if (gaps.All(g => covered.Contains(g.Code)))
-                {
-                    ex.Status = OpsReadinessExceptionStatus.Used; ex.UsedAt = DateTimeOffset.Now; ex.ModifyDate = DateTimeOffset.Now;
-                    await _uow.SaveChangesAsync(ct);
-                    return new ReadinessGateResult { ExceptionId = ex.Id };
-                }
+                // the exception is spent only when the baseline has really been made (AfterBaselineAsync); a failure after the gate must not use it up
+                if (gaps.All(g => covered.Contains(g.Code))) return new ReadinessGateResult { ExceptionId = ex.Id };
             }
             string text = OpsReadiness.Message(gaps, "پایه‌ریزی پروژه از بانک محصول ممکن نیست؛ اطلاعات مهندسیِ زیر کامل نیست و باید توسط مسئول هر مورد تکمیل شود:")
                 + "\nاگر شروع بدون این اطلاعات ضروری است، «درخواست استثنا» با توجیه ثبت کنید؛ استثنا باید هم توسط مدیر PMO و هم توسط مدیرعامل (دو نفر غیر از درخواست‌دهنده) تأیید شود و موارد ناقص به‌عنوان تعهد با مهلت پیگیری می‌شوند.";
@@ -246,6 +252,12 @@ namespace Services.NasbNiro.OpsData
         public async Task AfterBaselineAsync(int workOrderId, int productId, CancellationToken ct)
         {
             ReadinessResult r = await ComputeAsync(productId, workOrderId, ct);
+            OpsReadinessException spent = await FindApprovedAsync(workOrderId, productId, ct);
+            if (spent != null && r.HardGaps.Count > 0)
+            {
+                spent.Status = OpsReadinessExceptionStatus.Used; spent.UsedAt = DateTimeOffset.Now; spent.ModifyDate = DateTimeOffset.Now;
+                await _uow.SaveChangesAsync(ct);
+            }
             int? exceptionId = await _uow.Set<OpsReadinessException>().AsNoTracking().Where(e => !e.Deleted && e.WorkOrderId == workOrderId && e.Status == OpsReadinessExceptionStatus.Used).OrderByDescending(e => e.Id).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
             await SyncObligationsAsync(workOrderId, productId, r, exceptionId, DateTime.Today, ct);
             string code = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == workOrderId).Select(w => w.Code).FirstOrDefaultAsync(ct);
@@ -318,9 +330,10 @@ namespace Services.NasbNiro.OpsData
             int escalateDays = OpsReadinessCatalog.Days(st, OpsReadinessCatalog.EscalateDays, 3);
             var baselines = await _uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => !b.Deleted && b.IsCurrent).Select(b => new { b.WorkOrderId, b.ProductId }).OrderBy(b => b.WorkOrderId).Take(300).ToListAsync(ct);
             int newGaps = 0, reminded = 0, escalated = 0;
+            var batch = new BatchCache();
             foreach (var b in baselines)
             {
-                ReadinessResult r = await ComputeAsync(b.ProductId, b.WorkOrderId, ct);
+                ReadinessResult r = await ComputeAsync(b.ProductId, b.WorkOrderId, ct, batch);
                 int? exceptionId = await _uow.Set<OpsReadinessException>().AsNoTracking().Where(e => !e.Deleted && e.WorkOrderId == b.WorkOrderId && e.Status == OpsReadinessExceptionStatus.Used).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
                 List<string> opened = await SyncObligationsAsync(b.WorkOrderId, b.ProductId, r, exceptionId, today, ct);
                 string woCode = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == b.WorkOrderId).Select(w => w.Code).FirstOrDefaultAsync(ct);
@@ -339,7 +352,7 @@ namespace Services.NasbNiro.OpsData
                         Title = $"تعهد تکمیل اطلاعات مهندسی دستور کار {woCode} ({ob.Title}) {N(late)} روز دیرکرد دارد.", Link = "/product-bank/products/" + N(ob.ProductId), Roles = OpsReadinessCatalog.OwnerRoles(ob.OwnerUnit) + ",PMO",
                     }, ct);
                     ob.LastNotifiedAt = DateTimeOffset.Now; reminded++;
-                    if (late >= escalateDays && ob.EscalatedAt == null)
+                    if (ob.Hard && late >= escalateDays && ob.EscalatedAt == null)   // only a missing hard item goes up to the CEO; a soft gap is the owner's reminder
                     {
                         await _notify.NotifyAsync(new NotifyRequest
                         {
@@ -366,9 +379,10 @@ namespace Services.NasbNiro.OpsData
             Dictionary<int, string> pCodes = await _uow.Set<PbProduct>().AsNoTracking().Where(p => pIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Code, ct);
             var obligations = await _uow.Set<OpsReadinessObligation>().AsNoTracking().Where(o => !o.Deleted && o.Status == OpsObligationStatus.Open && woIds.Contains(o.WorkOrderId)).Select(o => new { o.WorkOrderId, o.DueDate }).ToListAsync(ct);
             var sum = new ReadinessSummaryDto { AsOf = DateTime.Today };
+            var batch = new BatchCache();
             foreach (var b in baselines)
             {
-                ReadinessResult r = await ComputeAsync(b.ProductId, b.WorkOrderId, ct);
+                ReadinessResult r = await ComputeAsync(b.ProductId, b.WorkOrderId, ct, batch);
                 var mine = obligations.Where(o => o.WorkOrderId == b.WorkOrderId).ToList();
                 sum.Items.Add(new ReadinessProjectDto
                 {
@@ -461,7 +475,8 @@ namespace Services.NasbNiro.OpsData
                 if (ex.CeoUserId.HasValue && ex.PmoUserId.HasValue && ex.CeoUserId != ex.PmoUserId) ex.Status = OpsReadinessExceptionStatus.Approved;
             }
             ex.ModifierUserId = Me; ex.ModifyDate = now;
-            await _uow.SaveChangesAsync(ct);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return Bad<ReadinessExceptionDto>("همزمان تصمیم دیگری روی این درخواست ثبت شد؛ صفحه را تازه کنید و دوباره تصمیم بگیرید."); }
             if (ex.Status != OpsReadinessExceptionStatus.Pending) await _notify.CloseAsync("rdx:" + N(ex.Id), ex.Status == OpsReadinessExceptionStatus.Approved ? "تأیید شد" : "رد شد", ct);
             return ResponseDtoHelper.Ok(await MapAsync(ex, ct));
         }
