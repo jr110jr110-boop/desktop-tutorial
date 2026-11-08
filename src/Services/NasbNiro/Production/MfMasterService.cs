@@ -462,6 +462,8 @@ namespace Services.NasbNiro.Production
             HashSet<int> editors = await MfRouting.EditorsAsync(_uow, steps, ct);
             if (editors.Contains(Me)) return Bad<RoutingRevisionDto>(MfText.SameUser + " (نویسنده یا ویرایشگر مراحل نمی‌تواند تأیید کند)");
             if (production ? r.EngineeringApprovedByUserId == Me : r.ProductionApprovedByUserId == Me) return Bad<RoutingRevisionDto>(MfText.SameUser + " (دو تأیید باید از دو نفر مختلف باشد)");
+            string ecProblem = await global::Services.NasbNiro.EngChange.EcGate.RoutingRevisionProblemAsync(_uow, r, ct);   // Package A2: a new revision of an approved routing needs an approved ECO that names it
+            if (ecProblem != null) return Bad<RoutingRevisionDto>(ecProblem);
 
             string hash = await MfRouting.HashAsync(_uow, steps, standards, ct);
             string message = null;

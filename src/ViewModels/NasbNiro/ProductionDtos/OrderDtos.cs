@@ -88,6 +88,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? BomId { get; set; }
         public int? ActivityId { get; set; }
         public string SerialsPlanned { get; set; }
+
+        /// <summary>Package A2: where the components came from: BASELINE (the project BOM baseline), LEGACY (the old BOM, read only fallback) or empty (manual).</summary>
+        public string ComponentSource { get; set; }
+
+        public string ComponentNote { get; set; }
         public int? KitRequestId { get; set; }
         public string KitNumber { get; set; }
 

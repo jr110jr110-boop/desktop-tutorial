@@ -126,6 +126,9 @@ namespace Entities.Model.NasbNiro.Production
         public MfRoutingStatus Status { get; set; }
         public string Note { get; set; }
 
+        /// <summary>Package A2: the OPC chart revision this routing revision was written from (set by the OPC publication only, never by a user). Such a revision is covered by the engineering change gate of the chart itself.</summary>
+        public int? SourceOpcRoutingId { get; set; }
+
         /// <summary>Hash of the steps and their standards at the last approval step.</summary>
         public string ContentHash { get; set; }
 
@@ -198,6 +201,12 @@ namespace Entities.Model.NasbNiro.Production
         public DateTimeOffset? ActualFinish { get; set; }
 
         public bool AutoDrafted { get; set; }
+
+        /// <summary>Package A2: where the components come from: BASELINE (the project's released baseline, PbProjectBomLine), LEGACY (the read-only legacy process / BOM of a project without a baseline) or empty (an order drafted before Package A2).</summary>
+        public string ComponentSource { get; set; }
+
+        /// <summary>Package A2: the Persian flag that tells the planner the components come from the legacy BOM fallback.</summary>
+        public string ComponentNote { get; set; }
 
         /// <summary>The last person who changed the components by hand: he cannot release the order (maker-checker).</summary>
         public int? EditedByUserId { get; set; }

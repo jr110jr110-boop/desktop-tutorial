@@ -121,6 +121,13 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<ResponseWorkOrderDto>(NasbNiroMessages.EquipmentNotFound);
             }
 
+            // Package A2 (single BOM master): a work order is not built from the legacy equipment BOM / process template while the legacy BOM is frozen; the BOM of the project comes from the product bank (baseline)
+            if (responseGeneratedAssembliesDto.Assemblies != null && responseGeneratedAssembliesDto.Assemblies.Any(a => (a.Boms != null && a.Boms.Any())))
+            {
+                string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);
+                if (frozen != null) return ResponseDtoHelper.BadRequest<ResponseWorkOrderDto>("دستور کار از قالب تجهیز با BOM قدیمی ساخته نمی‌شود. " + frozen);
+            }
+
             WorkOrder workOrderToAdd = _mapper.Map<WorkOrder>(addWorkOrderDto);
             IEnumerable<AssemblyEntity> assembliesToAdd = responseGeneratedAssembliesDto.Assemblies;
 

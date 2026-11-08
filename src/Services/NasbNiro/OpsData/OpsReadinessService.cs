@@ -172,6 +172,16 @@ namespace Services.NasbNiro.OpsData
                 int? contractId = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == workOrderId.Value).Select(w => (int?)w.ContractId).FirstOrDefaultAsync(ct);
                 if (contractId.HasValue)
                 {
+                    // Package A2: engineering change orders in approval or approved (not closed) that touch a part of this product are listed (soft)
+                    string[] ecoParts = f.Parts.Where(p => !string.IsNullOrWhiteSpace(p.PartNumber)).Select(p => p.PartNumber.Trim().ToUpperInvariant()).Distinct().ToArray();
+                    if (ecoParts.Length > 0)
+                    {
+                        var openEcos = await _uow.Set<Entities.Model.NasbNiro.EngChange.EcOrder>().AsNoTracking()
+                            .Where(e => !e.Deleted && (e.Status == Entities.Model.NasbNiro.EngChange.EcoStatus.InApproval || e.Status == Entities.Model.NasbNiro.EngChange.EcoStatus.Approved) && e.AffectedParts != null)
+                            .OrderBy(e => e.Id).Select(e => new { e.Number, e.Title, e.AffectedParts, e.Status }).ToListAsync(ct);
+                        foreach (var e in openEcos.Where(e => ecoParts.Any(p => e.AffectedParts.Contains("," + p + ","))))
+                            f.OpenEcos.Add($"دستور تغییر مهندسی {e.Number} ({e.Title}) هنوز {(e.Status == Entities.Model.NasbNiro.EngChange.EcoStatus.InApproval ? "در حال تایید" : "باز")} است و این محصول را متاثر می‌کند.");
+                    }
                     f.MdrCount = await _uow.Set<PcEngineeringDeliverable>().CountAsync(d => !d.Deleted && d.ContractId == contractId.Value, ct);
                     f.ScheduleBaselineApproved = await _uow.Set<PcBaseline>().AnyAsync(b => !b.Deleted && b.ContractId == contractId.Value && b.Status == PcBaselineStatus.Approved, ct);
                 }

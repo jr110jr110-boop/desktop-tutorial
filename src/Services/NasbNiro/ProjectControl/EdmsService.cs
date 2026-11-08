@@ -250,9 +250,13 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     string listProblem = await global::Services.NasbNiro.Quality.CharacteristicRelease.ReleaseProblemAsync(_uow, d.Id, r.Id, ct);
                     if (listProblem != null) return Bad<PcRevisionDto>(listProblem);
-                    string designProblem = await global::Services.NasbNiro.ProductBank.DesignGate.CheckReleaseAsync(_uow, null, d, r, ct);   // Package A1: design output needs a closed, accepted design verification
-                    if (designProblem != null) return Bad<PcRevisionDto>(designProblem);
                 }
+                // Packages A2 + A1 (one gate, one message): a new revision of a part drawing needs an approved ECO that names it - also a revision received from the client (it is not used for production
+                // until an order adopts it); then a design output needs a closed, accepted design verification (not for a revision received from the client). Both problems are reported together.
+                string releaseProblem = global::Services.NasbNiro.ProductBank.PbBomService.JoinProblems(
+                    await global::Services.NasbNiro.EngChange.EcGate.DrawingReleaseProblemAsync(_uow, d, r, ct),
+                    received ? null : await global::Services.NasbNiro.ProductBank.DesignGate.CheckReleaseAsync(_uow, null, d, r, ct));
+                if (releaseProblem != null) return Bad<PcRevisionDto>(releaseProblem);
                 List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
                 List<PcDocumentRevision> previous = await _uow.Set<PcDocumentRevision>().Where(x => x.DeliverableId == d.Id && x.Id != r.Id && !x.Deleted && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt)).ToListAsync(ct);
                 DateTimeOffset now = DateTimeOffset.Now;

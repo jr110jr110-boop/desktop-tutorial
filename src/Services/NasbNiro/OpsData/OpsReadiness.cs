@@ -25,6 +25,8 @@ namespace Services.NasbNiro.OpsData
         public const string Schedule = "RS-SCHEDULE";
         public const string LongLead = "RS-LONGLEAD";
         public const string Stage = "RS-STAGE";
+        /// <summary>Package A2: open engineering change orders (in approval or approved, not yet closed) that touch the parts of the project; soft, listed only when there are some.</summary>
+        public const string Eco = "RS-ECO";
     }
 
     public sealed class ReadinessDef
@@ -70,6 +72,7 @@ namespace Services.NasbNiro.OpsData
             new ReadinessDef { Code = ReadinessCodes.Schedule, Title = "خط پایه‌ی برنامه‌ی زمان‌بندی (تأییدشده)", Owner = "PLANNING", Hard = false, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.LongLead, Title = "علامت‌گذاری اقلام با زمان تأمین طولانی (زمان تأمین کالا ثبت شده)", Owner = "PLANNING", Hard = false },
             new ReadinessDef { Code = ReadinessCodes.Stage, Title = "کد مرحله‌ی OPC برای هر مرحله‌ی قطعه‌ی ساخت", Owner = "ENGINEERING", Hard = false },
+            new ReadinessDef { Code = ReadinessCodes.Eco, Title = "دستور تغییر مهندسی (ECO) بازِ متاثر از این محصول", Owner = "ENGINEERING", Hard = false, ProjectLevel = true },
         };
 
         public static ReadinessDef Find(string code) => All.FirstOrDefault(d => string.Equals(d.Code, code, StringComparison.OrdinalIgnoreCase));
@@ -191,6 +194,7 @@ namespace Services.NasbNiro.OpsData
         public bool ItpExists { get; set; }
         public bool ItpClientApproved { get; set; }
         public int MdrCount { get; set; }
+        public List<string> OpenEcos { get; set; } = new List<string>();
         public bool ScheduleBaselineApproved { get; set; }
     }
 
@@ -332,6 +336,11 @@ namespace Services.NasbNiro.OpsData
                         foreach (ReadinessPart p in make.Where(p => f.Routings.TryGetValue(p.PartNumber, out ReadinessRoutingFact r) && r.StepsWithoutStage.Count > 0))
                             off.Add(Off(PartText(p) + ": مراحل بدون کد مرحله: " + string.Join("، ", f.Routings[p.PartNumber].StepsWithoutStage.Take(5)), f.ProductLink));
                         item = Make(d, s, make.Count, off);
+                        break;
+                    case ReadinessCodes.Eco:
+                        if (f.OpenEcos.Count == 0) continue;   // no open order touches the project: the item does not appear and the percentage does not move
+                        foreach (string eco in f.OpenEcos) off.Add(Off(eco, f.ProductLink));
+                        item = Make(d, s, f.OpenEcos.Count, off);
                         break;
                     default:
                         continue;

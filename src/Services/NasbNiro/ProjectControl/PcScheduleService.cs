@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
@@ -456,6 +457,14 @@ namespace Services.NasbNiro.ProjectControl
             foreach (WorkOrder wo in orders)
             {
                 if (existingWo.Contains(wo.Id)) { result.WorkOrdersSkipped++; result.Notes.Add("WBS دستور کار " + wo.Code + " قبلاً تولید شده است."); continue; }
+                // Package A2 (single BOM master): a project with a baseline takes its WBS from the baseline («تولید WBS» of the product bank); the legacy BOM is only the read-only fallback of a project without a baseline
+                if (await _uow.Set<PbProjectBaseline>().AsNoTracking().AnyAsync(b => b.WorkOrderId == wo.Id && b.IsCurrent && !b.Deleted, cancellationToken))
+                {
+                    result.WorkOrdersSkipped++;
+                    result.Notes.Add("دستور کار " + wo.Code + " مبنای BOM پروژه دارد؛ WBS آن از مبنای BOM پروژه (بانک محصول، «تولید WBS») ساخته می‌شود، نه از BOM قدیمی.");
+                    continue;
+                }
+                result.Notes.Add("WBS دستور کار " + wo.Code + " از BOM قدیمی (فقط‌خواندنی) ساخته شد چون پروژه مبنای BOM منتشرشده ندارد.");
                 productIndex++;
                 PcWorkOrderInfo info = await _uow.Set<PcWorkOrderInfo>().AsNoTracking().FirstOrDefaultAsync(i => i.WorkOrderId == wo.Id && !i.Deleted, cancellationToken);
                 string pcode = projectCode + "." + productIndex.ToString("00", CultureInfo.InvariantCulture);
