@@ -14,15 +14,15 @@ onMounted(async () => {
 
 <template>
   <div v-if="summary" class="integrity-light" role="button" title="سلامت سوابق" @click="router.push({ name: 'Integrity' })">
-    <span :class="summary.chainStatus === 'Ok' ? 'good' : 'red'" class="dot"></span>
+    <span :class="summary.chainStatus === 'Ok' || summary.chainStatus === 'Running' ? 'good' : 'red'" class="dot"></span>
     <span>زنجیره سوابق: {{ summary.chainStatusText }}</span>
     <span class="sep">|</span>
-    <span :class="summary.red ? 'red' : 'good'" class="dot"></span>
+    <span :class="summary.restoreStatus === 'Ok' ? 'good' : 'red'" class="dot"></span>
     <span>
       آزمون بازیابی پشتیبان:
       <template v-if="summary.lastRestoreSuccessAtText">آخرین موفق {{ summary.lastRestoreSuccessAtText }}</template>
       <template v-else>انجام نشده</template>
-      <template v-if="summary.red"> (قرمز: بیش از {{ summary.restoreWarnDays }} روز)</template>
+      <template v-if="summary.restoreStatus !== 'Ok'"> (قرمز: بیش از {{ summary.restoreWarnDays }} روز)</template>
     </span>
   </div>
 </template>

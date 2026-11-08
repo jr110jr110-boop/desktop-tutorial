@@ -21,7 +21,7 @@ export interface ChainRun {
   requestedByName: string | null;
   startedAt: string;
   startedAtText: string;
-  status: "Ok" | "Broken" | "Error";
+  status: "Ok" | "Broken" | "Error" | "Running";
   statusText: string;
   fromSeq: number | null;
   toSeq: number | null;
@@ -34,6 +34,7 @@ export interface ChainRun {
   breakRowId: number | null;
   breakEntityType: string | null;
   breakEntityTypeText: string | null;
+  breakColumn: string | null;
   breakAtText: string | null;
   message: string | null;
 }
@@ -55,6 +56,8 @@ export interface RestoreTest {
 export interface IntegritySummary {
   chainStatus: string;
   chainStatusText: string;
+  openBreak: boolean;
+  pendingAcceptanceId: number | null;
   lastChainRun: ChainRun | null;
   lastGoodChainRun: ChainRun | null;
   lastFullRun: ChainRun | null;
@@ -89,11 +92,36 @@ export interface SafetyChange {
   requestedByUserId: number;
   requestedByName: string;
   requestedAtText: string;
-  status: "Pending" | "Approved" | "Rejected" | "Cancelled";
+  status: "Pending" | "Approved" | "Rejected" | "Cancelled" | "Expired" | "AppliedAwaitingConfirmation";
   statusText: string;
   decidedByName: string | null;
   decidedAtText: string | null;
   decisionNote: string | null;
+}
+
+export interface BreakAcceptance {
+  id: number;
+  breakRunId: number;
+  breakKind: string | null;
+  breakSeq: number | null;
+  breakRowId: number | null;
+  breakEntityType: string | null;
+  breakEntityTypeText: string | null;
+  breakColumn: string | null;
+  reason: string;
+  requestedByName: string;
+  requestedAtText: string;
+  qaName: string | null;
+  qaAtText: string | null;
+  pmoName: string | null;
+  pmoAtText: string | null;
+  ceoName: string | null;
+  ceoAtText: string | null;
+  signatures: number;
+  status: "Pending" | "Approved" | "Cancelled";
+  statusText: string;
+  appliedAtText: string | null;
+  anchorSeq: number | null;
 }
 
 export const getIntegritySummary = () => get("integrity/summary");
@@ -108,3 +136,9 @@ export const getSafetyChanges = (params: any) => get("safety/changes", params);
 export const requestSafetyChange = (body: { store: string; key: string; value: string; reason: string }) => post("safety/changes", body);
 export const decideSafetyChange = (id: number, approve: boolean, note: string | null) => post("safety/changes/decide", { id, approve, note });
 export const cancelSafetyChange = (id: number) => post(`safety/changes/${id}/cancel`);
+
+export const getChainRun = (id: number) => get(`integrity/chain/runs/${id}`);
+export const getAcceptances = (params: any) => get("integrity/acceptances", params);
+export const requestAcceptance = (runId: number, reason: string) => post("integrity/acceptances", { runId, reason });
+export const signAcceptance = (id: number, role: "QA" | "PMO" | "CEO") => post("integrity/acceptances/sign", { id, role });
+export const cancelAcceptance = (id: number) => post(`integrity/acceptances/${id}/cancel`);

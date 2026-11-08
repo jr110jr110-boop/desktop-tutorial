@@ -5,9 +5,10 @@
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
-import { getChainRuns, getIntegritySummary, getRestoreTests, importRestoreTests, runChainCheck, type ChainRun, type IntegritySummary } from "@/api/IntegrityAPIs";
+import { cancelAcceptance, getAcceptances, getChainRun, requestAcceptance, signAcceptance, getChainRuns, getIntegritySummary, getRestoreTests, importRestoreTests, runChainCheck, type BreakAcceptance, type ChainRun, type IntegritySummary } from "@/api/IntegrityAPIs";
 import { usePagedList } from "@/composables/fn";
 import { fail, ok } from "@/composables/inventory";
+import { hasRole, IntegrityRoles } from "@/composables/roles";
 
 const summary = ref<IntegritySummary | null>(null);
 const busy = ref(false);
@@ -15,8 +16,15 @@ const open = ref<number | null>(null);
 const none = ref<any>({});
 const runs = usePagedList(getChainRuns, none, 25);
 const tests = usePagedList(getRestoreTests, none, 12);
+const accepts = usePagedList(getAcceptances, none, 10);
+const canAccept = hasRole(IntegrityRoles.approvers.concat(["QA"]));
+const reason = ref("");
+const seats: { role: "QA" | "PMO" | "CEO"; title: string }[] = [{ role: "QA", title: "مسئول کیفیت" }, { role: "PMO", title: "PMO" }, { role: "CEO", title: "مدیرعامل" }];
+const signer = (a: BreakAcceptance, r: string) => (r === "QA" ? a.qaName : r === "PMO" ? a.pmoName : a.ceoName);
+const signedAt = (a: BreakAcceptance, r: string) => (r === "QA" ? a.qaAtText : r === "PMO" ? a.pmoAtText : a.ceoAtText);
 
 const chainBadge = (s: string | undefined) => (s === "Ok" ? "ok" : s === "Broken" ? "bad" : "warn");
+const breakWhere = (r: ChainRun) => (r.breakKind === "record-drift" ? `جدول «${r.breakEntityTypeText || r.breakEntityType}»، شناسه ردیف ${r.breakRowId ?? "-"}، ستون ${r.breakColumn ?? "-"} (رکورد با ردپای ثبت‌شده نمی‌خواند)` : `شماره ${r.breakSeq}، جدول «${r.breakEntityTypeText || r.breakEntityType}»، شناسه ردیف ${r.breakRowId ?? "-"}`);
 const restoreBadge = (s: string | undefined) => (s === "Ok" ? "ok" : s === "Never" || s === "Stale" || s === "Failed" ? "bad" : "warn");
 
 async function load() {
@@ -25,15 +33,55 @@ async function load() {
   summary.value = data;
   runs.load();
   tests.load();
+  accepts.load();
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function check(mode: "incremental" | "full") {
   busy.value = true;
-  const [run, error] = await runChainCheck(mode);
+  let [run, error] = await runChainCheck(mode);
+  // a full pass is queued (status Running): poll the run until it ends (at most about 30 minutes)
+  for (let i = 0; !error && run && (run as ChainRun).status === "Running" && i < 900; i++) {
+    await sleep(2000);
+    [run, error] = await getChainRun((run as ChainRun).id);
+  }
   busy.value = false;
   if (error) return fail(error);
-  if ((run as ChainRun).status === "Ok") ok("زنجیره سوابق سالم است.");
-  else fail(new Error((run as ChainRun).message || "خطا در زنجیره سوابق؛ هشدار برای مسئول کیفیت، PMO و مدیرعامل ارسال شد."));
+  const r = run as ChainRun;
+  if (r.status === "Ok") ok("زنجیره سوابق سالم است.");
+  else if (r.status === "Running") ok("بررسی کامل هنوز در حال اجراست؛ نتیجه در تاریخچه می‌آید.");
+  else fail(new Error(r.message || "خطا در زنجیره سوابق؛ هشدار برای مسئول کیفیت، PMO و مدیرعامل ارسال شد."));
+  load();
+}
+
+async function askAccept() {
+  const id = summary.value?.lastChainRun?.id;
+  if (!id) return;
+  busy.value = true;
+  const [, error] = await requestAcceptance(id, reason.value);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("درخواست پذیرش ثبت شد؛ سه امضای جدا (کیفیت، PMO، مدیرعامل) لازم است.");
+  reason.value = "";
+  load();
+}
+
+async function sign(a: BreakAcceptance, role: "QA" | "PMO" | "CEO") {
+  busy.value = true;
+  const [, error] = await signAcceptance(a.id, role);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("امضا ثبت شد.");
+  load();
+}
+
+async function cancelAccept(a: BreakAcceptance) {
+  busy.value = true;
+  const [, error] = await cancelAcceptance(a.id);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("درخواست لغو شد.");
   load();
 }
 
@@ -67,7 +115,12 @@ onMounted(load);
               آخرین بررسی: {{ summary.lastChainRun.startedAtText }} ({{ summary.lastChainRun.kindText }}) — {{ summary.lastChainRun.entriesChecked }} ردیف بررسی شد
             </div>
             <div v-if="summary.lastFullRun" class="inv-muted small">آخرین بررسی کامل: {{ summary.lastFullRun.startedAtText }}</div>
-            <div v-if="summary.lastChainRun && summary.lastChainRun.status !== 'Ok'" class="text-danger small mt-2">{{ summary.lastChainRun.message }}</div>
+            <div v-if="summary.openBreak" class="text-danger small mt-2">شکست زنجیره هنوز باز است و تا یک بررسی کامل سالم یا پذیرش سه‌امضایی باقی می‌ماند.</div>
+            <div v-if="summary.lastChainRun && summary.lastChainRun.status !== 'Ok'" class="text-danger small mt-1">{{ summary.lastChainRun.message }}</div>
+            <div v-if="summary.openBreak && canAccept && !summary.pendingAcceptanceId" class="mt-2 d-flex gap-2">
+              <input v-model="reason" class="form-control form-control-sm" maxlength="1000" placeholder="دلیل پذیرش شکست شناخته‌شده (الزامی)" />
+              <button :disabled="busy" class="btn btn-sm btn-outline-danger text-nowrap" @click="askAccept">درخواست پذیرش</button>
+            </div>
             <div class="mt-3 d-flex gap-2">
               <button :disabled="busy" class="btn btn-sm btn-primary" @click="check('incremental')">بررسی همین حالا</button>
               <button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="check('full')">بررسی کامل زنجیره</button>
@@ -84,7 +137,7 @@ onMounted(load);
               <template v-if="summary.lastRestoreSuccessAtText">آخرین آزمون موفق: {{ summary.lastRestoreSuccessAtText }} ({{ summary.daysSinceRestoreSuccess }} روز پیش)</template>
               <template v-else>هنوز آزمون موفقی ثبت نشده است.</template>
             </div>
-            <div v-if="summary.red" class="text-danger small mt-1">بیش از {{ summary.restoreWarnDays }} روز از آخرین آزمون موفق گذشته یا آزمونی انجام نشده است.</div>
+            <div v-if="summary.red" class="text-danger small mt-1">بیش از {{ summary.restoreWarnDays }} روز از آخرین آزمون موفق گذشته یا آخرین آزمون ناموفق بوده یا آزمونی انجام نشده است.</div>
             <div class="mt-3"><button :disabled="busy" class="btn btn-sm btn-outline-primary" @click="importResults">خواندن نتیجه آزمون</button></div>
           </div>
         </div>
@@ -112,7 +165,7 @@ onMounted(load);
                 <td colspan="7" class="bg-light">
                   <div>{{ r.message }}</div>
                   <div v-if="r.status === 'Broken'" class="text-danger mt-1">
-                    اولین ردیف خراب: شماره {{ r.breakSeq }}، جدول «{{ r.breakEntityTypeText || r.breakEntityType }}»، شناسه ردیف {{ r.breakRowId ?? "-" }}، زمان {{ r.breakAtText || "-" }}
+                    اولین مورد خراب ({{ r.breakKind }}): {{ breakWhere(r) }}، زمان {{ r.breakAtText || "-" }}
                   </div>
                   <div v-if="!r.keyConfigured" class="text-warning mt-1">کلید امضای سوابق تنظیم نشده بود.</div>
                 </td>
@@ -122,6 +175,32 @@ onMounted(load);
         </table>
       </div>
       <QPager :page="runs.page.value" :total="runs.total.value" :page-size="runs.pageSize" @go="runs.go" />
+    </div>
+
+    <div class="inv-card">
+      <div class="inv-toolbar"><h2 class="inv-title">پذیرش شکست شناخته‌شده</h2></div>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>زمان</th><th>شکست</th><th>دلیل</th><th>درخواست‌دهنده</th><th v-for="x in seats" :key="x.role">{{ x.title }}</th><th>وضعیت</th><th></th></tr></thead>
+          <tbody>
+            <tr v-if="!accepts.rows.value.length"><td colspan="8" class="text-center inv-muted">درخواستی ثبت نشده است.</td></tr>
+            <tr v-for="a in accepts.rows.value" :key="a.id">
+              <td>{{ a.requestedAtText }}</td>
+              <td>{{ a.breakKind }}<span v-if="a.breakSeq"> ({{ a.breakSeq }})</span><span v-if="a.breakEntityType"> {{ a.breakEntityTypeText || a.breakEntityType }}</span></td>
+              <td>{{ a.reason }}</td>
+              <td>{{ a.requestedByName }}</td>
+              <td v-for="x in seats" :key="x.role">
+                <template v-if="signer(a, x.role)">{{ signer(a, x.role) }}<div class="inv-muted small">{{ signedAt(a, x.role) }}</div></template>
+                <button v-else-if="a.status === 'Pending' && canAccept" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="sign(a, x.role)">امضا</button>
+                <span v-else>-</span>
+              </td>
+              <td>{{ a.statusText }}</td>
+              <td><button v-if="a.status === 'Pending'" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="cancelAccept(a)">لغو</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="inv-muted small">سه نفر جدا (کیفیت، PMO، مدیرعامل؛ نه هوش مصنوعی) باید امضا کنند؛ امضای سوم، شکست را می‌پذیرد و بررسی از همان نقطه ادامه می‌یابد.</div>
     </div>
 
     <div class="inv-card">

@@ -14,11 +14,13 @@ const storeTitles: Record<string, string> = {
   Procurement: "تدارکات",
   Finance: "مالی",
   Quality: "کیفیت",
+  Sales: "فروش",
   AiSeat: "دستیارهای هوش مصنوعی",
 };
 const canApprove = hasRole(IntegrityRoles.approvers);
 const items = ref<SafetyItem[]>([]);
 const pending = ref<SafetyChange[]>([]);
+const confirming = ref<SafetyChange[]>([]);
 const history = ref<SafetyChange[]>([]);
 const onlyDeviations = ref(false);
 const busy = ref(false);
@@ -38,6 +40,8 @@ async function load() {
   pending.value = open?.data || [];
   const [done] = await getSafetyChanges({ PageNumber: 1, PageSize: 15 });
   history.value = (done?.data || []).filter((c: SafetyChange) => c.status !== "Pending");
+  const [conf] = await getSafetyChanges({ Status: "AppliedAwaitingConfirmation", PageSize: 0 });
+  confirming.value = conf?.data || [];
 }
 
 function ask(item: SafetyItem) {
@@ -164,6 +168,18 @@ onMounted(load);
         <button :disabled="busy" class="btn btn-sm btn-danger me-2" @click="decide(false)">رد</button>
         <button class="btn btn-sm btn-outline-secondary" @click="decision.change = null">بستن</button>
         <div class="inv-muted small mt-1">تایید توسط خود درخواست‌دهنده پذیرفته نمی‌شود.</div>
+      </div>
+    </div>
+
+    <div v-if="confirming.length" class="inv-card">
+      <h2 class="inv-title">خاموشی فوری دستیار، منتظر تایید در ۲۴ ساعت</h2>
+      <p class="inv-muted small">دستیارهای پیش‌نویس‌ساز با یک نفر (PMO یا مدیرعامل) فوراً خاموش می‌شوند؛ نفر دوم باید ظرف ۲۴ ساعت تایید کند وگرنه دستیار دوباره روشن می‌شود و مدیرعامل خبردار می‌شود.</p>
+      <div v-for="c in confirming" :key="c.id" class="border rounded p-2 mb-2">
+        <b>{{ c.title }}</b> — {{ c.requestedByName }}: {{ c.reason }} <span class="inv-badge warn ms-1">{{ c.statusText }}</span>
+        <div v-if="canApprove" class="mt-1">
+          <button :disabled="busy" class="btn btn-sm btn-success me-2" @click="decision = { change: c, note: '' }; decide(true)">تایید خاموشی</button>
+          <button :disabled="busy" class="btn btn-sm btn-danger" @click="decision = { change: c, note: 'رد خاموشی' }; decide(false)">رد و روشن کردن دوباره</button>
+        </div>
       </div>
     </div>
 
