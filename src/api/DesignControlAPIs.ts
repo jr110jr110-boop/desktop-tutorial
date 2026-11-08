@@ -68,3 +68,11 @@ export const saveDesignFinding = (dto: any) => call("post", base + "reviews/find
 export const designFindingAction = (dto: { id: number; action: string; note?: string | null }) => call("post", base + "reviews/findings/action", dto);
 /** SaveDesignTraceDto { reviewId, rows[{ inputId, outputId, result (0 pending, 1 passed, 2 failed), evidence, evidenceRef }] }: judged by an independent participant. */
 export const saveDesignTraces = (dto: { reviewId: number; rows: any[] }) => call("post", base + "reviews/traces", dto);
+
+// adoption of an existing design (fix round 1, H6): BOM revisions released before the design control started
+/** DesignAdoptionQuery { OnlyLegacy (default true), ProductId?, Contains? } -> the BOM revisions with the state of their adoption (adoptionId null = none asked yet). */
+export const getDesignAdoptions = (params: any) => call("get", base + "adoptions", undefined, clean(params));
+/** SaveDesignAdoptionDto { bomHeaderId, reason, evidenceRef }: asked by ENGINEERING. */
+export const requestDesignAdoption = (dto: { bomHeaderId: number; reason: string; evidenceRef: string }) => call("post", base + "adoptions", dto);
+/** DesignAdoptionActionDto { id, action (accept: QA, never the person who asked | void), note, rowVersion } */
+export const designAdoptionAction = (dto: { id: number; action: string; note?: string | null; rowVersion?: string | null }) => call("post", base + "adoptions/action", dto);

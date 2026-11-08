@@ -446,6 +446,7 @@ const links = {
     { title: "برنامه‌های طراحی", routeName: "DesignPlans" },
     { title: "ورودی‌های طراحی", routeName: "DesignInputs" },
     { title: "بازبینی، تایید و صحه‌گذاری طراحی", routeName: "DesignReviews" },
+    { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions" },
     { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance" },
     { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },

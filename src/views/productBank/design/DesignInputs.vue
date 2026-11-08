@@ -186,7 +186,7 @@ onMounted(async () => {
                 <button v-if="r.status === 0" class="btn btn-sm btn-outline-primary py-0" @click="edit(r)">{{ r.usedByReview ? "جایگزینی" : "ویرایش" }}</button>
                 <button v-if="r.status === 0" class="btn btn-sm btn-outline-danger py-0 ms-1" @click="conflictDialog = { id: r.id, withInputId: null, note: '' }">تعارض</button>
                 <button v-if="r.status === 1 && canResolve" class="btn btn-sm btn-outline-success py-0" @click="dialog = { id: r.id, action: 'resolve', title: 'رفع تعارض (نفر دوم)' }">رفع تعارض</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 ms-1" @click="dialog = { id: r.id, action: 'void', title: 'ابطال ورودی' }">ابطال</button>
+                <button v-if="r.status === 0" class="btn btn-sm btn-outline-secondary py-0 ms-1" @click="dialog = { id: r.id, action: 'void', title: 'ابطال ورودی' }">ابطال</button>
               </template>
             </td>
           </tr>

@@ -717,6 +717,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/product-bank/design/inputs", name: "DesignInputs", component: () => import("@/views/productBank/design/DesignInputs.vue"), meta: { roles: DesignRoles.readers } },
   { path: "/product-bank/design/reviews", name: "DesignReviews", component: () => import("@/views/productBank/design/DesignReviews.vue"), meta: { roles: DesignRoles.readers } },
   { path: "/product-bank/design/reviews/:id", name: "DesignReview", component: () => import("@/views/productBank/design/DesignReview.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/adoptions", name: "DesignAdoptions", component: () => import("@/views/productBank/design/DesignAdoptions.vue"), meta: { roles: DesignRoles.readers } },
   { path: "/product-bank/design/dossier/:productId", name: "DesignDossier", component: () => import("@/views/productBank/design/DesignDossier.vue"), meta: { roles: DesignRoles.readers } },
   { path: "/project-balance", name: "ProjectBalance", component: () => import("@/views/projectBalance/Balance.vue"), meta: { roles: BalanceRoles.readers } },
   { path: "/project-balance/substitutes", name: "ProjectBalanceSubstitutes", component: () => import("@/views/projectBalance/Substitutes.vue"), meta: { roles: BalanceRoles.readers } },
