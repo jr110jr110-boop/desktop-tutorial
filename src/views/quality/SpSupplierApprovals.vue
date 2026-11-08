@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import KsDatePicker from "@/components/common/KsDatePicker.vue";
 import QPager from "@/components/quality/QPager.vue";
 import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -59,9 +60,9 @@ onMounted(async () => {
         <div class="row g-2">
           <div class="col-md-3"><label class="form-label small mb-0">پیمانکار *</label><select v-model="form.providerId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option></select></div>
           <div class="col-md-3"><label class="form-label small mb-0">فرایند *</label><select v-model="form.typeId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="t in types" :key="t.id" :value="t.id">{{ t.title }}</option></select></div>
-          <div class="col-md-2"><label class="form-label small mb-0">از *</label><input v-model="form.validFrom" class="form-control form-control-sm" type="date" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">تا * (حداکثر سه سال)</label><input v-model="form.validTo" class="form-control form-control-sm" type="date" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ ممیزی</label><input v-model="form.auditDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">از *</label><KsDatePicker v-model="form.validFrom" element-tag="spa-valid-from" placeholder="تاریخ" simple-placeholder /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تا * (حداکثر سه سال)</label><KsDatePicker v-model="form.validTo" element-tag="spa-valid-to" placeholder="تاریخ" simple-placeholder /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ ممیزی</label><KsDatePicker v-model="form.auditDate" element-tag="spa-audit" placeholder="تاریخ" simple-placeholder /></div>
           <div class="col-md-3"><label class="form-label small mb-0">شماره اعتبارنامه</label><input v-model="form.accreditationNumber" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">مدرک ممیزی / اعتبارنامه (فایل یا شماره)</label><DocAttach v-model="form.evidenceDocumentId" title="مدرک تایید پیمانکار" /></div>
           <div class="col-md-5"><label class="form-label small mb-0">توضیح</label><input v-model="form.note" class="form-control form-control-sm" /></div>
@@ -80,7 +81,7 @@ onMounted(async () => {
           <tr v-for="a in list.rows.value" :key="a.id">
             <td>{{ a.providerName }}</td><td>{{ a.typeTitle }}</td><td class="small">{{ jalali(a.validFrom) }} تا {{ jalali(a.validTo) }}<div :class="a.daysLeft <= 30 ? 'text-danger' : 'inv-muted'">{{ a.daysLeft }} روز مانده</div></td>
             <td class="inv-ltr small">{{ a.accreditationNumber }}</td>
-            <td><span :class="{ ok: a.status === 1, warn: a.status === 0, bad: a.status >= 2 }" class="inv-badge">{{ spApprovalStatuses[a.status] }}</span><div v-if="a.rejectReason" class="small text-danger">{{ a.rejectReason }}</div><div v-if="a.voidReason" class="small text-danger">{{ a.voidReason }}</div></td>
+            <td><span :class="{ ok: a.status === 1, warn: a.status === 0, bad: a.status === 2 || a.status === 3 }" class="inv-badge">{{ spApprovalStatuses[a.status] }}</span><div v-if="a.rejectReason" class="small text-danger">{{ a.rejectReason }}</div><div v-if="a.voidReason" class="small text-danger">{{ a.voidReason }}</div></td>
             <td class="small">{{ a.creatorName }}<br />{{ a.approvedByName }}</td>
             <td class="text-nowrap">
               <button v-if="(a.actions || []).includes('approve')" :disabled="busy" class="btn btn-sm btn-success me-1" @click="act(a.id, 'approve')">تایید QA</button>

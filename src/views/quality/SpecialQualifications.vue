@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import KsDatePicker from "@/components/common/KsDatePicker.vue";
 import QPager from "@/components/quality/QPager.vue";
 import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import ProcedurePicker from "@/components/quality/ProcedurePicker.vue";
@@ -99,8 +100,8 @@ onMounted(async () => {
           <div class="col-md-3"><label class="form-label small mb-0">نوع فرایند *</label>
             <select v-model="form.typeId" :disabled="!!form.id" class="form-select form-select-sm" @change="pickType"><option :value="null">-</option><option v-for="t in types" :key="t.id" :value="t.id">{{ t.title }}</option></select></div>
           <div class="col-md-5"><label class="form-label small mb-0">عنوان</label><input v-model="form.title" class="form-control form-control-sm" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">اعتبار از *</label><input v-model="form.validFrom" class="form-control form-control-sm" type="date" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">اعتبار تا * (حداکثر سه سال)</label><input v-model="form.validTo" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">اعتبار از *</label><KsDatePicker v-model="form.validFrom" element-tag="spq-valid-from" placeholder="تاریخ" simple-placeholder /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">اعتبار تا * (حداکثر سه سال)</label><KsDatePicker v-model="form.validTo" element-tag="spq-valid-to" placeholder="تاریخ" simple-placeholder /></div>
           <div class="col-md-6"><label class="form-label small mb-0">روش اجرایی و ویرایش معتبر *</label><ProcedurePicker v-model:deliverable-id="form.procedureDeliverableId" v-model:revision-id="form.procedureRevisionId" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">توضیح</label><input v-model="form.note" class="form-control form-control-sm" /></div>
           <div class="col-12">
@@ -123,8 +124,8 @@ onMounted(async () => {
               <div v-if="e.kind === 1" class="col-md-3"><label class="form-label small mb-0">کوره / خط</label><select v-model="e.machineId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="m in machines" :key="m.id" :value="m.id">{{ m.title }}</option></select></div>
               <template v-if="e.kind === 1 && typeOf?.requiresSurvey">
                 <div class="col-md-2"><label class="form-label small mb-0">نوع بررسی دما</label><select v-model="e.surveyKind" class="form-select form-select-sm"><option v-for="(t, k) in spSurveyKinds" :key="k" :value="Number(k)">{{ t }}</option></select></div>
-                <div class="col-md-2"><label class="form-label small mb-0">تاریخ بررسی</label><input v-model="e.surveyDate" class="form-control form-control-sm" type="date" /></div>
-                <div class="col-md-2"><label class="form-label small mb-0">سررسید بعدی</label><input v-model="e.surveyDueDate" class="form-control form-control-sm" type="date" /></div>
+                <div class="col-md-2"><label class="form-label small mb-0">تاریخ بررسی</label><KsDatePicker v-model="e.surveyDate" :element-tag="'spq-survey-' + i" placeholder="تاریخ" simple-placeholder /></div>
+                <div class="col-md-2"><label class="form-label small mb-0">سررسید بعدی</label><KsDatePicker v-model="e.surveyDueDate" :element-tag="'spq-due-' + i" placeholder="تاریخ" simple-placeholder /></div>
                 <div class="col-md-2"><DocAttach v-model="e.surveyDocumentId" title="گزارش بررسی دما" /></div>
               </template>
               <div v-if="e.kind === 2" class="col-md-5"><label class="form-label small mb-0">ابزار اندازه‌گیری</label><select v-model="e.equipmentId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="m in instruments" :key="m.id" :value="m.id">{{ m.code }} {{ m.name }}</option></select></div>

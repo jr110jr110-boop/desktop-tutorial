@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
+import KsDatePicker from "@/components/common/KsDatePicker.vue";
 import QPager from "@/components/quality/QPager.vue";
 import ReasonDialog from "@/components/quality/ReasonDialog.vue";
 import DocAttach from "@/components/quality/DocAttach.vue";
@@ -133,8 +134,8 @@ onMounted(async () => {
           <div class="col-md-2"><label class="form-label small mb-0">تعداد قطعه *</label><input v-model="form.quantity" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">شناسه بچ</label><input v-model.number="form.lotId" class="form-control form-control-sm inv-ltr" type="number" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">سریال‌ها</label><input v-model="form.serialNumbers" class="form-control form-control-sm inv-ltr" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">آغاز *</label><input v-model="form.startedAt" class="form-control form-control-sm" type="datetime-local" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">پایان *</label><input v-model="form.endedAt" class="form-control form-control-sm" type="datetime-local" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">آغاز *</label><KsDatePicker v-model="form.startedAt" element-tag="spr-started" placeholder="تاریخ و ساعت" simple-placeholder type="datetime" format="YYYY-MM-DDTHH:mm" display-format="jYYYY/jMM/jDD HH:mm" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">پایان *</label><KsDatePicker v-model="form.endedAt" element-tag="spr-ended" placeholder="تاریخ و ساعت" simple-placeholder type="datetime" format="YYYY-MM-DDTHH:mm" display-format="jYYYY/jMM/jDD HH:mm" /></div>
           <template v-if="!form.isSubcontract && qual">
             <div class="col-md-3"><label class="form-label small mb-0">اپراتور *</label><select v-model="form.operatorPersonId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="o in operators" :key="o.personId" :value="o.personId">{{ o.personName }}</option></select></div>
             <div v-if="machinesOfQual.length" class="col-md-3"><label class="form-label small mb-0">کوره / خط *</label><select v-model="form.machineId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="e in machinesOfQual" :key="e.machineId" :value="e.machineId">{{ e.machineTitle }}</option></select></div>

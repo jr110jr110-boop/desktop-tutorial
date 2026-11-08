@@ -213,6 +213,8 @@ const ms = base + "material-specs";
 export const getSpTypes = (includeInactive = false) => call("get", sp + "types", undefined, clean({ IncludeInactive: includeInactive }));
 /** dto { id?, code, title, description?, requiresMachine, requiresSurvey, requiredInstrumentClass?, procedureDeliverableId?, existingControl, isActive, parameters: [{ name, unit, min, max, required }], rowVersion? } */
 export const saveSpType = (dto: any) => call("post", sp + "types", dto);
+// Fix round 1: the second person decides a change that weakens a process type (action approve or reject; id = the pending change)
+export const spTypeChangeAction = (id: number, action: string, note?: string) => call("post", sp + "types/change-action", { id, action, note: note || null });
 export const getSpQualifications = (params: any) => call("get", sp + "qualifications", undefined, clean(params));
 export const getSpQualification = (id: number) => call("get", sp + "qualifications/" + id);
 /** dto { id?, typeId, title, procedureDeliverableId, procedureRevisionId, validFrom, validTo, note?, supersedesId?, limits: [{ name, unit, min, max, required }], equipments: [{ kind (1 machine, 2 instrument), machineId?, equipmentId?, surveyKind, surveyDate?, surveyDueDate?, surveyDocumentId? }], operatorPersonIds: [], rowVersion? } */

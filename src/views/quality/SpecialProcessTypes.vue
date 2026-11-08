@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import ProcedurePicker from "@/components/quality/ProcedurePicker.vue";
-import { getSpTypes, saveSpType } from "@/api/QualityAPIs";
+import ReasonDialog from "@/components/quality/ReasonDialog.vue";
+import { getSpTypes, saveSpType, spTypeChangeAction } from "@/api/QualityAPIs";
 import { fail, ok } from "@/composables/inventory";
 import { instrumentClasses } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
@@ -11,6 +12,7 @@ import { hasRole, QualityRoles } from "@/composables/roles";
 const rows = ref<any[]>([]);
 const form = ref<any>(null);
 const busy = ref(false);
+const dialog = ref<null | { id: number }>(null);
 const canEdit = hasRole([...QualityRoles.engineering, ...QualityRoles.qaManager]);
 
 async function load() {
@@ -18,20 +20,29 @@ async function load() {
   if (error) return fail(error);
   rows.value = Array.isArray(data) ? data : [];
 }
-const blank = () => ({ id: null, code: "", title: "", description: "", requiresMachine: true, requiresSurvey: false, requiredInstrumentClass: null as number | null, procedureDeliverableId: null as number | null, existingControl: false, isActive: true, parameters: [] as any[], rowVersion: null });
+const blank = () => ({ id: null, code: "", title: "", description: "", requiresMachine: true, requiresSurvey: false, requiredInstrumentClass: null as number | null, procedureDeliverableId: null as number | null, existingControl: false, isActive: true, parameters: [] as any[], rowVersion: null, reason: "" });
 function edit(t: any) {
-  form.value = { ...t, parameters: (t.parameters || []).map((p: any) => ({ ...p })) };
+  form.value = { ...t, reason: "", parameters: (t.parameters || []).map((p: any) => ({ ...p })) };
 }
 const addParameter = () => form.value.parameters.push({ id: 0, sortOrder: form.value.parameters.length, name: "", unit: "", min: null, max: null, required: true });
 async function save() {
   const f = form.value;
   const nn = (v: any) => (v === "" || v === undefined ? null : v);
   busy.value = true;
-  const [, error] = await saveSpType({ ...f, requiredInstrumentClass: f.requiredInstrumentClass || null, parameters: f.parameters.map((p: any, i: number) => ({ ...p, sortOrder: i, min: nn(p.min), max: nn(p.max) })) });
+  const [data, error] = await saveSpType({ ...f, requiredInstrumentClass: f.requiredInstrumentClass || null, parameters: f.parameters.map((p: any, i: number) => ({ ...p, sortOrder: i, min: nn(p.min), max: nn(p.max) })) });
   busy.value = false;
   if (error) return fail(error);
-  ok("فرایند ذخیره شد.");
+  ok(data?.pendingChangeId ? "تغییر کنترل را ضعیف می‌کند و منتظر تایید نفر دوم (مدیر QA یا PMO) است." : "فرایند ذخیره شد.");
   form.value = null;
+  load();
+}
+async function decide(id: number, action: string, note?: string) {
+  busy.value = true;
+  const [, error] = await spTypeChangeAction(id, action, note);
+  busy.value = false;
+  dialog.value = null;
+  if (error) return fail(error);
+  ok(action === "approve" ? "تغییر تایید و اعمال شد." : "تغییر رد شد.");
   load();
 }
 onMounted(load);
@@ -48,12 +59,12 @@ onMounted(load);
 
       <div v-if="form" class="border rounded p-2 mb-3">
         <div class="row g-2">
-          <div class="col-md-2"><label class="form-label small mb-0">کد *</label><input v-model="form.code" :disabled="!!form.id" class="form-control form-control-sm inv-ltr" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">کد *</label><input v-model="form.code" :disabled="!!form.id" class="form-control form-control-sm inv-ltr" :title="form.id ? 'کد پس از ثبت تغییر نمی‌کند' : ''" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">عنوان *</label><input v-model="form.title" class="form-control form-control-sm" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">توضیح</label><input v-model="form.description" class="form-control form-control-sm" /></div>
           <div class="col-md-3 d-flex align-items-end"><label class="form-check"><input v-model="form.requiresMachine" class="form-check-input" type="checkbox" /> <span class="form-check-label">دستگاه (کوره/خط) لازم است</span></label></div>
           <div class="col-md-3 d-flex align-items-end"><label class="form-check"><input v-model="form.requiresSurvey" class="form-check-input" type="checkbox" /> <span class="form-check-label">بررسی دما (TUS/SAT) لازم است</span></label></div>
-          <div class="col-md-3 d-flex align-items-end"><label class="form-check"><input v-model="form.existingControl" class="form-check-input" type="checkbox" /> <span class="form-check-label">با صلاحیت پرسنلی موجود کنترل می‌شود (NDT)</span></label></div>
+          <div class="col-md-3 d-flex align-items-end"><span v-if="form.existingControl" class="inv-badge info">با صلاحیت پرسنلی موجود کنترل می‌شود (NDT)؛ از این صفحه تغییر نمی‌کند</span></div>
           <div class="col-md-3 d-flex align-items-end"><label class="form-check"><input v-model="form.isActive" class="form-check-input" type="checkbox" /> <span class="form-check-label">فعال</span></label></div>
           <div class="col-md-4"><label class="form-label small mb-0">رده ابزار اندازه‌گیری لازم</label>
             <select v-model="form.requiredInstrumentClass" class="form-select form-select-sm"><option :value="null">ندارد</option><option v-for="(t, k) in instrumentClasses" :key="k" :value="Number(k)" :hidden="Number(k) === 99">{{ t }}</option></select></div>
@@ -72,6 +83,7 @@ onMounted(load);
             </table>
             <button class="btn btn-sm btn-outline-secondary" @click="addParameter">پارامتر جدید</button>
           </div>
+          <div v-if="form.id" class="col-12"><label class="form-label small mb-0">دلیل تغییر (اگر تغییر کنترل را ضعیف می‌کند الزامی است: حذف دستگاه یا بررسی دما، گشاد کردن حد، غیرفعال کردن؛ نفر دوم تصمیم می‌گیرد)</label><input v-model="form.reason" class="form-control form-control-sm" maxlength="1000" /></div>
           <div class="col-12 d-flex gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button></div>
         </div>
       </div>
@@ -85,11 +97,17 @@ onMounted(load);
             <td class="inv-ltr">{{ t.procedureNumber || "-" }}</td>
             <td class="small"><div v-for="p in t.parameters" :key="p.id" class="inv-ltr">{{ p.name }}: {{ p.min ?? "?" }} - {{ p.max ?? "?" }} {{ p.unit }}</div></td>
             <td><span :class="t.isActive ? 'ok' : 'bad'" class="inv-badge">{{ t.isActive ? "فعال" : "غیرفعال" }}</span></td>
-            <td><button v-if="canEdit" class="btn btn-sm btn-outline-secondary" @click="edit(t)">ویرایش</button></td>
+            <td>
+              <div v-if="t.pendingChangeId" class="small mb-1"><span class="inv-badge warn">تغییر منتظر نفر دوم</span> {{ t.pendingSummary }} <span class="inv-muted">(درخواست: {{ t.pendingByName }}؛ دلیل: {{ t.pendingReason }})</span></div>
+              <button v-if="(t.actions || []).includes('approve-change')" :disabled="busy" class="btn btn-sm btn-success me-1" @click="decide(t.pendingChangeId, 'approve')">تایید تغییر</button>
+              <button v-if="(t.actions || []).includes('reject-change')" :disabled="busy" class="btn btn-sm btn-outline-warning me-1" @click="dialog = { id: t.pendingChangeId }">رد تغییر</button>
+              <button v-if="canEdit && !t.pendingChangeId" class="btn btn-sm btn-outline-secondary" @click="edit(t)">ویرایش</button>
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
+    <ReasonDialog v-if="dialog" title="رد تغییر فرایند ویژه" :busy="busy" @confirm="(t: string) => decide(dialog!.id, 'reject', t)" @close="dialog = null" />
   </div>
 </template>
 
