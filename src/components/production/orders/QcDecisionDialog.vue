@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
-import { onMounted, ref } from "vue";
-import { getEquipmentList, getItpByWorkOrder } from "@/api/QualityAPIs";
+import { computed, onMounted, ref } from "vue";
+import { getEquipmentList, getItpByWorkOrder, getPartCharacteristics } from "@/api/QualityAPIs";
 import { qcDecision } from "@/api/ProductionAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, ok } from "@/composables/inventory";
@@ -10,7 +10,7 @@ import { testTypes } from "@/composables/quality";
 import { qcResults, qtyText } from "@/composables/production";
 
 // Decision of the QC inspector on an operation that waits for inspection. The quantity inspected is taken by the service (good quantity of the operation, or the order quantity): the API has no quantity field.
-const props = defineProps<{ operation: any; quantity: number; workOrderId?: number | null }>();
+const props = defineProps<{ operation: any; quantity: number; workOrderId?: number | null; itemId?: number | null }>();
 const emit = defineEmits(["close", "done"]);
 const result = ref<1 | 2 | 3 | 4>(1);
 const note = ref("");
@@ -22,11 +22,26 @@ const activityId = ref<number | null>(props.operation.itpActivityId ?? null);
 // R1p D16: the measured values behind the decision; every value needs its calibrated instrument (the service refuses a value without one)
 const instruments = ref<any[]>([]);
 const measurements = ref<any[]>([]);
-const addMeasurement = () => measurements.value.push({ characteristic: "", nominal: null, tolPlus: 0, tolMinus: 0, measured: null, unit: "", instrumentId: null });
+// Package B: the characteristics come from the released list of the part's drawing; the inspector picks one and types only the measured value (nominal, tolerance and pass/fail are the server's)
+const part = ref<any>(null);
+const lines = computed<any[]>(() => part.value?.lines || []);
+const lineOf = (m: any) => lines.value.find((l: any) => l.id === m.characteristicId);
+const instrumentsFor = (m: any) => {
+  const l = lineOf(m);
+  return !l || l.instrumentClass === 99 ? instruments.value : instruments.value.filter((e: any) => e.type === l.instrumentClass);
+};
+const addMeasurement = () => measurements.value.push({ characteristicId: null, measured: null, instrumentId: null });
+const addRequired = () => {
+  for (const l of lines.value.filter((x: any) => x.required)) if (!measurements.value.some((m) => m.characteristicId === l.id)) measurements.value.push({ characteristicId: l.id, measured: null, instrumentId: null });
+};
 
 onMounted(async () => {
   const [eq] = await getEquipmentList({ PageSize: 300 });
   instruments.value = rowsOf(eq);
+  if (props.itemId) {
+    const [pc] = await getPartCharacteristics(props.itemId);
+    part.value = pc;
+  }
   if (props.operation.inspectionRequirement !== 3 || !props.workOrderId) return;
   const [data] = await getItpByWorkOrder(props.workOrderId);
   const type = props.operation.itpTestType;
@@ -37,13 +52,13 @@ onMounted(async () => {
 async function save() {
   if (result.value !== 1 && !note.value.trim()) return fail("برای نتیجه غیر از «قبول»، توضیح بنویسید.");
   for (const m of measurements.value) {
-    if (!m.characteristic.trim() || m.measured === null || m.measured === "") return fail("برای هر اندازه‌گیری، مشخصه و مقدار اندازه‌گیری‌شده را بنویسید.");
+    if (!m.characteristicId || m.measured === null || m.measured === "") return fail("برای هر اندازه‌گیری، مشخصه از فهرست نقشه و مقدار اندازه‌گیری‌شده را وارد کنید.");
     if (!m.instrumentId) return fail("برای هر مقدار اندازه‌گیری‌شده، ابزار اندازه‌گیری کالیبره الزامی است.");
   }
   busy.value = true;
   const [, error] = await qcDecision({
     operationId: props.operation.id, result: result.value, note: note.value.trim() || null, itpActivityId: activityId.value,
-    measurements: measurements.value.map((m) => ({ ...m, characteristic: m.characteristic.trim(), nominal: Number(m.nominal) || 0, tolPlus: Number(m.tolPlus) || 0, tolMinus: Number(m.tolMinus) || 0, measured: Number(m.measured), unit: m.unit || null })),
+    measurements: measurements.value.map((m) => ({ characteristicId: m.characteristicId, measured: Number(m.measured), instrumentId: m.instrumentId })),
   });
   busy.value = false;
   if (error) return fail(error);
@@ -69,14 +84,13 @@ async function save() {
         <label v-for="(t, k) in qcResults" :key="k" class="form-check"><input v-model="result" :value="Number(k)" class="form-check-input" type="radio" /> <span class="form-check-label">{{ t }}</span></label>
       </div>
       <div class="mb-2">
-        <div class="d-flex justify-content-between"><label class="form-label small mb-0">اندازه‌گیری‌ها (اختیاری)</label><button class="btn btn-sm btn-outline-secondary" @click="addMeasurement">افزودن مقدار</button></div>
+        <div class="d-flex justify-content-between"><label class="form-label small mb-0">اندازه‌گیری‌ها (از فهرست مشخصه‌های نقشه)</label><span><button v-if="lines.length" class="btn btn-sm btn-outline-secondary me-1" @click="addRequired">مشخصه‌های الزامی</button><button v-if="lines.length" class="btn btn-sm btn-outline-secondary" @click="addMeasurement">افزودن مقدار</button></span></div>
+        <p v-if="part && !lines.length" class="small inv-muted mb-0">{{ part.message || "برای این قطعه فهرست مشخصه منتشرشده‌ای نیست؛ مقدار اندازه‌گیری‌شده ثبت نمی‌شود." }}</p>
         <div v-for="(m, i) in measurements" :key="i" class="row g-1 mt-1">
-          <div class="col-4"><input v-model="m.characteristic" class="form-control form-control-sm" placeholder="مشخصه" /></div>
-          <div class="col-2"><input v-model="m.nominal" class="form-control form-control-sm inv-ltr" placeholder="اسمی" /></div>
-          <div class="col-2"><input v-model="m.tolPlus" class="form-control form-control-sm inv-ltr" placeholder="+تلرانس" /></div>
-          <div class="col-2"><input v-model="m.tolMinus" class="form-control form-control-sm inv-ltr" placeholder="-تلرانس" /></div>
-          <div class="col-2"><input v-model="m.measured" class="form-control form-control-sm inv-ltr" placeholder="اندازه‌گیری" /></div>
-          <div class="col-10"><select v-model="m.instrumentId" class="form-select form-select-sm"><option :value="null">ابزار اندازه‌گیری (الزامی)</option><option v-for="e in instruments" :key="e.id" :value="e.id">{{ e.code }} - {{ e.title || e.name }}</option></select></div>
+          <div class="col-6"><select v-model="m.characteristicId" class="form-select form-select-sm" @change="m.instrumentId = null"><option :value="null">— مشخصه —</option><option v-for="l in lines" :key="l.id" :value="l.id">{{ l.no }} — {{ l.name }}</option></select></div>
+          <div class="col-3 small inv-ltr align-self-center">{{ lineOf(m) ? lineOf(m).nominal + " [" + lineOf(m).lower + " … " + lineOf(m).upper + "] " + (lineOf(m).unit || "") : "" }}</div>
+          <div class="col-3"><input v-model="m.measured" class="form-control form-control-sm inv-ltr" type="number" step="any" placeholder="اندازه‌گیری" /></div>
+          <div class="col-10"><select v-model="m.instrumentId" class="form-select form-select-sm"><option :value="null">ابزار اندازه‌گیری (الزامی)</option><option v-for="e in instrumentsFor(m)" :key="e.id" :value="e.id">{{ e.code }} - {{ e.title || e.name }}</option></select></div>
           <div class="col-2"><button class="btn btn-sm btn-outline-danger w-100" @click="measurements.splice(i, 1)">حذف</button></div>
         </div>
       </div>

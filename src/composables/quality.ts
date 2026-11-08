@@ -27,6 +27,7 @@ export const recordTypes: Record<number, string> = { 1: "حین ساخت", 2: "�
 export const charListStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ارسال‌شده", 2: "تاییدشده (منتظر انتشار نقشه)", 3: "منتشرشده", 4: "جایگزین‌شده", 5: "باطل" };
 export const charClasses: Record<number, string> = { 1: "بحرانی", 2: "عمده", 3: "جزئی" };
 export const instrumentClasses: Record<number, string> = { 99: "هر نوع", 1: "ابزار دستی ابعادی", 2: "گیج", 3: "فشارسنج", 4: "دماسنج", 5: "ابزار الکتریکی", 6: "تجهیز NDT", 7: "ابزار میز آزمون" };
+export const asBuiltStatuses: Record<number, string> = { 0: "جاری", 1: "جایگزین‌شده", 2: "در انتظار تایید صدور مجدد", 3: "ردشده" };
 export const noDrawingStatuses: Record<number, string> = { 0: "در انتظار فعال‌سازی", 1: "فعال", 2: "ردشده", 3: "باطل" };
 export const faiStatuses: Record<number, string> = { 0: "باز (در انتظار اندازه‌گیری)", 1: "اندازه‌گیری‌شده", 2: "پذیرفته‌شده توسط QC", 3: "تاییدشده توسط QA", 4: "ردشده", 5: "باطل" };
 export const qcResults: Record<number, string> = { 1: "قبول", 2: "رد", 3: "دوباره‌کاری", 4: "توقف" };

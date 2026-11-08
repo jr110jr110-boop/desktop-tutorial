@@ -5,7 +5,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { getInspections, getWarehouses, recordInspection, rowsOf, uploadFile } from "@/api/InventoryAPIs";
-import { getEquipmentList } from "@/api/QualityAPIs";
+import { getEquipmentList, getPartCharacteristics } from "@/api/QualityAPIs";
 import {
   distributionText,
   documentTypes,
@@ -58,6 +58,7 @@ function search() {
 }
 
 function openResult(row: any) {
+  loadPart(row.itemId);
   form.value = {
     row,
     id: row.id,
@@ -75,50 +76,42 @@ function openResult(row: any) {
   };
 }
 
+// Package B (H1): the incoming mode. A part with a released characteristic list is measured against it (pick the characteristic, type only the value); a part without one is decided on its certificate and visual evidence
+const part = ref<any>(null);
+const lines = computed<any[]>(() => part.value?.lines || []);
+const lineOf = (m: any) => lines.value.find((l: any) => l.id === m.characteristicId);
+const equipmentFor = (m: any) => {
+  const l = lineOf(m);
+  return !l || l.instrumentClass === 99 ? usableEquipment.value : usableEquipment.value.filter((e: any) => e.type === l.instrumentClass);
+};
+async function loadPart(itemId: number) {
+  part.value = null;
+  const [data] = await getPartCharacteristics(itemId);
+  part.value = data;
+}
 function addMeasurement() {
-  form.value.measurements.push({ characteristic: "", nominal: null, tolPlus: 0, tolMinus: 0, measured: null, unit: "", equipmentId: form.value.equipmentIds[0] ?? null });
+  form.value.measurements.push({ characteristicId: null, measured: null, equipmentId: form.value.equipmentIds[0] ?? null });
+}
+function addRequired() {
+  for (const l of lines.value.filter((x: any) => x.required)) if (!form.value.measurements.some((m: any) => m.characteristicId === l.id)) form.value.measurements.push({ characteristicId: l.id, measured: null, equipmentId: form.value.equipmentIds[0] ?? null });
 }
 
-// the display of the verdict only; the API decides (a value out of tolerance cannot be accepted)
-function passes(m: any) {
-  if (m.nominal === null || m.nominal === "" || m.measured === null || m.measured === "") return null;
-  const round = (v: number) => Math.round(v * 1e9) / 1e9;
-  const measured = round(Number(m.measured));
-  return measured >= round(Number(m.nominal) - (Number(m.tolMinus) || 0)) && measured <= round(Number(m.nominal) + (Number(m.tolPlus) || 0));
-}
-const hasFailedMeasurement = computed(() => !!form.value && form.value.measurements.some((m: any) => passes(m) === false));
-
-// an instrument that is ticked stays selectable for the values; a value whose instrument was un-ticked keeps it (the API still checks it)
 function measurementsBody(): any[] | null {
   const out: any[] = [];
   for (const m of form.value.measurements) {
-    const name = String(m.characteristic || "").trim();
-    const numbers = [m.nominal, m.measured, m.tolPlus, m.tolMinus];
-    if (!name) {
-      fail("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
+    if (!m.characteristicId) {
+      fail("مشخصه را از فهرست نقشه انتخاب کنید.");
       return null;
     }
-    if (numbers.some((v) => v === null || v === "" || !Number.isFinite(Number(v)))) {
-      fail(`مقدار اسمی، تلرانس‌ها و مقدار اندازه‌گیری‌شده «${name}» را به عدد وارد کنید.`);
-      return null;
-    }
-    if (Number(m.tolPlus) < 0 || Number(m.tolMinus) < 0) {
-      fail("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
+    if (m.measured === null || m.measured === "" || !Number.isFinite(Number(m.measured))) {
+      fail("مقدار اندازه‌گیری‌شده را به عدد وارد کنید.");
       return null;
     }
     if (!m.equipmentId) {
-      fail(`برای اندازه‌گیری «${name}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید.`);
+      fail("برای هر اندازه‌گیری ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید.");
       return null;
     }
-    out.push({
-      characteristic: name,
-      nominal: Number(m.nominal),
-      tolPlus: Number(m.tolPlus),
-      tolMinus: Number(m.tolMinus),
-      measured: Number(m.measured),
-      unit: String(m.unit || "").trim() || null,
-      equipmentId: Number(m.equipmentId),
-    });
+    out.push({ characteristicId: Number(m.characteristicId), measured: Number(m.measured), equipmentId: Number(m.equipmentId) });
   }
   return out;
 }
@@ -433,50 +426,36 @@ onMounted(async () => {
           <div class="col-12">
             <div class="d-flex justify-content-between align-items-center">
               <label class="form-label small mb-0">مقادیر اندازه‌گیری‌شده (ابعاد، ضخامت، سختی…)</label>
-              <button class="btn btn-sm btn-outline-primary py-0" type="button" @click="addMeasurement">+ مقدار</button>
+              <span v-if="lines.length"><button class="btn btn-sm btn-outline-secondary py-0 me-1" type="button" @click="addRequired">مشخصه‌های الزامی</button><button class="btn btn-sm btn-outline-primary py-0" type="button" @click="addMeasurement">+ مقدار</button></span>
             </div>
             <div v-if="form.measurements.length" class="table-responsive">
               <table class="table table-sm mb-1">
-                <thead>
-                  <tr>
-                    <th>مشخصه *</th>
-                    <th>اسمی</th>
-                    <th>+ تلرانس</th>
-                    <th>− تلرانس</th>
-                    <th>اندازه‌گیری‌شده</th>
-                    <th>واحد</th>
-                    <th>ابزار *</th>
-                    <th></th>
-                    <th></th>
-                  </tr>
-                </thead>
+                <thead><tr><th>مشخصه (از فهرست نقشه)</th><th>اسمی</th><th>حدود</th><th>اندازه‌گیری‌شده</th><th>واحد</th><th>ابزار *</th><th></th></tr></thead>
                 <tbody>
                   <tr v-for="(m, i) in form.measurements" :key="i">
-                    <td><input v-model="m.characteristic" class="form-control form-control-sm" maxlength="200" /></td>
-                    <td><input v-model="m.nominal" class="form-control form-control-sm inv-ltr" step="any" type="number" /></td>
-                    <td><input v-model="m.tolPlus" class="form-control form-control-sm inv-ltr" min="0" step="any" type="number" /></td>
-                    <td><input v-model="m.tolMinus" class="form-control form-control-sm inv-ltr" min="0" step="any" type="number" /></td>
+                    <td>
+                      <select v-model="m.characteristicId" class="form-select form-select-sm" @change="m.equipmentId = form.equipmentIds[0] ?? null">
+                        <option :value="null">— انتخاب —</option>
+                        <option v-for="l in lines" :key="l.id" :value="l.id">{{ l.no }} — {{ l.name }} ({{ l.classText }})</option>
+                      </select>
+                    </td>
+                    <td class="inv-ltr">{{ lineOf(m) ? lineOf(m).nominal : "" }}</td>
+                    <td class="inv-ltr small">{{ lineOf(m) ? lineOf(m).lower + " … " + lineOf(m).upper : "" }}</td>
                     <td><input v-model="m.measured" class="form-control form-control-sm inv-ltr" step="any" type="number" /></td>
-                    <td><input v-model="m.unit" class="form-control form-control-sm" maxlength="30" style="width: 4.5rem" /></td>
+                    <td class="inv-ltr">{{ lineOf(m)?.unit }}</td>
                     <td>
                       <select v-model="m.equipmentId" class="form-select form-select-sm">
                         <option :value="null">-</option>
-                        <option v-for="e in usableEquipment" :key="e.id" :value="e.id">{{ e.code }} {{ e.name }}</option>
+                        <option v-for="e in equipmentFor(m)" :key="e.id" :value="e.id">{{ e.code }} {{ e.name }}</option>
                       </select>
-                    </td>
-                    <td class="text-nowrap">
-                      <span v-if="passes(m) === true" class="inv-badge ok">در تلرانس</span>
-                      <span v-else-if="passes(m) === false" class="inv-badge bad">خارج از تلرانس</span>
                     </td>
                     <td><button class="btn btn-sm btn-outline-danger py-0" type="button" @click="form.measurements.splice(i, 1)">حذف</button></td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p v-else class="inv-muted small mb-0">بازرسی چشمی یا مدرکی مقدار اندازه‌گیری‌شده ندارد؛ برای بازرسی ابعادی هر مقدار را با ابزارش ثبت کنید.</p>
-            <p v-if="hasFailedMeasurement && !(form.rejectedQuantity > 0)" class="small text-danger mb-0">
-              مقدار خارج از تلرانس ثبت شده است؛ کل مقدار قبول نمی‌شود، مقدار رد را مشخص کنید.
-            </p>
+            <p v-if="part && !lines.length" class="inv-muted small mb-0">برای این قطعه فهرست مشخصه منتشرشده‌ای نیست؛ بازرسی با گواهی و بررسی چشمی تصمیم‌گیری می‌شود و مقدار اندازه‌گیری‌شده ثبت نمی‌شود.</p>
+            <p v-else-if="!form.measurements.length" class="inv-muted small mb-0">اسمی و تلرانس از فهرست مشخصه‌های نقشه می‌آید؛ نتیجه قبول/رد را سرور حساب می‌کند. مقدار خارج از تلرانس با قبول کل مقدار پذیرفته نمی‌شود.</p>
           </div>
           <div class="col-12">
             <label class="form-label small mb-0">توضیح</label>

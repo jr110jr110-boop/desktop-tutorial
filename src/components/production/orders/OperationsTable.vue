@@ -104,7 +104,7 @@ function done() {
     <ReasonDialog v-if="skipping" :busy="busy" danger title="رد کردن مرحله" :hint="`مرحله ${skipping.sequence} - ${skipping.title} اجرا نمی‌شود و مرحله بعد آزاد می‌شود.`" label="دلیل رد کردن" confirm-text="رد کردن مرحله" @close="skipping = null" @confirm="skip" />
     <ReasonDialog v-if="ncrFor" :busy="busy" :title="ncrFor.action === 'scrap-by-ncr' ? 'ضایعات با گزارش عدم انطباق' : 'پذیرش ارفاقی با گزارش عدم انطباق'" :hint="`گزارش ${ncrFor.op.ncrNumber || ''} باید با تصمیم متناسب توسط کیفیت، مهندسی و تولید تأیید شده باشد؛ در غیر این صورت سرویس رد می‌کند.`" label="دلیل" confirm-text="ثبت" @close="ncrFor = null" @confirm="byNcr" />
     <CompleteOutsideDialog v-if="outside" :operation="outside" :work-order-id="order.workOrderId" @close="outside = null" @done="done" />
-    <QcDecisionDialog v-if="deciding" :operation="deciding" :quantity="order.quantity" :work-order-id="order.workOrderId" @close="deciding = null" @done="done" />
+    <QcDecisionDialog v-if="deciding" :operation="deciding" :quantity="order.quantity" :work-order-id="order.workOrderId" :item-id="order.itemId" @close="deciding = null" @done="done" />
     <ReworkDialog v-if="reworking" :operation="reworking" :work-order-code="order.workOrderCode" :item-id="order.itemId" @close="reworking = null" @done="done" />
   </div>
 </template>

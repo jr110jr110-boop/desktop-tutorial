@@ -141,7 +141,7 @@ onMounted(load);
       <p v-else-if="list.status === 1" class="inv-muted">در انتظار تایید نفر دوم (تهیه‌کننده یا ویرایش‌کننده فهرست نمی‌تواند آن را تایید کند).</p>
       <p v-if="list.returnNote" class="text-danger small">برگشت: {{ list.returnNote }}</p>
       <p v-if="list.voidReason" class="text-danger small">ابطال: {{ list.voidReason }}</p>
-      <div v-if="editable && list.version > 1 || (list.reason && list.version > 1)" class="mb-2"><label class="form-label small mb-0">دلیل این نسخه</label><input v-model="list.reason" :disabled="!editable" class="form-control form-control-sm" /></div>
+      <div v-if="editable && (list.version > 1 || !list.items.length) || list.reason" class="mb-2"><label class="form-label small mb-0">{{ list.items.length ? "دلیل این نسخه" : "دلیل «بدون مشخصه قابل اندازه‌گیری» (دست‌کم ۱۵ نویسه)" }}</label><input v-model="list.reason" :disabled="!editable" class="form-control form-control-sm" /><span v-if="!list.items.length" class="small inv-muted">فهرست خالی همان مسیر دو نفره تهیه و تایید را می‌گذراند؛ برای قطعه‌ای که فقط با گواهی و بررسی چشمی پذیرفته می‌شود.</span></div>
 
       <div v-if="editable" class="inv-filters mb-3">
         <input type="file" accept=".xlsx" class="form-control form-control-sm" @change="onFile" />

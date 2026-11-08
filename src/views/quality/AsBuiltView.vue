@@ -3,9 +3,9 @@ import { nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AsBuiltPrint from "@/components/quality/print/AsBuiltPrint.vue";
 import ReasonDialog from "@/components/quality/ReasonDialog.vue";
-import { getAsBuilt, getAsBuiltBySerial, getAsBuiltList, reissueAsBuilt } from "@/api/QualityAPIs";
+import { getAsBuilt, getAsBuiltBySerial, getAsBuiltList, reissueAsBuilt, decideAsBuiltReissue } from "@/api/QualityAPIs";
 import { fail, jalali, num, ok } from "@/composables/inventory";
-import { printForm } from "@/composables/quality";
+import { asBuiltStatuses, printForm } from "@/composables/quality";
 import { hasRole } from "@/composables/roles";
 
 // Package B (H10): «پیکربندی ساخته‌شده» per serial. The record is a snapshot made at the release (JSON + SHA-256): it is never edited; a correction is a new version with a reason that supersedes the old one.
@@ -16,6 +16,8 @@ const rows = ref<any[]>([]);
 const busy = ref(false);
 const reissue = ref(false);
 const canReissue = hasRole(["QA"]);
+const canDecide = hasRole(["PMO", "CEO"]);
+const deciding = ref<"approve" | "reject" | null>(null);
 
 async function find() {
   rec.value = null;
@@ -39,7 +41,17 @@ async function doReissue(reason: string) {
   busy.value = false;
   reissue.value = false;
   if (error) return fail(error);
-  ok("نسخه جدید صادر شد.");
+  ok("درخواست صدور مجدد ثبت شد؛ پس از تایید مدیر پروژه یا مدیرعامل نسخه جدید جاری می‌شود.");
+  rec.value = data;
+  loadList();
+}
+async function doDecide(note: string) {
+  busy.value = true;
+  const [data, error] = await decideAsBuiltReissue(rec.value.id, deciding.value === "approve", note);
+  busy.value = false;
+  if (error) return fail(error);
+  deciding.value = null;
+  ok(data.status === 0 ? "نسخه جدید جاری شد." : "درخواست صدور مجدد رد شد.");
   rec.value = data;
   loadList();
 }
@@ -78,10 +90,12 @@ onMounted(async () => {
         <div>
           <h2 class="inv-title"><span class="inv-ltr">{{ rec.itemCode }}</span> <span class="inv-ltr">{{ rec.serialNumber }}</span> — نسخه {{ rec.version }}</h2>
           <span :class="rec.hashOk ? 'ok' : 'bad'" class="inv-badge">{{ rec.hashOk ? "یکپارچگی تایید شد (SHA-256)" : "اثر انگشت با محتوا نمی‌خواند" }}</span>
-          <span v-if="rec.status === 1" class="inv-badge warn ms-1">جایگزین‌شده</span>
+          <span v-if="rec.status !== 0" class="inv-badge warn ms-1">{{ asBuiltStatuses[rec.status] }}</span>
         </div>
         <div class="d-flex gap-2">
           <button class="btn btn-sm btn-outline-secondary" @click="doPrint">چاپ</button>
+          <button v-if="canDecide && rec.status === 2" class="btn btn-sm btn-success" @click="deciding = 'approve'">تایید صدور مجدد</button>
+          <button v-if="canDecide && rec.status === 2" class="btn btn-sm btn-outline-danger" @click="deciding = 'reject'">رد صدور مجدد</button>
           <button v-if="canReissue && rec.status === 0" class="btn btn-sm btn-outline-primary" @click="reissue = true">صدور نسخه جدید</button>
         </div>
       </div>
@@ -112,9 +126,10 @@ onMounted(async () => {
       <h3 class="h6 mt-3">نسخه‌ها</h3>
       <table class="table table-sm">
         <thead><tr><th>نسخه</th><th>وضعیت</th><th>دلیل</th><th>تاریخ</th><th>SHA-256</th></tr></thead>
-        <tbody><tr v-for="v in rec.versions" :key="v.id" role="button" @click="open(v.id)"><td>{{ v.version }}</td><td>{{ v.status === 0 ? "جاری" : "جایگزین‌شده" }}</td><td class="small">{{ v.reason }}</td><td>{{ jalali(v.createDate) }}</td><td class="inv-ltr small">{{ v.sha256?.substring(0, 16) }}…</td></tr></tbody>
+        <tbody><tr v-for="v in rec.versions" :key="v.id" role="button" @click="open(v.id)"><td>{{ v.version }}</td><td>{{ asBuiltStatuses[v.status] }}</td><td class="small">{{ v.reason }}</td><td>{{ jalali(v.createDate) }}</td><td class="inv-ltr small">{{ v.sha256?.substring(0, 16) }}…</td></tr></tbody>
       </table>
     </div>
+    <ReasonDialog v-if="deciding" :title="deciding === 'approve' ? 'تایید صدور مجدد' : 'رد صدور مجدد'" label="توضیح (در رد الزامی)" confirm-class="btn-primary" :busy="busy" @confirm="doDecide" @close="deciding = null" />
     <ReasonDialog v-if="reissue" title="صدور نسخه جدید پیکربندی ساخته‌شده" label="دلیل" confirm-class="btn-primary" :busy="busy" @confirm="doReissue" @close="reissue = false" />
   </div>
 </template>

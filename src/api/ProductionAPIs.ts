@@ -157,7 +157,8 @@ export const operationAction = (dto: { id: number; action: "skip" | "complete-ou
 export const qcDecision = (dto: { operationId: number; result: 1 | 2 | 3 | 4; note?: string | null; itpActivityId?: number | null; measurements?: QcMeasurementInput[] }) =>
   post(pr + "operations/qc-decision", { operationId: dto.operationId, result: dto.result, note: dto.note || null, itpActivityId: dto.itpActivityId ?? null, measurements: dto.measurements || [] });
 /** R1p D16: a measured value; instrumentId (calibrated equipment) is mandatory for every value. */
-export interface QcMeasurementInput { characteristic: string; nominal: number; tolPlus: number; tolMinus: number; measured: number; unit?: string | null; instrumentId: number | null }
+/** Package B: the characteristic comes from the released list (nominal, tolerance, unit and pass/fail are the server's). */
+export interface QcMeasurementInput { characteristicId: number | null; measured: number; instrumentId: number | null }
 /** ReworkOperationDto { operationId, ncrId, note? }: makes a rework operation for an operation rejected in inspection (status 6, not itself a rework). Who: supervisors. Returns OperationDto. */
 export const reworkOperation = (dto: { operationId: number; ncrId: number; note?: string | null }) => post(pr + "operations/rework", dto);
 

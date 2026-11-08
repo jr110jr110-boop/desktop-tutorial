@@ -50,6 +50,6 @@ onMounted(() => list.load());
       </table>
     </div>
     <QPager :page="list.page.value" :total="list.total.value" :page-size="list.pageSize" @go="list.go" />
-    <QcDecisionDialog v-if="deciding" :operation="deciding.operation" :quantity="deciding.order.quantity" :work-order-id="deciding.order.workOrderId" @close="deciding = null" @done="done" />
+    <QcDecisionDialog v-if="deciding" :operation="deciding.operation" :quantity="deciding.order.quantity" :work-order-id="deciding.order.workOrderId" :item-id="deciding.order.itemId" @close="deciding = null" @done="done" />
   </div>
 </template>

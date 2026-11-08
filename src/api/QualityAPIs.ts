@@ -201,4 +201,7 @@ export const firstArticleAction = (id: number, action: string, note?: string) =>
 export const getAsBuiltList = (params: any) => call("get", base + "as-built", undefined, clean(params));
 export const getAsBuilt = (id: number) => call("get", base + "as-built/" + id);
 export const getAsBuiltBySerial = (serial: string, itemId?: number) => call("get", base + "as-built/by-serial", undefined, clean({ serial, itemId }));
+/** QA asks for a new version: it is created Pending (status 2) and takes effect only when PMO/CEO approve it (two persons, never an AI seat). */
 export const reissueAsBuilt = (id: number, reason: string) => call("post", base + "as-built/reissue", { id, reason });
+/** PMO/CEO decide a pending re-issue: { id (the pending version), approve, note (required on reject) }. */
+export const decideAsBuiltReissue = (id: number, approve: boolean, note?: string) => call("post", base + "as-built/reissue/decide", { id, approve, note: note || null });
