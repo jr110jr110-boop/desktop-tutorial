@@ -10327,7 +10327,7 @@ rm -f "$CDAOV"
 
 # ===================================================================================== the AI seats
 # The notes and the runs of the seats are compared with the lists of the AI module (read as the same user); no note or run is made here.
-CDAITYPES="QualityNcr، FinanceJournal، BankLine، SupplierIbanChange، PurchaseRfq، OfficeLetter، OfficeMeeting، PcWeeklyReport، CeoBrief"
+CDAITYPES="QualityNcr، FinanceJournal، BankLine، SupplierIbanChange، PurchaseRfq، OfficeLetter، OfficeMeeting، PcWeeklyReport، CeoBrief، InventoryDocument، StockCount، MfOperation، QcInspection، SupplierInvoice"
 
 # --- ai.notes_new: the notes nobody decided on yet, the newest first; each role sees the notes of its own modules
 cdainotes() { # cdainotes [TYPE [SEAT]] : the expectation from the list of new notes of the module as the CEO, filtered here
@@ -10939,8 +10939,8 @@ call POST ContractEquipments "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"coun
 call POST WorkOrders "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"code\":\"PB-WO-1\",\"title\":\"Turbine 1\",\"description\":\"x\",\"count\":3}"; check "pb1: work order created (3 units)" '.success and .data.id > 0'
 PBWO=$(val .data.id)
 # PB8: the readiness gate («کنترل آمادگی اطلاعات مهندسی شروع پروژه») stays ON for the pb1/pb2 instantiations, so the BOM, WBS, item and specification items are still exercised. Only the three items these two chains do not carry
-# (an approved OPC with work centre and hours, a Released drawing, ITP characteristics) are made Soft for the two instantiations and are Hard again right after the pb2 instantiation.
-for RDK in RD-OPC RD-DRAWING RD-ITP; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":0}"; check "pb8 setup: $RDK is a soft item for the pb1/pb2 instantiations" '.success'; done
+# (an approved OPC with work centre and hours, a Released drawing, ITP characteristics; and RD-SPEC: the FY paper BOM has a purchased part, 16.13.03.007.2, without a specification) are made Soft for the two instantiations and are Hard again right after the pb2 instantiation.
+for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":0}"; check "pb8 setup: $RDK is a soft item for the pb1/pb2 instantiations" '.success'; done
 as "$COM_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; r403 "pb1: commercial cannot take a product into a project (403)"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; check "pb1: the project takes the RELEASED revision 00 of the test product (not the draft 01): source recorded, quantities multiplied by 3, the heading is kept, the contract review is not accepted so no PC WBS yet and the answer says why" '.success and .data.sourceBomRevision == 0 and .data.sourceBomCode == "88.11.00.000.2-BOM" and .data.count == 3 and (.data.lines|length) == 4 and ([.data.lines[]|select(.partNumber=="88.11.01.002.2")|.totalQty]|.[0]) == 6 and .data.pcBaselineCurrent == false and (.data.pcWbs|length) == 0 and .data.pcProductNodeId == null and (.data.wbsNote|length) > 0 and .data.wbsTemplateVersion == 1'
 PBBASE=$(val .data.id); PBLINE=$(jq -r '[.data.lines[]|select(.partNumber=="88.11.01.002.2")][0].id' "$B")
@@ -10991,7 +10991,7 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PB2CT,\"currencyCode\":\"IRR\"
 pcreview $PB2CT # the draft requests of a project need the accepted contract review
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; no "pb2: before the product is taken there is no balance run"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB2WO,\"productId\":$PBFYPROD}"; check "pb2: the FY product is taken into the project (the balance runs by itself after it)" '.success and .data.count == 2'
-for RDK in RD-OPC RD-DRAWING RD-ITP; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":1}"; check "pb8 setup: $RDK is a hard item again (default)" '.success'; done
+for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":1}"; check "pb8 setup: $RDK is a hard item again (default)" '.success'; done
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; check "pb2: run 1 was made by the instantiation: 81 lines, 55 short, 26 raw materials not coded" '.success and .data.runNumber == 1 and .data.trigger == "Instantiate" and .data.lineCount == 81 and .data.shortLineCount == 55 and .data.notCodedCount == 26 and .data.bomRevision == 0'
 check "pb2: a bought part: 2 units for 2 units of the product, nothing in stock, so the shortage is 2" '([.data.lines[]|select(.partNumber=="16.13.02.014.2" and .kind == 1)]|length) == 1 and ([.data.lines[]|select(.partNumber=="16.13.02.014.2")][0] | .grossQty == 2 and .scrapQty == 0 and .requiredQty == 2 and .onHandQty == 0 and .onOrderPrQty == 0 and .shortQty == 2)'
 check "pb2: the raw material of a made part (first stage of its OPC chart, 16 rings for 2 units) is short by 16" '([.data.lines[]|select(.itemCode=="16.11.01.012.2-CT")][0] | .kind == 2 and .requiredQty == 16 and .shortQty == 16)'
@@ -11480,7 +11480,7 @@ TOKEN=$ADMIN_TOKEN
 # Placed before the PB2 fix round on purpose: it receives and issues stock of an item of its own (PB8I) and uses no other item, so no figure of the PB2 fix round moves.
 TOKEN=$ADMIN_TOKEN
 OPS=opsdata
-item PB8I "{\"code\":\"PB8-ITEM-1\",\"title\":\"کالای آزمون کنترل داده\",\"unit\":\"عدد\",\"trackingMode\":0,\"weight\":10,\"requiresIncomingInspection\":false}" "pb8 data-control item (unit weight 10 kg)"
+item PB8I "{\"code\":\"01003010060188\",\"title\":\"کالای آزمون کنترل داده\",\"unit\":\"عدد\",\"trackingMode\":0,\"weight\":10,\"requiresIncomingInspection\":false}" "pb8 data-control item (unit weight 10 kg)"
 # receipt 1: 100 pieces, the scale says 1200 kg, the item weight says 1000 kg: +20 %, between the warning (10) and the block (100) thresholds
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":100,\"unitPrice\":100000,\"weighedWeightKg\":1200}]}"; check "pb8 gate: the receipt with 1200 kg weighed for 100 pieces of 10 kg shows exactly one finding, the weight warning, in the form" '.success and (.data.opsFindings|length) == 1 and .data.opsFindings[0].ruleCode == "R-RCV-WEIGHT" and .data.opsFindings[0].severity == 1'
 PB8R1=$(val .data.id)
@@ -11517,7 +11517,7 @@ call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=r
 # the baseline of a project is its latest PB2 material-balance run (raw materials, scrap, conversions, substitutes included), not the raw BOM lines: PBWO must have a run, and the run does not contain PB8I
 as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest
 if [ "$(jq -r '.success' "$B")" != "true" ]; then as "$PLAN_TOKEN" POST $PBL/run "{\"workOrderId\":$PBWO}"; check "pb8 baseline: the project PBWO had no balance run yet: the planner runs it" '.success'; fi
-as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest; check "pb8 baseline: the project PBWO has a balance run and PB8-ITEM-1 is not one of its lines" '.success and .data.lineCount == (.data.lines|length) and ([.data.lines[]|select(.itemCode == "PB8-ITEM-1")]|length) == 0'
+as "$PLAN_TOKEN" GET $PBL/work-order/$PBWO/latest; check "pb8 baseline: the project PBWO has a balance run and 01003010060188 is not one of its lines" '.success and .data.lineCount == (.data.lines|length) and ([.data.lines[]|select(.itemCode == "01003010060188")]|length) == 0'
 call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"workOrderId\":$PBWO,\"warehouseId\":$W1,\"purpose\":\"آزمون مطابقت با خط‌مبنا\",\"lines\":[{\"itemId\":$PB8I,\"quantity\":5}]}"; check "pb8 baseline: the material request of an item that is not in the project BOM is saved" '.success and .data.id > 0'
 PB8MR=$(val .data.id)
 call POST inventory/material-requests/action "{\"id\":$PB8MR,\"action\":\"submit\"}"; check "pb8 baseline: the request is submitted" '.success'
