@@ -70,6 +70,9 @@ namespace Services.NasbNiro.ProductBank
         /// <summary>★ true = the checked, QC checked, manufacturing checked and approved signatures of a BOM must also differ from each other. The preparer always differs from every other signer. Default false (company practice: one person may sign several of the four).</summary>
         public const string DistinctReviewers = "BomSignatures:DistinctReviewers";
 
+        /// <summary>★ true = the legacy Bom / EquipmentBom are read only (Package A2: the product BOM is the single BOM master). Switching it off is a safety-profile change (two persons, reason) for a transition only.</summary>
+        public const string LegacyBomFrozen = "EngChange.LegacyBomFrozen";
+
         /// <summary>★ true = the demonstration data of the company's own product may be installed (a demo or test installation). Off in production installs.</summary>
         public const string DemoData = "DemoData:Enabled";
 
@@ -83,6 +86,7 @@ namespace Services.NasbNiro.ProductBank
             yield return new PbSetting { Key = StageSeparator, Value = "-", Title = "جداکننده شماره قطعه و کد مرحله", Source = "★ تصمیم برنامه (به تایید شرکت)" };
             yield return new PbSetting { Key = MinSuggestConfidence, Value = "50", Title = "کمترین اطمینان پیشنهاد نگاشت خودکار (درصد)", Source = "★ تصمیم برنامه (به تایید شرکت)" };
             yield return new PbSetting { Key = DistinctReviewers, Value = "true", Title = "امضاکنندگان کنترل، کنترل کیفیت، کنترل ساخت و تایید BOM چهار نفر متفاوت باشند", Source = "تصمیم مدیرعامل D13: چهار امضا چهار نفر متفاوت؛ تهیه‌کننده نیز با همه امضاکنندگان متفاوت است (در صورت نیاز با این تنظیم قابل تغییر)" };
+            yield return new PbSetting { Key = LegacyBomFrozen, Value = "true", Title = "BOM قدیمی (Bom / EquipmentBom) فقط‌خواندنی است و BOM محصول تنها مرجع است", Source = "تصمیم مدیرعامل D11 تا D13 و بسته A2: مرجع یگانه BOM؛ خاموش کردن فقط با درخواست دونفره پروفایل سخت‌گیرانه" };
             yield return new PbSetting { Key = DemoData, Value = "false", Title = "نصب داده‌های نمونه (محصول FY) مجاز باشد", Source = "★ فقط در نصب آزمایشی یا نمایشی روشن شود؛ در نصب اصلی خاموش است" };
         }
 

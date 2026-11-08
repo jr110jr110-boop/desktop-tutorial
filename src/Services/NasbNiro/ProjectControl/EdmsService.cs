@@ -250,6 +250,8 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     string listProblem = await global::Services.NasbNiro.Quality.CharacteristicRelease.ReleaseProblemAsync(_uow, d.Id, r.Id, ct);
                     if (listProblem != null) return Bad<PcRevisionDto>(listProblem);
+                    string ecProblem = await global::Services.NasbNiro.EngChange.EcGate.DrawingReleaseProblemAsync(_uow, d, r, ct);   // Package A2: a new revision of a part drawing needs an approved ECO that names it
+                    if (ecProblem != null) return Bad<PcRevisionDto>(ecProblem);
                 }
                 List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
                 List<PcDocumentRevision> previous = await _uow.Set<PcDocumentRevision>().Where(x => x.DeliverableId == d.Id && x.Id != r.Id && !x.Deleted && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt)).ToListAsync(ct);

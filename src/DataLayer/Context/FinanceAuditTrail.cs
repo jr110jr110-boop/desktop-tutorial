@@ -414,6 +414,7 @@ namespace DataLayer.Context
             AddRecordsIntegrity();   // package D: the quality, manufacturing and warehouse evidence (FinanceAuditTrail.RecordsIntegrity.cs)
             AddInspectionRelease();   // package B: characteristic lists, no-drawing flags, first articles, as-built records (FinanceAuditTrail.InspectionRelease.cs)
             AddSpecialProcess();      // package C: special process types, qualifications, runs, supplier approvals, material specifications, certificate values (FinanceAuditTrail.SpecialProcess.cs)
+            AddEngChange();           // package A2: engineering change requests and orders, impact snapshot, dispositions, tasks (FinanceAuditTrail.EngChange.cs)
             var more = new Dictionary<Type, string[]>
             {
                 { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },

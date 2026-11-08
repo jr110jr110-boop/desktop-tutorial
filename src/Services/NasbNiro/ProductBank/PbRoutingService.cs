@@ -284,6 +284,8 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ApproveRoles)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.NotAllowed);
             if (r.PreparedByUserId == User.UserId || r.CheckedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.SameUser);
             if (HashOf(r.Steps) != r.ContentHash) return ResponseDtoHelper.BadRequest<PbOpcDto>("مراحل بعد از ارسال تغییر کرده است.");
+            string ecProblem = await EngChange.EcGate.OpcApproveProblemAsync(Uow, r, ct);   // Package A2: a new revision of an approved OPC chart needs an approved ECO that names it
+            if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbOpcDto>(ecProblem);
             PbOpcRouting previous = await Uow.Set<PbOpcRouting>().FirstOrDefaultAsync(x => !x.Deleted && x.PartNumber == r.PartNumber && x.Status == PbRoutingStatus.Approved && x.Id != r.Id, ct);
             if (previous != null) { previous.Status = PbRoutingStatus.Superseded; Stamp(previous, false); }
             r.Status = PbRoutingStatus.Approved;

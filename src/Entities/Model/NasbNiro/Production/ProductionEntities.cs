@@ -199,6 +199,12 @@ namespace Entities.Model.NasbNiro.Production
 
         public bool AutoDrafted { get; set; }
 
+        /// <summary>Package A2: where the components come from: BASELINE (the project's released baseline, PbProjectBomLine), LEGACY (the read-only legacy process / BOM of a project without a baseline) or empty (an order drafted before Package A2).</summary>
+        public string ComponentSource { get; set; }
+
+        /// <summary>Package A2: the Persian flag that tells the planner the components come from the legacy BOM fallback.</summary>
+        public string ComponentNote { get; set; }
+
         /// <summary>The last person who changed the components by hand: he cannot release the order (maker-checker).</summary>
         public int? EditedByUserId { get; set; }
 

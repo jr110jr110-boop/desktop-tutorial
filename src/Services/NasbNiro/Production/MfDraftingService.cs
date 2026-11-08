@@ -231,18 +231,18 @@ namespace Services.NasbNiro.Production
             _uow.Set<MfProductionOrder>().Add(order);   // the components and operations come with the graph
             added.Add(order);
 
-            // the input commodity of the process is the component the order consumes
-            string enterCode = MfText.Clean(process.EnterCommodityCode);
-            if (enterCode != null)
+            // Package A2 (single BOM master): the components come from the project baseline (released product BOM revision + approved deviations); the legacy process input is only the flagged read-only fallback
+            MfBaselineDrafting.Expected expected = await MfBaselineDrafting.ExpectedAsync(_uow, workOrderId, process.Id, item, quantity, ct);
+            order.ComponentSource = expected.Source;
+            order.ComponentNote = expected.Note;
+            foreach (MfBaselineDrafting.ComponentLine l in expected.Lines)
             {
-                InventoryItem component = await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Code == enterCode && !i.Deleted, ct);
-                if (component != null && component.Id != item.Id)
-                {
-                    var line = new MfOrderComponent { ItemId = component.Id, Quantity = quantity, Unit = component.Unit };
-                    order.Components.Add(line);
-                    added.Add(line);
-                }
+                var line = new MfOrderComponent { ItemId = l.ItemId, Quantity = l.Quantity, Unit = l.Unit };
+                order.Components.Add(line);
+                added.Add(line);
             }
+            if (expected.Source == MfBaselineDrafting.SourceLegacy) result.Notes.Add($"{title}: {expected.Note}");
+            if (expected.Warning != null) result.Notes.Add($"{title}: {expected.Warning}");
 
             MfResolvedRouting routing = await MfRouting.ResolveAsync(_uow, item, ct);
             if (routing.Revision != null)

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using Entities.Identity;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.EngChange;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
@@ -117,6 +118,17 @@ namespace MsTests
         private static async Task Release(AppHost host, int revisionId)
         {
             await EnsureEmptyList(host, revisionId);
+            // Package A2: a new revision of a drawing that was already released needs an approved engineering change order that names it
+            host.Write(u =>
+            {
+                string tag = Guid.NewGuid().ToString("N").Substring(0, 10);
+                var req = AppHost.Add(u, new EcRequest { Number = "ECR-T-" + tag, Title = "t", Reason = "test change", Status = EcrStatus.Approved, RequestedByUserId = 1 });
+                u.SaveChanges();
+                var eco = AppHost.Add(u, new EcOrder { Number = "ECO-T-" + tag, RequestId = req.Id, Title = "t", Status = EcoStatus.Approved, EffectiveFromDate = DateTime.Today });
+                u.SaveChanges();
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Drawing, Action = EcChangeAction.NewRevision, TargetId = revisionId, Reference = "test" });
+                u.SaveChanges();
+            });
             foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve"), (Pmo, "release") })
             {
                 var r = await Edms(host, step.Item1, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = step.Item2 }, default));

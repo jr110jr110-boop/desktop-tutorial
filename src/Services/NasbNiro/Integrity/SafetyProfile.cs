@@ -93,6 +93,7 @@ namespace Services.NasbNiro.Integrity
                 new SafetySettingSpec { Store = SafetyStore.AiSeat, Key = "*", Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "صندلی هوش مصنوعی فعال بماند", Note = "روشن یا خاموش کردن هر صندلی تصمیم است" },
             });
             Register(ModuleSpecs());
+            Register(EngChangeSpecs());
         }
 
         /// <summary>Adds the specs of a module (once; a spec with the same store and key replaces the earlier one). Package 8 adds its gate keys with one call.</summary>

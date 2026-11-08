@@ -495,6 +495,8 @@ namespace Services.NasbNiro.ProductBank
             string childProblem = await ChildProblemAsync(h.Lines, ct);
             if (childProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(childProblem);
             if (await DistinctReviewersAsync(ct) && (h.CheckedByUserId == User.UserId || h.QcCheckedByUserId == User.UserId || h.ManufacturingCheckedByUserId == User.UserId || h.ApprovedByUserId == User.UserId)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUserReviewers);
+            string ecProblem = await EngChange.EcGate.BomReleaseProblemAsync(Uow, h, ct);   // Package A2: a new revision of a released BOM needs an approved ECO that names it
+            if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(ecProblem);
             DateTime effective = (dto.EffectiveFrom ?? DateTime.Today).Date;
             PbBomHeader previous = await Uow.Set<PbBomHeader>().FirstOrDefaultAsync(x => !x.Deleted && x.Code == h.Code && x.Status == PbBomStatus.Released && x.Id != h.Id, ct);
             if (previous != null)
@@ -521,6 +523,8 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ReleaseRoles)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (h.Status != PbBomStatus.Released && h.Status != PbBomStatus.Superseded) return ResponseDtoHelper.BadRequest<PbBomDto>("فقط نسخه منتشرشده یا جایگزین‌شده منسوخ می‌شود.");
             if (PbText.Clean(dto.Note) == null) return ResponseDtoHelper.BadRequest<PbBomDto>("دلیل منسوخ کردن را بنویسید.");
+            string ecProblem = await EngChange.EcGate.BomObsoleteProblemAsync(Uow, h, ct);   // Package A2: an approved ECO that names it, and every open use has a disposition
+            if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(ecProblem);
             h.Status = PbBomStatus.Obsolete;
             h.ChangeReason = PbText.Clean(dto.Note);
             Stamp(h, false);

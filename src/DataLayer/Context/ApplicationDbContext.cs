@@ -10,6 +10,7 @@ using DataLayer.Configurations.EF;
 using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
 using DataLayer.Configurations.EF.NasbNiro.Attachments;
+using DataLayer.Configurations.EF.NasbNiro.EngChange;
 using DataLayer.Configurations.EF.NasbNiro.Integrity;
 using DataLayer.Configurations.EF.NasbNiro.Inventory;
 using DataLayer.Mappings;
@@ -497,6 +498,9 @@ namespace DataLayer.Context
 
             // Package D: chain verification history, restore test results, two-person change of security settings
             builder.AddIntegrityConfigurations();
+
+            // Package A2: engineering change requests and orders, impact snapshot, dispositions, tasks
+            builder.AddEngChangeConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();
