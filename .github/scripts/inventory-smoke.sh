@@ -107,9 +107,9 @@ PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "log
 # (default the Admin, a PMO user; a module whose role is another one names its token: SAFETY_REQ="$FM_TOKEN" safety_set Finance CloseChecklist.Enforce 0), the approver is the second PMO user.
 # The request is checked here (Pending); the answer of the approval stays in $B for the check of the caller (.success and .data.status == "Approved"; .data.newValue is the value).
 safety_set() {
-  local store=$1 key=$2 value=$3 req=${SAFETY_REQ:-$ADMIN_TOKEN} sid
+  local store=$1 key=$2 value=$3 first=${4:-Pending} req=${SAFETY_REQ:-$ADMIN_TOKEN} sid
   as "$req" POST safety/changes "{\"store\":\"$store\",\"key\":\"$key\",\"value\":\"$value\",\"reason\":\"آزمون خودکار: تغییر موقت تنظیم برای اجرای سناریو\"}"
-  check "safety: the request to set $key to $value waits for a second person" '.success and .data.status == "Pending"'
+  check "safety: the request to set $key to $value is $first (a drafting AI seat switched OFF is applied at once and waits for the confirmation of a second person)" ".success and .data.status == \"$first\""
   sid=$(val '.data.id')
   as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":${sid:-0},\"approve\":true,\"note\":\"تایید خودکار آزمون\"}"
 }
@@ -897,12 +897,12 @@ D31DOC=$(val .data.id); call DELETE "inventory/documents/$D31DOC"
 EXPDAYS=$(( ( $(TZ=UTC date -d 2026-09-11 +%s) - $(TZ=UTC date -d "$D0" +%s) ) / 86400 ))
 as "$QC_TOKEN" POST inventory/items/quality "{\"itemId\":$RAW,\"requiresIncomingInspection\":false,\"shelfLifeDays\":10}"; check "r1q D32: QC gives the forging bar a shelf life of 10 days (adding a control needs no reason)" '.success and .data.shelfLifeDays == 10 and .data.requiresIncomingInspection == false'
 # PB8: the two expiry receipts (1,000 per kg, the forging bar was received at 120,000 per kg) are price outliers by design of that fixture: the price rule would block them (a 120 times history), so its block threshold is "never" (0) for these two receipts only and back at its default (300) right after
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsData.R-RCV-PRICE.Block","value":0}'; check "pb8 setup: the price block threshold is off for the two expiry-fixture receipts" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsData.R-RCV-PRICE.Block 0; check "pb8 setup: the price block threshold is off for the two expiry-fixture receipts (two-person change)" '.success and .data.status == "Approved"'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-09-01T00:00:00\",\"warehouseId\":$W1,\"referenceNumber\":\"EXP-RC\",\"lines\":[{\"itemId\":$RAW,\"quantity\":20,\"lotNumber\":\"EXP-1\",\"locationId\":$L1,\"unitPrice\":1000}]}"
 EXRC=$(val .data.id); call POST "inventory/documents/$EXRC/confirm"; check "r1q D32: 20 kg received on 2026-09-01 as lot EXP-1" '.success and .data.status == 1'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$W1,\"referenceNumber\":\"EXP-RC2\",\"lines\":[{\"itemId\":$RAW,\"quantity\":10,\"lotNumber\":\"EXP-2\",\"locationId\":$L1,\"unitPrice\":1000}]}"
 EXRC2=$(val .data.id); call POST "inventory/documents/$EXRC2/confirm"; check "r1q D32: 10 kg received today as lot EXP-2" '.success and .data.status == 1'
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsData.R-RCV-PRICE.Block","value":300}'; check "pb8 setup: the price block threshold is back at its default 300" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsData.R-RCV-PRICE.Block 300; check "pb8 setup: the price block threshold is back at its default 300" '.success and .data.status == "Approved"'
 call GET "inventory/stock/lots?ItemId=$RAW"; EXLOT=$(val '.data.data[]|select(.lotNumber=="EXP-1")|.id'); EXLOT2=$(val '.data.data[]|select(.lotNumber=="EXP-2")|.id')
 check "r1q D32: the lots carry the expiry date of the receipt day plus the shelf life: 2026-09-11 and today plus 10 days" "([.data.data[]|select(.lotNumber==\"EXP-1\")|.expiryDate[0:10]][0] == \"2026-09-11\") and ([.data.data[]|select(.lotNumber==\"EXP-2\")|.expiryDate[0:10]][0] == \"$(dd 10)\")"
 SUBX() { echo "{\"type\":9,\"documentDate\":\"${D0}T00:00:00\",\"warehouseId\":$W1,\"destinationWarehouseId\":$WK,\"providerId\":${PRV:-0},\"driverName\":\"احمدی\",\"vehiclePlate\":\"12ع345-67\",\"receiverName\":\"مدیر کارگاه\",\"lines\":[{\"itemId\":$RAW,\"quantity\":$1,\"lotId\":$2}]}"; }
@@ -1947,8 +1947,9 @@ as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":3650
 as "$QA_TOKEN" POST quality/settings '{"key":"NcrMinorDueDays","value":7.5}'; nomsg "r1q D30: days are whole numbers (7.5 refused)" "باید عدد صحیح بین 1 تا 180 باشد"
 as "$QA_TOKEN" POST quality/settings '{"key":"EffectivenessWaitDays","value":400}'; nomsg "r1q D30: a waiting period beyond a year is refused (the range is 7 to 365 days since the review)" "باید عدد صحیح بین 7 تا 365 باشد"
 as "$QA_TOKEN" GET quality/settings; check "r1q D30: the refused values were not stored (committee minimum still 3, minor NCR period still 7, welder continuity still 6 months and a default)" '.success and ([.data[]|select(.key=="MajorNcrCommitteeMin")|.value][0] == 3) and ([.data[]|select(.key=="NcrMinorDueDays")|.value][0] == 7) and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 6) and ([.data[]|select(.key=="WeldContinuityMonths")|.isDefault][0] == true) and ([.data[]|select(.key=="WeldContinuityMonths")|.max][0] == 12)'
-as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":12}'; check "r1q D30: twelve months, the top of the range, is accepted and stored" '.success and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 12) and ([.data[]|select(.key=="WeldContinuityMonths")|.isDefault][0] == false)'
-as "$QA_TOKEN" POST quality/settings '{"key":"WeldContinuityMonths","value":6}'; check "r1q D30: ... and put back to the six months of the standard" '.success and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 6)'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality WeldContinuityMonths 12; check "r1q D30: twelve months, the top of the range, is accepted (a strict setting: two-person change)" '.success and .data.status == "Approved" and .data.newValue == "12"'
+as "$QA_TOKEN" GET quality/settings; check "r1q D30: ... and stored, no longer the default" '.success and ([.data[]|select(.key=="WeldContinuityMonths")|.value][0] == 12) and ([.data[]|select(.key=="WeldContinuityMonths")|.isDefault][0] == false)'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality WeldContinuityMonths 6; check "r1q D30: ... and put back to the six months of the standard" '.success and .data.status == "Approved" and .data.newValue == "6"'
 # R1q review H6 and M14: the minimum of the witness notice period (company setting, 1 to 30 days, default 1) and the ranges of the other new settings
 as "$QA_TOKEN" GET quality/settings; check "r1q M14: the new settings carry their ★ default and their range: back-date window 7 (0-30), waiting period of the effectiveness check 30 (7-365, put back by QA), minimum witness notice 1 (1-30)" '.success and ([.data[]|select(.key=="MaxBackdateDays")|[.value,.min,.max,.isDefault]][0] == [7,0,30,true]) and ([.data[]|select(.key=="EffectivenessWaitDays")|[.value,.min,.max]][0] == [30,7,365]) and ([.data[]|select(.key=="MinNoticeDays")|[.value,.min,.max,.isDefault]][0] == [1,1,30,true])'
 as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":31}'; nomsg "r1q M14: a back-date window beyond a month is refused" "باید عدد صحیح بین 0 تا 30 باشد"
@@ -5229,9 +5230,9 @@ as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notif
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLS}"; nomsg "r1q H5: a letter sent to a supplier is no notice to the client" "گیرنده نامه انتخاب‌شده کارفرمای این قرارداد نیست"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLF}"; nomsg "r1q H5: a letter whose send date is in the future is no proof of a notice" "تاریخ ارسال نامه در آینده است"
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLW}"; nomsg "r1q H5: a letter sent three days ago, before the client approved plan 1 two days ago, does not prove a notice" "نامه پیش از تایید برنامه توسط کارفرما ارسال شده است"
-as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":0}'; check "r1q H5: setup: the back-date window is 0 days for the next check" '.success and ([.data[]|select(.key=="MaxBackdateDays")|.value][0] == 0)'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality MaxBackdateDays 0; check "r1q H5: setup: the back-date window is 0 days for the next check (two-person change)" '.success and .data.status == "Approved" and .data.newValue == "0"'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLY}"; nomsg "r1q H5: with a back-date window of 0 days a letter sent yesterday is too old" "تاریخ ارسال نامه بیش از 0 روز پیش است"
-as "$QA_TOKEN" POST quality/settings '{"key":"MaxBackdateDays","value":7}'; check "r1q H5: ... and the back-date window is 7 days again" '.success and ([.data[]|select(.key=="MaxBackdateDays")|.value][0] == 7)'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality MaxBackdateDays 7; check "r1q H5: ... and the back-date window is 7 days again" '.success and .data.status == "Approved" and .data.newValue == "7"'
 as "$QC_TOKEN" POST quality/itps/activity/action "{\"id\":$A6,\"action\":\"notify\",\"letterId\":$OLA}"; check "r1q H5: the notice is proven by the letter the secretariat sent today to the client of the contract: the activity is notified from the day the letter was sent, with the letter number" ".success and ([.data.activities[]|select(.id==$A6)|.status][0] == 1) and ([.data.activities[]|select(.id==$A6)|.notificationLetterId][0] == $OLA) and ([.data.activities[]|select(.id==$A6)|.notificationSentAt[0:10]][0] == \"$D0\") and ([.data.activities[]|select(.id==$A6)|.notificationLetterNumber][0] != null)"
 # plan 2: a revised plan is approved by the client again before an H or W point is done; the witness notice of its second activity comes from the letter sent three days ago
 as "$QC_TOKEN" GET "quality/itps/$ITP2"; ITP2S2=$(val '.data.activities[]|select(.seq==2)|.id'); ITP2S3=$(val '.data.activities[]|select(.seq==3)|.id'); ITP2S6=$(val '.data.activities[]|select(.seq==6)|.id')
@@ -6107,7 +6108,7 @@ call GET "$MF/orders/$MFORDA"; check "mes: finishing step 10 made step 20 ready;
 # --- supervisor bookings for another person, the attendance difference list
 # PB8: this chain books and corrects hours of order C on purpose far above its standard (4 to 5.5 hours against a standard of well under one hour) to test the booking, correction and hour-report rules. That is exactly what the time rule blocks,
 # so its block threshold is "never" (0) for this chain only and back at its default (400) right after the last correction.
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsData.R-PRD-TIME.Block","value":0}'; check "pb8 setup: the time block threshold is off for the bookings chain of order C" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsData.R-PRD-TIME.Block 0; check "pb8 setup: the time block threshold is off for the bookings chain of order C" '.success and .data.status == "Approved"'
 call POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T08:00:00\",\"endAt\":\"2026-06-27T12:00:00\",\"reason\":\"ثبت از روی برگه دستی\"}"; nomsg "mes: the PMO cannot book time for somebody else" "مجوز"
 as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T08:00:00\",\"endAt\":\"2026-06-27T12:00:00\"}"; nomsg "mes: booking for somebody else needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/bookings "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"startAt\":\"2026-06-27T12:00:00\",\"endAt\":\"2026-06-27T08:00:00\",\"reason\":\"x\"}"; nomsg "mes: the end must be after the start" "بعد از شروع"
@@ -6246,7 +6247,7 @@ as "$MSV_TOKEN" POST $MF/bookings/correct "{\"operationId\":$MFOPC10,\"employeeI
 as "$MSV_TOKEN" POST $MF/bookings/correct "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"machineId\":$MFM1,\"startAt\":\"2026-06-23T08:00:00\",\"endAt\":\"2026-06-23T10:00:00\",\"reason\":\"x\"}"; nomsg "mes: a correction needs a recorded attendance of that day (none on 06-23) (review 9)" "تردد ثبت نشده است"
 as "$MSV_TOKEN" POST $MF/bookings/correct "{\"operationId\":$MFOPC10,\"employeeId\":$OAEMP,\"machineId\":$MFM1,\"startAt\":\"2026-06-27T16:00:00\",\"endAt\":\"2026-06-27T19:00:00\",\"reason\":\"x\"}"; nomsg "mes: the booked time of a person cannot exceed his attendance: 330 + 90 minutes booked + 180 would be 600 against 500 minutes present (review 9)" "از حضور او"
 as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDC&PageSize=0"; check "mes: the override release of C is audited with its reason" '.success and ([.data.data[]|select(.action == "Modified" and (.afterJson|tostring|contains("ReleaseOverrideReason")))]|length) >= 1'
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsData.R-PRD-TIME.Block","value":400}'; check "pb8 setup: the time block threshold is back at its default 400" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsData.R-PRD-TIME.Block 400; check "pb8 setup: the time block threshold is back at its default 400" '.success and .data.status == "Approved"'
 
 # --- reading roles
 as "$MMT_TOKEN" GET "$MF/orders?OpenOnly=true&PageSize=5"; check "mes: maintenance reads the open orders (none of the three is open any more)" ".success and ([.data.data[]|select(.id == $MFORDA or .id == $MFORDB or .id == $MFORDC)]|length) == 0"
@@ -8100,7 +8101,7 @@ as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Seat=CEO-BRIEF&Status=4&PageSize=0"; c
 as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=3&PageSize=0"; check "ai runs: no seat run failed" '.success and (.data.data|length) == 0'
 as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=1&PageSize=0"; check "ai runs: no seat run is still running" '.success and (.data.data|length) == 0'
 as "$WH_TOKEN" GET "$AI/admin/seats/runs?PageSize=0"; nomsg "ai runs: a storekeeper cannot read the runs" "$AINOTALLOWED"
-safety_set AiSeat PROC-COMPARE 0; check "ai seats: the procurement seat is switched off" '.success and .data.status == "Approved"'
+safety_set AiSeat PROC-COMPARE 0 AppliedAwaitingConfirmation; check "ai seats: the procurement seat is switched off" '.success and .data.status == "Approved"'
 as "$ADMIN_TOKEN" POST $AI/admin/seats/run '{"code":"PROC-COMPARE"}'; nomsg "ai seats: a switched-off seat cannot be run" "این صندلی غیرفعال است"
 safety_set AiSeat PROC-COMPARE 1; check "ai seats: the procurement seat is switched on again" '.success and .data.status == "Approved"'
 airun PROC-COMPARE; check "ai seats: the procurement seat runs (no complete inquiry yet: no note)" '.success and .data.status == 2 and .data.outputs == "notes=0"'
@@ -10950,7 +10951,7 @@ call POST WorkOrders "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"code\":\"PB-
 PBWO=$(val .data.id)
 # PB8: the readiness gate («کنترل آمادگی اطلاعات مهندسی شروع پروژه») stays ON for the pb1/pb2 instantiations, so the BOM, WBS, item and specification items are still exercised. Only the three items these two chains do not carry
 # (an approved OPC with work centre and hours, a Released drawing, ITP characteristics; and RD-SPEC: the FY paper BOM has a purchased part, 16.13.03.007.2, without a specification) are made Soft for the two instantiations and are Hard again right after the pb2 instantiation.
-for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":0}"; check "pb8 setup: $RDK is a soft item for the pb1/pb2 instantiations" '.success'; done
+for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do SAFETY_REQ="$QA_TOKEN" safety_set Quality "OpsReady.$RDK.Hard" 0; check "pb8 setup: $RDK is a soft item for the pb1/pb2 instantiations" '.success and .data.status == "Approved"'; done
 as "$COM_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; r403 "pb1: commercial cannot take a product into a project (403)"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; check "pb1: the project takes the RELEASED revision 00 of the test product (not the draft 01): source recorded, quantities multiplied by 3, the heading is kept, the contract review is not accepted so no PC WBS yet and the answer says why" '.success and .data.sourceBomRevision == 0 and .data.sourceBomCode == "88.11.00.000.2-BOM" and .data.count == 3 and (.data.lines|length) == 4 and ([.data.lines[]|select(.partNumber=="88.11.01.002.2")|.totalQty]|.[0]) == 6 and .data.pcBaselineCurrent == false and (.data.pcWbs|length) == 0 and .data.pcProductNodeId == null and (.data.wbsNote|length) > 0 and .data.wbsTemplateVersion == 1'
 PBBASE=$(val .data.id); PBLINE=$(jq -r '[.data.lines[]|select(.partNumber=="88.11.01.002.2")][0].id' "$B")
@@ -11001,7 +11002,7 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PB2CT,\"currencyCode\":\"IRR\"
 pcreview $PB2CT # the draft requests of a project need the accepted contract review
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; no "pb2: before the product is taken there is no balance run"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB2WO,\"productId\":$PBFYPROD}"; check "pb2: the FY product is taken into the project (the balance runs by itself after it)" '.success and .data.count == 2'
-for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do as "$QA_TOKEN" POST quality/settings "{\"key\":\"OpsReady.$RDK.Hard\",\"value\":1}"; check "pb8 setup: $RDK is a hard item again (default)" '.success'; done
+for RDK in RD-OPC RD-DRAWING RD-ITP RD-SPEC; do SAFETY_REQ="$QA_TOKEN" safety_set Quality "OpsReady.$RDK.Hard" 1; check "pb8 setup: $RDK is a hard item again (default)" '.success and .data.status == "Approved"'; done
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; check "pb2: run 1 was made by the instantiation: 81 lines, 55 short, 26 raw materials not coded" '.success and .data.runNumber == 1 and .data.trigger == "Instantiate" and .data.lineCount == 81 and .data.shortLineCount == 55 and .data.notCodedCount == 26 and .data.bomRevision == 0'
 check "pb2: a bought part: 2 units for 2 units of the product, nothing in stock, so the shortage is 2" '([.data.lines[]|select(.partNumber=="16.13.02.014.2" and .kind == 1)]|length) == 1 and ([.data.lines[]|select(.partNumber=="16.13.02.014.2")][0] | .grossQty == 2 and .scrapQty == 0 and .requiredQty == 2 and .onHandQty == 0 and .onOrderPrQty == 0 and .shortQty == 2)'
 check "pb2: the raw material of a made part (first stage of its OPC chart, 16 rings for 2 units) is short by 16" '([.data.lines[]|select(.itemCode=="16.11.01.012.2-CT")][0] | .kind == 2 and .requiredQty == 16 and .shortQty == 16)'
@@ -11572,10 +11573,10 @@ as "$ENG2_TOKEN" POST $PB/routings/check "{\"id\":$PB8OPC}"; check "pb8 ready: t
 as "$ADMIN_TOKEN" POST $PB/routings/approve "{\"id\":$PB8OPC}"; check "pb8 ready: the routing is approved" '.success and .data.status == 2'
 as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PB8WO&productId=$PB8PROD"; check "pb8 ready: after the routing is approved only RD-DRAWING is missing" '.success and .data.ready == false and .data.hardMissing == 1 and ([.data.items[]|select(.hard and (.status == "Missing" or .status == "Partial"))|.code]) == ["RD-DRAWING"]'
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB8WO,\"productId\":$PB8PROD}"; nomsg "pb8 ready: the baseline is still refused while the drawing is missing" "[RD-DRAWING]"
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.RD-DRAWING.Hard","value":0}'; check "pb8 ready: the company makes the drawing item a soft one (setting)" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsReady.RD-DRAWING.Hard 0; check "pb8 ready: the company makes the drawing item a soft one (setting, two-person change)" '.success and .data.status == "Approved"'
 as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PB8WO&productId=$PB8PROD"; check "pb8 ready: with the drawing soft the checklist is ready and shows the drawing as a soft gap" '.success and .data.ready == true and .data.hardMissing == 0 and ([.data.items[]|select(.code == "RD-DRAWING")][0] | .hard == false and .status == "Missing")'
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB8WO,\"productId\":$PB8PROD}"; check "pb8 ready: the baseline is created once the hard items are met" '.success and .data.count == 1'
-as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.RD-DRAWING.Hard","value":1}'; check "pb8 ready: the drawing item is hard again (default)" '.success'
+SAFETY_REQ="$QA_TOKEN" safety_set Quality OpsReady.RD-DRAWING.Hard 1; check "pb8 ready: the drawing item is hard again (default)" '.success and .data.status == "Approved"'
 as "$PLAN_TOKEN" GET "$OPS/readiness/summary"; check "pb8 ready: the PMO summary lists the project with its hard gap (the drawing, hard again)" ".success and ([.data.items[]|select(.workOrderId == $PB8WO)]|length) == 1 and ([.data.items[]|select(.workOrderId == $PB8WO)][0].hardMissing) == 1"
 
 # the OPS-DATA seat: a run by hand, then the same day again finds nothing new
@@ -11589,15 +11590,23 @@ PBD_H0=$(val '.data.headSeq')
 as "$ADMIN_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"PBD audit coverage\",\"quantity\":1,\"result\":1}"; check "pbd: a quality record is saved (the known change)" '.success and .data.id > 0'
 PBD_QNUM=$(val '.data.number')
 as "$FM_TOKEN" GET "finance/audit?EntityType=QcRecord&PageSize=0"; check "pbd: the quality record is in the audit trail: exactly one Added entry (named by its number) with the user" ".success and ([.data.data[]|select(.action == \"Added\" and (.userName|length) > 0 and (.summary|endswith(\"$PBD_QNUM\")))]|length) == 1"
-as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; check "pbd: the next incremental run starts after the checkpoint and checks exactly the one new entry" ".success and .data.kind == \"Incremental\" and .data.status == \"Ok\" and .data.entriesChecked == 1 and .data.fromSeq == $PBD_H0 + 1 and .data.headSeq == $PBD_H0 + 1"
-as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"full"}'; check "pbd: the weekly full pass checks the whole chain from the first entry" '.success and .data.kind == "Full" and .data.status == "Ok" and .data.fromSeq == 1 and .data.entriesChecked == .data.headSeq'
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; check "pbd: the next incremental run starts after the checkpoint and checks exactly two entries: the entry of the first run itself (the history of the verification is in the chain) and the quality record" ".success and .data.kind == \"Incremental\" and .data.status == \"Ok\" and .data.entriesChecked == 2 and .data.fromSeq == $PBD_H0 + 1 and .data.headSeq == $PBD_H0 + 2"
+# M8: a full pass is queued to the background job; the answer is the queued run (Running) and the run is read until it is done
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"full"}'; check "pbd: the full pass by hand is queued to the background job (status Running, kind Full)" '.success and .data.kind == "Full" and .data.status == "Running" and .data.id > 0'
+PBD_RID=$(val '.data.id')
+for _i in $(seq 1 180); do as "$ADMIN_TOKEN" GET "integrity/chain/runs/${PBD_RID:-0}"; [ "$(val '.data.status')" != "Running" ] && break; sleep 1; done
+check "pbd: the full pass checks the whole chain from the first entry (it ends Ok, entries checked equal to its head)" '.success and .data.kind == "Full" and .data.status == "Ok" and .data.fromSeq == 1 and .data.entriesChecked == .data.headSeq'
 as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"sometimes"}'; no "pbd: an unknown check mode is refused"
 as "$WH_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; no "pbd: the storekeeper cannot run the chain check"
-as "$ADMIN_TOKEN" GET "integrity/chain/runs?PageSize=0"; check "pbd: the history lists the three runs of this block newest first (the last is the full pass)" '.success and (.data.data|length) >= 3 and .data.data[0].kind == "Full" and .data.data[1].kind == "Incremental" and .data.data[1].entriesChecked == 1'
+as "$WH_TOKEN" POST integrity/chain/run '{"mode":"full"}'; no "pbd: the storekeeper cannot queue a full pass"
+as "$ADMIN_TOKEN" GET "integrity/chain/runs?PageSize=0"; check "pbd: the history lists exactly the three runs of this block, newest first (the last is the full pass)" '.success and (.data.data|length) == 3 and .data.data[0].kind == "Full" and .data.data[1].kind == "Incremental" and .data.data[1].entriesChecked == 2'
 as "$ADMIN_TOKEN" GET integrity/summary; check "pbd: the summary light: chain Ok, restore test never made on this server (red)" '.success and .data.chainStatus == "Ok" and .data.lastChainRun.status == "Ok" and .data.restoreStatus == "Never" and .data.red == true and .data.restoreWarnDays == 35'
 as "$WH_TOKEN" GET integrity/chain/runs; no "pbd: the storekeeper cannot read the chain history"
 # the strict production profile: the settings that weaken a control change only with a second person
 as "$ADMIN_TOKEN" GET safety/deviations; check "pbd: the deviation check lists the revision requirement of transmittals (0 against the strict 1) as a weaker value" '.success and ([.data.items[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.deviates == true and .weaker == true and .current == "0" and .strict == "1") and .data.deviations == (.data.items|length)'
+as "$QA_TOKEN" POST quality/settings '{"key":"OpsData.R-RCV-PRICE.Block","value":0}'; nomsg "pbd: the QA manager cannot switch a gate of the operational data control off from the quality settings page" "پروفایل سخت"
+as "$QA_TOKEN" POST safety/changes '{"store":"Quality","key":"OpsData.R-RCV-PRICE.Warn","value":"400","reason":"آستانه هشدار از آستانه مسدودسازی بیشتر شود"}'; no "pbd: a warning threshold above the block threshold is refused already at the request (the check of the module)"
+as "$ADMIN_TOKEN" GET safety/profile; check "pbd: the gates of the operational data control are in the strict profile (the block threshold of the price rule is listed with its default 300)" '.success and ([.data[]|select(.store == "Quality" and .key == "OpsData.R-RCV-PRICE.Block" and .strict == "300" and .current == "300" and .deviates == false)]|length) == 1'
 as "$ADMIN_TOKEN" GET safety/deviations; check "pbd: the purchase-order rule (on, as strict) is not a deviation" '.success and ([.data.items[]|select(.key == "EnforcePurchaseOrder")]|length) == 0'
 as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; nomsg "pbd: the settings page cannot change a security-relevant setting directly" "پروفایل سخت‌گیرانه"
 as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"x"}'; nomsg "pbd: a request needs a reason" "دلیل"
