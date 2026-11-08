@@ -38,6 +38,7 @@ namespace Services.NasbNiro.Ai
         public const string QcNcrAssist = "QC-NCR-ASSIST";
         public const string FinAnomaly = "FIN-ANOMALY";
         public const string OfficeDraft = "OFFICE-DRAFT";
+        public const string OpsData = "OPS-DATA";
 
         /// <summary>The user the evaluation runs as (it is not a seat).</summary>
         public const string Eval = "EVAL";
@@ -70,6 +71,8 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = AiSeatCodes.QcNcrAssist, Title = "دستیار گزارش عدم انطباق", Roles = new[] { "QC" }, Schedule = "poll 10", OutputKind = "QualityNcr", UsesModel = true },
             new AiSeatDefinition { Code = AiSeatCodes.FinAnomaly, Title = "بازبینی ناهنجاری‌های مالی", Roles = new[] { "FINANCIAL" }, Schedule = "daily 06:00", OutputKind = "FinanceNotes", UsesModel = false },
             new AiSeatDefinition { Code = AiSeatCodes.OfficeDraft, Title = "پیش‌نویس پاسخ نامه و خلاصه‌ی صورت‌جلسه", Roles = new[] { "SECRETARIAT" }, Schedule = "poll 15", OutputKind = "OfficeNotes", UsesModel = true },
+            // rule-based like FIN-ANOMALY: it reads through the services of the units (read roles of the warehouse only) and writes notes; it never approves and never edits data
+            new AiSeatDefinition { Code = AiSeatCodes.OpsData, Title = "کنترل داده‌ی عملیاتی (انبار، تولید، کیفیت، مالی)", Roles = new[] { "WAREHOUSE" }, Schedule = "daily 06:15", OutputKind = "OpsNotes", UsesModel = false },
         };
 
         /// <summary>The evaluation user: it reads like the CEO (★), it is not a seat and has no row in AiSeats.</summary>

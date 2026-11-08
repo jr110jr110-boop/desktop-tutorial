@@ -82,7 +82,7 @@ namespace Services.NasbNiro.ProductBank
         {
             yield return new PbSetting { Key = StageSeparator, Value = "-", Title = "جداکننده شماره قطعه و کد مرحله", Source = "★ تصمیم برنامه (به تایید شرکت)" };
             yield return new PbSetting { Key = MinSuggestConfidence, Value = "50", Title = "کمترین اطمینان پیشنهاد نگاشت خودکار (درصد)", Source = "★ تصمیم برنامه (به تایید شرکت)" };
-            yield return new PbSetting { Key = DistinctReviewers, Value = "false", Title = "امضاکنندگان کنترل، کنترل کیفیت، کنترل ساخت و تایید BOM افراد متفاوت باشند", Source = "★ روال شرکت: یک نفر می‌تواند چند امضا بزند (به تایید شرکت)؛ تهیه‌کننده همیشه با همه امضاکنندگان متفاوت است" };
+            yield return new PbSetting { Key = DistinctReviewers, Value = "true", Title = "امضاکنندگان کنترل، کنترل کیفیت، کنترل ساخت و تایید BOM چهار نفر متفاوت باشند", Source = "تصمیم مدیرعامل D13: چهار امضا چهار نفر متفاوت؛ تهیه‌کننده نیز با همه امضاکنندگان متفاوت است (در صورت نیاز با این تنظیم قابل تغییر)" };
             yield return new PbSetting { Key = DemoData, Value = "false", Title = "نصب داده‌های نمونه (محصول FY) مجاز باشد", Source = "★ فقط در نصب آزمایشی یا نمایشی روشن شود؛ در نصب اصلی خاموش است" };
         }
 

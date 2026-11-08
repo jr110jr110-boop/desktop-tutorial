@@ -152,6 +152,8 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = StagnantDays, Value = 90, Title = "کالای راکد: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
             yield return new QualitySetting { Key = StagnantDeadDays, Value = 180, Title = "کالای راکد مرده: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
             yield return new QualitySetting { Key = ReorderUseDays, Value = 90, Title = "بازه محاسبه مصرف روزانه برای نقطه سفارش (روز)", Source = "★ پیشنهاد PMIS" };
+            // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
+            foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
         }
 
         /// <summary>

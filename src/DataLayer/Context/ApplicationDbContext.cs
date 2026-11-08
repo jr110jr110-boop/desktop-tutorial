@@ -127,6 +127,10 @@ namespace DataLayer.Context
         public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryPackingLine> InventoryPackingLines { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.Inventory.ItemUnitConversion> ItemUnitConversions { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryAsset> InventoryAssets { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.OpsData.OpsFinding> OpsFindings { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.OpsData.OpsException> OpsExceptions { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.OpsData.OpsReadinessException> OpsReadinessExceptions { get; set; }
+        public virtual DbSet<Entities.Model.NasbNiro.OpsData.OpsReadinessObligation> OpsReadinessObligations { get; set; }
         public virtual DbSet<Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling> InventoryConsumptionCeilings { get; set; }
         #endregion
 

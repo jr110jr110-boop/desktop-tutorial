@@ -31,9 +31,17 @@ namespace Services.NasbNiro.Ai
         public const string PcWeeklyReport = "PcWeeklyReport";
         public const string CeoBrief = "CeoBrief";
 
+        // OPS-DATA: the target is the document the finding is about (one note per document and rule)
+        public const string OpsInventoryDocument = "InventoryDocument";
+        public const string OpsStockCount = "StockCount";
+        public const string OpsOperation = "MfOperation";
+        public const string OpsInspection = "QcInspection";
+        public const string OpsInvoice = "SupplierInvoice";
+
         public static readonly string[] All =
         {
             QualityNcr, FinanceJournal, BankLine, SupplierIbanChange, PurchaseRfq, OfficeLetter, OfficeMeeting, PcWeeklyReport, CeoBrief,
+            OpsInventoryDocument, OpsStockCount, OpsOperation, OpsInspection, OpsInvoice,
         };
 
         /// <summary>The type needs the office service to say who may read the record.</summary>
@@ -53,6 +61,11 @@ namespace Services.NasbNiro.Ai
                 case SupplierIbanChange: return "FINANCEMANAGER,FINANCIAL";
                 case PurchaseRfq: return "COMMERCIAL,PMO,FINANCIAL,FINANCEMANAGER,TREASURY,ENGINEERING,QC,CONSTRUCTION,CEO";
                 case PcWeeklyReport: return "PMO,PLANNING";
+                case OpsInventoryDocument:
+                case OpsStockCount: return "PMO,CEO,PLANNING,WAREHOUSE,WHSUPERVISOR,AUDITOR";
+                case OpsOperation: return "PMO,CEO,PLANNING,SHOPSUPERVISOR,PRODUCTIONMANAGER,AUDITOR";
+                case OpsInspection: return "PMO,CEO,QC,QA,AUDITOR";
+                case OpsInvoice: return "PMO,CEO,FINANCIAL,FINANCEMANAGER,AUDITOR";
                 case CeoBrief: return "CEO"; // the brief is written as the CEO (it may hold what only the CEO sees), so only the CEO reads it
                 default: return null;
             }
@@ -71,6 +84,11 @@ namespace Services.NasbNiro.Ai
                 case OfficeLetter: return "/office/letters/" + id.Value.ToString(CultureInfo.InvariantCulture);
                 case OfficeMeeting: return "/office/meetings/" + id.Value.ToString(CultureInfo.InvariantCulture);
                 case PcWeeklyReport: return "/project-control/reports";
+                case OpsInventoryDocument: return "/inventory/documents/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OpsStockCount: return "/inventory/counts/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OpsOperation: return "/production/operations/" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OpsInspection: return "/inventory/inspections?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
+                case OpsInvoice: return "/procurement/invoices?id=" + id.Value.ToString(CultureInfo.InvariantCulture);
                 default: return null;
             }
         }

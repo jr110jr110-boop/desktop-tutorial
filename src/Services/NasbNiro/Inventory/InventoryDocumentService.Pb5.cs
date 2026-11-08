@@ -298,7 +298,7 @@ namespace Services.NasbNiro.Inventory
                 {
                     ItemId = l.ItemId, Quantity = l.Quantity, LotId = l.LotId, LotNumber = l.LotNumber, HeatNumber = l.HeatNumber, CertificateNumber = l.CertificateNumber,
                     LocationId = l.LocationId, DestinationLocationId = l.DestinationLocationId, UnitPrice = l.UnitPrice, PurchaseOrderLineId = l.PurchaseOrderLineId,
-                    SalesOrderLineId = l.SalesOrderLineId, Description = l.Description, Direction = l.Direction, SourceRowNumber = l.SourceRowNumber,
+                    SalesOrderLineId = l.SalesOrderLineId, Description = l.Description, Direction = l.Direction, SourceRowNumber = l.SourceRowNumber, WeighedWeightKg = l.WeighedWeightKg, CertificateWeightKg = l.CertificateWeightKg,   // PB8 fix: the weights travel into the correction
                     SerialNumbers = l.Serials.Select(s => s.SerialNumber).ToList(),
                 });
             return await SaveDraftCoreAsync(dto, null, cancellationToken);

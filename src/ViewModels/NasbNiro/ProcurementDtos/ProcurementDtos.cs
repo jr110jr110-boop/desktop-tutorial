@@ -531,6 +531,9 @@ namespace ViewModels.NasbNiro.ProcurementDtos
 
     public class SupplierInvoiceDto
     {
+        /// <summary>PB8: the plausibility warnings of the invoice (price against the order, unit, date), shown when it is saved.</summary>
+        public List<ViewModels.NasbNiro.OpsDataDtos.OpsFindingDto> OpsFindings { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public SupplierInvoiceStatus Status { get; set; }

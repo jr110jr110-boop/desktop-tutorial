@@ -385,7 +385,7 @@ namespace Services.NasbNiro.Ai
     public class ToolRegistry : IToolRegistry
     {
         // the A1 tools, the tools of the CEO dashboard and the UI action tools (release D1)
-        private static readonly IReadOnlyList<AiToolDefinition> All = AiTools.Build().Concat(AiCeoTools.Build()).Concat(AiUiTools.Build()).ToList();
+        private static readonly IReadOnlyList<AiToolDefinition> All = AiTools.Build().Concat(AiCeoTools.Build()).Concat(global::Services.NasbNiro.OpsData.AiOpsDataTools.Build()).Concat(AiUiTools.Build()).ToList();
 
         public const int MaxNameLength = 50;
 

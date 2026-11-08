@@ -282,6 +282,11 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreight), new[] { "Number", "ReceiptDocumentId", "FreightDate", "Amount", "Status", "ApprovedAt", "ApprovedByUserId", "VoidedAt", "VoidedByUserId", "VoidReason", "CarrierProviderId", "BillOfLadingNumber" } },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreightAllocation), new[] { "FreightId", "DocumentLineId", "ItemId", "Basis", "Amount", "StockAmount", "RevaluationAmount" } },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemUnitConversion), null },
+            // ---- PB8: operational data control (findings, exceptions)
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsFinding), null },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsException), null },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsReadinessException), null },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsReadinessObligation), null },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling), null },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryAsset), new[] { "Tag", "Title", "ItemId", "SerialUnitId", "WarehouseId", "LocationId", "Status", "PurchaseDate", "CustodianUnit" } }, // the cost is not copied (it is hidden from most roles)
             { typeof(Entities.Model.NasbNiro.Inventory.ItemGroup), new[] { "Code", "Title", "DefaultMinStock", "DefaultMaxStock", "DefaultReorderQuantity", "DefaultLeadTimeDays" } },
@@ -394,6 +399,10 @@ namespace DataLayer.Context
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreight), "کرایه حمل" },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryFreightAllocation), "سهم کرایه ردیف رسید" },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemUnitConversion), "تبدیل واحد کالا" },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsFinding), "یافته کنترل داده" },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsException), "استثنای کنترل داده" },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsReadinessException), "استثنای آمادگی اطلاعات مهندسی" },
+            { typeof(Entities.Model.NasbNiro.OpsData.OpsReadinessObligation), "تعهد تکمیل اطلاعات مهندسی" },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryConsumptionCeiling), "سقف مصرف کالا برای پروژه" },
             { typeof(Entities.Model.NasbNiro.Inventory.InventoryAsset), "دارایی (اموال)" },
             { typeof(Entities.Model.NasbNiro.Inventory.ItemGroup), "گروه کالا" },

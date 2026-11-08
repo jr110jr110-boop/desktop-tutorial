@@ -178,7 +178,7 @@ namespace Services.NasbNiro.ProductBank
 
         /// <summary>
         /// Maker-checker: the preparer never signs any other step. Whether the four reviewers (checked, QC checked, manufacturing checked, approved) must also differ from each other is a setting
-        /// (BomSignatures:DistinctReviewers, ★ default false: in the company one person may sign several of the four).
+        /// (BomSignatures:DistinctReviewers, default true since CEO decision D13: the four signatures are four distinct persons).
         /// </summary>
         private static string SignerError(PbBomHeader h, int userId, bool distinctReviewers)
         {

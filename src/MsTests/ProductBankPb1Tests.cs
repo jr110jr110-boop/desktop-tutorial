@@ -35,7 +35,7 @@ namespace MsTests
         private static readonly ClaimsPrincipal Plan2 = AppHost.Principal(16, "planning.two", "PLANNING");
         private static readonly ClaimsPrincipal Sales = AppHost.Principal(17, "sales.one", "COMMERCIAL");
 
-        private static AppHost NewHost(string name) => new AppHost("Pb1_" + name + "_" + Guid.NewGuid().ToString("N"));
+        private static AppHost NewHost(string name) => new AppHost("Pb1_" + name + "_" + Guid.NewGuid().ToString("N")).WithoutReadinessGate();
         private static readonly CancellationToken Ct = CancellationToken.None;
 
         private static Task<T> Run<T>(AppHost host, ClaimsPrincipal who, Func<IServiceProvider, Task<T>> call) => host.As(who, call);
@@ -63,6 +63,12 @@ namespace MsTests
         }
 
         // ------------------------------------------------------------------------------------------ item coding by part number
+
+        [TestMethod]
+        public void DistinctReviewers_IsOnByDefault_CeoDecisionD13()
+        {
+            Assert.AreEqual("true", PbSettingKeys.Defaults().Single(d => d.Key == PbSettingKeys.DistinctReviewers).Value);
+        }
 
         [TestMethod]
         public async Task StageItemCode_IsPartNumberSeparatorAndStage_AndTitleIsDerived()
@@ -613,7 +619,7 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------ review fixes
 
         [TestMethod]
-        public async Task Signers_PreparerAlwaysRefused_OthersMayRepeatByDefault()
+        public async Task Signers_PreparerAlwaysRefused_RepeatRefusedByDefault_AllowedWhenTheSettingIsOff()
         {
             AppHost host = NewHost("signdef");
             var saved = await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().SaveAsync(Bom(Line(1, "99.11.01.001.2", "Wheel case", 1)), Ct));
@@ -622,7 +628,9 @@ namespace MsTests
             Assert.IsTrue((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Checked }, Ct))).Success);
             Assert.IsTrue((await Run(host, Qc, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.QcChecked }, Ct))).Success);
             Assert.IsTrue((await Run(host, Shop, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.ManufacturingChecked }, Ct))).Success);
-            Assert.IsTrue((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success, "with the setting off the same person may sign two blocks");
+            Assert.IsFalse((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success, "CEO decision D13: by default the same person cannot sign two blocks");
+            Assert.IsTrue((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DistinctReviewers, Value = "false" }, Ct))).Success);
+            Assert.IsTrue((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success, "with the setting switched off the same person may sign two blocks");
             var prep = AppHost.Principal(11, "engineer.one", "ENGINEERING", "PMO");
             Assert.IsFalse((await Run(host, prep, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = id }, Ct))).Success, "the preparer never releases, whatever the setting");
         }

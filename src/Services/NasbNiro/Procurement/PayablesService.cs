@@ -57,9 +57,15 @@ namespace Services.NasbNiro.Procurement
 
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
+        private readonly global::Services.NasbNiro.OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
+
         public PayablesService(IUnitOfWork uow, IInventoryUserContext user, ICostingService costing, IProcurementService procurement, ITreasuryService treasury,
-            global::Services.NasbNiro.Office.INotificationService notify)
+            global::Services.NasbNiro.Office.INotificationService notify,
+            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
         {
+            _opsEvaluator = opsEvaluator;
+            _opsGate = opsGate;
             _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -217,7 +223,19 @@ namespace Services.NasbNiro.Procurement
             await SyncInvoiceGateAsync(invoice, cancellationToken);
             if (invoice.Status == SupplierInvoiceStatus.Approved)
                 await ProcOrderNotices.SendAsync(_uow, _notify, Me, invoice.PurchaseOrderId, "invoiced", "فاکتور تامین‌کننده سفارش شما تایید شد", cancellationToken);
-            return await GetInvoiceAsync(invoice.Id, cancellationToken);
+            ResponseDto<SupplierInvoiceDto> saved = await GetInvoiceAsync(invoice.Id, cancellationToken);
+            // PB8: the plausibility warnings are shown at once, while the invoice is still being entered
+            if (saved.Success && saved.Data != null && _opsEvaluator != null && _opsGate != null)
+            {
+                try
+                {
+                    global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateInvoiceAsync(invoice.Id, cancellationToken);
+                    if (opsEv != null) saved.Data.OpsFindings = await _opsGate.PreviewAsync(opsEv, cancellationToken);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) { /* information only */ }
+            }
+            return saved;
         }
 
         /// <summary>PB6: the approver of an invoice sees it in the inbox: finance for a matched invoice, the PMO deputy when the price differs.</summary>
@@ -243,6 +261,13 @@ namespace Services.NasbNiro.Procurement
                     if (invoice.CreatorUserId == Me) return Bad<SupplierInvoiceDto>(SameUser);
                     string role = invoice.Status == SupplierInvoiceStatus.NeedsApproval ? ProcurementRoles.OrderApproval : ProcurementRoles.Finance;
                     if (!_user.IsInRole(role)) return Bad<SupplierInvoiceDto>(NotAllowed + (invoice.Status == SupplierInvoiceStatus.NeedsApproval ? " (اختلاف قیمت: معاونت PMO)" : " (مالی)"));
+                    // PB8: the real-time gate on the approval (a price ten times the order's is stopped unless the finance manager approved an exception)
+                    if (_opsEvaluator != null && _opsGate != null)
+                    {
+                        global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateInvoiceAsync(invoice.Id, cancellationToken);
+                        global::Services.NasbNiro.OpsData.OpsGateResult opsRes = await _opsGate.CheckAsync(opsEv, cancellationToken);
+                        if (opsRes.Refusal != null) return Bad<SupplierInvoiceDto>(opsRes.Refusal);
+                    }
                     invoice.Status = SupplierInvoiceStatus.Approved;
                     invoice.ApprovedAt = now;
                     invoice.ApprovedByUserId = Me;

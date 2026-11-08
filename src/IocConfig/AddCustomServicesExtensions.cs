@@ -134,6 +134,11 @@ namespace IocConfig
             services.AddScoped<IInventoryMasterService, InventoryMasterService>();
             services.AddScoped<IInventoryDocumentService, InventoryDocumentService>();
             services.AddScoped<IInventoryFreightService, InventoryFreightService>();
+            services.AddScoped<Services.NasbNiro.OpsData.IOpsDataEvaluator, Services.NasbNiro.OpsData.OpsDataEvaluator>();
+            services.AddScoped<Services.NasbNiro.OpsData.IOpsGateService, Services.NasbNiro.OpsData.OpsGateService>();
+            services.AddScoped<Services.NasbNiro.OpsData.IOpsExceptionService, Services.NasbNiro.OpsData.OpsExceptionService>();
+            services.AddScoped<Services.NasbNiro.OpsData.IOpsDataQualityService, Services.NasbNiro.OpsData.OpsDataQualityService>();
+            services.AddScoped<Services.NasbNiro.OpsData.IOpsReadinessService, Services.NasbNiro.OpsData.OpsReadinessService>();
             services.AddScoped<IWarehouseAlertService, WarehouseAlertService>();
             services.AddScoped<IWarehouseReorderService, WarehouseReorderService>();
             services.AddScoped<IWarehouseReportService, WarehouseReportService>();
@@ -264,6 +269,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.QcNcrAssistSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.FinAnomalySeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.OpsData.OpsDataSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();

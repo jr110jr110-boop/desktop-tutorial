@@ -134,6 +134,7 @@ namespace Services.NasbNiro.Quality
 
         public static bool TryGetBounds(string key, out int min, out int max)
         {
+            if (global::Services.NasbNiro.OpsData.OpsRuleCatalog.TryGetBounds(key, out min, out max)) return true;
             if (key != null && Table.TryGetValue(key, out KeyValuePair<int, int> range)) { min = range.Key; max = range.Value; return true; }
             min = 0; max = 0;
             return false;
@@ -153,6 +154,8 @@ namespace Services.NasbNiro.Quality
         /// <summary>L5 (PB5): the settings that belong together must keep their order (the second consignment alert is nearer than the first, the escalation comes after the first QC alert, slow &lt; stagnant &lt; dead).</summary>
         public static string CheckRelations(IDictionary<string, decimal> values)
         {
+            string opsRelation = global::Services.NasbNiro.OpsData.OpsRuleCatalog.CheckRelations(values);
+            if (opsRelation != null) return opsRelation;
             decimal V(string k) => values.TryGetValue(k, out decimal v) ? v : 0m;
             if (values.ContainsKey(QualitySettingKeys.ConsignmentAlertDays1) && V(QualitySettingKeys.ConsignmentAlertDays2) >= V(QualitySettingKeys.ConsignmentAlertDays1))
                 return "هشدار دوم امانی (نزدیک‌تر) باید از هشدار اول کمتر باشد.";

@@ -389,6 +389,10 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }
+
+        /// <summary>PB8: weighed weight (kg) and the weight stated by the heat certificate (kg); both optional, used by the plausibility rule R-RCV-WEIGHT.</summary>
+        public decimal? WeighedWeightKg { get; set; }
+        public decimal? CertificateWeightKg { get; set; }
         public List<string> SerialNumbers { get; set; } = new List<string>();
     }
 
@@ -476,6 +480,13 @@ namespace ViewModels.NasbNiro.InventoryDtos
     public class DocumentDto
     {
         public int Id { get; set; }
+
+        /// <summary>PB8: plausibility and baseline findings of the document: live ones while it is a draft (shown on the form at once), the stored ones after confirmation.</summary>
+        public List<ViewModels.NasbNiro.OpsDataDtos.OpsFindingDto> OpsFindings { get; set; } = new List<ViewModels.NasbNiro.OpsDataDtos.OpsFindingDto>();
+
+        /// <summary>PB8: an approved exception covers the blocking findings (the confirmation will pass).</summary>
+        public bool OpsBlocked { get; set; }
+
         public InventoryDocumentType Type { get; set; }
         public string Number { get; set; }
         public DateTime DocumentDate { get; set; }
@@ -608,6 +619,8 @@ namespace ViewModels.NasbNiro.InventoryDtos
         public string Description { get; set; }
         public DocumentLineDirection Direction { get; set; }
         public int? SourceRowNumber { get; set; }
+        public decimal? WeighedWeightKg { get; set; }
+        public decimal? CertificateWeightKg { get; set; }
         public List<string> SerialNumbers { get; set; } = new List<string>();
     }
 

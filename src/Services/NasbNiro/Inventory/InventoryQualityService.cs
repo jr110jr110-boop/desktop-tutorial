@@ -43,9 +43,15 @@ namespace Services.NasbNiro.Inventory
         private readonly Quality.IMaterialService _material;
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
+        private readonly global::Services.NasbNiro.OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
+
         public InventoryQualityService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents,
-            Quality.ICapaService capa, Quality.IMaterialService material, global::Services.NasbNiro.Office.INotificationService notify)
+            Quality.ICapaService capa, Quality.IMaterialService material, global::Services.NasbNiro.Office.INotificationService notify,
+            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
         {
+            _opsEvaluator = opsEvaluator;
+            _opsGate = opsGate;
             _notify = notify;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -185,6 +191,14 @@ namespace Services.NasbNiro.Inventory
             if (dto.AcceptedQuantity < 0 || dto.RejectedQuantity < 0) return ResponseDtoHelper.BadRequest<InspectionDto>("مقدار قبول یا رد نمی‌تواند منفی باشد.");
             if (dto.AcceptedQuantity + dto.RejectedQuantity != inspection.Quantity)
                 return ResponseDtoHelper.BadRequest<InspectionDto>($"جمع مقدار قبول و رد باید برابر مقدار رسید ({InventoryText.Number(inspection.Quantity)}) باشد.");
+
+            // PB8: the real-time gate on the result (a rejected quantity far above the history of the item and supplier)
+            if (_opsEvaluator != null && _opsGate != null)
+            {
+                global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateInspectionAsync(inspection.Id, dto.AcceptedQuantity, dto.RejectedQuantity, cancellationToken);
+                global::Services.NasbNiro.OpsData.OpsGateResult opsRes = await _opsGate.CheckAsync(opsEv, cancellationToken);
+                if (opsRes.Refusal != null) return ResponseDtoHelper.BadRequest<InspectionDto>(opsRes.Refusal);
+            }
 
             List<string> serials = Lines(inspection.SerialNumbers);
             List<string> rejectedSerials = (dto.RejectedSerialNumbers ?? new List<string>()).Select(InventoryText.Clean).Where(s => s != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();

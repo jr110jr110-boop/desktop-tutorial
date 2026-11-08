@@ -187,6 +187,17 @@ namespace MsTests
             }
         }
 
+        /// <summary>PB8: the legacy product-bank and balance tests do not build the engineering data of a project (WBS template, OPC, drawings); they switch the readiness gate off by its master setting. The gate itself is tested in OpsDataTests.</summary>
+        public AppHost WithoutReadinessGate()
+        {
+            Write(uow =>
+            {
+                Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = Services.NasbNiro.OpsData.OpsReadinessCatalog.MasterSwitch, Value = 0, Title = "readiness gate off (test)", Source = "test" });
+                uow.SaveChanges();
+            });
+            return this;
+        }
+
         /// <summary>Reads with a new scope and no user.</summary>
         public T Read<T>(Func<IUnitOfWork, T> read)
         {
