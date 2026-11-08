@@ -284,6 +284,12 @@ namespace Services.NasbNiro.Quality
             foreach (AsBuiltRecord ab in await _uow.Set<AsBuiltRecord>().Where(a => a.WorkOrderId == wo.Id && !a.Deleted && a.Status == AsBuiltStatus.Current).OrderBy(a => a.ItemId).ThenBy(a => a.SerialNumber).ToListAsync(cancellationToken))
                 s12.Entries.Add(new DataBookEntryDto { SourceKind = "AsBuilt", SourceId = ab.Id, Number = (ab.SerialNumber ?? ab.ProductCode) + " v" + ab.Version, Title = $"{ab.ProductCode}{(ab.SerialNumber == null ? string.Empty : " — " + ab.SerialNumber)} — SHA-256 {ab.Sha256.Substring(0, 12)}", Status = "Current", Mandatory = false, Missing = false, ClientRelevant = true });
             if (s12.Entries.Count > 0) book.Sections.Add(s12);
+            // 13: the design reviews that cover the project BOM (Package A1, ISO 9001 8.3.4); the audit itself is the FCA_MATCH check, so these are not mandatory entries
+            global::Services.NasbNiro.ProductBank.DesignFcaResult fcaForBook = await global::Services.NasbNiro.ProductBank.DesignGate.FcaAsync(_uow, wo.Id, cancellationToken);
+            var s13 = new DataBookSectionDto { No = 13, Name = "کنترل طراحی: بازبینی‌های تایید و صحه‌گذاری طراحی" };
+            foreach (var dr in fcaForBook.Reviews)
+                s13.Entries.Add(new DataBookEntryDto { SourceKind = "DesignReview", SourceId = dr.Id, Number = dr.Number, Title = $"{dr.Number} — {(global::Services.NasbNiro.ProductBank.DesignRules.TypeText(dr.Type))}: {dr.Title}", Status = "Accepted", Mandatory = false, Missing = false });
+            if (s13.Entries.Count > 0) book.Sections.Add(s13);
             // client relevance: until the MDL table exists, an entry is for the client when its ITP activity has a client point
             var clientActivities = new HashSet<int>(itp == null ? new List<int>() : itp.Activities.Where(x => x.PointClient != ItpPoint.None).Select(x => x.Id));
             var reportActivity = reports.Where(r => r.ItpActivityId.HasValue).ToDictionary(r => r.Id, r => r.ItpActivityId.Value);
@@ -406,6 +412,13 @@ namespace Services.NasbNiro.Quality
             {
                 Code = "PCA_MATCH", Title = "ممیزی پیکربندی فیزیکی: هر ردیف BOM پروژه بچ یا سریال نصب‌شده با مقدار برابر دارد", Passed = pca.Passed,
                 Detail = !pca.Applicable ? "اعمال نمی‌شود: " + pca.NotApplicableReason : pcaProblems.Count == 0 ? "-" : $"{pcaProblems.Count} ردیف ناهمخوان: " + string.Join(" | ", pcaProblems.Take(8)) + (pcaProblems.Count > 8 ? "…" : string.Empty),
+            });
+            // Package A1 (ISO 10007): the functional configuration audit; a work order without a project BOM baseline, or with the design control switched off, passes as "not applicable"
+            global::Services.NasbNiro.ProductBank.DesignFcaResult fca = await global::Services.NasbNiro.ProductBank.DesignGate.FcaAsync(_uow, wo.Id, cancellationToken);
+            checks.Add(new ReleaseCheckDto
+            {
+                Code = "FCA_MATCH", Title = "ممیزی پیکربندی عملکردی: BOM پروژه دارای بازبینی تایید و صحه‌گذاری طراحی پذیرفته است", Passed = fca.Passed,
+                Detail = !fca.Applicable ? "اعمال نمی‌شود: " + fca.NotApplicableReason : fca.Problems.Count == 0 ? "-" : $"{fca.Problems.Count} ایراد: " + string.Join(" | ", fca.Problems.Take(8)),
             });
             return checks;
         }

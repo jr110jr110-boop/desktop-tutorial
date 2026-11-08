@@ -18,6 +18,7 @@ namespace Services.NasbNiro.OpsData
         public const string Drawing = "RD-DRAWING";
         public const string Itp = "RD-ITP";
         public const string Spec = "RD-SPEC";
+        public const string Design = "RD-DESIGN";   // Package A1
         public const string Weight = "RS-WEIGHT";
         public const string Mdr = "RS-MDR";
         public const string ItpClient = "RS-ITPCLIENT";
@@ -62,6 +63,7 @@ namespace Services.NasbNiro.OpsData
             new ReadinessDef { Code = ReadinessCodes.Drawing, Title = "نقشه‌ی منتشرشده (Released) در سامانه‌ی مدارک مهندسی برای هر قطعه‌ی ساخت", Owner = "DCC", Hard = true },
             new ReadinessDef { Code = ReadinessCodes.Itp, Title = "مشخصه‌های ITP برای هر عملیات بازرسی/کنترل کیفیت مسیر ساخت", Owner = "QC", Hard = true, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.Spec, Title = "مشخصه‌ی فنی / جنس برای هر قطعه‌ی خریدنی", Owner = "ENGINEERING", Hard = true },
+            new ReadinessDef { Code = ReadinessCodes.Design, Title = "کنترل طراحی: برنامه طراحی تاییدشده، کامل بودن ورودی‌ها و بازبینی تایید طراحی (Verification) پذیرفته برای BOM منتشرشده", Owner = "ENGINEERING", Hard = true },
             new ReadinessDef { Code = ReadinessCodes.Weight, Title = "وزن واحد کالاهای فلزی", Owner = "ENGINEERING", Hard = false },
             new ReadinessDef { Code = ReadinessCodes.Mdr, Title = "فهرست مدارک مهندسی قرارداد (MDR/MDL)", Owner = "DCC", Hard = false, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.ItpClient, Title = "ITP تأییدشده‌ی کارفرما", Owner = "QC", Hard = false, ProjectLevel = true },
@@ -175,6 +177,10 @@ namespace Services.NasbNiro.OpsData
         public List<ReadinessPart> Parts { get; set; } = new List<ReadinessPart>();
         public Dictionary<string, ReadinessRoutingFact> Routings { get; set; } = new Dictionary<string, ReadinessRoutingFact>();
         public string ProductLink { get; set; }
+
+        /// <summary>Package A1: the design control applies (Design.VerificationRequired) and what is missing of it for the released BOM (empty = complete).</summary>
+        public bool DesignRequired { get; set; }
+        public List<string> DesignProblems { get; set; } = new List<string>();
 
         // project level (only with a work order)
         public int ItpActivities { get; set; }
@@ -292,6 +298,11 @@ namespace Services.NasbNiro.OpsData
                     case ReadinessCodes.Spec:
                         foreach (ReadinessPart p in buy.Where(p => !p.HasSpec)) off.Add(Off(PartText(p) + ": مشخصه‌ی فنی یا جنس ندارد.", f.ProductLink));
                         item = Make(d, s, buy.Count, off);
+                        break;
+                    case ReadinessCodes.Design:
+                        if (!f.DesignRequired || !f.BomReleased) { item = Make(d, s, 0, off); item.Status = NotApplicable; break; }
+                        foreach (string problem in f.DesignProblems) off.Add(Off(problem, f.ProductLink));
+                        item = Make(d, s, 1, off);
                         break;
                     case ReadinessCodes.Weight:
                         foreach (ReadinessPart p in lines.Where(p => p.MetalWithoutWeight)) off.Add(Off(PartText(p) + ": وزن واحد کالا ثبت نشده است.", f.ProductLink));

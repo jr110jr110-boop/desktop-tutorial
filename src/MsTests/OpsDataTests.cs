@@ -239,7 +239,7 @@ namespace MsTests
         {
             ReadinessResult r = OpsReadiness.Evaluate(Complete(), null);
             Assert.AreEqual(0, r.HardMissing);
-            Assert.IsTrue(r.Items.All(i => i.Status == OpsReadiness.Ok));
+            Assert.IsTrue(r.Items.Where(i => i.Code != ReadinessCodes.Design).All(i => i.Status == OpsReadiness.Ok)); // Package A1: the design item is not applicable while the facts do not ask for it
             Assert.AreEqual(100, r.Percent);
             Assert.IsFalse(r.Items.Any(i => i.Code == ReadinessCodes.Itp), "project-level items need a work order");
         }

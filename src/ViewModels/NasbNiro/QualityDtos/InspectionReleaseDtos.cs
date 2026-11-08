@@ -412,6 +412,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         /// <summary>Package C: the special process runs of the work order (qualification, procedure revision, operator, machine, result, review) and the certificates of the lots built in.</summary>
         public List<AsBuiltSpecialProcessDto> SpecialProcesses { get; set; } = new List<AsBuiltSpecialProcessDto>();
         public List<AsBuiltCertificateDto> Certificates { get; set; } = new List<AsBuiltCertificateDto>();
+
+        /// <summary>Package A1: the design verification and validation reviews that covered the project BOM.</summary>
+        public List<AsBuiltDesignReviewDto> DesignReviews { get; set; } = new List<AsBuiltDesignReviewDto>();
     }
 
     public class AsBuiltSpecialProcessDto

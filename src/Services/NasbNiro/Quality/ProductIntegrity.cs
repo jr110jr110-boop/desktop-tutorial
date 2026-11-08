@@ -221,6 +221,14 @@ namespace Services.NasbNiro.Quality
             List<ReleaseNoteLine> lines = await uow.Set<ReleaseNoteLine>().AsNoTracking().Include(l => l.Item).Where(l => l.ReleaseNoteId == note.Id).OrderBy(l => l.RowNumber).ToListAsync(ct);
             PbProjectBaseline baseline = await uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => b.WorkOrderId == wo.Id && b.IsCurrent && !b.Deleted).OrderByDescending(b => b.Id).FirstOrDefaultAsync(ct);
             PcaResult pca = await PhysicalConfigurationAudit.RunAsync(uow, wo.Id, ct, note.Id);
+            // Package A1: the design reviews (verification, validation) that covered the project BOM, part of the as-built record
+            global::Services.NasbNiro.ProductBank.DesignFcaResult designFca = await global::Services.NasbNiro.ProductBank.DesignGate.FcaAsync(uow, wo.Id, ct);
+            List<AsBuiltDesignReviewDto> designReviews = new List<AsBuiltDesignReviewDto>();
+            foreach (PbDesignReview dr in designFca.Reviews.OrderBy(x => x.Number, StringComparer.Ordinal))
+            {
+                string planNumber = await uow.Set<PbDesignPlan>().AsNoTracking().Where(x => x.Id == dr.PlanId).Select(x => x.Number).FirstOrDefaultAsync(ct);
+                designReviews.Add(new AsBuiltDesignReviewDto { Number = dr.Number, Type = dr.Type.ToString(), Outcome = dr.Outcome.ToString(), PlanNumber = planNumber, ClosedAt = dr.ClosedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Covers = designFca.Bom == null ? null : designFca.Bom.Code + " r" + designFca.Bom.Revision.ToString(CultureInfo.InvariantCulture) });
+            }
             List<AsBuiltDeviationDto> deviations = await DeviationsAsync(uow, wo.Id, baseline, ct);
             List<AsBuiltNcrDto> ncrs = (await uow.Set<NonConformance>().AsNoTracking().Where(n => n.WorkOrderId == wo.Id && !n.Deleted && n.Status != NcrStatus.Cancelled).OrderBy(n => n.Id).ToListAsync(ct))
                 .Select(n => new AsBuiltNcrDto { Number = n.Number, Status = n.Status.ToString(), Disposition = n.Disposition.ToString(), ConcessionApproved = ConcessionRules.IsValid(n, false) }).ToList();
@@ -296,6 +304,7 @@ namespace Services.NasbNiro.Quality
                         ItemTitle = line.Item.Title, SerialNumber = serial, Quantity = serial == null ? line.Quantity : 1m, BomCode = baseline?.SourceBomCode, BomRevision = baseline?.SourceBomRevision, ProductCount = baseline?.Count ?? 0,
                         Routings = routings.OrderBy(r => r.PartNumber, StringComparer.Ordinal).ThenBy(r => r.Revision).ToList(), Drawings = drawings, Deviations = deviations, Ncrs = ncrs, FirstArticles = fais,
                         PcaFindings = pca.Applicable ? pca.Problems : new List<string>(),
+                        DesignReviews = designReviews,
                     };
                     foreach (var g in links.Where(x => x.OutputItemId == line.ItemId && (serial == null || x.OutputSerial == null || string.Equals(x.OutputSerial, serial, StringComparison.OrdinalIgnoreCase))))
                         snap.Installed.Add(new AsBuiltInstalledDto { PartNumber = g.InputPart ?? g.InputCode, ItemCode = g.InputCode, ItemTitle = g.InputTitle, LotNumber = g.Lot, SerialNumber = g.Serial, HeatNumber = g.Heat, CertificateNumber = g.Cert, Quantity = g.Quantity, Via = "genealogy" });

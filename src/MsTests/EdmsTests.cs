@@ -44,7 +44,7 @@ namespace MsTests
                 foreach (int id in new[] { 31, 32, 33, 34, 35, 36, 37, 38, 39 }) AppHost.Add(u, new User { Id = id, UserName = "p7b.user" + id, Email = "p7b.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
-            return host;
+            return host.WithoutDesignControl(); // Package A1: these tests are about the EDMS gates; the design verification gate has its own tests
         }
 
         private static int NewContract(AppHost host)

@@ -151,6 +151,7 @@ namespace Services.NasbNiro.Quality
         public static bool TryGetBounds(string key, out int min, out int max)
         {
             if (global::Services.NasbNiro.OpsData.OpsRuleCatalog.TryGetBounds(key, out min, out max)) return true;
+            if (global::Services.NasbNiro.ProductBank.DesignSettingKeys.TryGetBounds(key, out min, out max)) return true;   // Package A1
             if (key != null && Table.TryGetValue(key, out KeyValuePair<int, int> range)) { min = range.Key; max = range.Value; return true; }
             min = 0; max = 0;
             return false;
