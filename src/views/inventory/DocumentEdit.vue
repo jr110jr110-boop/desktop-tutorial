@@ -6,6 +6,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
 import PrintForm from "@/components/print/PrintForm.vue";
+import { requestOpsException } from "@/api/OpsDataAPIs";
 import { getSlOrder } from "@/api/SalesAPIs";
 import { getSvOrder } from "@/api/ServiceAPIs";
 import {
@@ -18,7 +19,7 @@ import {
   needsApprovalTypes, num, ok, openLabels, outgoingTypes, parseScan, printPage, purchaseOrderTypes, rial, sepidarStatuses,
   transferTypes, today, trackingModes, typeOrder, warehouseKinds, distributionText,
 } from "@/composables/inventory";
-import { hasRole, InventoryRoles } from "@/composables/roles";
+import { hasRole, InventoryRoles, OpsDataRoles } from "@/composables/roles";
 
 const route = useRoute();
 const router = useRouter();
@@ -70,6 +71,7 @@ const pettyCash = computed(() => type.value === 1 && !doc.value?.purchaseOrderId
 const orderLocked = computed(() => !!doc.value?.purchaseOrderId);
 
 const canEdit = hasRole(InventoryRoles.documents);
+const canRequestOpsExc = hasRole(OpsDataRoles.makers);
 const canApproveWarehouse = hasRole(InventoryRoles.approveWarehouse);
 const canApprovePlanning = hasRole(InventoryRoles.approvePlanning);
 const canApproveQuality = hasRole(InventoryRoles.approveQuality);
@@ -101,6 +103,7 @@ function newLine(item: any = null) {
   return {
     key: Math.random().toString(36).slice(2), item, quantity: item && item.trackingMode === 2 ? 0 : 1, lotId: null,
     lotNumber: "", heatNumber: "", certificateNumber: "", locationId: null, destinationLocationId: null, unitPrice: null,
+    weighedWeightKg: null as number | null, certificateWeightKg: null as number | null,
     description: "", serialText: "", direction: 0, sourceRowNumber: null as number | null, purchaseOrderLineId: null as number | null,
   };
 }
@@ -119,13 +122,18 @@ async function loadLinkedNumbers(dto: any) {
   }
 }
 
+// PB8: the form as last saved; an unchanged draft is not saved again before the confirmation (a save recreates the lines)
+let savedSnapshot = "";
 function setDoc(dto: any) {
   doc.value = fromDto(dto);
+  savedSnapshot = "";
   loadLinkedNumbers(dto);
   parseQuotes(dto.priceQuotes);
   doc.value.lines.forEach(loadLots);
   if (doc.value.purchaseOrderId && doc.value.status === 0) loadOrderLines();
+  try { savedSnapshot = JSON.stringify(toDto()); } catch { savedSnapshot = ""; }
 }
+const isDirty = () => { try { return savedSnapshot === "" || JSON.stringify(toDto()) !== savedSnapshot; } catch { return true; } };
 
 async function loadOrderLines() {
   const [order] = await getPurchaseOrderForReceipt(doc.value.purchaseOrderId);
@@ -140,7 +148,7 @@ function fromDto(d: any) {
       ...newLine({ id: l.itemId, code: l.itemCode, title: l.itemTitle, unit: l.unit, trackingMode: l.trackingMode }),
       quantity: l.quantity, lotId: l.lotId, lotNumber: l.lotNumber || "", heatNumber: l.heatNumber || "",
       certificateNumber: l.certificateNumber || "", locationId: l.locationId, destinationLocationId: l.destinationLocationId,
-      unitPrice: l.unitPrice, description: l.description || "", serialText: (l.serialNumbers || []).join("\n"),
+      unitPrice: l.unitPrice, weighedWeightKg: l.weighedWeightKg ?? null, certificateWeightKg: l.certificateWeightKg ?? null, description: l.description || "", serialText: (l.serialNumbers || []).join("\n"),
       locationCode: l.locationCode, destinationLocationCode: l.destinationLocationCode,
       direction: l.direction || 0, sourceRowNumber: l.sourceRowNumber, purchaseOrderLineId: l.purchaseOrderLineId, salesOrderLineId: l.salesOrderLineId ?? null,
     })),
@@ -176,6 +184,7 @@ function toDto() {
       lotNumber: l.item.trackingMode === 1 && !l.lotId ? l.lotNumber : null, heatNumber: l.heatNumber || null,
       certificateNumber: l.certificateNumber || null, locationId: l.locationId, destinationLocationId: transfer.value ? l.destinationLocationId : null,
       unitPrice: l.unitPrice === "" ? null : l.unitPrice, description: l.description,
+      weighedWeightKg: l.weighedWeightKg === "" ? null : l.weighedWeightKg ?? null, certificateWeightKg: l.certificateWeightKg === "" ? null : l.certificateWeightKg ?? null,
       serialNumbers: l.item.trackingMode === 2 ? serials(l) : [],
     })),
   };
@@ -310,15 +319,38 @@ async function save(silent = false): Promise<boolean> {
   return true;
 }
 
+async function reloadDoc() {
+  if (!doc.value?.id) return;
+  const [data] = await getDocument(doc.value.id);
+  if (data) setDoc(data);
+}
+
 async function confirmDoc() {
   if (!confirm("سند تایید شود؟ پس از تایید، موجودی تغییر می‌کند و سند فقط با ابطال برمی‌گردد.")) return;
-  if (!(await save(true))) return;
+  if (isDirty() && !(await save(true))) return;
   busy.value = true;
   const [data, error] = await confirmDocument(doc.value.id);
   busy.value = false;
-  if (error) return fail(error);
+  if (error) {
+    fail(error);
+    await reloadDoc(); // PB8: reload the plausibility findings (a refused confirmation stores its blocking findings); the draft is read again, not saved again
+    return;
+  }
   setDoc(data);
   ok(`سند ${data.number} تایید شد.`);
+}
+
+// PB8: plausibility findings of the document; a blocking one needs an exception approved by another supervisor
+const opsJustification = ref<Record<number, string>>({});
+async function requestOpsExc(f: any) {
+  const text = (opsJustification.value[f.id] || "").trim();
+  if (!text) return fail("توجیه را بنویسید.");
+  busy.value = true;
+  const [, error] = await requestOpsException(f.id, text);
+  busy.value = false;
+  if (error) return fail(error);
+  ok("درخواست استثنا ثبت شد؛ سرپرست دیگر واحد باید تایید کند.");
+  await reloadDoc();
 }
 
 async function cancelDoc() {
@@ -1055,6 +1087,21 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div v-if="doc.opsFindings && doc.opsFindings.length" class="inv-card screen-only">
+      <h2 class="inv-title">هشدارهای کنترل داده</h2>
+      <div v-for="(f, fi) in doc.opsFindings" :key="f.id ?? f.ruleCode + '-' + fi" class="border rounded p-2 mb-2" :class="f.severity === 2 ? 'border-danger' : 'border-warning'">
+        <strong>{{ f.severity === 2 ? "مسدودکننده" : "هشدار" }}</strong> — {{ f.message }}
+        <div v-if="f.severity === 2 && f.id && canRequestOpsExc" class="mt-1">
+          <span v-if="f.exceptionStatus === 1" class="small text-success">استثنا تایید شد.</span>
+          <span v-else-if="f.exceptionStatus === 0" class="small inv-muted">درخواست استثنا در انتظار تایید سرپرست دیگر است.</span>
+          <template v-else>
+            <input v-model="opsJustification[f.id]" class="form-control form-control-sm" placeholder="توجیه درخواست استثنا" />
+            <button class="btn btn-sm btn-outline-danger mt-1" :disabled="busy" @click="requestOpsExc(f)">درخواست استثنا</button>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
         <h2 class="inv-title">ردیف‌ها</h2>
@@ -1177,6 +1224,10 @@ onMounted(async () => {
                   :disabled="!isDraft || (type === 1 && !!doc.purchaseOrderId) || (conversion && line.direction !== 2)"
                   class="form-control form-control-sm"
                   type="number" />
+                <template v-if="type === 1">
+                  <input v-model.number="line.weighedWeightKg" :disabled="!isDraft" class="form-control form-control-sm mt-1 inv-ltr" type="number" placeholder="وزن توزین‌شده (kg)" />
+                  <input v-model.number="line.certificateWeightKg" :disabled="!isDraft" class="form-control form-control-sm mt-1 inv-ltr" type="number" placeholder="وزن گواهی ذوب (kg)" />
+                </template>
               </td>
               <td><input v-model="line.description" :disabled="!isDraft" class="form-control form-control-sm" /></td>
               <td v-if="isDraft" class="d-print-none"><button class="btn btn-sm btn-link text-danger p-0" @click="removeLine(i)">×</button></td>

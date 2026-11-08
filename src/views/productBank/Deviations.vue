@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
+import ReadinessPanel from "@/components/opsData/ReadinessPanel.vue";
 import { generateWbs, applyChange, approveChangeEngineering, approveChangePlanning, cancelChange, getBaseline, getProducts, instantiateProduct, rejectChange, saveChange, submitChange } from "@/api/ProductBankAPIs";
 import { fail, jalali, ok, printPage } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
@@ -103,6 +104,8 @@ if (workOrderId.value) load();
           <button :disabled="busy || !productId" class="btn btn-sm btn-primary" @click="take">گرفتن از بانک و کپی به‌عنوان مبنا</button>
         </div>
       </div>
+
+      <ReadinessPanel v-if="loaded && !baseline && productId && workOrderId" :product-id="productId" :work-order-id="workOrderId" />
 
       <div v-if="baseline">
         <p class="small">
