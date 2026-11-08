@@ -302,6 +302,7 @@
 import { Features } from "@/utils/features";
 import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
+import { EcRoles } from "@/composables/engChange";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -447,6 +448,8 @@ const links = {
     { title: "ورودی‌های طراحی", routeName: "DesignInputs" },
     { title: "بازبینی، تایید و صحه‌گذاری طراحی", routeName: "DesignReviews" },
     { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions" },
+    { title: "درخواست‌های تغییر مهندسی (ECR)", routeName: "EngChangeRequests", disabled: !hasRole(EcRoles.readers) },
+    { title: "دستورهای تغییر مهندسی (ECO)", routeName: "EngChangeOrders", disabled: !hasRole(EcRoles.readers) },
     { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance" },
     { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
