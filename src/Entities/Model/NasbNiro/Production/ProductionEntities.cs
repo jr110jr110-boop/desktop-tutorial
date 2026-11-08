@@ -98,6 +98,9 @@ namespace Entities.Model.NasbNiro.Production
 
         public bool FirstArticleRequired { get; set; }
 
+        /// <summary>P2: how many times the part is set up (re-clamped) on the machine for this step (تعداد چیدمان); null = not given.</summary>
+        public int? SetupCount { get; set; }
+
         /// <summary>R1p D12: a welding step. It starts only with an approved WPS (<see cref="WpsId"/>) and a booking employee who holds a valid welder qualification for the process of that WPS.</summary>
         public bool IsWelding { get; set; }
 

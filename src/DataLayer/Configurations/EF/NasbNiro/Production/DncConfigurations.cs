@@ -109,6 +109,65 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfMaintenanceRequest>().WithMany().HasForeignKey(x => x.MaintenanceRequestId).OnDelete(DeleteBehavior.Restrict);
             });
+            // P2 part C: checklists, staff performance events, cameras
+            builder.Entity<MfChecklistTemplate>(b =>
+            {
+                b.ToTable("MfChecklistTemplates");
+                b.HasIndex(x => x.OperationTemplateId).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.RequiredToFinish).HasDefaultValue(true).HasSentinel(true);
+                b.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<OperationTemplate>().WithMany().HasForeignKey(x => x.OperationTemplateId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfChecklistItem>(b =>
+            {
+                b.ToTable("MfChecklistItems");
+                b.Property(x => x.Text).HasMaxLength(Text).IsRequired();
+                b.Property(x => x.Nominal).HasPrecision(18, 4);
+                b.Property(x => x.Min).HasPrecision(18, 4);
+                b.Property(x => x.Max).HasPrecision(18, 4);
+                b.Property(x => x.Unit).HasMaxLength(20);
+                b.Property(x => x.Mandatory).HasDefaultValue(true).HasSentinel(true);
+                b.Property(x => x.IsActive).HasDefaultValue(true).HasSentinel(true);
+            });
+            builder.Entity<MfChecklistResult>(b =>
+            {
+                b.ToTable("MfChecklistResults");
+                b.HasIndex(x => x.OperationId).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.ReviewNote).HasMaxLength(Text);
+                b.HasMany(x => x.Answers).WithOne().HasForeignKey(x => x.ResultId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfChecklistTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfChecklistAnswer>(b =>
+            {
+                b.ToTable("MfChecklistAnswers");
+                b.HasIndex(x => new { x.ResultId, x.ItemId }).IsUnique();
+                b.Property(x => x.Value).HasPrecision(18, 4);
+                b.Property(x => x.Text).HasMaxLength(Text);
+                b.HasOne<MfChecklistItem>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<HrPerformanceEvent>(b =>
+            {
+                b.ToTable("HrPerformanceEvents");
+                b.HasIndex(x => new { x.EmployeeId, x.EventDate });
+                b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.Description).HasMaxLength(LongText);
+                b.Property(x => x.DecisionNote).HasMaxLength(Text);
+                b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<NonConformance>().WithMany().HasForeignKey(x => x.NcrId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfCamera>(b =>
+            {
+                b.ToTable("MfCameras");
+                b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.SnapshotUrl).HasMaxLength(Text);
+                b.Property(x => x.StreamUrl).HasMaxLength(Text);
+                b.Property(x => x.CredentialKey).HasMaxLength(Code);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfWorkCenter>().WithMany().HasForeignKey(x => x.WorkCenterId).OnDelete(DeleteBehavior.Restrict);
+            });
             builder.Entity<MfNcRun>(b =>
             {
                 b.ToTable("MfNcRuns");

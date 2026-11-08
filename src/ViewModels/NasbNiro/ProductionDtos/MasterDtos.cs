@@ -149,6 +149,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? ItpTestType { get; set; }
         public bool FirstArticleRequired { get; set; }
 
+        /// <summary>P2: how many times the part is set up (re-clamped) on the machine for this step (تعداد چیدمان); null = not given.</summary>
+        public int? SetupCount { get; set; }
+
         /// <summary>R1p D12: a welding step (WPS and welder qualification are checked on the terminal).</summary>
         public bool IsWelding { get; set; }
 
@@ -174,6 +177,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public MfInspectionRequirement InspectionRequirement { get; set; }
         public int? ItpTestType { get; set; }
         public bool FirstArticleRequired { get; set; }
+
+        /// <summary>P2: how many times the part is set up (re-clamped) on the machine for this step (تعداد چیدمان); null = not given.</summary>
+        public int? SetupCount { get; set; }
 
         /// <summary>R1p D12: a welding step; then <see cref="WpsId"/> (an approved WPS) is mandatory.</summary>
         public bool IsWelding { get; set; }

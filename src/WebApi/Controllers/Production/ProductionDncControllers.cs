@@ -143,6 +143,103 @@ namespace WebApi.Controllers
         public async Task<IActionResult> UtilisationAsync([FromQuery] UtilisationQuery query, CancellationToken ct) => Ok(await _monitor.GetUtilisationAsync(query, ct));
     }
 
+    /// <summary>In-process checklists of the routing steps (P2 part C): templates, the checklist of an operation, answers and the review.</summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/production/checklists")]
+    [RolesCheckedInService]
+    public class ProductionChecklistController : ControllerBase
+    {
+        private readonly IMfChecklistService _checklists;
+
+        public ProductionChecklistController(IMfChecklistService checklists)
+        {
+            _checklists = checklists;
+        }
+
+        [HttpGet("templates/{operationTemplateId:int}")]
+        public async Task<IActionResult> TemplateAsync(int operationTemplateId, CancellationToken ct) => Ok(await _checklists.GetTemplateAsync(operationTemplateId, ct));
+
+        [HttpPost("templates")]
+        public async Task<IActionResult> SaveTemplateAsync([FromBody] ChecklistTemplateDto dto, CancellationToken ct) => Ok(await _checklists.SaveTemplateAsync(dto, ct));
+
+        [HttpGet("operations/{operationId:int}")]
+        public async Task<IActionResult> OperationAsync(int operationId, CancellationToken ct) => Ok(await _checklists.GetForOperationAsync(operationId, ct));
+
+        [HttpPost("answers")]
+        public async Task<IActionResult> AnswersAsync([FromBody] SaveChecklistAnswersDto dto, CancellationToken ct) => Ok(await _checklists.SaveAnswersAsync(dto, ct));
+
+        [HttpPost("review")]
+        public async Task<IActionResult> ReviewAsync([FromBody] ChecklistReviewDto dto, CancellationToken ct) => Ok(await _checklists.ReviewAsync(dto, ct));
+    }
+
+    /// <summary>Performance events of the staff (P2 part C).</summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/production/staff-events")]
+    [RolesCheckedInService]
+    public class StaffEventsController : ControllerBase
+    {
+        private readonly IHrEventService _events;
+
+        public StaffEventsController(IHrEventService events)
+        {
+            _events = events;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> ListAsync([FromQuery] HrEventQuery query, CancellationToken ct) => Ok((await _events.GetEventsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpPost]
+        public async Task<IActionResult> SaveAsync([FromBody] SaveHrEventDto dto, CancellationToken ct) => Ok(await _events.SaveAsync(dto, ct));
+
+        [HttpPost("action")]
+        public async Task<IActionResult> ActionAsync([FromBody] HrEventActionDto dto, CancellationToken ct) => Ok(await _events.ActionAsync(dto, ct));
+
+        [HttpGet("summary")]
+        public async Task<IActionResult> SummaryAsync([FromQuery] System.DateTime from, [FromQuery] System.DateTime to, CancellationToken ct) => Ok(await _events.GetSummaryAsync(from, to, ct));
+    }
+
+    /// <summary>Live view of the shop cameras (P2 part C): the server passes on the picture or the MJPEG stream of a camera on the LAN.</summary>
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/production/cameras")]
+    [RolesCheckedInService]
+    public class ProductionCameraController : ControllerBase
+    {
+        private readonly IMfCameraService _cameras;
+
+        public ProductionCameraController(IMfCameraService cameras)
+        {
+            _cameras = cameras;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> ListAsync(CancellationToken ct) => Ok(await _cameras.GetCamerasAsync(ct));
+
+        [HttpPost]
+        public async Task<IActionResult> SaveAsync([FromBody] CameraDto dto, CancellationToken ct) => Ok(await _cameras.SaveAsync(dto, ct));
+
+        [HttpGet("{id:int}/snapshot")]
+        public async Task<IActionResult> SnapshotAsync(int id, CancellationToken ct)
+        {
+            ResponseDto<CameraMediaDto> r = await _cameras.SnapshotAsync(id, ct);
+            if (!r.Success) return Ok(r);
+            Response.Headers["Cache-Control"] = "no-store";
+            return File(r.Data.Bytes, r.Data.ContentType);
+        }
+
+        [HttpGet("{id:int}/stream")]
+        public async Task<IActionResult> StreamAsync(int id, CancellationToken ct)
+        {
+            ResponseDto<CameraMediaDto> r = await _cameras.StreamAsync(id, ct);
+            if (!r.Success) return Ok(r);
+            HttpContext.Response.RegisterForDispose(r.Data.Response);
+            Response.Headers["Cache-Control"] = "no-store";
+            return new FileStreamResult(r.Data.Stream, r.Data.ContentType);
+        }
+    }
+
     /// <summary>
     /// For an edge box at a machine (pull: the server never connects to it). Headers X-Dnc-Machine (machine id) and X-Dnc-Key; a wrong machine, key or (for a gateway bound to addresses) source address gives 401.
     /// </summary>

@@ -236,6 +236,9 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.Dnc.IMfDncService, Services.NasbNiro.Production.Dnc.MfDncService>();
             services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfModbusReader, Services.NasbNiro.Production.Dnc.ModbusTcpReader>();
             services.AddScoped<Services.NasbNiro.Production.Dnc.IMfMonitorService, Services.NasbNiro.Production.Dnc.MfMonitorService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfChecklistService, Services.NasbNiro.Production.Dnc.MfChecklistService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IHrEventService, Services.NasbNiro.Production.Dnc.HrEventService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfCameraService, Services.NasbNiro.Production.Dnc.MfCameraService>();
             services.AddHostedService<Services.NasbNiro.Production.Dnc.MfDncHostedService>();
             // sales (release S1 part A)
             services.AddScoped<Services.NasbNiro.Sales.ISlCrmService, Services.NasbNiro.Sales.SlCrmService>();

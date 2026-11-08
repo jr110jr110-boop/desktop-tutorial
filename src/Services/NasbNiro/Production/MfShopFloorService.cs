@@ -591,6 +591,9 @@ namespace Services.NasbNiro.Production
             if (l.Op.Status != MfOperationStatus.InProgress && l.Op.Status != MfOperationStatus.Paused) return Bad<TerminalOperationDto>("فقط عملیاتی که شروع شده پایان می‌یابد.");
             string faiFinish = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct, dto.GoodQty + dto.ScrapQty);
             if (faiFinish != null) return Bad<TerminalOperationDto>(faiFinish);
+            // P2 part C: a step with a required in-process checklist finishes only after it was submitted with every item passing
+            string checklist = await global::Services.NasbNiro.Production.Dnc.MfChecklistGate.FinishProblemAsync(_uow, l.Op, ct);
+            if (checklist != null) return Bad<TerminalOperationDto>(checklist);
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید.");
             // PB8: before anything is changed, the rules look at the time of the running booking and the quantities of this finish
