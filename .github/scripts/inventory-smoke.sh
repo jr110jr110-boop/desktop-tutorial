@@ -1305,6 +1305,43 @@ pka1_part() {
   fi
 }
 
+# --- Package A2 (fix round 2): a REAL engineering change request and order for a change that the A2 gates demand an order for (a new MES routing revision, a new version of a released characteristic list).
+# eco_make KIND TARGETID PART TAG : request (class I) raised by engineering and decided by a second engineering manager, the order with its effectivity (from yesterday: every existing order is at or after the point),
+# the named revision, the computed impact, a disposition for every impacted item (change to the new revision where the list allows it), sent, approved by QA and by the second engineering manager. Sets ECX_ORDER.
+ECP=eng-change
+ECX_READY=""
+eco_users() {
+  [ -z "$ECX_READY" ] || return 0
+  local keep=$TOKEN; TOKEN=$ADMIN_TOKEN
+  user2 ecx.eng1.ci 4 'Ci#Ecx1Eng-User-2026' 09120005211 0012345731
+  user2 ecx.eng2.ci 4 'Ci#Ecx2Eng-User-2026' 09120005212 0012345732
+  user2 ecx.qa1.ci 14 'Ci#Ecx1Qa-User-2026' 09120005213 0012345733
+  TOKEN=$keep
+  ECX1=$(login ecx.eng1.ci 'Ci#Ecx1Eng-User-2026'); ECX2=$(login ecx.eng2.ci 'Ci#Ecx2Eng-User-2026'); ECXQ=$(login ecx.qa1.ci 'Ci#Ecx1Qa-User-2026')
+  [ -n "$ECX1" ] && [ -n "$ECX2" ] && [ -n "$ECXQ" ] && ok "eco: login of the two engineering managers and the QA user of the change orders" || bad "eco: login of the two engineering managers and the QA user of the change orders"
+  ECX1ID=$(uid "$ECX1")
+  ECX_READY=1
+}
+eco_make() {
+  local kind=$1 tid=$2 part=$3 t=$4 req oid rows row ROWS
+  eco_users
+  as "$ECX1" POST $ECP/requests "{\"title\":\"تغییر $t\",\"reason\":\"نسخه جدید لازم است و باید با دستور تغییر مهندسی بگذرد\",\"classification\":1,\"urgency\":1,\"targets\":[{\"kind\":2,\"partNumber\":\"$part\"}]}"; check "eco $t: the change request is saved" '.success and .data.status == 0'; req=$(val .data.id)
+  as "$ECX1" POST $ECP/requests/action "{\"id\":$req,\"action\":\"submit\"}"; check "eco $t: the request is sent" '.success and .data.status == 1'
+  as "$ECX2" POST $ECP/requests/action "{\"id\":$req,\"action\":\"approve\"}"; check "eco $t: the second engineering manager approves the request" '.success and .data.status == 2'
+  as "$ECX1" POST $ECP/orders "{\"requestId\":$req,\"title\":\"ECO $t\",\"effectiveFromDate\":\"$(dd -1)\",\"effectivityNote\":\"از دیروز\"}"; check "eco $t: the order is made with its effectivity" '.success and .data.status == 0'; oid=$(val .data.id)
+  as "$ECX1" POST $ECP/orders/changes "{\"orderId\":$oid,\"kind\":$kind,\"targetId\":$tid,\"action\":1,\"note\":\"$t\"}"; check "eco $t: the new revision is named in the order" '.success and (.data.changes|length) == 1'
+  as "$ECX1" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"refresh-impact\"}"; check "eco $t: the impact is computed" '.success and .data.impact.hashOk == true'
+  rows=$(jq -c '[.data.dispositions[] | select(.stale | not) | {k:.impactKey, d:(if (.allowed|index(6)) then 6 elif (.allowed|index(1)) then 1 else .allowed[0] end)}]' "$B")
+  mapfile -t ROWS < <(jq -c '.[]' <<<"$rows")
+  for row in "${ROWS[@]}"; do
+    as "$ECX1" POST $ECP/orders/dispositions "{\"orderId\":$oid,\"impactKey\":$(jq -c .k <<<"$row"),\"disposition\":$(jq -r .d <<<"$row"),\"ownerUserId\":$ECX1ID,\"dueDate\":\"$(dd 10)\",\"note\":\"تکلیف تغییر $t\"}"; check "eco $t: a disposition is set for an impacted item" '.success'
+  done
+  as "$ECX1" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"submit\"}"; check "eco $t: the order is sent for approval" '.success and .data.status == 1'
+  as "$ECXQ" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"approve-qa\"}"; check "eco $t: QA approves" '.success and .data.status == 1'
+  as "$ECX2" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"approve-engineering\"}"; check "eco $t: the second engineering manager approves: the order is approved" '.success and .data.status == 2'
+  ECX_ORDER=$oid
+}
+
 # --- Package B (inspection and release integrity): the drawing, the released characteristic list and the «بدون نقشه» flag that the quality records, the incoming inspections and the shop floor now rest on
 # pkb_drawing ITEMID DOCNUMBER LINES : the whole chain for ONE part: the document controller registers the drawing (contract of the quality section), a revision with a file, the drawing is linked to the part, engineering
 # prepares the characteristic list (LINES is the JSON array of lines), QA approves it (maker-checker), then the revision goes through review (PMO), approval (engineering manager) and release (PMO): the release also releases the list.
@@ -6184,9 +6221,10 @@ ibx "$MSV_TOKEN" "mf:order:$MFORDB"; check "mes: and its release gate is closed"
 # --- a newer approved routing revision (same content): the draft order must follow it before it is released
 call POST $MF/routings "{\"itemId\":$MFPA}"; check "mes: a new revision of item A is opened as a draft" '.success and .data.status == 0'
 MFREVA3=$(val .data.id)
+eco_make 4 "$MFREVA3" "77.10.00.001.1" "mes routing A"   # A2: the second approved routing of an item needs an approved engineering change order that names it (real request, impact, dispositions, ENG + QA)
 as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-production\"}"; check "mes: production approves the new revision of item A" '.success and .data.status == 0'
 as "$ENG_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-engineering\"}"; check "mes: engineering approves the new revision of item A: approved, content matches" '.success and .data.status == 1 and .data.contentMatches == true'
-call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: only the routing check fails (the operations come from the old revision) and it cannot be overridden" ".success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.passed == false)]|length) == 1 and ([.data.checks[]|select(.code == \"routing\")][0] | .passed == false and (.message|contains(\"refresh-routing\")))"
+call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: only the routing check and the engineering change check fail (the operations come from the old revision; the order is at the point of the approved change) and it cannot be overridden" ".success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.passed == false)|.code]|sort) == [\"engchange\",\"routing\"] and ([.data.checks[]|select(.code == \"routing\")][0] | .passed == false and (.message|contains(\"refresh-routing\")))"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: order A cannot be released while it follows a superseded routing revision" "به‌روزرسانی مسیر"
 as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"refresh-routing\"}"; check "mes: refreshing the routing moves draft order A to the new revision with three fresh operations" ".success and .data.status == 0 and .data.routingRevisionId == $MFREVA3 and (.data.operations|length) == 3 and ([.data.operations[].sequence]) == [10,20,30]"
 MFOPA10=$(val '.data.operations[0].id'); MFOPA20=$(val '.data.operations[1].id'); MFOPA30=$(val '.data.operations[2].id')
@@ -11038,7 +11076,7 @@ as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB1,\"assemblyPartNumber\":\"88.11.00.0
 as "$ENG_TOKEN" GET "$PB/boms/diff?from=$PBB0&to=$PBB1"; check "pb1: the diff says exactly: added 88.11.01.004.2, removed 88.11.01.003.2, changed 88.11.01.002.2 (qty 2 -> 4), one line unchanged" '.success and ([.data.added[].partNumber]) == ["88.11.01.004.2"] and ([.data.removed[].partNumber]) == ["88.11.01.003.2"] and ([.data.changed[].partNumber]) == ["88.11.01.002.2"] and ([.data.changed[0].fields[]|select(.old=="2" and .new=="4")]|length) == 1 and .data.unchanged == 1'
 as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=88.11.01.002.2"; check "pb1: where-used finds the part in both revisions of the BOM (qty 2 in 00, 4 in 01)" '.success and (.data.rows|length) == 2 and ([.data.rows[].qty]|sort) == [2,4]'
 as "$ENG_TOKEN" GET "$PB/boms?ProductId=$PBPROD&PageSize=0"; check "pb1: the list shows both revisions, newest first" '.success and (.data.data|length) == 2 and .data.data[0].revision == 1'
-as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8)" '.success and (.data.data|length) == 8'
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes of this product are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8; the headers of other chains, e.g. the A1 umbrella BOM, are not counted)" ".success and ([.data.data[]|select(.entityId == $PBB0 or .entityId == $PBB1)]|length) == 8"
 as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"true"}'; check "pb1: the setting is set to its default (on) again" '.success'
 
 # --- mapping of legacy codes: imported draft, approved by engineering who is not the proposer
@@ -11795,6 +11833,8 @@ as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBO
 as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBOLTREV" --argjson l "$( { pkb_line 1 Bore 100 0.06 0.06 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )" '{revisionId:$r,reason:"اصلاح تلرانس قطر پس از بازبینی",items:$l}')"; check "pkb: the new version 2 is a draft that supersedes nothing yet" '.success and .data.version == 2 and .data.status == 0 and .data.supersedesListId != null'
 PKBV2=$(val .data.id)
 as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"submit\"}"; check "pkb: engineering submits version 2" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" GET "inventory/items/$BOLT"; check "pkb: the bolt is read for the engineering change order" '.success and (.data.code|length) > 0'; PKBBOLTCODE=$(val .data.code)
+eco_make 5 "$PKBV2" "$PKBBOLTCODE" "pkb list v2"   # A2: a new version of the list of a released drawing needs an approved engineering change order that names it
 as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"approve\"}"; check "pkb: the QA manager approves version 2; the drawing is in force, so the list is released at once and version 1 is superseded" '.success and .data.status == 3'
 as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBBOLTLIST"; check "pkb: version 1 is Superseded and kept (never deleted)" '.success and .data.status == 4 and (.data.items|length) == 2'
 as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the part answers with its drawing and the released lines of version 2 (the bore tolerance is 0.06)" '.success and .data.hasDrawing == true and .data.hasReleasedList == true and (.data.lines|length) == 2 and ([.data.lines[]|select(.name == "Bore")][0].tolPlus) == 0.06'
@@ -12265,26 +12305,34 @@ pka2_sign() { # pka2_sign BOMID LABEL : submit and the four signatures (always f
   as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$1,\"step\":3}"; check "pka2: $2 is manufacturing checked" '.success'
   as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$1,\"step\":4}"; check "pka2: $2 is approved by the fourth person" '.success and .data.status == 2'
 }
-# a first revision needs no engineering change order
-as "$PKA2E1" POST $PB/boms "{\"assemblyPartNumber\":\"$PKA2PA\",\"title\":\"BOM A2 مجموعه الف\",\"lines\":$(pka2_lines 2)}"; check "pka2: BOM of the assembly A, revision 00, is saved as a draft" '.success and .data.revision == 0 and .data.status == 0'
-PKA2A0=$(val .data.id)
-pka2_sign "$PKA2A0" "BOM A revision 00"
-# pka2_release_bom BOMID : the one place where the PKA2 block releases a BOM (as the PMO). After the merge with A1 (design control, DesignGate.BomReleaseProblemAsync needs a closed accepted design verification
-# for every BOM release) the setup of that gate (pka1_design / pka1_verify for the product and revision) is added HERE only; the calls and checks of the PKA2 block stay as they are.
-PKA2DPLAN=""
-pka2_release_bom() { # merged with A1: one product with an approved design plan and complete inputs (once), a closed accepted verification of THIS BOM revision, then the release (its answer is the last request)
-  if [ -z "$PKA2DPLAN" ]; then
-    as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.200.2","title":"محصول آزمون تغییر مهندسی","platform":"T"}'; check "pka2 design: the product that holds the design plan of the change scenario is saved" '.success and .data.id > 0'
-    pka1_design "$(val .data.id)" "pka2"; PKA2DPLAN=$PKA1PLAN
-  fi
-  pka1_verify bom "$1" "$PKA2DPLAN" "pka2 BOM $1"
+# pka2_release_bom BOMID REVISION : the one place where the PKA2 block releases a BOM (as the PMO). Merged with A1: the three BOMs of the scenario belong to ONE product (PKA2PROD, saved with them), which has an approved
+# design plan and complete inputs for revision 00 and for revision 01 (made once each); every BOM gets ONE closed, accepted design verification (the BOM is the product BOM of the plan revision), then the release (its answer is the last request).
+PKA2PROD=""; PKA2PLAN0=""; PKA2PLAN1=""; PKA2VERIFIED=","
+pka2_product() { # pka2_product : the product of the scenario and the plan of revision 00 (once)
+  [ -z "$PKA2PROD" ] || return 0
+  as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.200.2","title":"محصول آزمون تغییر مهندسی","platform":"T"}'; check "pka2 design: the product that holds the design plans of the change scenario is saved" '.success and .data.id > 0'
+  PKA2PROD=$(val .data.id)
+  pka1_design "$PKA2PROD" "pka2 rev 00" 0; PKA2PLAN0=$PKA1PLAN
+}
+pka2_release_bom() {
+  local plan
+  if [ "$2" = "1" ]; then
+    if [ -z "$PKA2PLAN1" ]; then pka1_design "$PKA2PROD" "pka2 rev 01" 1; PKA2PLAN1=$PKA1PLAN; fi
+    plan=$PKA2PLAN1
+  else plan=$PKA2PLAN0; fi
+  case "$PKA2VERIFIED" in *",$1,"*) ;; *) pka1_verify bom "$1" "$plan" "pka2 BOM $1"; PKA2VERIFIED="$PKA2VERIFIED$1,";; esac
   as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$1}"
 }
-pka2_release_bom $PKA2A0; check "pka2: the first revision is released without an engineering change order" '.success and .data.status == 3'
-as "$PKA2E1" POST $PB/boms "{\"assemblyPartNumber\":\"$PKA2PB\",\"title\":\"BOM A2 مجموعه ب\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"$PKA2PA\",\"partName\":\"Assembly A\",\"qty\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":9,\"grossWeight\":10}]}"; check "pka2: BOM of the assembly B (uses A twice) is saved" '.success and .data.status == 0'
+# a first revision needs no engineering change order
+pka2_product
+as "$PKA2E1" POST $PB/boms "{\"productId\":$PKA2PROD,\"assemblyPartNumber\":\"$PKA2PA\",\"title\":\"BOM A2 مجموعه الف\",\"lines\":$(pka2_lines 2)}"; check "pka2: BOM of the assembly A, revision 00, is saved as a draft" '.success and .data.revision == 0 and .data.status == 0'
+PKA2A0=$(val .data.id)
+pka2_sign "$PKA2A0" "BOM A revision 00"
+pka2_release_bom $PKA2A0 0; check "pka2: the first revision is released without an engineering change order" '.success and .data.status == 3'
+as "$PKA2E1" POST $PB/boms "{\"productId\":$PKA2PROD,\"assemblyPartNumber\":\"$PKA2PB\",\"title\":\"BOM A2 مجموعه ب\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"$PKA2PA\",\"partName\":\"Assembly A\",\"qty\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":9,\"grossWeight\":10}]}"; check "pka2: BOM of the assembly B (uses A twice) is saved" '.success and .data.status == 0'
 PKA2B0=$(val .data.id)
 pka2_sign "$PKA2B0" "BOM B revision 00"
-pka2_release_bom $PKA2B0; check "pka2: BOM B revision 00 is released" '.success and .data.status == 3'
+pka2_release_bom $PKA2B0 0; check "pka2: BOM B revision 00 is released" '.success and .data.status == 3'
 
 # --- the change request: raised by engineering, decided by an engineering manager who is not the originator
 as "$PKA2E1" POST $ECP/requests "{\"title\":\"افزایش تعداد غلاف\",\"reason\":\"کوتاه\",\"classification\":1,\"urgency\":2,\"targets\":[{\"kind\":2,\"partNumber\":\"$PKA2PA\"}]}"; nomsg "pka2: a request needs a real reason (at least ten characters)" "دلیل"
@@ -12305,7 +12353,7 @@ PKA2A1=$(val '.data.changes[0].targetId')
 as "$PKA2E1" POST $PB/boms "{\"id\":$PKA2A1,\"assemblyPartNumber\":\"$PKA2PA\",\"changeReason\":\"افزایش تعداد غلاف\",\"lines\":$(pka2_lines 3)}"; check "pka2: revision 01 is edited (the sleeve goes from 2 to 3)" '.success and .data.revision == 1 and .data.status == 0'
 # the gate: the revision is signed by four people but cannot be released while no APPROVED order names it
 pka2_sign "$PKA2A1" "BOM A revision 01"
-pka2_release_bom $PKA2A1; nomsg "pka2: gate - revision 01 of a released BOM is not released without an approved engineering change order" "دستور تغییر مهندسی تاییدشده"
+pka2_release_bom $PKA2A1 1; nomsg "pka2: gate - revision 01 of a released BOM is not released without an approved engineering change order" "دستور تغییر مهندسی تاییدشده"
 as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check says an order is required and there is none" '.success and .data.required == true and .data.ok == false'
 
 # --- the computed impact: never typed, one list per category, a fingerprint
@@ -12334,7 +12382,7 @@ ibx "$CEO_TOKEN" "ec:eco:info:$PKA2O"; check "pka2: the CEO is told" '.success a
 
 # --- the gate opens only for the approved order; the revision is released
 as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check now finds the approved order" '.success and .data.ok == true and .data.orderNumber != null'
-pka2_release_bom $PKA2A1; check "pka2: revision 01 is released because an approved order names it" '.success and .data.status == 3'
+pka2_release_bom $PKA2A1 1; check "pka2: revision 01 is released because an approved order names it" '.success and .data.status == 3'
 
 # --- tasks and closing: done by the owner, verified by QA (not the doer), closed only when all are verified
 as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"close\"}"; nomsg "pka2: the order does not close while a task is open" "تکلیف"
