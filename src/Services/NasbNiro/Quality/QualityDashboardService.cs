@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,6 +66,7 @@ namespace Services.NasbNiro.Quality
             string relationError = QualitySettingRules.CheckRelations(all);
             if (relationError != null) return QualityText.Bad<List<QualitySettingDto>>(relationError);
             QualitySetting row = await _uow.Set<QualitySetting>().FirstOrDefaultAsync(s => s.Key == dto.Key, cancellationToken);
+            if (SafetyProfile.Refusal(SafetyStore.Quality, def.Key) != null && (row?.Value ?? def.Value) != dto.Value) return QualityText.Bad<List<QualitySettingDto>>(SafetyProfile.RefusalText);   // PD: two-person change
             if (row == null)
             {
                 row = new QualitySetting { Key = def.Key, Title = def.Title };

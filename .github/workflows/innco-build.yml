@@ -176,6 +176,7 @@ jobs:
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
+          Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
@@ -204,6 +205,7 @@ jobs:
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
+          Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
@@ -229,6 +231,7 @@ jobs:
           Balance__Jobs: 'false'  # the PB2 nightly material balance and kit job must not run on their own; the smoke runs them by hand
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
+          Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
           AdminUserSeed__MustChangePassword: 'false'  # the smoke signs in as Admin with the seed password; the install test (job install-test) covers the forced first password change
           Identity__ApproverMinDays: '0'  # the smoke makes its second PMO seconds before that user approves; everywhere else the approver must have held PMO for Identity:ApproverMinDays (1 day)
@@ -299,7 +302,7 @@ jobs:
           # a delivered package never carries a password: install.ps1 sets the real one
           grep -q '"Password": "SET-BY-INSTALL-ps1"' package-output/app/appsettings.json || { echo "::error::package appsettings.json must carry the admin password placeholder"; exit 1; }
           if grep -rqF 'Ci#Adm1n-Build-2026' package-output/app; then echo "::error::the CI test password is in the package"; exit 1; fi
-          cp deploy/install.ps1 deploy/backup.ps1 deploy/backup-crypto.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
+          cp deploy/install.ps1 deploy/backup.ps1 deploy/backup-crypto.ps1 deploy/restore-test.ps1 deploy/Install-PMIS-Server.ps1 deploy/Install-PMIS-Server.cmd package-output/
           mkdir -p package-output/test-kit && cp deploy/test-kit/Create-Test-Users.ps1 deploy/test-kit/Create-Test-Users.cmd package-output/test-kit/
           mkdir -p package-output/installers
           cp deploy/installers/README.txt package-output/installers/
@@ -397,6 +400,21 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -RestoreBackup $import -ReplaceDatabase -UploadedFilesFrom D:\Import\old-app | Tee-Object -FilePath install-output\3-restore-run.txt
           "exit=$LASTEXITCODE" | Tee-Object -Append -FilePath install-output\3-restore-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 3-restore
+
+      - name: 5 - Restore test (the monthly task, run once; Package D)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          # the scheduled task "INNCO monthly restore test" restores the newest backup (x.bak.enc on Express) into IRNNCO_RESTORETEST, checks it, drops it and writes a result file;
+          # install-checks.ps1 (phase 5-restore-test) checks the task, the result file, that the scratch database is gone and that the program reads the result
+          $ErrorActionPreference = 'Continue'
+          $started = Get-Date
+          Start-ScheduledTask -TaskName 'INNCO monthly restore test'
+          do { Start-Sleep -Seconds 5; $info = Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test' }
+          while ((Get-ScheduledTask -TaskName 'INNCO monthly restore test').State -eq 'Running' -or $info.LastRunTime -lt $started.AddSeconds(-5))
+          "restore test task result=$($info.LastTaskResult)" | Tee-Object -FilePath install-output\5-restore-test-run.txt
+          Get-Content D:\INNCO\Backup\restore-test\restore-test-log.txt -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath install-output\5-restore-test-run.txt
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 5-restore-test
 
       - name: 4 - Create the test users with Create-Test-Users.cmd (test kit)
         continue-on-error: true

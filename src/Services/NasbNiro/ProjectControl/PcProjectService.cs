@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -117,6 +119,7 @@ namespace Services.NasbNiro.ProjectControl
                 if (value < min || value > max || (whole && value != decimal.Truncate(value)))
                     return Bad<List<PcSettingDto>>($"مقدار «{defaults[key].Title}» باید بین {min:0.####} و {max:0.####} باشد" + (whole ? " و عدد صحیح باشد." : "."));
                 if (merged[key] == value) continue;
+                if (SafetyProfile.Refusal(SafetyStore.ProjectControl, key) != null) return Bad<List<PcSettingDto>>(SafetyProfile.RefusalText);   // PD: two-person change
                 // the limit up to which the PMO deputy approves variation orders is not widened by the PMO deputy
                 if (key == PcSettingKeys.VoCeoThresholdPercent && !_user.IsInRole(ProjectControlRoles.Ceo))
                     return Bad<List<PcSettingDto>>("سقف تایید دستور تغییر توسط معاونت PMO را فقط مدیرعامل تغییر می‌دهد.");

@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -449,6 +451,7 @@ namespace Services.NasbNiro.Ai
             await _provisioner.EnsureAsync(ct);
             AiSeat seat = await _uow.Set<AiSeat>().FirstOrDefaultAsync(s => s.Code == code, ct);
             if (seat == null) return AiText.NotFound<AiSeatDto>("صندلی پیدا نشد.");
+            if (seat.Enabled != dto.Enabled && SafetyProfile.Refusal(SafetyStore.AiSeat, seat.Code) != null) return AiText.Bad<AiSeatDto>(SafetyProfile.RefusalText);   // PD: two-person change
             if (seat.Enabled != dto.Enabled)
             {
                 seat.Enabled = dto.Enabled;

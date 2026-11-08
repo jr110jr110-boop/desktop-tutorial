@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -111,6 +113,7 @@ namespace Services.NasbNiro.Procurement
             ProcurementSetting setting = await _uow.Set<ProcurementSetting>().FirstOrDefaultAsync(s => s.Key == dto.Key, cancellationToken);
             if (setting == null) return ResponseDtoHelper.NotFound<ProcurementSettingDto>("تنظیم پیدا نشد.");
             if (dto.Value < 0) return Bad<ProcurementSettingDto>("مقدار نمی‌تواند منفی باشد.");
+            if (setting.Value != dto.Value && SafetyProfile.Refusal(SafetyStore.Procurement, setting.Key) != null) return Bad<ProcurementSettingDto>(SafetyProfile.RefusalText);   // PD: two-person change
             setting.Value = dto.Value;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(new ProcurementSettingDto { Key = setting.Key, Value = setting.Value, Title = setting.Title, Source = setting.Source });

@@ -25,7 +25,7 @@ namespace DataLayer.Context
     /// <see cref="FnAuditLog"/> in the same SaveChanges as the change itself (before / after values of the changed fields,
     /// user, time, IP). Personal data is masked; nothing in the trail can be edited or deleted.
     /// </summary>
-    internal static class FinanceAuditTrail
+    internal static partial class FinanceAuditTrail
     {
         /// <summary>Audited record types. A null list means all scalar properties; otherwise only the listed ones are recorded.</summary>
         private static readonly Dictionary<Type, string[]> Audited = new Dictionary<Type, string[]>
@@ -402,6 +402,7 @@ namespace DataLayer.Context
         // R1c: columns added to entries above, kept apart so the entries stay as they were (merge friendly)
         static FinanceAuditTrail()
         {
+            AddRecordsIntegrity();   // package D: the quality, manufacturing and warehouse evidence (FinanceAuditTrail.RecordsIntegrity.cs)
             var more = new Dictionary<Type, string[]>
             {
                 { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },
@@ -518,6 +519,7 @@ namespace DataLayer.Context
                     if (entry.Entity is MfOperation) continue;
                     // items (imports) and ITP activities (copied from a template) are made in bulk; only the changes of their gates are listed
                     if (entry.Entity is Entities.Model.NasbNiro.Inventory.InventoryItem || entry.Entity is Entities.Model.NasbNiro.Quality.ItpActivity) continue;
+                    if (PdSkipsInsert(entry.Entity)) continue;   // package D: the characteristics copied from an ITP template
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
                     // (R1a2, L9: the inserts of the schedule and the WBS nodes are listed too; a node made by the generator is as much a decision as an edit)
                     // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed

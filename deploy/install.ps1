@@ -834,6 +834,7 @@ try {
     foreach ($rel in $DataFolders) { New-Item -ItemType Directory -Force -Path (Join-Path $AppDir $rel) | Out-Null }
     Copy-Item -Path (Join-Path $PackageDir 'backup.ps1') -Destination $ToolsDir -Force
     Copy-Item -Path (Join-Path $PackageDir 'backup-crypto.ps1') -Destination $ToolsDir -Force
+    Copy-Item -Path (Join-Path $PackageDir 'restore-test.ps1') -Destination $ToolsDir -Force   # Package D: the monthly restore test
 
     $webConfigPath = Join-Path $AppDir 'web.config'
     [xml]$webConfig = Get-Content -Raw -Path $webConfigPath
@@ -1163,6 +1164,22 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Write-Ok "Tasks '$taskName' and '$logTaskName': database and log backups to $BackupFolder\database, uploaded files to $BackupFolder\files; kept as long as the setting Backup:RetentionDays says (35 days by default)."
     if ($OffsiteCopyPath) { Write-Ok "Every backup run also copies to $OffsiteCopyPath (setting Backup:OffsiteCopyPath)." }
     Save-SealedAuditKey $settingsPath $keysFolder   # R1t review: on every edition (the file-key seal needs no certificate)
+
+    # 10a. Package D: the monthly restore test (day 1 of every month, 03:00). The newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped;
+    # the result file is read by the program (setting RestoreTest:ResultDirectory) for the page «سلامت سوابق» and the CEO dashboard. It runs as SYSTEM because the program must not hold sysadmin.
+    $restoreTestDir = Join-Path $BackupFolder 'restore-test'
+    New-Item -ItemType Directory -Force -Path $restoreTestDir | Out-Null
+    Invoke-Icacls @($restoreTestDir, '/grant', "${poolIdentity}:(OI)(CI)R", '/grant', '*S-1-5-18:(OI)(CI)F', '/grant', '*S-1-5-32-544:(OI)(CI)F') | Out-Null   # the program only reads; SYSTEM and administrators write
+    $restoreTaskName = 'INNCO monthly restore test'
+    $restoreArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -SqlServer "{1}" -DatabaseName "{2}" -BackupFolder "{3}" -ResultDirectory "{4}" -ScratchName "IRNNCO_RESTORETEST"' -f `
+                   (Join-Path $ToolsDir 'restore-test.ps1'), $script:SqlInstance, $DatabaseName, $BackupFolder, $restoreTestDir
+    $restoreAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $restoreArgs
+    $monthlyClass = Get-CimClass -ClassName MSFT_TaskMonthlyTrigger -Namespace 'Root/Microsoft/Windows/TaskScheduler'
+    $restoreTrigger = New-CimInstance -CimClass $monthlyClass -ClientOnly -Property @{ DaysOfMonth = [uint32]1; MonthsOfYear = [uint16]4095; StartBoundary = ((Get-Date).Date.AddHours(3).ToString('yyyy-MM-ddTHH:mm:ss')); Enabled = $true }
+    $restoreSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6)
+    Register-ScheduledTask -TaskName $restoreTaskName -Action $restoreAction -Trigger $restoreTrigger -Principal $taskPrincipal -Settings $restoreSettings -Force | Out-Null
+    Set-ProgramSetting $settingsPath 'RestoreTest' 'ResultDirectory' $restoreTestDir
+    Write-Ok "Task '$restoreTaskName': on day 1 of every month at 03:00 the newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped. Result files: $restoreTestDir"
 
     # 10b. Database updates and protection of the audit trail (R1t, D20). The pool is still stopped here, so nothing is written meanwhile.
     if ($HardenAudit) {

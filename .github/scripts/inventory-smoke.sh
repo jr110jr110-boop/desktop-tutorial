@@ -103,6 +103,16 @@ user pmo2.ci 1 'Ci#Pmo2-User-2026' 6
 # "Bootstrap" and an alert to the CEO. Admin is the only PMO user at this point, so pmo2.ci is that case (the audit row and the alert are checked further down).
 check "r1a2 h1: the second PMO user is given the PMO role at once (bootstrap: only one active PMO user existed) and the answer says that no second approval was needed" '.success and .data.id > 0 and (.message|contains("بدون تأیید دوم")) and ([.data.roles[]?.name]|index("PMO")) != null'
 PMO2_TOKEN=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$PMO2_TOKEN" ] && ok "login second PMO user" || bad "login second PMO user"
+# PBD helper: safety_set STORE KEY VALUE : a security-relevant setting (the strict production profile) changes only with a second person. The requester is $SAFETY_REQ
+# (default the Admin, a PMO user; a module whose role is another one names its token: SAFETY_REQ="$FM_TOKEN" safety_set Finance CloseChecklist.Enforce 0), the approver is the second PMO user.
+# The request is checked here (Pending); the answer of the approval stays in $B for the check of the caller (.success and .data.status == "Approved"; .data.newValue is the value).
+safety_set() {
+  local store=$1 key=$2 value=$3 req=${SAFETY_REQ:-$ADMIN_TOKEN} sid
+  as "$req" POST safety/changes "{\"store\":\"$store\",\"key\":\"$key\",\"value\":\"$value\",\"reason\":\"آزمون خودکار: تغییر موقت تنظیم برای اجرای سناریو\"}"
+  check "safety: the request to set $key to $value waits for a second person" '.success and .data.status == "Pending"'
+  sid=$(val '.data.id')
+  as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":${sid:-0},\"approve\":true,\"note\":\"تایید خودکار آزمون\"}"
+}
 # own_pw NAME : R1a2 (M-2) the receiver of a sensitive role chooses a password of his own, with the current one (the answer comes with fresh tokens). The new password is the registered one with
 # "-Own" added; login() maps the pair, so the lines further down keep naming the password of the registration. The fresh access token (it carries the roles the user has now) stays in OWN_TOKEN.
 # The refusal of an approval before this step is checked once, with ceo.ci below.
@@ -565,7 +575,7 @@ L3=$(val .data.id)
 
 # go-live switch: receipts without a PMIS purchase order are allowed until procurement is switched on (tested at the end)
 call GET procurement/settings; check "procurement settings seeded from the procedures" '.success and ([.data[].key]|index("PettyCashLimit")) != null'
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "purchase order rule switched off for go-live" '.success and .data.value == 0'
+safety_set Procurement EnforcePurchaseOrder 0; check "purchase order rule switched off for go-live" '.success and .data.status == "Approved"'
 
 # ---------------------------------------------------------------- purchase receipt
 DOC="{\"type\":1,\"documentDate\":\"2026-10-15T00:00:00\",\"warehouseId\":$W1,\"referenceNumber\":\"PO-77\",\"lines\":[
@@ -1149,7 +1159,7 @@ as "$QA_TOKEN" POST inventory/items/quality-changes/decide "{\"id\":$XQ2CH,\"app
 call GET "inventory/items/$XQ2"; check "r1q M8: ... and the new material has no incoming inspection now" '.success and .data.requiresIncomingInspection == false and .data.pendingQualityChangeId == null'
 
 # switching the purchase order rule on: only petty-cash purchases are received without an order
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "purchase order rule switched on" '.success and .data.value == 1'
+safety_set Procurement EnforcePurchaseOrder 1; check "purchase order rule switched on" '.success and .data.status == "Approved"'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2}]}"
 D=$(val .data.id); call POST "inventory/documents/$D/confirm"; check "receipt without order and price rejected" '.success == false'; call DELETE "inventory/documents/$D"
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"2026-10-23T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$BOLT,\"quantity\":1,\"locationId\":$L2,\"unitPrice\":60000000}]}"
@@ -2716,7 +2726,7 @@ as "$FM_TOKEN" GET $FG/years; PERIOD7=$(jq -r --argjson y "$FY" '.data[]|select(
 as "$FM_TOKEN" GET $FG/settings; check "r1t d10: the defaults are CloseChecklist.Enforce = 1 and PeriodClose.CloseBy = CEO" '.success and ([.data[]|select(.key == "CloseChecklist.Enforce")][0].value) == "1" and ([.data[]|select(.key == "PeriodClose.CloseBy")][0].value) == "CEO"'
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"lock\"}"; nomsg "r1t d10: with the default setting a month with events not yet posted cannot be locked" "فهرست کنترل بستن دوره"
 as "$FM_TOKEN" GET "$FG/close-checklist/$PERIOD7"; check "r1t d10: the checklist of that month shows the unposted events in red, enforced, and cannot be locked" '.success and .data.enforced == true and .data.canLock == false and ([.data.items[]|select(.key == "UnpostedEvents")][0].status) == "Red"'
-as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"0"}'; check "r1t d10: the scenario switches the enforcement off explicitly" '.success and .data.value == "0"'
+SAFETY_REQ="$FM_TOKEN" safety_set Finance CloseChecklist.Enforce 0; check "r1t d10: the scenario switches the enforcement off explicitly" '.success and .data.status == "Approved"'
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"lock\"}"; check "finance: period of 2026-10-15 locked" '.success'
 as "$FIN_TOKEN" POST $FG/vouchers "$(jq -c '.date = "2026-10-15T00:00:00"' <<< "$MV")"; no "finance: a voucher in a locked period is rejected"
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PERIOD7,\"action\":\"reopen\"}"; no "finance: reopening a period needs a reason"
@@ -3515,7 +3525,7 @@ as "$FIN2_TOKEN" POST $FG/vouchers/action "{\"id\":$EV1,\"action\":\"check\"}"
 as "$FM_TOKEN" POST $FG/vouchers/action "{\"id\":$EV1,\"action\":\"finalize\"}"; check "f3 close: the sandbox voucher is final" '.success and .data.status == 2'
 as "$FIN_TOKEN" POST $FG/vouchers '{"date":"2017-06-01T00:00:00","description":"پیش‌نویس باز","lines":[{"accountCode":"80108","debit":300},{"accountCode":"10101","credit":300}]}'
 as "$FM_TOKEN" GET "$FG/close-checklist/$PEND2"; check "f3 close: an open draft makes the item red, the lock is still free while the checklist is not enforced" '.success and ([.data.items[]|select(.key == "NonFinalVouchers")][0].status) == "Red" and ([.data.items[]|select(.key == "NonFinalVouchers")][0].count) == 1 and .data.enforced == false and .data.canLock == true and ([.data.items[]|select(.key == "Intercompany")][0].status) == "NotApplicable" and ([.data.items[]|select(.key == "FxRevaluation")][0].status) == "NotApplicable"'
-as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"1"}'; check "f3 close: enforcement switched on" '.success and .data.value == "1"'
+SAFETY_REQ="$FM_TOKEN" safety_set Finance CloseChecklist.Enforce 1; check "f3 close: enforcement switched on" '.success and .data.status == "Approved"'
 as "$FM_TOKEN" GET "$FG/close-checklist/$PEND2"; check "f3 close: enforced, the period cannot be locked" '.data.enforced == true and .data.canLock == false and .data.redCount >= 1'
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; nomsg "f3 close: the lock is refused while items are red" "فهرست کنترل"
 as "$FIN_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"reason":"x"}'; no "f3 close: only the finance manager overrides"
@@ -3526,7 +3536,7 @@ as "$FM_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"action":"approve"}'
 as "$FM2_TOKEN" POST "$FG/close-checklist/$PEND2/override" '{"action":"approve"}'; check "r1t d10: a second finance manager approves: the checklist is overridden and the period can be locked" '.success and .data.overridden == true and .data.overridePending == false and .data.canLock == true'
 
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$PEND2,\"action\":\"lock\"}"; check "f3 close: the period locks after the override" '.success'
-as "$FM_TOKEN" POST $FG/settings '{"key":"CloseChecklist.Enforce","value":"0"}'; check "f3 close: enforcement switched off again" '.success and .data.value == "0"'
+SAFETY_REQ="$FM_TOKEN" safety_set Finance CloseChecklist.Enforce 0; check "f3 close: enforcement switched off again" '.success and .data.status == "Approved"'
 
 # --- voucher controls: approval threshold above which the CEO approves
 as "$FIN_TOKEN" POST $FG/approval-thresholds '{"minAmount":1500000}'; no "f3 controls: only the finance manager sets thresholds"
@@ -6828,10 +6838,10 @@ as "$FM_TOKEN" POST $FR/invoices/draft-from-milestones; check "finance: a second
 # --- stock and prices for the spare parts and the equipment template (the purchase-order rule is switched off only while the opening receipt is made)
 item SLSPA "{\"code\":\"77.30.00.001.1\",\"title\":\"پروانه پمپ یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part A (impeller)"
 item SLSPB "{\"code\":\"77.30.00.002.1\",\"title\":\"مکانیکال سیل یدکی\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "sales: spare part B (mechanical seal)"
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "sales: setup: purchase-order rule switched off for the opening receipt" '.success and .data.value == 0'
+safety_set Procurement EnforcePurchaseOrder 0; check "sales: setup: purchase-order rule switched off for the opening receipt" '.success and .data.status == "Approved"'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$SLSPA,\"quantity\":10,\"unitPrice\":2000000},{\"itemId\":$SLSPB,\"quantity\":20,\"unitPrice\":500000}]}"; SLRC=$(val .data.id)
 call POST "inventory/documents/$SLRC/confirm"; check "sales: setup: opening receipt confirmed: 10 impellers at 2,000,000 and 20 seals at 500,000" '.success and .data.status == 1'
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "sales: setup: purchase-order rule switched on again" '.success and .data.value == 1'
+safety_set Procurement EnforcePurchaseOrder 1; check "sales: setup: purchase-order rule switched on again" '.success and .data.status == "Approved"'
 call GET "inventory/stock/items?ItemId=$SLSPA"; check "sales: stock of impeller A is 10" '.data.data[0].onHand == 10'
 call GET "inventory/stock/items?ItemId=$SLSPB"; check "sales: stock of seal B is 20" '.data.data[0].onHand == 20'
 
@@ -7212,10 +7222,10 @@ call POST "$MF/work-centers" '{"code":"SV-WC","title":"مرکز دستمزد ا�
 SVWC=$(val .data.id)
 item SVPA "{\"code\":\"77.31.00.001.1\",\"title\":\"یاتاقان یدکی خدمات\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "service: spare part A (bearing)"
 item SVPB "{\"code\":\"77.31.00.002.1\",\"title\":\"اورینگ یدکی خدمات\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "service: spare part B (O-ring)"
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "service: setup: purchase-order rule switched off for the opening receipt" '.success and .data.value == 0'
+safety_set Procurement EnforcePurchaseOrder 0; check "service: setup: purchase-order rule switched off for the opening receipt" '.success and .data.status == "Approved"'
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$SVPA,\"quantity\":10,\"unitPrice\":250000},{\"itemId\":$SVPB,\"quantity\":10,\"unitPrice\":80000}]}"; SVRC=$(val .data.id)
 call POST "inventory/documents/$SVRC/confirm"; check "service: setup: opening receipt confirmed: 10 bearings at 250,000 and 10 O-rings at 80,000" '.success and .data.status == 1'
-call POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "service: setup: purchase-order rule switched on again" '.success and .data.value == 1'
+safety_set Procurement EnforcePurchaseOrder 1; check "service: setup: purchase-order rule switched on again" '.success and .data.status == "Approved"'
 call GET "inventory/stock/items?ItemId=$SVPA"; check "service: stock of bearing A is 10" '.data.data[0].onHand == 10'
 call GET "inventory/stock/items?ItemId=$SVPB"; check "service: stock of O-ring B is 10" '.data.data[0].onHand == 10'
 # a general (no work order) material request: the only way an issue leaves the warehouse; 6 bearings and 5 O-rings
@@ -8083,9 +8093,9 @@ as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Seat=CEO-BRIEF&Status=4&PageSize=0"; c
 as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=3&PageSize=0"; check "ai runs: no seat run failed" '.success and (.data.data|length) == 0'
 as "$CEO_TOKEN" GET "$AI/admin/seats/runs?Status=1&PageSize=0"; check "ai runs: no seat run is still running" '.success and (.data.data|length) == 0'
 as "$WH_TOKEN" GET "$AI/admin/seats/runs?PageSize=0"; nomsg "ai runs: a storekeeper cannot read the runs" "$AINOTALLOWED"
-as "$ADMIN_TOKEN" POST $AI/admin/seats/enable '{"code":"PROC-COMPARE","enabled":false}'; check "ai seats: the procurement seat is switched off" '.success and .data.enabled == false'
+safety_set AiSeat PROC-COMPARE 0; check "ai seats: the procurement seat is switched off" '.success and .data.status == "Approved"'
 as "$ADMIN_TOKEN" POST $AI/admin/seats/run '{"code":"PROC-COMPARE"}'; nomsg "ai seats: a switched-off seat cannot be run" "این صندلی غیرفعال است"
-as "$ADMIN_TOKEN" POST $AI/admin/seats/enable '{"code":"PROC-COMPARE","enabled":true}'; check "ai seats: the procurement seat is switched on again" '.success and .data.enabled == true'
+safety_set AiSeat PROC-COMPARE 1; check "ai seats: the procurement seat is switched on again" '.success and .data.status == "Approved"'
 airun PROC-COMPARE; check "ai seats: the procurement seat runs (no complete inquiry yet: no note)" '.success and .data.status == 2 and .data.outputs == "notes=0"'
 
 # --- evaluation: 66 fixed cases against the mock, run as the evaluation user in the background
@@ -9372,10 +9382,10 @@ check "ceo drills: the two drafts are deleted again and the documents waiting fo
 # --- setup: an item of its own (minimum 40) with a purchase receipt of 30 pieces at 250,000, an issue of 4 to production and a scrap receipt of 20, all dated today, so that the money of the movements and the scrap rule of the minimum are known exactly;
 # a second request for the item is left submitted, so that the list of the open requests is not empty. The purchase-order rule is off only while the receipt is made
 item CDTI "{\"code\":\"77.30.00.901.1\",\"title\":\"قطعه‌ی آزمون جزئیات مدیرعامل\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":40,\"requiresIncomingInspection\":false}" "ceo drills setup: the item of the warehouse drills (minimum stock 40)"
-as "$ADMIN_TOKEN" POST procurement/settings '{"key":"EnforcePurchaseOrder","value":0}'; check "ceo drills setup: the purchase-order rule is switched off for the receipt" '.success and .data.value == 0'
+safety_set Procurement EnforcePurchaseOrder 0; check "ceo drills setup: the purchase-order rule is switched off for the receipt" '.success and .data.status == "Approved"'
 as "$ADMIN_TOKEN" POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$CDTI,\"quantity\":30,\"unitPrice\":250000}]}"; CDTRC=$(val .data.id)
 as "$ADMIN_TOKEN" POST "inventory/documents/$CDTRC/confirm"; check "ceo drills setup: the receipt of 30 pieces at 250,000 is confirmed" '.success and .data.status == 1'
-as "$ADMIN_TOKEN" POST procurement/settings '{"key":"EnforcePurchaseOrder","value":1}'; check "ceo drills setup: the purchase-order rule is switched on again" '.success and .data.value == 1'
+safety_set Procurement EnforcePurchaseOrder 1; check "ceo drills setup: the purchase-order rule is switched on again" '.success and .data.status == "Approved"'
 as "$ADMIN_TOKEN" POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"purpose\":\"آزمون جزئیات مدیرعامل\",\"lines\":[{\"itemId\":$CDTI,\"quantity\":4}]}"; CDTMR=$(val .data.id)
 as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR,\"action\":\"submit\"}"
 as "$ADMIN_TOKEN" POST inventory/material-requests/action "{\"id\":$CDTMR,\"action\":\"approve-planning\"}"
@@ -10848,7 +10858,7 @@ as "$ENG_TOKEN" POST $PB/boms "{\"productId\":$PBPROD,\"assemblyPartNumber\":\"8
 PBB0=$(val .data.id)
 as "$ENG_TOKEN" POST $PB/boms/submit "{\"id\":$PBB0}"; check "pb1: the draft is submitted (UnderReview) and the content hash is fixed" '.success and .data.status == 1 and (.data.contentHash|length) == 64'
 as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB0,\"assemblyPartNumber\":\"88.11.00.000.2\",\"lines\":$BOMLINES}"; no "pb1: a revision under review is not edited"
-as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"true"}'; check "pb1: the company asks for four different reviewers (setting on)" '.success'
+SAFETY_REQ="$PLAN_TOKEN" safety_set ProductBank BomSignatures:DistinctReviewers true; check "pb1: the company asks for four different reviewers (setting on)" '.success and .data.status == "Approved"'
 as "$ENG_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":1}"; nomsg "pb1: the preparer does not check his own BOM" "فرد دیگری"
 as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":2}"; nomsg "pb1: QC cannot sign before the check (order)" "نوبت"
 as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":1}"; no "pb1: QC cannot do the engineering check (role)"
@@ -10873,7 +10883,7 @@ as "$ENG_TOKEN" GET "$PB/boms/diff?from=$PBB0&to=$PBB1"; check "pb1: the diff sa
 as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=88.11.01.002.2"; check "pb1: where-used finds the part in both revisions of the BOM (qty 2 in 00, 4 in 01)" '.success and (.data.rows|length) == 2 and ([.data.rows[].qty]|sort) == [2,4]'
 as "$ENG_TOKEN" GET "$PB/boms?ProductId=$PBPROD&PageSize=0"; check "pb1: the list shows both revisions, newest first" '.success and (.data.data|length) == 2 and .data.data[0].revision == 1'
 as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8)" '.success and (.data.data|length) == 8'
-as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"false"}'; check "pb1: the setting is switched back off (default)" '.success'
+SAFETY_REQ="$PLAN_TOKEN" safety_set ProductBank BomSignatures:DistinctReviewers false; check "pb1: the setting is switched back off (default)" '.success and .data.status == "Approved"'
 
 # --- mapping of legacy codes: imported draft, approved by engineering who is not the proposer
 as "$PLAN_TOKEN" POST $PB/coding/mappings/import '[{"legacyCode":"02101001000010","legacyTitle":"Wheel case -قطعه خام ریخته گری","partNumber":"88.11.01.001.2","stageCode2":"RW"},{"legacyCode":"02101001000010","partNumber":"88.11.01.001.2"},{"legacyCode":"","partNumber":"88.11.01.001.2"},{"legacyCode":"02101002000110","partNumber":"88.11.01.002.2","stageCode2":"ZZ"}]'; check "pb1: the mapping import creates 1 draft and skips 3 (duplicate old code, empty code, unknown stage)" '.success and .data.created == 1 and .data.skipped == 3 and (.data.errors|length) == 3'
@@ -10912,7 +10922,7 @@ as "$ADMIN_TOKEN" POST $PB/routings/publish "{\"id\":$PBOPC}"; check "pb1: publi
 # --- the FY seed from the company documents
 as "$ENG_TOKEN" POST $PB/seed-fy; r403 "pb1: only the PMO installs the FY data (403)"
 as "$ADMIN_TOKEN" POST $PB/seed-fy; nomsg "pb1: the demo data is refused while the DemoData setting is off" "DemoData"
-as "$ADMIN_TOKEN" POST $PB/coding/settings '{"key":"DemoData:Enabled","value":"true"}'; check "pb1: the PMO turns the demo-data setting on (test installation)" '.success'
+safety_set ProductBank DemoData:Enabled true; check "pb1: the PMO turns the demo-data setting on (test installation)" '.success and .data.status == "Approved"'
 as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the FY seed: 88 BOM lines, 7 OPC routings, 350 template nodes, mapping drafts suggested from the item lists" '.success and .data.alreadyInstalled == false and .data.bomLines == 88 and .data.routings == 7 and .data.templateNodes == 350 and .data.mappings == 6 and .data.items == 213 and .data.stages == 39'
 PBFYPROD=$(val .data.productId); PBFYBOM=$(val .data.bomId)
 as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the seed runs once: the second call changes nothing" '.success and .data.alreadyInstalled == true and .data.productId == '$PBFYPROD
@@ -11435,10 +11445,10 @@ as "$DCC_TOKEN" POST $PC/transmittals "$PB7BTR"; check "pb7b edms: the transmitt
 PB7BIN=$(jq -nc --argjson c $PCT '{contractId:$c,direction:2,transmittalDate:"2026-10-03T00:00:00",reference:"Client letter 1",lines:[{deliverableId:0,revision:"0",purpose:1,newDocument:{documentNumber:"PB7B-CL-001",title:"Client P&ID",discipline:"Process",documentType:"P&ID",revision:"0"}}]}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PB7BIN"; check "pb7b edms: an incoming transmittal creates the client document on receipt" '.success and (.data.lines|length) == 1 and .data.lines[0].revision == "0"'
 as "$DCC_TOKEN" GET "$PC/mdr?ContractId=$PCT&PageSize=0"; check "pb7b edms: the received document is in the client list (MDL) exactly once" '([.data.data[]|select(.documentNumber == "PB7B-CL-001" and .clientSubmittal == true)]|length) == 1'
-as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; check "pb7b edms: the PMO switches the revision requirement of transmittals on (end of the transition)" '.success'
+safety_set ProjectControl EdmsRequireRevision 1; check "pb7b edms: the PMO switches the revision requirement of transmittals on (end of the transition)" '.success and .data.status == "Approved"'
 PB7BFREE=$(jq -nc --argjson c $PCT --argjson ids "$CL_IDS" '{contractId:$c,direction:1,transmittalDate:"2026-10-04T00:00:00",reference:"Free text",lines:[{deliverableId:($ids[0]),revision:"Z",purpose:1}]}')
 as "$DCC_TOKEN" POST $PC/transmittals "$PB7BFREE"; nomsg "pb7b edms: with the requirement on, a free revision text is refused" "از فهرست بازنگری"
-as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":0}]}'; check "pb7b edms: the setting is put back to its default (0) for the rest of the script" '.success'
+safety_set ProjectControl EdmsRequireRevision 0; check "pb7b edms: the setting is put back to its default (0) for the rest of the script" '.success and .data.status == "Approved"'
 # the approver matrix is edited by the PMO only; a distribution row notifies on release
 as "$DCC_TOKEN" POST edms/approvers "{\"discipline\":\"Mechanical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":false}"; no "pb7b edms: the DCC cannot edit the approver matrix"
 as "$ADMIN_TOKEN" POST edms/approvers "{\"discipline\":\"Electrical\",\"userId\":$PMID,\"canReview\":true,\"canApprove\":true}"; check "pb7b edms: the PMO adds a row to the approver matrix" '.success and .data.id > 0'
@@ -11464,6 +11474,46 @@ as "$ADMIN_TOKEN" GET dashboards/commitments; check "pb7b epm: the commitments f
 as "$ADMIN_TOKEN" GET dashboards/delay-causes; check "pb7b epm: the delay-cause report answers for the PMO" '.success and (.data.byCause|type) == "array"'
 as "$WH_TOKEN" GET dashboards/delay-causes; no "pb7b epm: the warehouse keeper cannot read the delay-cause report"
 TOKEN=$ADMIN_TOKEN
+
+# --- PBD: records integrity and security hardening (Package D). The chain check runs on demand (the nightly job is switched off in CI: Integrity__Jobs=false);
+# the quality record below is the one known change: it writes exactly one audit entry (the QcRecord; no measurement), so the next incremental run checks exactly one entry.
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; check "pbd: the chain check on demand finishes with status Ok (the first run takes the whole chain)" '.success and .data.status == "Ok" and .data.manual == true and .data.entriesChecked > 0 and .data.headSeq > 0'
+PBD_H0=$(val '.data.headSeq')
+as "$ADMIN_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"PBD audit coverage\",\"quantity\":1,\"result\":1}"; check "pbd: a quality record is saved (the known change)" '.success and .data.id > 0'
+PBD_QNUM=$(val '.data.number')
+as "$FM_TOKEN" GET "finance/audit?EntityType=QcRecord&PageSize=0"; check "pbd: the quality record is in the audit trail: exactly one Added entry (named by its number) with the user" ".success and ([.data.data[]|select(.action == \"Added\" and (.userName|length) > 0 and (.summary|endswith(\"$PBD_QNUM\")))]|length) == 1"
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; check "pbd: the next incremental run starts after the checkpoint and checks exactly the one new entry" ".success and .data.kind == \"Incremental\" and .data.status == \"Ok\" and .data.entriesChecked == 1 and .data.fromSeq == $PBD_H0 + 1 and .data.headSeq == $PBD_H0 + 1"
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"full"}'; check "pbd: the weekly full pass checks the whole chain from the first entry" '.success and .data.kind == "Full" and .data.status == "Ok" and .data.fromSeq == 1 and .data.entriesChecked == .data.headSeq'
+as "$ADMIN_TOKEN" POST integrity/chain/run '{"mode":"sometimes"}'; no "pbd: an unknown check mode is refused"
+as "$WH_TOKEN" POST integrity/chain/run '{"mode":"incremental"}'; no "pbd: the storekeeper cannot run the chain check"
+as "$ADMIN_TOKEN" GET "integrity/chain/runs?PageSize=0"; check "pbd: the history lists the three runs of this block newest first (the last is the full pass)" '.success and (.data.data|length) >= 3 and .data.data[0].kind == "Full" and .data.data[1].kind == "Incremental" and .data.data[1].entriesChecked == 1'
+as "$ADMIN_TOKEN" GET integrity/summary; check "pbd: the summary light: chain Ok, restore test never made on this server (red)" '.success and .data.chainStatus == "Ok" and .data.lastChainRun.status == "Ok" and .data.restoreStatus == "Never" and .data.red == true and .data.restoreWarnDays == 35'
+as "$WH_TOKEN" GET integrity/chain/runs; no "pbd: the storekeeper cannot read the chain history"
+# the strict production profile: the settings that weaken a control change only with a second person
+as "$ADMIN_TOKEN" GET safety/deviations; check "pbd: the deviation check lists the revision requirement of transmittals (0 against the strict 1) as a weaker value" '.success and ([.data.items[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.deviates == true and .weaker == true and .current == "0" and .strict == "1") and .data.deviations == (.data.items|length)'
+as "$ADMIN_TOKEN" GET safety/deviations; check "pbd: the purchase-order rule (on, as strict) is not a deviation" '.success and ([.data.items[]|select(.key == "EnforcePurchaseOrder")]|length) == 0'
+as "$ADMIN_TOKEN" PUT $PC/settings '{"items":[{"key":"EdmsRequireRevision","value":1}]}'; nomsg "pbd: the settings page cannot change a security-relevant setting directly" "پروفایل سخت‌گیرانه"
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"x"}'; nomsg "pbd: a request needs a reason" "دلیل"
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"0","reason":"بدون تغییر مقدار"}'; nomsg "pbd: a request with the value it already has is refused" "یکی است"
+as "$WH_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"انبار دار مجاز نیست"}'; no "pbd: the storekeeper cannot request a change"
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"DaysToClose","value":"1","reason":"این تنظیم در پروفایل نیست"}'; no "pbd: a setting that is not in the profile cannot be requested"
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"پایان دوره گذار سامانه مدارک"}'; check "pbd: the request waits for a second person" '.success and .data.status == "Pending" and .data.oldValue == "0" and .data.newValue == "1" and .data.weakening == false'
+PBD_CID=$(val '.data.id')
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"درخواست دوم برای همان تنظیم"}'; nomsg "pbd: one open request per setting" "در انتظار"
+as "$ADMIN_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true,\"note\":\"خودم تایید می‌کنم\"}"; nomsg "pbd: the requester cannot approve his own request" "تفکیک وظایف"
+as "$WH_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true}"; no "pbd: the storekeeper cannot approve"
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":false}"; nomsg "pbd: a rejection needs a note" "دلیل"
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true,\"note\":\"تایید نفر دوم\"}"; check "pbd: the second person approves: the change is applied with both names and the reason" '.success and .data.status == "Approved" and .data.requestedByName != .data.decidedByName and (.data.decidedByName|length) > 0 and (.data.reason|length) > 0'
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true}"; no "pbd: a decided request cannot be decided again"
+as "$ADMIN_TOKEN" GET safety/profile; check "pbd: the profile shows the new value and no deviation for the revision requirement" '.success and ([.data[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.current == "1" and .deviates == false and .strict == "1")'
+as "$FM_TOKEN" GET "finance/audit?EntityType=SafetySettingChange&PageSize=0"; check "pbd: the request and its approval are in the audit chain: one Added entry (named by the setting) and one Modified entry of the request, both with the user" ".success and ([.data.data[]|select(.action == \"Added\" and (.userName|length) > 0 and (.summary|endswith(\"EdmsRequireRevision\")))]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and .entityId == $PBD_CID and (.userName|length) > 0)]|length) == 1"
+as "$ADMIN_TOKEN" GET "safety/changes?Status=Approved&PageSize=0"; check "pbd: the approved request is listed" ".success and ([.data.data[]|select(.id == $PBD_CID)]|length) == 1"
+safety_set ProjectControl EdmsRequireRevision 0; check "pbd: the setting is put back to its default (0) with a second person" '.success and .data.status == "Approved" and .data.weakening == true'
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"درخواستی که لغو می‌شود"}'; check "pbd: a request to cancel" '.success and .data.status == "Pending"'
+PBD_CID2=$(val '.data.id')
+as "$PMO2_TOKEN" POST safety/changes/$PBD_CID2/cancel; no "pbd: only the requester cancels"
+as "$ADMIN_TOKEN" POST safety/changes/$PBD_CID2/cancel; check "pbd: the requester cancels his open request" '.success and .data.status == "Cancelled"'
+as "$ADMIN_TOKEN" GET safety/profile; check "pbd: the cancelled request changed nothing (the revision requirement is still 0)" '.success and ([.data[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.current == "0" and .deviates == true and .pendingRequestId == null)'
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

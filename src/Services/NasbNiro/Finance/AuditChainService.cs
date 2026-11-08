@@ -21,6 +21,12 @@ namespace Services.NasbNiro.Finance
         /// <paramref name="anchorSeq"/> and <paramref name="anchorHash"/> are an earlier head that the auditor wrote down: the row at that place must still carry that hash.
         /// </summary>
         Task<ResponseDto<AuditChainVerifyDto>> VerifyAsync(long? from, long? to, long? anchorSeq, string anchorHash, CancellationToken ct);
+
+        /// <summary>
+        /// Package D: the same walk without the check of the caller's role and without the limit of rows of one call, for the scheduled verification (<c>AuditIntegrityService</c>), which has no signed-in user.
+        /// The arguments are the ones <see cref="VerifyAsync"/> has after its own checks: <paramref name="from"/> at least 1, <paramref name="anchorSeq"/> and <paramref name="anchorHash"/> both or none.
+        /// </summary>
+        Task<AuditChainVerifyDto> VerifyUncheckedAsync(long from, long? to, long? anchorSeq, string anchorHash, CancellationToken ct);
     }
 
     /// <summary>
@@ -59,6 +65,16 @@ namespace Services.NasbNiro.Finance
             if ((anchorSeq.HasValue) != (anchor != null) || (anchorSeq.HasValue && anchorSeq.Value < 1))
                 return ResponseDtoHelper.BadRequest<AuditChainVerifyDto>("برای نشانی (anchor) هم شماره ردیف و هم مهر آن ردیف را بدهید.");
 
+            ResponseDto<AuditChainVerifyDto> tooLong = null;
+            AuditChainVerifyDto result = await VerifyCoreAsync(first, to, anchorSeq, anchor, true, ct, message => tooLong = ResponseDtoHelper.BadRequest<AuditChainVerifyDto>(message));
+            return tooLong ?? ResponseDtoHelper.Ok(result);
+        }
+
+        public Task<AuditChainVerifyDto> VerifyUncheckedAsync(long from, long? to, long? anchorSeq, string anchorHash, CancellationToken ct) =>
+            VerifyCoreAsync(from, to, anchorSeq, string.IsNullOrWhiteSpace(anchorHash) ? null : anchorHash.Trim(), false, ct, null);
+
+        private async Task<AuditChainVerifyDto> VerifyCoreAsync(long first, long? to, long? anchorSeq, string anchor, bool limit, CancellationToken ct, Action<string> refuse = null)
+        {
             byte[] key = AuditChain.KeyFrom(_configuration);
             var head = await Rows.Where(a => a.Seq != null).OrderByDescending(a => a.Seq).Select(a => new { Seq = a.Seq.Value, a.Hash }).FirstOrDefaultAsync(ct);
             var dto = new AuditChainVerifyDto
@@ -73,8 +89,11 @@ namespace Services.NasbNiro.Finance
                 VerifiedAt = DateTimeOffset.Now,
             };
             long last = Math.Min(to ?? long.MaxValue, head?.Seq ?? 0);
-            if (head != null && last - first + 1 > MaxRowsPerCall)
-                return ResponseDtoHelper.BadRequest<AuditChainVerifyDto>($"بازه بررسی بیش از {MaxRowsPerCall.ToString("N0", CultureInfo.InvariantCulture)} ردیف است؛ زنجیره را بازه‌بازه بررسی کنید (مثلاً از {first.ToString(CultureInfo.InvariantCulture)} تا {(first + MaxRowsPerCall - 1).ToString(CultureInfo.InvariantCulture)} و بعد از آن بازه بعدی). آخرین ردیف زنجیره شماره {head.Seq.ToString(CultureInfo.InvariantCulture)} است.");
+            if (limit && head != null && last - first + 1 > MaxRowsPerCall)
+            {
+                refuse?.Invoke($"بازه بررسی بیش از {MaxRowsPerCall.ToString("N0", CultureInfo.InvariantCulture)} ردیف است؛ زنجیره را بازه‌بازه بررسی کنید (مثلاً از {first.ToString(CultureInfo.InvariantCulture)} تا {(first + MaxRowsPerCall - 1).ToString(CultureInfo.InvariantCulture)} و بعد از آن بازه بعدی). آخرین ردیف زنجیره شماره {head.Seq.ToString(CultureInfo.InvariantCulture)} است.");
+                return null;
+            }
             dto.WholeChain = first == 1 && (!to.HasValue || (head != null && to.Value >= head.Seq));
 
             AuditChain.ChainBreak broken = await WalkAsync(dto, first, to, key, ct) ?? await UnsealedAsync(ct) ?? await AnchorAsync(anchorSeq, anchor, ct);
@@ -83,7 +102,7 @@ namespace Services.NasbNiro.Finance
                 dto.Ok = false;
                 dto.FirstBreak = await Describe(broken, ct);
                 dto.Message = "زنجیره سوابق سالم نیست؛ " + broken.Message;
-                return ResponseDtoHelper.Ok(dto);
+                return dto;
             }
 
             dto.Ok = true;
@@ -94,7 +113,7 @@ namespace Services.NasbNiro.Finance
                   + (anchor != null ? "؛ نشانی ثبت‌شده با ردیف " + anchorSeq.Value.ToString(CultureInfo.InvariantCulture) + " می‌خواند" : "")
                   + (dto.KeyConfigured ? "." : "؛ توجه: کلید مهر (Identity:AuditHmacKey) تنظیم نشده و ردیف‌ها بدون کلید مهر شده‌اند؛ بازنویسی کامل زنجیره با دسترسی به پایگاه داده را نشان نمی‌دهد.")
                   + (dto.LegacyRows > 0 ? " " + dto.LegacyRows.ToString(CultureInfo.InvariantCulture) + " ردیف قدیمی پیش از آغاز زنجیره مهر ندارند." : "");
-            return ResponseDtoHelper.Ok(dto);
+            return dto;
         }
 
         /// <summary>Walks the sealed rows in the asked range, in pages ordered by (place, id), and returns the first break.</summary>

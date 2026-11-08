@@ -178,6 +178,11 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Finance.ISepidarOutboxService, Services.NasbNiro.Finance.SepidarOutboxService>();
             services.AddSingleton<Services.NasbNiro.Finance.ISepidarClient, Services.NasbNiro.Finance.FileSepidarClient>();
             services.AddScoped<Services.NasbNiro.Finance.IAuditChainService, Services.NasbNiro.Finance.AuditChainService>();   // R1t D20: check of the hash chain of the audit trail
+            // package D: scheduled verification of the audit chain (02:30, Integrity:Jobs=false switches the job off), the restore test results, «سلامت سوابق»
+            services.AddScoped<Services.NasbNiro.Integrity.IRestoreTestService, Services.NasbNiro.Integrity.RestoreTestService>();
+            services.AddScoped<Services.NasbNiro.Integrity.IAuditIntegrityService, Services.NasbNiro.Integrity.AuditIntegrityService>();
+            services.AddHostedService<Services.NasbNiro.Integrity.IntegrityHostedService>();
+            services.AddScoped<Services.NasbNiro.Integrity.ISafetySettingsService, Services.NasbNiro.Integrity.SafetySettingsService>();
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();
             services.AddScoped<Services.NasbNiro.Procurement.IProcurementService, Services.NasbNiro.Procurement.ProcurementService>();
             services.AddScoped<Services.NasbNiro.Procurement.IPayablesService, Services.NasbNiro.Procurement.PayablesService>();

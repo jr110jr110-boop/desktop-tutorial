@@ -330,6 +330,65 @@ if ($Phase -eq '3-restore') {
     }
 }
 
+if ($Phase -eq '5-restore-test') {
+    $restoreDir = Join-Path $BackupFolder 'restore-test'
+    $script:restoreResult = $null
+    Check 'the monthly restore test task is registered (day 1, 03:00, SYSTEM)' {
+        $t = Get-ScheduledTask -TaskName 'INNCO monthly restore test'
+        $trigger = @($t.Triggers)[0]
+        if ($trigger.CimClass.CimClassName -ne 'MSFT_TaskMonthlyTrigger') { throw "trigger is $($trigger.CimClass.CimClassName)" }
+        if ($trigger.DaysOfMonth -ne 1) { throw "days of month=$($trigger.DaysOfMonth)" }
+        if (([datetime]$trigger.StartBoundary).Hour -ne 3) { throw "start=$($trigger.StartBoundary)" }
+        if ($t.Principal.UserId -notmatch 'SYSTEM') { throw "runs as $($t.Principal.UserId)" }
+        "state=$($t.State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test').LastTaskResult)"
+    }
+    Check 'the restore test passed (task result 0)' {
+        $r = (Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test').LastTaskResult
+        if ($r -ne 0) { throw "last result=$r" }
+        'last result=0'
+    }
+    Check 'the result file says the backup restored and every check passed' {
+        $f = Get-ChildItem $restoreDir -Filter 'restore-test-*.json' -File | Sort-Object LastWriteTime | Select-Object -Last 1
+        if (-not $f) { throw "no restore-test-*.json in $restoreDir" }
+        $j = Get-Content -Raw -Path $f.FullName | ConvertFrom-Json
+        $script:restoreResult = $j
+        if (-not $j.success) { throw "success=false: $($j.message)" }
+        if (-not $j.migrationsMatch) { throw 'migrationsMatch=false' }
+        if (-not $j.chainOk) { throw 'chainOk=false' }
+        if (-not $j.scratchDropped) { throw 'scratchDropped=false' }
+        if (@($j.checks | Where-Object { -not $_.passed }).Count -gt 0) { throw 'a check failed' }
+        "$($f.Name) backup=$($j.backupFile) chainEntries=$($j.chainEntriesChecked) checks=$(@($j.checks).Count)"
+    }
+    Check 'the backup used was the newest one and its encrypted form was opened when it is .enc' {
+        if (-not $script:restoreResult) { throw 'no result' }
+        $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' -and $_.Name -notmatch 'before-restore|pre-update' } | Sort-Object LastWriteTime | Select-Object -Last 1
+        if ($newest.Name -ne $script:restoreResult.backupFile) { throw "newest=$($newest.Name) used=$($script:restoreResult.backupFile)" }
+        if ($newest.Name -like '*.enc' -and -not (@($script:restoreResult.checks | Where-Object { $_.name -eq 'decrypt' -and $_.passed }).Count)) { throw 'no decrypt check' }
+        $newest.Name
+    }
+    Check 'the scratch database IRNNCO_RESTORETEST is gone' {
+        $c = New-Object System.Data.SqlClient.SqlConnection 'Data Source=.\SQLEXPRESS;Initial Catalog=master;Integrated Security=True;Connect Timeout=30'
+        $c.Open()
+        try { $cmd = $c.CreateCommand(); $cmd.CommandText = "SELECT COUNT(*) FROM sys.databases WHERE name = N'IRNNCO_RESTORETEST'"; $n = [int]$cmd.ExecuteScalar() } finally { $c.Dispose() }
+        if ($n -ne 0) { throw "sys.databases has $n row(s) named IRNNCO_RESTORETEST" }
+        'not in sys.databases'
+    }
+    Check 'the program is told where the result files are (RestoreTest:ResultDirectory)' {
+        $real = Get-Content -Raw -Path "$InstallRoot\app\appsettings.Production.json" | ConvertFrom-Json
+        if ($real.RestoreTest.ResultDirectory -ne $restoreDir) { throw "ResultDirectory='$($real.RestoreTest.ResultDirectory)'" }
+        $real.RestoreTest.ResultDirectory
+    }
+    Check 'the program reads the result and shows it (import, then summary: restore status Ok)' {
+        $r = Invoke-RestMethod -UseBasicParsing -Method Post -Headers $headers "$base/api/v1/integrity/restore-tests/import"
+        if (-not $r.success) { throw "import: $($r.message)" }
+        $s = Invoke-RestMethod -UseBasicParsing -Headers $headers "$base/api/v1/integrity/summary"
+        if (-not $s.success) { throw "summary: $($s.message)" }
+        if ($s.data.restoreStatus -ne 'Ok') { throw "restoreStatus=$($s.data.restoreStatus)" }
+        if ($s.data.red) { throw 'the summary is red' }
+        "imported=$($r.data.imported) restoreStatus=$($s.data.restoreStatus)"
+    }
+}
+
 $file = Join-Path $out "checks-$Phase.txt"
 $results | Set-Content -Path $file
 $results | ForEach-Object { Write-Host $_ }

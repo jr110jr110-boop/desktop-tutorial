@@ -98,7 +98,7 @@ namespace MsTests
         public async Task M7_ATreasuryDocumentDatedInAClosedPeriodIsRefused()
         {
             AppHost host = NewHost();
-            await host.As(Fm, sp => sp.GetRequiredService<IGlControlsService>().SaveSettingAsync(new SaveFinanceSettingDto { Key = "CloseChecklist.Enforce", Value = "0" }, CancellationToken.None));
+            SafetyTestSupport.SetFinance(host, "CloseChecklist.Enforce", "0");   // Package D: a security-relevant setting is set directly in a test
             FiscalYearDto y = Ok(await host.As(Fm, sp => sp.GetRequiredService<IGlService>().EnsureYearAsync(new EnsureYearDto { Date = new DateTime(2017, 6, 1) }, CancellationToken.None)));
             PeriodDto p = y.Periods.First(x => x.StartDate <= new DateTime(2017, 6, 10) && new DateTime(2017, 6, 10) <= x.EndDate);
             Ok(await PeriodAct(host, Fin, p.Id, "lock"));

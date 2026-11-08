@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -114,6 +116,7 @@ namespace Services.NasbNiro.ProductBank
                 return ResponseDtoHelper.BadRequest<PbSettingDto>("مقدار این تنظیم فقط true یا false است.");
             if (def.Key == PbSettingKeys.DemoData && !InRole(PbRoles.Admin)) return ResponseDtoHelper.BadRequest<PbSettingDto>(PbMessages.NotAllowed);
             PbSetting row = await Uow.Set<PbSetting>().FirstOrDefaultAsync(s => s.Key == def.Key, ct);
+            if (SafetyProfile.Refusal(SafetyStore.ProductBank, def.Key) != null && !SafetyProfile.SameValue(row?.Value ?? def.Value, value)) return ResponseDtoHelper.BadRequest<PbSettingDto>(SafetyProfile.RefusalText);   // PD: two-person change
             if (row == null)
             {
                 row = new PbSetting { Key = def.Key, Title = def.Title, Source = def.Source };

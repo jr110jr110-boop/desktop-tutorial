@@ -1,3 +1,5 @@
+using Entities.Model.NasbNiro.Integrity;
+using Services.NasbNiro.Integrity;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -124,6 +126,7 @@ namespace Services.NasbNiro.Finance
             await FinanceSeed.EnsureAsync(_uow, ct);
             await FinanceSeed.EnsureSettingsAsync(_uow, ct);
             FnSetting s = await _uow.Set<FnSetting>().FirstAsync(x => x.Key == key, ct);
+            if (!SafetyProfile.SameValue(s.Value, value) && SafetyProfile.Refusal(SafetyStore.Finance, key) != null) return Bad<FinanceSettingDto>(SafetyProfile.RefusalText);   // PD: two-person change
             s.Value = value;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok(new FinanceSettingDto { Key = s.Key, Value = s.Value, Title = s.Title });

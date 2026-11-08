@@ -152,7 +152,8 @@ namespace MsTests
         public async Task Signatures_AreDistinctUsers_InOrder_WithTheRightRoles()
         {
             AppHost host = NewHost("sign");
-            Assert.IsTrue((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DistinctReviewers, Value = "true" }, Ct))).Success);
+            Assert.IsFalse((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DistinctReviewers, Value = "true" }, Ct))).Success, "Package D: the setting changes only with a second person");
+            SafetyTestSupport.SetProductBank(host, PbSettingKeys.DistinctReviewers, "true");
             var saved = await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().SaveAsync(Bom(Line(1, "99.11.01.001.2", "Wheel case", 1)), Ct));
             await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().SubmitAsync(new PbBomActionDto { Id = saved.Data.Id }, Ct));
             int id = saved.Data.Id;
@@ -438,7 +439,8 @@ namespace MsTests
             Assert.IsFalse((await Run(host, Pmo, p => p.GetRequiredService<IPbSeedService>().InstallFyAsync(Ct))).Success, "demo data is refused while the DemoData setting is off");
             Assert.AreEqual(0, host.Read(u => u.Set<PbProduct>().Count()));
             Assert.IsFalse((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DemoData, Value = "true" }, Ct))).Success, "only the PMO turns demo data on");
-            Assert.IsTrue((await Run(host, Pmo, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DemoData, Value = "true" }, Ct))).Success);
+            Assert.IsFalse((await Run(host, Pmo, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DemoData, Value = "true" }, Ct))).Success, "Package D: the setting changes only with a second person");
+            SafetyTestSupport.SetProductBank(host, PbSettingKeys.DemoData, "true");
             var first = await Run(host, Pmo, p => p.GetRequiredService<IPbSeedService>().InstallFyAsync(Ct));
             Assert.IsTrue(first.Success, first.Message);
             Assert.IsFalse(first.Data.AlreadyInstalled);

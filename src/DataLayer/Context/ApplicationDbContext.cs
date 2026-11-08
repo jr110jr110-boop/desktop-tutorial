@@ -10,6 +10,7 @@ using DataLayer.Configurations.EF;
 using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
 using DataLayer.Configurations.EF.NasbNiro.Attachments;
+using DataLayer.Configurations.EF.NasbNiro.Integrity;
 using DataLayer.Configurations.EF.NasbNiro.Inventory;
 using DataLayer.Mappings;
 using Entities.AuditableEntity;
@@ -425,6 +426,9 @@ namespace DataLayer.Context
 
             // PB3: record attachments (one table for every owner)
             builder.AddAttachmentConfigurations();
+
+            // Package D: chain verification history, restore test results, two-person change of security settings
+            builder.AddIntegrityConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();
