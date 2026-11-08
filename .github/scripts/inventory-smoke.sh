@@ -1265,7 +1265,7 @@ pkb_drawing() {
   as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$doc,\"kind\":1,\"itemId\":$item}"; check "package b: the drawing $num is linked to the part" '.success and .data.id > 0'
   as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$rev" --argjson l "$lines" '{revisionId:$r,items:$l}')"; check "package b: engineering prepares the characteristic list of $num (version 1, a draft)" '.success and .data.version == 1 and .data.status == 0 and (.data.items|length) > 0'; PKBLIST=$(val .data.id)
   as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"submit\"}"; check "package b: engineering submits the list of $num" '.success and .data.status == 1'
-  as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"approve\"}"; nomsg "package b: the maker of the list cannot approve it (maker-checker)" "تفکیک وظایف"
+  as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"approve\"}"; nomsg "package b: the maker of the list (engineering) cannot approve it: approval is for QA/QC (maker-checker)" "شما مجوز این کار را ندارید"
   as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"approve\"}"; check "package b: the QA manager approves the list of $num; the drawing is not in force yet, so the list waits" '.success and .data.status == 2 and (.data.contentHash|length) == 64'
   as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"submit\"}"; check "package b: the revision of $num goes under review" '.success and .data.status == 2'
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"review\",\"note\":\"checked\"}"; check "package b: the PMO reviews $num" '.success and .data.status == 2'
@@ -3001,7 +3001,7 @@ SAFETY_REQ="$FM_TOKEN" safety_set Finance PeriodClose.CloseBy FINANCEMANAGER; ch
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$SBXB,\"action\":\"lock\"}"; check "r1t d10: the finance manager locks the second month" '.success and ([.data.periods[]|select(.id == '$SBXB')][0].status) == 1'
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$SBXB,\"action\":\"close\"}"; nomsg "r1t d10: the finance manager who locked a month cannot close it" "غیر از کسی که آن را قفل کرده"
 as "$FM2_TOKEN" POST $FG/periods/action "{\"id\":$SBXB,\"action\":\"close\"}"; check "r1t d10: a second finance manager closes it" '.success and ([.data.periods[]|select(.id == '$SBXB')][0].status) == 2'
-as "$FM_TOKEN" POST $FG/settings '{"key":"PeriodClose.CloseBy","value":"CEO"}'; check "r1t d10: the closer is the CEO again" '.success and .data.value == "CEO"'
+SAFETY_REQ="$FM_TOKEN" safety_set Finance PeriodClose.CloseBy CEO; check "r1t d10: the closer is the CEO again (two-person change)" '.success and .data.status == "Approved"'
 # a month with a draft voucher is not closed (the lock itself is not blocked while the checklist is off); after the voucher is final the CEO closes it
 as "$FIN_TOKEN" POST $FG/vouchers "{\"date\":\"${SBXCD}T00:00:00\",\"description\":\"پیش‌نویس باز ماه سوم\",\"lines\":[{\"accountCode\":\"80108\",\"debit\":4000},{\"accountCode\":\"10101\",\"credit\":4000}]}"; V95=$(val .data.id)
 as "$FM_TOKEN" POST $FG/periods/action "{\"id\":$SBXC,\"action\":\"lock\"}"; check "r1t d10: the third month is locked while it still holds the draft" '.success and ([.data.periods[]|select(.id == '$SBXC')][0].status) == 1'

@@ -346,10 +346,13 @@ if ($Phase -eq '5-restore-test') {
     $script:restoreResult = $null
     Check 'the monthly restore test task is registered (day 1, 03:00, SYSTEM)' {
         $t = Get-ScheduledTask -TaskName 'INNCO monthly restore test'
-        $trigger = @($t.Triggers)[0]
-        if ($trigger.CimClass.CimClassName -ne 'MSFT_TaskMonthlyTrigger') { throw "trigger is $($trigger.CimClass.CimClassName)" }
-        if ($trigger.DaysOfMonth -ne 1) { throw "days of month=$($trigger.DaysOfMonth)" }
-        if (([datetime]$trigger.StartBoundary).Hour -ne 3) { throw "start=$($trigger.StartBoundary)" }
+        [xml]$x = [string](Export-ScheduledTask -TaskName 'INNCO monthly restore test')   # a monthly trigger is described only in the task XML
+        $cal = @($x.Task.Triggers.CalendarTrigger)
+        if ($cal.Count -ne 1) { throw "calendar triggers=$($cal.Count)" }
+        if ($null -eq $cal[0].ScheduleByMonth) { throw 'the trigger is not monthly' }
+        if ([string]$cal[0].ScheduleByMonth.DaysOfMonth.Day -ne '1') { throw "days of month=$($cal[0].ScheduleByMonth.DaysOfMonth.Day)" }
+        if (@($cal[0].ScheduleByMonth.Months.ChildNodes).Count -ne 12) { throw "months=$(@($cal[0].ScheduleByMonth.Months.ChildNodes).Count)" }
+        if (([datetime]$cal[0].StartBoundary).Hour -ne 3) { throw "start=$($cal[0].StartBoundary)" }
         if ($t.Principal.UserId -notmatch 'SYSTEM') { throw "runs as $($t.Principal.UserId)" }
         "state=$($t.State) lastResult=$((Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test').LastTaskResult)"
     }

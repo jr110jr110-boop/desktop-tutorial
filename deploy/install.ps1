@@ -1197,8 +1197,8 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     $taskXml = Export-ScheduledTask -TaskName $restoreTaskName
     $taskXml = [regex]::Replace($taskXml, '(?s)<Triggers>.*?</Triggers>', $monthlyXml)
     Register-ScheduledTask -TaskName $restoreTaskName -Xml $taskXml -Force | Out-Null
-    $registered = Get-ScheduledTask -TaskName $restoreTaskName
-    if ($registered.Triggers.Count -ne 1 -or $registered.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskMonthlyTrigger') { throw "The task '$restoreTaskName' did not get its monthly trigger." }
+    $registeredXml = [string](Export-ScheduledTask -TaskName $restoreTaskName)   # the task cmdlets do not describe a monthly trigger; its XML does
+    if ($registeredXml -notmatch '<ScheduleByMonth>' -or $registeredXml -notmatch '<Day>1</Day>' -or ([regex]::Matches($registeredXml, '<CalendarTrigger')).Count -ne 1) { throw "The task '$restoreTaskName' did not get its monthly trigger." }
     Set-ProgramSetting $settingsPath 'RestoreTest' 'ResultDirectory' $restoreTestDir
     Write-Ok "Task '$restoreTaskName': on day 1 of every month at 03:00 the newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped. Result files: $restoreTestDir"
 

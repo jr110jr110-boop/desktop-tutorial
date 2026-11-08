@@ -233,6 +233,7 @@ namespace DataLayer.Context
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
             ChangeTracker.DetectChanges();
+            ChangeTracker.CascadeChanges();   // CI fix: orphans and cascades are deleted now (timing OnSaveChanges), so the audit trail sees them and writes their Deleted entries
 
             beforeSaveTriggers();
 
@@ -287,6 +288,7 @@ namespace DataLayer.Context
         public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = new CancellationToken())
         {
             ChangeTracker.DetectChanges();
+            ChangeTracker.CascadeChanges();   // CI fix: orphans and cascades are deleted now (timing OnSaveChanges), so the audit trail sees them and writes their Deleted entries
 
             beforeSaveTriggers();
 
