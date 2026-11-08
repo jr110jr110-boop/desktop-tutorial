@@ -50,6 +50,19 @@ namespace Services.NasbNiro.Integrity
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.MajorNcrCommitteeMin, Kind = SafetyKind.NumberAtLeast, Strict = "3", Min = 2, Max = 10, Title = "حداقل اعضای کمیته برای عدم انطباق عمده" });
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.WeldContinuityMonths, Kind = SafetyKind.NumberAtMost, Strict = "6", Min = 1, Max = 12, Title = "حداکثر وقفه جوشکاری در یک فرایند (ماه)" });
 
+            // Package B: the switches and sampling defaults of the inspection and release controls. Flags must stay on; a lower sampling of critical / major characteristics, a longer
+            // QTY tolerance of the physical configuration audit or a shorter «بدون نقشه» reason is the weaker setting (two persons change them, the strict value is the default)
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbFaiEnforce, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "بازرسی نمونه اول اجباری باشد" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbFaiOnNewRevision, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "نمونه اول برای اولین دستور پس از بازنگری تازه" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbPcaEnabled, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "ممیزی پیکربندی فیزیکی پیش از ترخیص" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbPcaTolerance, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 50, Title = "رواداری مقدار در ممیزی پیکربندی فیزیکی (درصد)" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbSampleCritical, Kind = SafetyKind.NumberAtLeast, Strict = "100", Min = 1, Max = 100, Title = "حداقل نمونه‌برداری مشخصه بحرانی (درصد)" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbSampleMajor, Kind = SafetyKind.NumberAtLeast, Strict = "100", Min = 1, Max = 100, Title = "حداقل نمونه‌برداری مشخصه عمده (درصد)" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbSampleMinor, Kind = SafetyKind.NumberAtLeast, Strict = "10", Min = 0, Max = 100, Title = "حداقل نمونه‌برداری مشخصه جزئی (درصد)" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbNoDrawingReasonMin, Kind = SafetyKind.NumberAtLeast, Strict = "15", Min = 5, Max = 200, Title = "حداقل نویسه دلیل پرچم «بدون نقشه»" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbIncomingBulkSamples, Kind = SafetyKind.NumberAtLeast, Strict = "1", Min = 1, Max = 50, Title = "حداقل نمونه بازرسی ورودی هر بچ انبوه" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbPcaBulkExtra, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 50, Title = "رواداری افزوده بر ضایعات BOM در ممیزی پیکربندی (درصد)" });
+
             // PB8: the gates of the operational data control and of the engineering readiness (the lists are the module's own catalogs, so a new rule is covered at once)
             list.AddRange(OpsSpecs());
             return list;

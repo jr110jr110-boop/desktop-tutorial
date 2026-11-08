@@ -32,6 +32,8 @@ namespace MsTests
         private static readonly ClaimsPrincipal Pmo = AppHost.Principal(34, "pmo.one", "PMO");
         private static readonly ClaimsPrincipal Operator = AppHost.Principal(35, "operator.one", "OPERATOR");
         private static readonly ClaimsPrincipal Dcc2 = AppHost.Principal(36, "dcc.two", "DCC");
+        private static readonly ClaimsPrincipal ListMaker = AppHost.Principal(38, "list.maker", "ENGINEER");
+        private static readonly ClaimsPrincipal ListChecker = AppHost.Principal(39, "list.checker", "QA");
         private static readonly ClaimsPrincipal Commercial = AppHost.Principal(37, "commercial.one", "COMMERCIAL");
 
         private static AppHost NewHost(string name)
@@ -39,7 +41,7 @@ namespace MsTests
             var host = new AppHost("P7b_" + name + "_" + Guid.NewGuid().ToString("N"));
             host.Write(u =>
             {
-                foreach (int id in new[] { 31, 32, 33, 34, 35, 36, 37 }) AppHost.Add(u, new User { Id = id, UserName = "p7b.user" + id, Email = "p7b.user" + id + "@example.com", IsActive = true });
+                foreach (int id in new[] { 31, 32, 33, 34, 35, 36, 37, 38, 39 }) AppHost.Add(u, new User { Id = id, UserName = "p7b.user" + id, Email = "p7b.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
             return host;
@@ -97,8 +99,24 @@ namespace MsTests
             return r.Data;
         }
 
+        /// <summary>Package B (H2): a drawing linked to a part is released only with an approved characteristic list; these tests are about documents, so the list is the empty one «بدون مشخصه قابل اندازه‌گیری» (reason, maker, checker).</summary>
+        private static async Task EnsureEmptyList(AppHost host, int revisionId)
+        {
+            bool linked = host.Read(u => u.Set<PcDocumentRevision>().Where(r => r.Id == revisionId).Join(u.Set<PcDocumentLink>().Where(l => !l.Deleted && l.UnlinkReason == null),
+                r => r.DeliverableId, l => l.DeliverableId, (r, l) => l.Kind).Any(k => k == PcDocLinkKind.Item || k == PcDocLinkKind.PartNumber || k == PcDocLinkKind.BomLine));
+            if (!linked) return;
+            var saved = await host.As(ListMaker, p => p.GetRequiredService<Services.NasbNiro.Quality.ICharacteristicService>().SaveAsync(new ViewModels.NasbNiro.QualityDtos.SaveCharListDto { RevisionId = revisionId, Reason = "این نقشه مشخصه قابل اندازه‌گیری ندارد (آزمون)" }, default));
+            Assert.IsTrue(saved.Success, saved.Message);
+            foreach (var step in new[] { (ListMaker, "submit"), (ListChecker, "approve") })
+            {
+                var r = await host.As(step.Item1, p => p.GetRequiredService<Services.NasbNiro.Quality.ICharacteristicService>().ActionAsync(new ViewModels.NasbNiro.QualityDtos.CharListActionDto { Id = saved.Data.Id, Action = step.Item2 }, default));
+                Assert.IsTrue(r.Success, step.Item2 + ": " + r.Message);
+            }
+        }
+
         private static async Task Release(AppHost host, int revisionId)
         {
+            await EnsureEmptyList(host, revisionId);
             foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve"), (Pmo, "release") })
             {
                 var r = await Edms(host, step.Item1, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = step.Item2 }, default));
@@ -263,6 +281,20 @@ namespace MsTests
                 item = i.Id; order = o.Id; wo = w.Id;
             }, Seeder);
             return (item, order, wo);
+        }
+
+        /// <summary>Package B: with no released drawing a make part passes the drawings check only with an active «بدون نقشه» flag.</summary>
+        private static void ActiveNoDrawing(AppHost host, int itemId)
+        {
+            host.Write(u =>
+            {
+                u.Set<Entities.Model.NasbNiro.Quality.NoDrawingFlag>().Add(new Entities.Model.NasbNiro.Quality.NoDrawingFlag
+                {
+                    ItemId = itemId, PartNumber = "PN", Reason = "no drawing for this test part", Status = Entities.Model.NasbNiro.Quality.NoDrawingStatus.Active,
+                    CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now, CreatorUserId = 1, ModifierUserId = 2, DecidedByUserId = 2, DecidedAt = DateTimeOffset.Now,
+                });
+                u.SaveChanges();
+            }, Seeder);
         }
 
         [TestMethod]
@@ -712,6 +744,7 @@ namespace MsTests
             PcRevisionDto r0 = await ReleasedRevision(host, doc);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
             Assert.IsTrue((await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = r0.Id, Action = "obsolete", Note = "replaced by the client" }, default))).Success);
+            ActiveNoDrawing(host, o.ItemId);
             Assert.AreEqual(0, host.Read(u => u.Set<PcDocumentLink>().Count(l => l.DeliverableId == doc && !l.Deleted)));
             Assert.AreEqual(0, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a retired document does not hold the order");
@@ -750,6 +783,7 @@ namespace MsTests
             await Link(host, foreignDraft, "PN-SC");
             await Link(host, foreignReleased, "PN-SC");
             await Draft(host, foreignDraft);
+            ActiveNoDrawing(host, o.ItemId);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a draft of another project is not this order's concern");
             await ReleasedRevision(host, foreignReleased);
             Assert.AreEqual(1, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count, "a released part drawing is company-wide");

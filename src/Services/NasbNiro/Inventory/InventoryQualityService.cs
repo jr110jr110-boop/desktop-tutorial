@@ -227,21 +227,34 @@ namespace Services.NasbNiro.Inventory
 
             // R1q D16 and review M12: whether the inspection is "measured" follows from the measured values on it, never from a flag of the client. Every value names the
             // instrument that measured it (calibration valid today, ISO 9001 7.1.5), and a value out of tolerance cannot be accepted.
-            var measurements = new List<InspectionMeasurementDto>();
+            // Package B (H5): the values are picked from the released characteristic list of the part's drawing revision; nominal, tolerances and unit come from the list, pass or fail is computed here,
+            // the instrument class is checked, and an acceptance needs every required characteristic measured and inside its tolerance
+            var inputs = new List<Quality.PickInput>();
             foreach (InspectionMeasurementDto m in dto.Measurements ?? new List<InspectionMeasurementDto>())
             {
                 string name = InventoryText.Clean(m?.Characteristic);
-                if (name == null) return ResponseDtoHelper.BadRequest<InspectionDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
-                if (name.Length > 200 || (InventoryText.Clean(m.Unit)?.Length ?? 0) > 30) return ResponseDtoHelper.BadRequest<InspectionDto>("نام مشخصه یا واحد اندازه‌گیری بیش از حد طولانی است.");
-                if (m.TolPlus < 0 || m.TolMinus < 0) return ResponseDtoHelper.BadRequest<InspectionDto>("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
+                if (name == null && !(m?.CharacteristicId).HasValue) return ResponseDtoHelper.BadRequest<InspectionDto>("مشخصه اندازه‌گیری‌شده را از فهرست مشخصه‌های نقشه انتخاب کنید.");
                 if (!m.EquipmentId.HasValue || m.EquipmentId.Value <= 0)
-                    return ResponseDtoHelper.BadRequest<InspectionDto>($"برای اندازه‌گیری «{name}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
-                measurements.Add(new InspectionMeasurementDto
-                {
-                    Characteristic = name, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = InventoryText.Clean(m.Unit), EquipmentId = m.EquipmentId,
-                    Pass = m.Measured >= m.Nominal - m.TolMinus && m.Measured <= m.Nominal + m.TolPlus,
-                });
+                    return ResponseDtoHelper.BadRequest<InspectionDto>($"برای اندازه‌گیری «{name ?? m.CharacteristicId.ToString()}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
+                inputs.Add(new Quality.PickInput { CharacteristicId = m.CharacteristicId, Name = name, Measured = m.Measured, EquipmentId = m.EquipmentId });
             }
+            // M9: a receipt is sampled by pieces (a bulk lot in kg / m / l: by the configured number of samples per lot or heat, never per kilogram)
+            string itemUnit = await _uow.Set<InventoryItem>().AsNoTracking().Where(x => x.Id == inspection.ItemId).Select(x => x.Unit).FirstOrDefaultAsync(cancellationToken);
+            Dictionary<string, decimal> incomingSettings = await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            decimal sampleUnits = Quality.CharacteristicRules.InspectionUnits(itemUnit, inspection.Quantity, (int)incomingSettings[Quality.QualitySettingKeys.PkbIncomingBulkSamples]);
+            // H1: the incoming mode: a part without a released list is decided on its certificate and visual evidence (no typed nominal or tolerance); with a list every picker rule applies
+            Quality.PickOutcome pick = await Quality.CharacteristicPicker.BuildAsync(_uow, inspection.ItemId, Entities.Model.NasbNiro.Quality.QcRecordType.Dimensional, null, sampleUnits, Entities.Model.NasbNiro.Quality.QcResult.Hold, inputs, cancellationToken, incoming: true);
+            if (pick.Error != null) return ResponseDtoHelper.BadRequest<InspectionDto>(pick.Error);
+            if (pick.Governed && dto.AcceptedQuantity > 0)
+            {
+                List<string> missing = Quality.CharacteristicRules.Missing(pick.Scope, pick.Values, sampleUnits, false);
+                if (missing.Count > 0) return ResponseDtoHelper.BadRequest<InspectionDto>("قبول بازرسی ممکن نیست؛ مشخصه‌های الزامی اندازه‌گیری نشده‌اند: " + string.Join("، ", missing) + ".");
+            }
+            var measurements = pick.Measurements.Select(m => new InspectionMeasurementDto
+            {
+                CharacteristicId = m.CharacteristicId, CharacteristicNo = m.CharacteristicNo, Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus,
+                Measured = m.Measured, Unit = m.Unit, EquipmentId = m.EquipmentId, Pass = m.Pass,
+            }).ToList();
             if (measurements.Any(m => !m.Pass) && dto.RejectedQuantity <= 0)
                 return ResponseDtoHelper.BadRequest<InspectionDto>("اندازه‌گیری خارج از تلرانس ثبت شده است؛ کل مقدار نمی‌تواند قبول شود، مقدار مردود را مشخص کنید.");
             List<int> equipmentIds = (dto.EquipmentIds ?? new List<int>()).Concat(measurements.Select(m => m.EquipmentId.Value)).Where(i => i > 0).Distinct().ToList();

@@ -173,8 +173,11 @@ ENG_TOKEN=$(login eng.ci 'Ci#Eng-User-2026'); SEC_TOKEN=$(login sec.ci 'Ci#Sec-U
 user2 qa.ci 14 'Ci#Qa-User-2026' 09120000020 0012345620
 user2 qc2.ci 5 'Ci#Qc2-User-2026' 09120000021 0012345621
 user2 fm.ci 17 'Ci#Fm-User-2026' 09120000025 0012345625
+# Package B: the document controller (role 16) prepares the drawings that the characteristic lists, the shop floor and the first article rest on, so this user exists before the first quality record (the registration moved here from the project control section)
+user2 dcc.ci 16 'Ci#Dcc-User-2026' 09120000023 0012345623
 approve_grants fm.ci # FINANCEMANAGER is a sensitive role (R1a): the second PMO user approves it before the finance manager signs in
 QA_TOKEN=$(login qa.ci 'Ci#Qa-User-2026'); QC2_TOKEN=$(login qc2.ci 'Ci#Qc2-User-2026'); FM_TOKEN=$(login fm.ci 'Ci#Fm-User-2026')
+DCC_TOKEN=$(login dcc.ci 'Ci#Dcc-User-2026'); [ -n "$DCC_TOKEN" ] && ok "package b: login of the document controller (role 16)" || bad "package b: login of the document controller (role 16)"
 [ -n "$QA_TOKEN" ] && [ -n "$QC2_TOKEN" ] && [ -n "$FM_TOKEN" ] && ok "quality: login QA (role 14), second QC user and the finance manager" || bad "quality: login QA (role 14), second QC user and the finance manager"
 # a third QC user: the closing of a CAPA, the second QC signature and the closing of an NCR come from people who did not touch the record (R1q review H7, M11)
 user2 qc3.ci 5 'Ci#Qc3-User-2026' 09120000028 0012345628
@@ -1248,13 +1251,56 @@ call POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"Casi
 as "$QC_TOKEN" GET "quality/itps/by-work-order/$WO2"; check "ITP of work order 2 was drafted by the system when the first record was saved" '.success and .data.autoDrafted == true and .data.status == 0 and (.data.activities|length) == 6'
 ITP2=$(val .data.id)
 
+# --- Package B (inspection and release integrity): the drawing, the released characteristic list and the «بدون نقشه» flag that the quality records, the incoming inspections and the shop floor now rest on
+# pkb_drawing ITEMID DOCNUMBER LINES : the whole chain for ONE part: the document controller registers the drawing (contract of the quality section), a revision with a file, the drawing is linked to the part, engineering
+# prepares the characteristic list (LINES is the JSON array of lines), QA approves it (maker-checker), then the revision goes through review (PMO), approval (engineering manager) and release (PMO): the release also releases the list.
+# Sets PKBREV (revision id) and PKBLIST (list id). Every request is checked; the id is read right after its request.
+pkb_drawing() {
+  local item=$1 num=$2 lines=$3 doc rev fid
+  as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$num\",\"title\":\"نقشه قطعه $num\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "package b: the document controller registers the drawing $num" '.success and .data.id > 0'; doc=$(val .data.id)
+  as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$doc}"; check "package b: the first revision of $num is 00 and a draft" '.success and .data.code == "00" and .data.status == 1'; rev=$(val .data.id)
+  upload_as "$ADMIN_TOKEN" "pkb-$num"; fid=$UPLOADED
+  [ -n "$fid" ] && ok "package b: the file of drawing $num is uploaded" || bad "package b: the file of drawing $num is uploaded"
+  as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$rev,\"documentId\":\"$fid\",\"fileName\":\"$num-00.pdf\",\"title\":\"$num\"}"; check "package b: the file is added to the draft revision of $num" '.success'
+  as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$doc,\"kind\":1,\"itemId\":$item}"; check "package b: the drawing $num is linked to the part" '.success and .data.id > 0'
+  as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$rev" --argjson l "$lines" '{revisionId:$r,items:$l}')"; check "package b: engineering prepares the characteristic list of $num (version 1, a draft)" '.success and .data.version == 1 and .data.status == 0 and (.data.items|length) > 0'; PKBLIST=$(val .data.id)
+  as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"submit\"}"; check "package b: engineering submits the list of $num" '.success and .data.status == 1'
+  as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"approve\"}"; nomsg "package b: the maker of the list cannot approve it (maker-checker)" "تفکیک وظایف"
+  as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBLIST,\"action\":\"approve\"}"; check "package b: the QA manager approves the list of $num; the drawing is not in force yet, so the list waits" '.success and .data.status == 2 and (.data.contentHash|length) == 64'
+  as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"submit\"}"; check "package b: the revision of $num goes under review" '.success and .data.status == 2'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"review\",\"note\":\"checked\"}"; check "package b: the PMO reviews $num" '.success and .data.status == 2'
+  as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"approve\"}"; check "package b: the engineering manager approves $num" '.success and .data.status == 3'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"release\"}"; check "package b: the PMO releases $num" '.success and .data.status == 4'
+  PKBREV=$rev
+  as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBLIST"; check "package b: releasing the drawing released its list in the same step (the list of $num is Released)" '.success and .data.status == 3 and .data.revisionInForce == true'
+}
+# pkb_nodraw_order ORDERID : an order of a make part is released only with a released drawing or an active «بدون نقشه» flag (requested by engineering with a reason, activated by a second person, never an AI seat).
+# A part that already has a drawing needs nothing; a part with a flag in progress or active is not asked again. The flag is the honest data of a part that has no drawing.
+pkb_nodraw_order() {
+  local item has n fid
+  as "$MPM_TOKEN" GET "$MF/orders/$1"; check "package b: order $1 names its part" '.success and .data.itemId > 0'; item=$(val .data.itemId)
+  as "$QC_TOKEN" GET "quality/characteristics/for-item/$item"; check "package b: the drawings of the part of order $1 are read" '.success'; has=$(val '.data.hasDrawing')
+  as "$ADMIN_TOKEN" GET "quality/no-drawing?ItemId=$item"; check "package b: the flags of the part of order $1 are read" '.success'; n=$(val '.data.totalItems')
+  if [ "$has" != "true" ] && [ "$n" = "0" ]; then
+    as "$ENG_TOKEN" POST quality/no-drawing/request "{\"itemId\":$item,\"reason\":\"قطعه ساده ماشین‌کاری شده بدون نقشه جداگانه؛ مشخصات در دستور کار آمده است\"}"; check "package b: engineering asks for the «بدون نقشه» flag of the part of order $1 with a reason" '.success and .data.status == 0'; fid=$(val .data.id)
+    as "$ENG_TOKEN" POST quality/no-drawing/action "{\"id\":$fid,\"action\":\"approve\"}"; nomsg "package b: the engineer who asked cannot activate the flag himself" "تفکیک وظایف"
+    as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$fid,\"action\":\"approve\"}"; check "package b: the second PMO user activates the flag of the part of order $1" '.success and .data.status == 1'
+  fi
+}
+# the line shape of a characteristic of a list: pkb_line NO NAME NOMINAL TOLPLUS TOLMINUS UNIT. All lines of the smoke are minor and not sampled, so an acceptance does not demand them (a first article demands every line).
+pkb_line() { jq -nc --arg no "$1" --arg name "$2" --argjson n "$3" --argjson p "$4" --argjson m "$5" --arg u "$6" '{no:$no,name:$name,nominal:$n,tolPlus:$p,tolMinus:$m,unit:$u,class:3,instrumentClass:99,samplePercent:0}'; }
+
+# the lists of the smoke are minor characteristics that an acceptance does not demand: a minor line below the company minimum sampling (10 percent) is refused, so the minimum is lowered for this run by the two-person route (the strict default 10 is registered on the safety profile)
+safety_set Quality Pkb.Char.SamplePercent.Minor 0; check "package b: the minimum sampling of a minor characteristic is lowered to 0 for the smoke run (second person approves)" '.success and .data.status == "Approved"'
+# the bolt (used by the quality section below) gets a released drawing with its characteristic list: the bore and the thread that the records below measure (minor, not sampled: an acceptance does not demand them)
+pkb_drawing "$BOLT" "PKB-DWG-BOLT" "$( { pkb_line 1 Bore 100 0.05 0.05 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )"; PKBBOLTLIST=$PKBLIST; PKBBOLTREV=$PKBREV
 # --- B. calibration and measuring equipment
 as "$QC_TOKEN" GET quality/calibration/intervals; check "default calibration intervals seeded with their source" '.success and (.data|length) >= 5 and ([.data[]|.source]|all(. != null))'
 as "$WH_TOKEN" POST quality/equipment '{"name":"Caliper","type":1}'; no "warehouse user cannot register measuring equipment"
 as "$QC_TOKEN" POST quality/equipment '{"name":"Digital caliper 0-150","type":1,"serialNumber":"DC-1","location":"QC lab"}'; check "equipment registered with an INN-IST code and the default interval" '.success and (.data.code|test("^INN-IST-[0-9]+$")) and .data.intervalMonths > 0'
 G1=$(val .data.id); G1CODE=$(val .data.code)
 call GET "quality/equipment/$G1"; check "never calibrated instrument is overdue (computed, not stored)" '.data.status == 2'
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G1}]}"; nomsg "record with an uncalibrated instrument rejected" "کالیبره نشده"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G1}]}"; nomsg "record with an uncalibrated instrument rejected" "کالیبره نشده"
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G1,\"eventDate\":\"$(dd -200)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-G1-1\",\"asFoundPass\":true,\"asLeftPass\":true}"; nomsg "calibration without a traceability statement rejected (ISO 7.1.5.1)" "7.1.5.1"
 as "$WH_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G1,\"eventDate\":\"$(dd -200)\",\"labName\":\"Lab A\",\"certificateNumber\":\"CAL-G1-1\",\"traceabilityStatement\":\"Traceable to national standard\",\"asFoundPass\":true,\"asLeftPass\":true}"; no "only QC registers a calibration"
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G1,\"eventDate\":\"$(dd -200)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-G1-1\",\"certificateDocumentId\":\"$DOCID\",\"traceabilityStatement\":\"Traceable to national standard\",\"asFoundPass\":true,\"asLeftPass\":true}"; check "calibration registered: valid for the interval" '.success and .data.status == 0 and .data.nextDue != null and (.data.events|length) == 1'
@@ -1262,10 +1308,10 @@ as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G1,\"eventD
 as "$QC_TOKEN" POST quality/equipment '{"name":"Old micrometer","type":1,"serialNumber":"MM-2"}'; G2=$(val .data.id)
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G2,\"eventDate\":\"$(dd -800)\",\"labName\":\"Lab A\",\"certificateNumber\":\"CAL-G2-1\",\"traceabilityStatement\":\"Traceable\",\"asFoundPass\":true,\"asLeftPass\":true}"
 call GET "quality/equipment/$G2"; check "expired certificate -> overdue" '.data.status == 2'
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G2}]}"; check "overdue instrument cannot be used" '.success == false and (.message|contains("INN-IST"))'
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G2}]}"; check "overdue instrument cannot be used" '.success == false and (.message|contains("INN-IST"))'
 as "$QC_TOKEN" POST quality/equipment '{"name":"Dial gauge","type":2}'; G3=$(val .data.id)
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G3,\"eventDate\":\"$(dd -10)\",\"labName\":\"Lab A\",\"certificateNumber\":\"CAL-G3-1\",\"traceabilityStatement\":\"Traceable\",\"asFoundPass\":false,\"asLeftPass\":false}"; check "calibration failed as-left -> out of service" '.success and .data.status == 3'
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G3}]}"; nomsg "out-of-service instrument cannot be used" "از رده خارج"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.01,\"unit\":\"mm\",\"equipmentId\":$G3}]}"; nomsg "out-of-service instrument cannot be used" "از رده خارج"
 as "$QC_TOKEN" POST quality/equipment/action "{\"id\":$G3,\"action\":\"return-to-service\"}"; nomsg "return to service needs a valid calibration first" "کالیبراسیون معتبر"
 as "$QC_TOKEN" POST quality/equipment '{"name":"Torque wrench","type":99}'; G5=$(val .data.id)
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$G5,\"eventDate\":\"$(dd -355)\",\"labName\":\"Lab A\",\"certificateNumber\":\"CAL-G5-1\",\"traceabilityStatement\":\"Traceable\",\"asFoundPass\":true,\"asLeftPass\":true,\"intervalMonths\":12}"
@@ -1276,12 +1322,12 @@ as "$QC_TOKEN" POST quality/equipment '{"name":"Test pressure gauge","type":3}';
 as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$PG1,\"eventDate\":\"$(dd -30)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-PG1-1\",\"certificateDocumentId\":\"$DOCID\",\"traceabilityStatement\":\"Traceable\",\"asFoundPass\":true,\"asLeftPass\":true}"; check "pressure gauge calibrated" '.success and .data.status == 0'
 
 # --- C. inspection records with measurements, self inspection, auto NCR
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.02,\"unit\":\"mm\"}]}"; nomsg "r1q D16: a measured value without the instrument that measured it is refused" "تجهیز اندازه‌گیری (ابزار) را انتخاب کنید"
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itpActivityId\":$A2,\"quantity\":1,\"operation\":\"Casing bore\",\"drawingNumber\":\"DWG-1\",\"drawingRevision\":\"A\",\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.02,\"unit\":\"mm\",\"equipmentId\":$G1}]}"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.02,\"unit\":\"mm\"}]}"; nomsg "r1q D16: a measured value without the instrument that measured it is refused" "تجهیز اندازه‌گیری (ابزار) را انتخاب کنید"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"itpActivityId\":$A2,\"quantity\":1,\"operation\":\"Casing bore\",\"drawingNumber\":\"DWG-1\",\"drawingRevision\":\"A\",\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.02,\"unit\":\"mm\",\"equipmentId\":$G1}]}"
 check "dimensional record with a calibrated instrument" '.success and (.data.number|startswith("QIR-")) and .data.result == 1 and .data.measurements[0].pass == true and .data.selfInspection == false'
 R1=$(val .data.id); R1NUM=$(val .data.number)
-as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.2,\"unit\":\"mm\",\"equipmentId\":$G1}]}"; nomsg "accepting an out-of-tolerance measurement rejected" "خارج از تلرانس"
-as "$PROD_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.0,\"unit\":\"mm\"}]}"; nomsg "ITP inspections are QC only (operator refused)" "فقط توسط بازرس QC"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.2,\"unit\":\"mm\",\"equipmentId\":$G1}]}"; nomsg "accepting an out-of-tolerance measurement rejected" "خارج از تلرانس"
+as "$PROD_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO1,\"itemId\":$BOLT,\"itpActivityId\":$A2,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":0.05,\"tolMinus\":0.05,\"measured\":100.0,\"unit\":\"mm\"}]}"; nomsg "ITP inspections are QC only (operator refused)" "فقط توسط بازرس QC"
 as "$PROD_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"Machining\",\"quantity\":1,\"result\":1}"; check "operator self-inspection allowed outside the ITP and marked as such" '.success and .data.selfInspection == true'
 as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Thread\",\"nominal\":24,\"tolPlus\":0.1,\"tolMinus\":0.1,\"measured\":24.05,\"unit\":\"mm\",\"equipmentId\":$G1}]}"; check "second record with the same instrument (item known)" '.success'
 R2=$(val .data.id); R2NUM=$(val .data.number)
@@ -1635,6 +1681,7 @@ as "$QC_TOKEN" GET "quality/traceability"; no "traceability without a serial or 
 # required certificate type on an item blocks incoming acceptance
 item PL31 '{"code":"01003010060102","title":"ورق با گواهی 3.1","unit":"kg","trackingMode":1,"requiresIncomingInspection":true,"requiredCertificateType":2}' "plate that needs an EN 10204 3.1 certificate"
 call GET "inventory/items/by-code?code=01003010060102"; check "required certificate type saved on the item" '.data.requiredCertificateType == 2'
+pkb_drawing "$PL31" "PKB-DWG-PL31" "$( { pkb_line 1 Thickness 10 0.2 0.2 mm; } | jq -sc . )" # Package B: the plate has a released drawing with the thickness the incoming inspection measures
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"$D0\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"referenceNumber\":\"INV-901\",\"lines\":[{\"itemId\":$PL31,\"quantity\":20,\"heatNumber\":\"HT-3100\",\"unitPrice\":1000}]}"; PRC=$(val .data.id)
 call POST "inventory/documents/$PRC/confirm"; check "receipt of the 3.1 plate into quarantine" '.success'
 call GET "inventory/quality/inspections?Status=0"; QI31=$(jq -r ".data.data[]|select(.itemId==$PL31)|.id" "$B")
@@ -2089,7 +2136,6 @@ PCDOW=$(date +%u); if [ "$PCDOW" -ge 6 ]; then PCMON=$(date -d "$((8 - PCDOW)) d
 pcd() { date -d "$PCMON $1 days" +%Y-%m-%d; }
 pcmin() { local t; t=$(date +%Y-%m-%d); if [[ "$1" > "$t" ]]; then echo "$t"; else echo "$1"; fi; }
 call POST Accounts/register-user '{"userName":"pm.ci","name":"pm.ci","lastName":"آزمون","email":"pm.ci@example.com","roleIds":[15],"password":"Ci#Pm-User-2026","phoneNumber":"09120000022","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345622"}'
-call POST Accounts/register-user '{"userName":"dcc.ci","name":"dcc.ci","lastName":"آزمون","email":"dcc.ci@example.com","roleIds":[16],"password":"Ci#Dcc-User-2026","phoneNumber":"09120000023","birthDate":"1990-01-01T00:00:00+03:30","nationalCode":"0012345623"}'
 PM_TOKEN=$(login pm.ci 'Ci#Pm-User-2026'); DCC_TOKEN=$(login dcc.ci 'Ci#Dcc-User-2026')
 [ -n "$PM_TOKEN" ] && [ -n "$DCC_TOKEN" ] && ok "pc: login project manager (role 15) and DCC (role 16)" || bad "pc: login project manager (role 15) and DCC (role 16)"
 PMID=$(uid "$PM_TOKEN"); PLANID=$(uid "$PLAN_TOKEN")
@@ -6026,6 +6072,8 @@ call GET "$MF/orders/$MFORDB"; check "mes: order B has one operation" '.success 
 ibx "$MSV_TOKEN" "mf:order:$MFORDA"; check "mes: the shop supervisor has the draft order A waiting for release in the inbox" '.success and (.data.data|length) == 1'
 as "$SEC_TOKEN" GET "$MF/orders?PageSize=5"; no "mes: the security user cannot read production orders"
 
+# Package B (H6): a make part is released to the shop only with a released drawing (or the «بدون نقشه» flag). Item A has a drawing with the outer diameter that the inspection step measures; item C has the flag (set below); item B has neither, on purpose.
+pkb_drawing "$MFPA" "PKB-DWG-MFPA" "$( { pkb_line 1 "قطر خارجی" 50 0.05 0.05 mm; } | jq -sc . )"
 # --- release gate: computed checks
 # R1p D19: drafting the orders also drafted the ITP of the work order from the quality template (a draft made by the system); no order of the work order is released before the client has approved it
 as "$QC_TOKEN" GET "quality/itps/by-work-order/$MFWO"; check "mes: drafting the orders also drafted the ITP of the work order from the quality template (a draft of the system with its six activities)" '.success and .data.autoDrafted == true and .data.status == 0 and (.data.activities|length) == 6'
@@ -6037,6 +6085,7 @@ call GET "$MF/orders/$MFORDA/release-check"; check "mes: a submitted ITP is stil
 as "$QA_TOKEN" POST quality/itps/action "{\"id\":$MFITP,\"action\":\"client-approve\",\"reference\":\"CL-MF-1\"}"; check "mes: the quality assurance manager records the client approval of the ITP (letter reference kept)" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-MF-1"'
 call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A once the ITP is approved: routing, work centres, drawings, ITP and materials all pass" '.success and .data.canRelease == true and (.data.checks|length) == 5 and ([.data.checks[]|select(.passed)]|length) == 5 and (.data.shortages|length) == 0'
 call GET "$MF/orders/$MFORDB/release-check"; check "mes: release check of B fails on the missing approved drawing and cannot be overridden" '.success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.code == "drawings")][0].passed == false)'
+pkb_nodraw_order "$MFORDC"
 call GET "$MF/orders/$MFORDC/release-check"; check "mes: release check of C fails only on the materials (short by 2) and can be overridden by the manager" '.success and .data.canRelease == false and .data.canReleaseWithOverride == true and (.data.shortages|length) == 1 and .data.shortages[0].required == 2 and .data.shortages[0].onHand == 0 and .data.shortages[0].short == 2'
 call POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: the PMO cannot release an order (shop supervisor or production manager only)" "سرپرست کارگاه"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDB}"; nomsg "mes: order B cannot be released without its approved drawing" "صدور ممکن نیست"
@@ -6065,6 +6114,14 @@ call GET "$MF/orders/$MFORDA/release-check"; check "mes: after the refresh all f
 # --- release of A
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; check "mes: the shop supervisor releases order A: first operation ready, the others wait, no kit, no override" '.success and .data.status == 1 and .data.releaseOverride == false and .data.kitRequestId == null and ([.data.operations[].status]) == [1,0,0] and (.data.releasedAtText|test("^1[34][0-9]{2}/[0-9]{2}/[0-9]{2}"))'
 ibx "$MSV_TOKEN" "mf:order:$MFORDA"; check "mes: and the release gate of A is closed" '.success and (.data.data|length) == 0'
+# Package B (first article): the first order of a part with a released characteristic list opens its first article at the release; the QC inspector measures every characteristic, ANOTHER QC inspector accepts and the QA manager approves (three people)
+as "$QC_TOKEN" GET "quality/first-articles/by-order/$MFORDA"; check "package b: releasing order A opened its first article (open, with the one characteristic of the drawing)" '.success and .data.status == 0 and (.data.lines|length) == 1 and (.data.number|startswith("FAI-"))'
+MFFAI=$(val .data.id); MFFCH=$(val '.data.lines[0].characteristicId')
+as "$QC_TOKEN" POST quality/first-articles/measure "{\"id\":$MFFAI,\"measurements\":[{\"characteristicId\":$MFFCH,\"measured\":50.02,\"equipmentId\":$G4}]}"; check "package b: the QC inspector measures the first article with the calibrated reference caliper (inside the tolerance of the list)" '.success and .data.status == 1 and .data.lines[0].pass == true'
+as "$QC_TOKEN" POST quality/first-articles/action "{\"id\":$MFFAI,\"action\":\"qc-accept\"}"; nomsg "package b: the inspector who measured cannot accept the first article" "تفکیک وظایف"
+as "$QC2_TOKEN" POST quality/first-articles/action "{\"id\":$MFFAI,\"action\":\"qc-accept\",\"note\":\"ابعاد مطابق نقشه\"}"; check "package b: a second QC inspector accepts it" '.success and .data.status == 2'
+as "$QC2_TOKEN" POST quality/first-articles/action "{\"id\":$MFFAI,\"action\":\"qa-approve\"}"; no "package b: the QC inspector who accepted it cannot also approve it as QA"
+as "$QA_TOKEN" POST quality/first-articles/action "{\"id\":$MFFAI,\"action\":\"qa-approve\",\"note\":\"تایید نمونه اول\"}"; check "package b: the QA manager approves the first article: the later steps of order A may run" '.success and .data.status == 3'
 call GET "inventory/trace/operations?WorkOrderId=$MFWO&PageSize=50"; check "mes: item A is lot tracked: release made one traceability row per operation (3) on the lot named like the order, pending, QC pending only on the inspection step" ".success and (.data.data|length) == 3 and ([.data.data[]|select(.lotNumber == \"$MFNOA\" and .serialNumber == null and .status == 0)]|length) == 3 and ([.data.data|sort_by(.sequence)[]|.sequence]) == [10,20,30] and ([.data.data|sort_by(.sequence)[]|.qcStatus]) == [0,1,0]"
 as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDA&PageSize=0"; check "mes: the release is in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) >= 1'
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: an order is released once" "صادر می‌شود"
@@ -6290,6 +6347,7 @@ mbdraft() { # mbdraft BOMPOSITION COUNT LABEL : BOM line + make process + draft 
   MBN=$(val .data.number)
 }
 mbrelease() { # mbrelease ORDERID LABEL
+  pkb_nodraw_order "$1"
   as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$1}"; check "mes B: the shop supervisor releases order $2: its operation is ready" '.success and .data.status == 1 and ([.data.operations[].status]) == [1]'
 }
 mbdraft 4 4 1; MBO1=$MBO; MBN1=$MBN
@@ -6324,6 +6382,7 @@ as "$QC_TOKEN" GET "quality/work-orders/$MBWO2/release-checks"; check "r1q D22: 
 # R1p D19: the second work order has its own ITP (drafted with its order): the client approves it before order F (and later order G) is released
 as "$QC_TOKEN" GET "quality/itps/by-work-order/$MBWO2"; check "mes B: the WBS hook drafted the ITP of the second work order too (a draft of the system)" '.success and .data.autoDrafted == true and .data.status == 0'
 MBITP2=$(val .data.id)
+pkb_nodraw_order "$MBOF"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MBOF}"; check "mes B: order F cannot be released before the client approved the ITP of its work order (D19): the refusal names the check" '.success == false and (.message|contains("ITP"))'
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$MBITP2,\"action\":\"submit\"}"; check "mes B: QC submits the ITP of the second work order" '.success and .data.status == 1'
 as "$QA_TOKEN" POST quality/itps/action "{\"id\":$MBITP2,\"action\":\"client-approve\",\"reference\":\"CL-MF-2\"}"; check "mes B: the quality assurance manager records the client approval of the second ITP" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-MF-2"'
@@ -6637,6 +6696,7 @@ r1draft() { # r1draft POSITION COUNT EXITCODE LABEL : BOM line + make process + 
 r1draft 3 2 "77.10.00.009.1" "قطعه جوشکاری R1"; R1OH=$R1O; R1NH=$R1N
 call GET "$MF/orders/$R1OH"; check "mes R1p: the draft order H carries a welding step with the procedure of the standard and the planned hours (setup 0.5 h, run 1 h x 2 pieces) (D12)" ".success and (.data.operations|length) == 1 and (.data.operations[0] | .isWelding == true and .wpsId == $R1WPS and .wpsNumber == \"WPS-004/0\" and .setupHoursPlanned == 0.5 and .runHoursPlanned == 2 and .workCenterId == $R1WW)"
 R1HOP=$(val '.data.operations[0].id')
+pkb_nodraw_order "$R1OH"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$R1OH}"; check "mes R1p: the shop supervisor releases order H: the welding step is ready (a welding procedure is not a release check, the terminal enforces it)" '.success and .data.status == 1 and ([.data.operations[].status]) == [1]'
 mfuser mf.wd.ci 22 'Ci#Mfwd-User-2026' 55
 MWD_TOKEN=$(login mf.wd.ci 'Ci#Mfwd-User-2026'); MWDID=$(uid "$MWD_TOKEN")
@@ -6668,6 +6728,7 @@ as "$MSV_TOKEN" GET "$MF/bookings?OperationId=$R1HOP&PageSize=0"; check "mes R1p
 
 # --- D43, D33, D7, D38: order J1 of 5 pieces: step 10 on the machining centre, step 20 inspected by QC
 r1draft 4 5 "77.10.00.010.1" "قطعه ماشینکاری R1 یک"; R1OJ1=$R1O; R1NJ1=$R1N
+pkb_nodraw_order "$R1OJ1"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$R1OJ1}"; check "mes R1p: order J1 (5 pieces) is released: step 10 ready, step 20 waits" '.success and .data.status == 1 and ([.data.operations[].status]) == [1,0]'
 R1J1A=$(val '.data.operations[0].id'); R1J1B=$(val '.data.operations[1].id')
 as "$MOP_TOKEN" GET "$MF/terminal/scan?Code=$R1NJ1/10"; check "mes R1p: the terminal tells the operator that step 10 needs a machine and has to report the 5 pieces (D43, D7)" ".success and (.data.data|length) == 1 and (.data.data[0] | .id == $R1J1A and .machineRequired == true and .expectedQty == 5 and .isWelding == false)"
@@ -6705,6 +6766,7 @@ as "$MPM_TOKEN" POST $MF/orders/action "{\"id\":$R1RPJ1,\"action\":\"cancel\",\"
 
 # --- D6: a rejected step goes on only by the decision of an approved NCR - order J2 (4 pieces) by a concession
 r1run10() { # r1run10 ORDERID LABEL QTY : release, step 10 on the machine R1M with QTY good pieces, step 20 started and finished on the inspection machine (QC hold); sets R1OP10 and R1OP20
+  pkb_nodraw_order "$1"
   as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$1}"; check "mes R1p: order $2 is released: step 10 ready, step 20 waits" '.success and .data.status == 1 and ([.data.operations[].status]) == [1,0]'
   R1OP10=$(val '.data.operations[0].id'); R1OP20=$(val '.data.operations[1].id')
   as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$R1OP10,\"machineId\":$R1M,\"kind\":2}"; check "mes R1p: the operator starts step 10 of $2 on machine R1M" '.success and .data.status == 2'
@@ -11308,6 +11370,7 @@ PB4ITP=$(val .data.id)
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"submit\"}"; check "pb4 chain: QC submits the ITP to the client" '.success and .data.status == 1'
 as "$QA_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"client-approve\",\"reference\":\"CL-PB4-1\"}"; check "pb4 chain: the QA manager records the client approval of the ITP" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-PB4-1"'
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$PB4ORD,\"components\":[{\"itemId\":$RAW,\"quantity\":2}]}"; check "pb4 chain: the components of the order are 2 of the raw material" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2'
+pkb_nodraw_order "$PB4ORD"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PB4ORD}"; check "pb4 chain: the order is released with a kit (a draft material request)" '.success and .data.status == 1 and .data.kitRequestId > 0'
 PB4KIT=$(val .data.kitRequestId)
 as "$MSV_TOKEN" POST inventory/material-requests/action "{\"id\":$PB4KIT,\"action\":\"submit\"}"; check "pb4 chain: the kit is submitted" '.success and .data.status == 1'
@@ -11630,6 +11693,69 @@ PBD_CID2=$(val '.data.id')
 as "$PMO2_TOKEN" POST safety/changes/$PBD_CID2/cancel; no "pbd: only the requester cancels"
 as "$ADMIN_TOKEN" POST safety/changes/$PBD_CID2/cancel; check "pbd: the requester cancels his open request" '.success and .data.status == "Cancelled"'
 as "$ADMIN_TOKEN" GET safety/profile; check "pbd: the cancelled request changed nothing (the revision requirement is still 0)" '.success and ([.data[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.current == "0" and .deviates == true and .pendingRequestId == null)'
+
+# --- PKB (Package B: inspection and release integrity). Exact checks; every request is checked, no check sits between a request and the reads of its answer. The settings stay at their strict defaults (nothing here weakens a gate).
+# the characteristic list of the bolt drawing (released together with the drawing, in the quality section above): immutable, a correction is a new version with a reason, the maker never approves it
+as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBBOLTLIST"; check "pkb: the list of the bolt drawing is Released with its two characteristics and a SHA-256 of the content" '.success and .data.status == 3 and .data.version == 1 and (.data.items|length) == 2 and (.data.contentHash|length) == 64 and .data.revisionInForce == true'
+as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBOLTREV" --argjson i "$PKBBOLTLIST" --argjson l "$( { pkb_line 1 Bore 100 0.5 0.5 mm; } | jq -sc . )" '{id:$i,revisionId:$r,items:$l}')"; nomsg "pkb: a released list cannot be edited" "فهرست منتشرشده تغییر نمی‌کند"
+as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBBOLTLIST,\"action\":\"void\",\"note\":\"x\"}"; nomsg "pkb: a released list cannot be voided" "باطل نمی‌شود"
+as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBOLTREV" --argjson l "$( { pkb_line 1 Bore 100 0.06 0.06 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )" '{revisionId:$r,items:$l}')"; nomsg "pkb: a new version of a released list needs a reason" "دلیل اصلاح"
+as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBOLTREV" --argjson l "$( { pkb_line 1 Bore 100 0.06 0.06 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )" '{revisionId:$r,reason:"اصلاح تلرانس قطر پس از بازبینی",items:$l}')"; check "pkb: the new version 2 is a draft that supersedes nothing yet" '.success and .data.version == 2 and .data.status == 0 and .data.supersedesListId != null'
+PKBV2=$(val .data.id)
+as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"submit\"}"; check "pkb: engineering submits version 2" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"approve\"}"; check "pkb: the QA manager approves version 2; the drawing is in force, so the list is released at once and version 1 is superseded" '.success and .data.status == 3'
+as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBBOLTLIST"; check "pkb: version 1 is Superseded and kept (never deleted)" '.success and .data.status == 4 and (.data.items|length) == 2'
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the part answers with its drawing and the released lines of version 2 (the bore tolerance is 0.06)" '.success and .data.hasDrawing == true and .data.hasReleasedList == true and (.data.lines|length) == 2 and ([.data.lines[]|select(.name == "Bore")][0].tolPlus) == 0.06'
+# the pick: the inspector chooses a characteristic of the list and types the measured value; the nominal and the tolerances are the list's, pass is computed on the server
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Hole\",\"nominal\":5,\"tolPlus\":1,\"tolMinus\":1,\"measured\":5,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; nomsg "pkb: a characteristic that is not on the drawing list is refused" "در فهرست مشخصه‌های نقشه این قطعه نیست"
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the released lines of the bolt are read again for the id of the bore" '.success and (.data.lines|length) == 2'; PKBBORE=$(val '[.data.lines[]|select(.name == "Bore")][0].id')
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBBORE,\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":9,\"tolMinus\":9,\"measured\":100.2,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; nomsg "pkb: the tolerance typed by the client is ignored: 100.2 is out of the 0.06 of the list, so it cannot be accepted" "خارج از تلرانس"
+# a part with a critical and a major characteristic: an acceptance needs both, the instrument class of the list is checked
+item PKBP '{"code":"66.10.00.001.1","title":"قطعه آزمون بسته ب","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkb: the part with a critical and a major characteristic"
+PKBPL=$( { jq -nc '{no:"1",name:"Bore",nominal:40,tolPlus:0.02,tolMinus:0.02,unit:"mm",class:1,instrumentClass:1,samplePercent:100}'; jq -nc '{no:"2",name:"Length",nominal:80,tolPlus:0.1,tolMinus:0.1,unit:"mm",class:2,instrumentClass:99,samplePercent:100}'; } | jq -sc . )
+pkb_drawing "$PKBP" "PKB-DWG-PKBP" "$PKBPL"; PKBPLIST=$PKBLIST
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$PKBP"; check "pkb: the part has its drawing and two released lines" '.success and .data.hasDrawing == true and .data.hasReleasedList == true and (.data.lines|length) == 2'
+PKBPB=$(val '[.data.lines[]|select(.name == "Bore")][0].id'); PKBPLN=$(val '[.data.lines[]|select(.name == "Length")][0].id')
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$PKBP,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBPB,\"measured\":40,\"equipmentId\":$G4}]}"; nomsg "pkb: an acceptance without the major characteristic is refused (every required characteristic is measured)" "مشخصه‌های الزامی اندازه‌گیری نشده‌اند"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$PKBP,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBPB,\"measured\":40,\"equipmentId\":$PG1},{\"characteristicId\":$PKBPLN,\"measured\":80,\"equipmentId\":$G4}]}"; nomsg "pkb: the bore must be measured with a hand tool: a pressure gauge is refused" "باید با"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$PKBP,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBPB,\"measured\":40.05,\"equipmentId\":$G4},{\"characteristicId\":$PKBPLN,\"measured\":80,\"equipmentId\":$G4}]}"; nomsg "pkb: a critical value out of tolerance cannot be accepted" "خارج از تلرانس"
+as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$PKBP,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBPB,\"characteristic\":\"Bore\",\"nominal\":999,\"tolPlus\":999,\"tolMinus\":999,\"measured\":40.01,\"unit\":\"mm\",\"equipmentId\":$G4},{\"characteristicId\":$PKBPLN,\"measured\":80,\"equipmentId\":$G4}]}"; check "pkb: with both required characteristics inside the list tolerance the record is accepted; the nominal is the list's (40), pass is computed, and the record keeps the drawing and the list" ".success and .data.result == 1 and (.data.measurements|length) == 2 and ([.data.measurements[]|select(.characteristicNo == \"1\")][0] | .nominal == 40 and .tolPlus == 0.02 and .pass == true) and .data.drawingNumber == \"PKB-DWG-PKBP\" and .data.characteristicListId == $PKBPLIST and .data.drawingRevisionId != null"
+# «بدون نقشه»: a part without a drawing: a reason, a second human activates the flag, a rejection needs a note, a void needs a reason, and nothing is deleted
+item PKBN '{"code":"66.10.00.002.1","title":"قطعه آزمون بدون نقشه","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkb: the part without a drawing"
+as "$ENG_TOKEN" POST quality/no-drawing/request "{\"itemId\":$PKBN,\"reason\":\"کوتاه\"}"; nomsg "pkb: the reason of the flag has a minimum length" "دست‌کم"
+as "$ENG_TOKEN" POST quality/no-drawing/request "{\"itemId\":$PKBN,\"reason\":\"قطعه ساده بدون نقشه جداگانه برای آزمون بسته ب\"}"; check "pkb: engineering asks for the flag: pending" '.success and .data.status == 0 and (.data.actions|index("approve")) == null'
+PKBF1=$(val .data.id)
+as "$QC_TOKEN" POST quality/no-drawing/request "{\"itemId\":$PKBN,\"reason\":\"قطعه ساده بدون نقشه جداگانه برای آزمون بسته ب\"}"; no "pkb: quality cannot ask for the flag (engineering only)"
+as "$ENG_TOKEN" POST quality/no-drawing/request "{\"itemId\":$PKBN,\"reason\":\"قطعه ساده بدون نقشه جداگانه برای آزمون بسته ب\"}"; nomsg "pkb: one live flag per part" "در جریان یا فعال است"
+as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$PKBF1,\"action\":\"reject\"}"; nomsg "pkb: a rejection needs a note" "دلیل رد"
+as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$PKBF1,\"action\":\"reject\",\"note\":\"دلیل کافی نیست\"}"; check "pkb: the second person rejects the first request" '.success and .data.status == 2'
+as "$ENG_TOKEN" POST quality/no-drawing/request "{\"itemId\":$PKBN,\"reason\":\"قطعه ساده بدون نقشه؛ مشخصات در دستور کار آمده است\"}"; check "pkb: a new request is allowed after a rejection" '.success and .data.status == 0'
+PKBF2=$(val .data.id)
+as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$PKBF2,\"action\":\"approve\"}"; check "pkb: the second person activates the flag" '.success and .data.status == 1 and .data.decidedByName != null'
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$PKBN"; check "pkb: the part now answers: no drawing, flag active" '.success and .data.hasDrawing == false and .data.noDrawingActive == true'
+as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$PKBF2,\"action\":\"void\"}"; nomsg "pkb: a void needs a reason" "دلیل ابطال"
+as "$PMO2_TOKEN" POST quality/no-drawing/action "{\"id\":$PKBF2,\"action\":\"void\",\"note\":\"نقشه قطعه منتشر شد\"}"; check "pkb: the flag is voided with its reason" '.success and .data.status == 3 and .data.voidReason != null'
+as "$ADMIN_TOKEN" GET "quality/no-drawing?ItemId=$PKBN"; check "pkb: both requests are kept (one rejected, one voided): nothing is deleted" '.success and .data.totalItems == 2 and ([.data.data[]|.status]|sort) == [2,3]'
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$PKBN"; check "pkb: after the void the part answers without a flag" '.success and .data.noDrawingActive == false'
+# the first article of order A (approved in the MES section): kept, listed, and an approved one is not voided
+as "$QC_TOKEN" GET "quality/first-articles/$MFFAI"; check "pkb: the first article of order A is Approved by three different people and carries the configuration it covers" '.success and .data.status == 3 and .data.measuredByName != null and .data.qcAcceptedByName != null and .data.qaApprovedByName != null and (.data.fingerprint|startswith("d:")) and .data.itemId == '"$MFPA"
+as "$QA_TOKEN" POST quality/first-articles/action "{\"id\":$MFFAI,\"action\":\"void\",\"note\":\"x\"}"; no "pkb: an approved first article is not voided"
+as "$QC_TOKEN" GET "quality/first-articles?ItemId=$MFPA"; check "pkb: one first article exists for item A" '.success and .data.totalItems == 1'
+# the as-built record: issued by the release note of work order 1 (the 5 bolts, one lot line), immutable (the hash is recomputed on every read), a correction is a new version by QA with a reason
+as "$QC_TOKEN" GET "quality/as-built?WorkOrderId=$WO1"; check "pkb: the release of work order 1 issued one as-built record (the lot line of the 5 bolts), version 1, current" '.success and .data.totalItems == 1 and .data.data[0].itemId == '"$BOLT"' and .data.data[0].version == 1 and .data.data[0].status == 0 and (.data.data[0].sha256|length) == 64'
+PKBAB=$(val '.data.data[0].id')
+as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: the stored snapshot hashes to the recorded SHA-256" '.success and .data.hashOk == true and .data.recomputedSha256 == .data.sha256'
+as "$QC_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; no "pkb: only the QA manager asks for a re-issue of an as-built record"
+as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"x\"}"; no "pkb: a re-issue needs a real reason"
+as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; check "pkb: the QA manager asks for a re-issue: version 2 waits (Pending) and version 1 stays in force" '.success and .data.version == 2 and .data.status == 2 and .data.hashOk == true'
+PKBAB2=$(val .data.id)
+as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"درخواست دوم برای همین واحد\"}"; nomsg "pkb: one re-issue request per unit at a time" "در انتظار تایید"
+as "$QA_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":true}"; no "pkb: the QA manager who asked cannot approve his own request (and QA is not an approver)"
+as "$ADMIN_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":false}"; nomsg "pkb: a refusal of the re-issue needs a note" "دلیل رد"
+as "$ADMIN_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":true,\"note\":\"تایید\"}"; check "pkb: the PMO approves the re-issue: version 2 is current" '.success and .data.version == 2 and .data.status == 0 and .data.hashOk == true'
+as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: version 1 is Superseded and untouched (its hash still matches)" '.success and .data.status == 1 and .data.hashOk == true and (.data.versions|length) == 2'
+as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "pkb: the physical configuration audit is a release check and passes for a work order without a project BOM baseline" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")|.passed][0]) == true'
+as "$QC_TOKEN" GET "quality/work-orders/$WO1/data-book"; check "pkb: the data book has section 12 with the current as-built record (the re-issued version)" '.success and ([.data.sections[]|select(.no == 12)|.entries|length][0]) == 1'
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

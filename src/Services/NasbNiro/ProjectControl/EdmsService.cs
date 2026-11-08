@@ -246,6 +246,11 @@ namespace Services.NasbNiro.ProjectControl
                 bool received = r.ReceivedFromClient && r.Status == PcDocStatus.UnderReview;
                 if (r.Status != PcDocStatus.Approved && !received) return Bad<PcRevisionDto>("فقط بازنگری تاییدشده منتشر می‌شود.");
                 PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().FirstAsync(x => x.Id == r.DeliverableId, ct);
+                if (!received)
+                {
+                    string listProblem = await global::Services.NasbNiro.Quality.CharacteristicRelease.ReleaseProblemAsync(_uow, d.Id, r.Id, ct);
+                    if (listProblem != null) return Bad<PcRevisionDto>(listProblem);
+                }
                 List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
                 List<PcDocumentRevision> previous = await _uow.Set<PcDocumentRevision>().Where(x => x.DeliverableId == d.Id && x.Id != r.Id && !x.Deleted && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt)).ToListAsync(ct);
                 DateTimeOffset now = DateTimeOffset.Now;
@@ -260,6 +265,8 @@ namespace Services.NasbNiro.ProjectControl
                     catch (DbUpdateConcurrencyException) { return Bad<PcRevisionDto>(PcText.Concurrency); }
                 }
                 r.Status = PcDocStatus.Released; r.ReleasedByUserId = Me; r.ReleasedAt = now;
+                // Package B: the approved characteristic list of the revision is released with it; the lists of the superseded revisions are superseded
+                await global::Services.NasbNiro.Quality.CharacteristicRelease.OnRevisionReleasedAsync(_uow, r.Id, previous.Select(x => x.Id), now, ct);
                 if (received) { r.ApproverUserId = Me; r.ApprovedAt = now; }
                 PcDocumentRevisionFile primary = files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Pdf) ?? files.FirstOrDefault(f => f.Role == PcRevisionFileRole.Native) ?? files.FirstOrDefault();
                 d.Revision = r.Code; if (primary != null) d.DocumentId = primary.DocumentId;

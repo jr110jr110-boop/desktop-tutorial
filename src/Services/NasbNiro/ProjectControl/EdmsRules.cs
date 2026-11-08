@@ -168,7 +168,7 @@ namespace Services.NasbNiro.ProjectControl
     /// The one place that answers "which documents belong to this order / part / tag and which revision of each is in force". The shop floor viewer, the production release gate and the part view
     /// all use it, so the three can never disagree.
     /// </summary>
-    public static class EdmsResolver
+    public static partial class EdmsResolver
     {
         public static async Task<EdmsKeys> KeysOfOrderAsync(IUnitOfWork uow, MfProductionOrder order, CancellationToken ct)
         {

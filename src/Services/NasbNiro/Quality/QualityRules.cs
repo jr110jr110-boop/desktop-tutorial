@@ -130,6 +130,17 @@ namespace Services.NasbNiro.Quality
             { QualitySettingKeys.StagnantDays, new KeyValuePair<int, int>(14, 1000) },
             { QualitySettingKeys.StagnantDeadDays, new KeyValuePair<int, int>(30, 2000) },
             { QualitySettingKeys.ReorderUseDays, new KeyValuePair<int, int>(7, 730) },
+            // Package B: a sample is never below one percent for critical and major (zero only for a minor characteristic), the flags are 0/1
+            { QualitySettingKeys.PkbSampleCritical, new KeyValuePair<int, int>(1, 100) },
+            { QualitySettingKeys.PkbSampleMajor, new KeyValuePair<int, int>(1, 100) },
+            { QualitySettingKeys.PkbSampleMinor, new KeyValuePair<int, int>(0, 100) },
+            { QualitySettingKeys.PkbFaiEnforce, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkbFaiOnNewRevision, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkbPcaEnabled, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkbPcaTolerance, new KeyValuePair<int, int>(0, 50) },
+            { QualitySettingKeys.PkbNoDrawingReasonMin, new KeyValuePair<int, int>(5, 200) },
+            { QualitySettingKeys.PkbIncomingBulkSamples, new KeyValuePair<int, int>(1, 50) },
+            { QualitySettingKeys.PkbPcaBulkExtra, new KeyValuePair<int, int>(0, 50) },
         };
 
         public static bool TryGetBounds(string key, out int min, out int max)

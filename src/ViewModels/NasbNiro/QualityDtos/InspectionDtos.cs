@@ -19,6 +19,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public int? EquipmentId { get; set; }
         public string EquipmentCode { get; set; }
         public bool Pass { get; set; }
+        /// <summary>Package B: the characteristic of the released list this value was picked from, and its number on the drawing.</summary>
+        public int? CharacteristicId { get; set; }
+        public string CharacteristicNo { get; set; }
     }
 
     public class QcRecordListDto
@@ -48,6 +51,8 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Operation { get; set; }
         public string DrawingNumber { get; set; }
         public string DrawingRevision { get; set; }
+        public int? DrawingRevisionId { get; set; }
+        public int? CharacteristicListId { get; set; }
         public Guid? AttachmentDocumentId { get; set; }
         public string Note { get; set; }
         public List<QcMeasurementDto> Measurements { get; set; } = new List<QcMeasurementDto>();
@@ -64,6 +69,8 @@ namespace ViewModels.NasbNiro.QualityDtos
 
     public class SaveQcMeasurementDto
     {
+        /// <summary>Package B: the characteristic of the released list. The nominal, tolerances and unit below are ignored when a list governs the part (they come from the list).</summary>
+        public int? CharacteristicId { get; set; }
         public string Characteristic { get; set; }
         public decimal Nominal { get; set; }
         public decimal TolPlus { get; set; }
@@ -83,6 +90,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string SerialNumber { get; set; }
         public decimal Quantity { get; set; }
         public string Operation { get; set; }
+
+        /// <summary>Package B: the routing step (sequence) of an in-process inspection; it narrows the characteristics the record must cover. Set by MES.</summary>
+        public int? OperationSequence { get; set; }
         public string DrawingNumber { get; set; }
         public string DrawingRevision { get; set; }
         public DateTime? RecordDate { get; set; }

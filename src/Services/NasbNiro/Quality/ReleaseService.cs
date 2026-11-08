@@ -279,6 +279,11 @@ namespace Services.NasbNiro.Quality
                     Missing = d.Required && d.IssueState != Entities.Model.NasbNiro.ProjectControl.PcIssueState.Approved, ClientRelevant = d.ClientSubmittal,
                 });
             if (s11.Entries.Count > 0) book.Sections.Add(s11);
+            // 12: the as-built record of every released unit (Package B); issued by the release, so it is not a mandatory entry
+            var s12 = new DataBookSectionDto { No = 12, Name = "پیکربندی ساخته‌شده (As-Built) هر واحد" };
+            foreach (AsBuiltRecord ab in await _uow.Set<AsBuiltRecord>().Where(a => a.WorkOrderId == wo.Id && !a.Deleted && a.Status == AsBuiltStatus.Current).OrderBy(a => a.ItemId).ThenBy(a => a.SerialNumber).ToListAsync(cancellationToken))
+                s12.Entries.Add(new DataBookEntryDto { SourceKind = "AsBuilt", SourceId = ab.Id, Number = (ab.SerialNumber ?? ab.ProductCode) + " v" + ab.Version, Title = $"{ab.ProductCode}{(ab.SerialNumber == null ? string.Empty : " — " + ab.SerialNumber)} — SHA-256 {ab.Sha256.Substring(0, 12)}", Status = "Current", Mandatory = false, Missing = false, ClientRelevant = true });
+            if (s12.Entries.Count > 0) book.Sections.Add(s12);
             // client relevance: until the MDL table exists, an entry is for the client when its ITP activity has a client point
             var clientActivities = new HashSet<int>(itp == null ? new List<int>() : itp.Activities.Where(x => x.PointClient != ItpPoint.None).Select(x => x.Id));
             var reportActivity = reports.Where(r => r.ItpActivityId.HasValue).ToDictionary(r => r.Id, r => r.ItpActivityId.Value);
@@ -315,7 +320,7 @@ namespace Services.NasbNiro.Quality
 
         // -------------------------------------------------------------------------------- release checks
 
-        private async Task<List<ReleaseCheckDto>> ComputeChecksAsync(WorkOrder wo, CancellationToken cancellationToken)
+        private async Task<List<ReleaseCheckDto>> ComputeChecksAsync(WorkOrder wo, CancellationToken cancellationToken, int? releaseNoteId = null)
         {
             var checks = new List<ReleaseCheckDto>();
             Itp itp = await _uow.Set<Itp>().Include(i => i.Activities).FirstOrDefaultAsync(i => i.WorkOrderId == wo.Id && !i.Deleted, cancellationToken);
@@ -388,11 +393,19 @@ namespace Services.NasbNiro.Quality
                 Detail = lastFinal == null ? "بازرسی نهایی ثبت نشده است." : lastFinal == QcResult.Accept ? "-" : "نتیجه آخرین بازرسی نهایی: " + ResultText(lastFinal.Value),
             });
             DataBookDto book = await BuildBookAsync(wo, cancellationToken);
-            var missing = book.Sections.Where(s => s.No != 10 && s.No != 11).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
+            var missing = book.Sections.Where(s => s.No != 10).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
             checks.Add(new ReleaseCheckDto
             {
                 Code = "DATABOOK_COMPLETE", Title = "فهرست کتاب نهایی (Final Data Book) مورد الزامی ناقص ندارد", Passed = missing.Count == 0,
                 Detail = missing.Count == 0 ? "-" : $"{missing.Count} مورد ناقص: " + string.Join("، ", missing.Take(8)) + (missing.Count > 8 ? "…" : string.Empty),
+            });
+            // Package B (ISO 10007): the physical configuration audit; a work order without a project BOM baseline passes as "not applicable"
+            PcaResult pca = await PhysicalConfigurationAudit.RunAsync(_uow, wo.Id, cancellationToken, releaseNoteId);
+            List<string> pcaProblems = pca.Problems;
+            checks.Add(new ReleaseCheckDto
+            {
+                Code = "PCA_MATCH", Title = "ممیزی پیکربندی فیزیکی: هر ردیف BOM پروژه بچ یا سریال نصب‌شده با مقدار برابر دارد", Passed = pca.Passed,
+                Detail = !pca.Applicable ? "اعمال نمی‌شود: " + pca.NotApplicableReason : pcaProblems.Count == 0 ? "-" : $"{pcaProblems.Count} ردیف ناهمخوان: " + string.Join(" | ", pcaProblems.Take(8)) + (pcaProblems.Count > 8 ? "…" : string.Empty),
             });
             return checks;
         }
@@ -419,7 +432,7 @@ namespace Services.NasbNiro.Quality
                     SerialNumbers = (l.SerialNumbers ?? string.Empty).Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList(),
                 }).ToList();
             List<ReleaseCheckDto> checks;
-            if (r.Status == ReleaseNoteStatus.Draft) checks = await ComputeChecksAsync(wo, cancellationToken);
+            if (r.Status == ReleaseNoteStatus.Draft) checks = await ComputeChecksAsync(wo, cancellationToken, r.Id);
             else checks = string.IsNullOrWhiteSpace(r.ChecksSnapshot) ? new List<ReleaseCheckDto>() : JsonSerializer.Deserialize<List<ReleaseCheckDto>>(r.ChecksSnapshot);
             bool ready = r.Status == ReleaseNoteStatus.Draft && lines.Count > 0 && checks.All(c => c.Passed);
             // R1-gaps: the caller may sign (release) when the action's own predicate lets him and the note is ready (items valid against the work order now, every check passed)
@@ -616,19 +629,26 @@ namespace Services.NasbNiro.Quality
                     Dictionary<int, InventoryItem> lineItems = await _uow.Set<InventoryItem>().Where(i => savedLines.Select(l => l.ItemId).Contains(i.Id)).ToDictionaryAsync(i => i.Id, cancellationToken);
                     string linesProblem = await LinesProblemAsync(wo, savedLines, lineItems, cancellationToken);
                     if (linesProblem != null) return Bad<ReleaseNoteDto>("ترخیص ممکن نیست: " + linesProblem);
-                    List<ReleaseCheckDto> checks = await ComputeChecksAsync(wo, cancellationToken);
+                    List<ReleaseCheckDto> checks = await ComputeChecksAsync(wo, cancellationToken, r.Id);
                     List<ReleaseCheckDto> failed = checks.Where(c => !c.Passed).ToList();
                     if (failed.Count > 0) return Bad<ReleaseNoteDto>("ترخیص ممکن نیست: " + string.Join(" | ", failed.Select(c => c.Title + (c.Detail == "-" ? string.Empty : " (" + c.Detail + ")"))));
                     r.Status = ReleaseNoteStatus.Released; r.ReleasedAt = now; r.ReleasedByUserId = Me;
                     r.CertificateOfConformityNumber = "CoC-" + r.Number;
                     r.ChecksSnapshot = JsonSerializer.Serialize(checks);
+                    // Package B (H10): the as-built record of every released unit, issued in the same transaction as the release (immutable; a correction is a new version)
+                    await AsBuiltBuilder.IssueAsync(_uow, r, wo, "ترخیص " + r.Number, now, Me, cancellationToken);
                     break;
                 case "cancel":
                     string cancelProblem = ReleaseNoteRules.CancelProblem(r, _user.IsInRole);
                     if (cancelProblem != null) return Bad<ReleaseNoteDto>(cancelProblem);
                     if (Clean(dto.Reason) == null) return Bad<ReleaseNoteDto>("دلیل لغو را بنویسید.");
                     if (Clean(dto.Reason).Length > 1000) return Bad<ReleaseNoteDto>("دلیل لغو نباید بیش از ۱۰۰۰ نویسه باشد.");
+                    bool wasReleased = r.Status == ReleaseNoteStatus.Released;
                     r.Status = ReleaseNoteStatus.Cancelled; r.CancelReason = Clean(dto.Reason);
+                    // M6: the as-built records of a cancelled release are no longer current: they are superseded with the cancel reason (kept, never deleted)
+                    if (wasReleased)
+                        foreach (AsBuiltRecord ab in await _uow.Set<AsBuiltRecord>().Where(a => a.ReleaseNoteId == r.Id && !a.Deleted && a.Status == AsBuiltStatus.Current).ToListAsync(cancellationToken))
+                        { ab.Status = AsBuiltStatus.Superseded; ab.Reason = ((ab.Reason ?? string.Empty) + " | لغو ترخیص: " + r.CancelReason).Trim(' ', '|'); if (ab.Reason.Length > 1000) ab.Reason = ab.Reason.Substring(0, 1000); ab.ModifyDate = now; ab.ModifierUserId = Me; }
                     break;
                 default:
                     return Bad<ReleaseNoteDto>("عملیات نامعتبر است.");

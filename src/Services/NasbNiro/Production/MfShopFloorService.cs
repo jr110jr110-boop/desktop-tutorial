@@ -296,6 +296,8 @@ namespace Services.NasbNiro.Production
             Loaded l = await LoadAsync(dto.OperationId, true, ct);
             if (l.Error != null) return Bad<TerminalOperationDto>(l.Error);
             if (l.Op.IsOutside) return Bad<TerminalOperationDto>("عملیات بیرونی روی ترمینال کارگاه شروع نمی‌شود.");
+            string faiStart = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct);
+            if (faiStart != null) return Bad<TerminalOperationDto>(faiStart);
 
             // the kit may have been issued since the last look
             await _flow.ApplyAsync(l.Order, l.All, ct);
@@ -578,6 +580,8 @@ namespace Services.NasbNiro.Production
             Loaded l = await LoadAsync(dto.OperationId, true, ct);
             if (l.Error != null) return Bad<TerminalOperationDto>(l.Error);
             if (l.Op.Status != MfOperationStatus.InProgress && l.Op.Status != MfOperationStatus.Paused) return Bad<TerminalOperationDto>("فقط عملیاتی که شروع شده پایان می‌یابد.");
+            string faiFinish = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct, dto.GoodQty + dto.ScrapQty);
+            if (faiFinish != null) return Bad<TerminalOperationDto>(faiFinish);
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید.");
             // PB8: before anything is changed, the rules look at the time of the running booking and the quantities of this finish

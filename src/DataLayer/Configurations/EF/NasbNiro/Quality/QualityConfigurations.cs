@@ -16,6 +16,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
 
         public static void AddQualityConfigurations(this ModelBuilder builder)
         {
+            builder.AddInspectionReleaseConfigurations();
+
             // ------------------------------------------------------------------ ITP
             builder.Entity<ItpTemplate>(b =>
             {
@@ -117,6 +119,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.Operation).HasMaxLength(Title);
                 b.Property(x => x.DrawingNumber).HasMaxLength(Name);
                 b.Property(x => x.DrawingRevision).HasMaxLength(Code);
+                b.HasIndex(x => x.CharacteristicListId);
                 b.Property(x => x.Note).HasMaxLength(LongText);
                 b.HasOne(x => x.WorkOrder).WithMany().HasForeignKey(x => x.WorkOrderId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne(x => x.ItpActivity).WithMany().HasForeignKey(x => x.ItpActivityId).OnDelete(DeleteBehavior.Restrict);
@@ -133,7 +136,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.TolMinus).HasPrecision(18, 4);
                 b.Property(x => x.Measured).HasPrecision(18, 4);
                 b.Property(x => x.Unit).HasMaxLength(Code);
+                b.Property(x => x.CharacteristicNo).HasMaxLength(Code);
                 b.HasIndex(x => x.EquipmentId);
+                b.HasIndex(x => x.CharacteristicId);
                 b.HasOne(x => x.Record).WithMany(x => x.Measurements).HasForeignKey(x => x.RecordId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(x => x.Equipment).WithMany().HasForeignKey(x => x.EquipmentId).OnDelete(DeleteBehavior.Restrict);
             });

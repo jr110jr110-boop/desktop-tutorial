@@ -343,6 +343,8 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
     public class QcMeasurementInputDto
     {
+        /// <summary>Package B: the characteristic of the released list of the part's drawing revision. When a list governs the part the nominal and tolerances below are ignored (they come from the list).</summary>
+        public int? CharacteristicId { get; set; }
         public string Characteristic { get; set; }
         public decimal Nominal { get; set; }
         public decimal TolPlus { get; set; }
