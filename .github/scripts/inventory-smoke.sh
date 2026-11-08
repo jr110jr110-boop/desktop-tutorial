@@ -7950,10 +7950,10 @@ print("%04d/%02d/%02d" % (jy, jm, jd))
 PYJ
 }
 
-AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true"
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true"
 as "$CEO_TOKEN" GET $AI/admin/seats
-check "ai seats: the CEO reads exactly the seven seats with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
-check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 7'
+check "ai seats: the CEO reads exactly the eight seats (PB8: OPS-DATA is the eighth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 8'
 as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
 as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
 as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
@@ -10820,7 +10820,7 @@ TOKEN=$ADMIN_TOKEN
 # --- stage dictionary and settings
 as "$ENG_TOKEN" GET $PB/coding/stages; check "pb1: the stage dictionary is seeded: 39 stages, no duplicate code, RW and RG are two different stages with Persian titles" '.success and (.data|length) == 39 and ([.data[].code]|unique|length) == 39 and ([.data[]|select(.code=="RW" or .code=="RG")]|length) == 2 and all(.data[]; (.titleFa|length) > 0 and (.code|length) == 2)'
 as "$ENG_TOKEN" GET $PB/coding/settings; check "pb1: the stage separator setting is a minus sign" '.success and ([.data[]|select(.key=="StageSeparator")][0].value) == "-"'
-check "pb1: the signature-distinctness and demo-data settings are both off by default" '.success and ([.data[]|select(.key=="BomSignatures:DistinctReviewers")][0].value) == "false" and ([.data[]|select(.key=="DemoData:Enabled")][0].value) == "false"'
+check "pb1: the signature-distinctness setting is on by default (CEO decision D13) and demo data is off" '.success and ([.data[]|select(.key=="BomSignatures:DistinctReviewers")][0].value) == "true" and ([.data[]|select(.key=="DemoData:Enabled")][0].value) == "false"'
 as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"DemoData:Enabled","value":"true"}'; nomsg "pb1: only the PMO turns the demo data on (the service refuses planning)" "مجوز"
 as "$ENG_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"maybe"}'; no "pb1: a yes/no setting refuses other text"
 as "$WH_TOKEN" POST $PB/coding/settings '{"key":"StageSeparator","value":"/"}'; r403 "pb1: the warehouse cannot change the separator (403)"
@@ -10873,7 +10873,7 @@ as "$ENG_TOKEN" GET "$PB/boms/diff?from=$PBB0&to=$PBB1"; check "pb1: the diff sa
 as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=88.11.01.002.2"; check "pb1: where-used finds the part in both revisions of the BOM (qty 2 in 00, 4 in 01)" '.success and (.data.rows|length) == 2 and ([.data.rows[].qty]|sort) == [2,4]'
 as "$ENG_TOKEN" GET "$PB/boms?ProductId=$PBPROD&PageSize=0"; check "pb1: the list shows both revisions, newest first" '.success and (.data.data|length) == 2 and .data.data[0].revision == 1'
 as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8)" '.success and (.data.data|length) == 8'
-as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"false"}'; check "pb1: the setting is switched back off (default)" '.success'
+as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"true"}'; check "pb1: the setting is set to its default (on) again" '.success'
 
 # --- mapping of legacy codes: imported draft, approved by engineering who is not the proposer
 as "$PLAN_TOKEN" POST $PB/coding/mappings/import '[{"legacyCode":"02101001000010","legacyTitle":"Wheel case -قطعه خام ریخته گری","partNumber":"88.11.01.001.2","stageCode2":"RW"},{"legacyCode":"02101001000010","partNumber":"88.11.01.001.2"},{"legacyCode":"","partNumber":"88.11.01.001.2"},{"legacyCode":"02101002000110","partNumber":"88.11.01.002.2","stageCode2":"ZZ"}]'; check "pb1: the mapping import creates 1 draft and skips 3 (duplicate old code, empty code, unknown stage)" '.success and .data.created == 1 and .data.skipped == 3 and (.data.errors|length) == 3'
@@ -10931,6 +10931,9 @@ call POST Equipments '{"code":"PB-EQ-T","title":"Test turbine"}'; check "pb1: th
 call POST ContractEquipments "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"count\":3}"; check "pb1: the equipment is attached to the contract" '.success'
 call POST WorkOrders "{\"contractId\":$PBCT,\"equipmentId\":$PBEQ,\"code\":\"PB-WO-1\",\"title\":\"Turbine 1\",\"description\":\"x\",\"count\":3}"; check "pb1: work order created (3 units)" '.success and .data.id > 0'
 PBWO=$(val .data.id)
+# PB8: the readiness gate («کنترل آمادگی اطلاعات مهندسی شروع پروژه») needs, for every make part, an approved OPC with work centre and hours, a Released drawing and ITP characteristics. The pb1/pb2 chains test the product bank and the balance,
+# not the engineering data of a project, so the gate's master switch is OFF for these two instantiations and back ON (its default) right after the pb2 instantiation; the gate itself is tested in the PB8 block.
+as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.Enabled","value":0}'; check "pb8 setup: the readiness gate master switch is off for the pb1/pb2 instantiations" '.success'
 as "$COM_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; r403 "pb1: commercial cannot take a product into a project (403)"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PBWO,\"productId\":$PBPROD}"; check "pb1: the project takes the RELEASED revision 00 of the test product (not the draft 01): source recorded, quantities multiplied by 3, the heading is kept, the contract review is not accepted so no PC WBS yet and the answer says why" '.success and .data.sourceBomRevision == 0 and .data.sourceBomCode == "88.11.00.000.2-BOM" and .data.count == 3 and (.data.lines|length) == 4 and ([.data.lines[]|select(.partNumber=="88.11.01.002.2")|.totalQty]|.[0]) == 6 and .data.pcBaselineCurrent == false and (.data.pcWbs|length) == 0 and .data.pcProductNodeId == null and (.data.wbsNote|length) > 0 and .data.wbsTemplateVersion == 1'
 PBBASE=$(val .data.id); PBLINE=$(jq -r '[.data.lines[]|select(.partNumber=="88.11.01.002.2")][0].id' "$B")
@@ -10981,6 +10984,7 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$PB2CT,\"currencyCode\":\"IRR\"
 pcreview $PB2CT # the draft requests of a project need the accepted contract review
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; no "pb2: before the product is taken there is no balance run"
 as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB2WO,\"productId\":$PBFYPROD}"; check "pb2: the FY product is taken into the project (the balance runs by itself after it)" '.success and .data.count == 2'
+as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.Enabled","value":1}'; check "pb8 setup: the readiness gate master switch is back on (default)" '.success'
 as "$PLAN_TOKEN" GET $PBL/work-order/$PB2WO/latest; check "pb2: run 1 was made by the instantiation: 81 lines, 55 short, 26 raw materials not coded" '.success and .data.runNumber == 1 and .data.trigger == "Instantiate" and .data.lineCount == 81 and .data.shortLineCount == 55 and .data.notCodedCount == 26 and .data.bomRevision == 0'
 check "pb2: a bought part: 2 units for 2 units of the product, nothing in stock, so the shortage is 2" '([.data.lines[]|select(.partNumber=="16.13.02.014.2" and .kind == 1)]|length) == 1 and ([.data.lines[]|select(.partNumber=="16.13.02.014.2")][0] | .grossQty == 2 and .scrapQty == 0 and .requiredQty == 2 and .onHandQty == 0 and .onOrderPrQty == 0 and .shortQty == 2)'
 check "pb2: the raw material of a made part (first stage of its OPC chart, 16 rings for 2 units) is short by 16" '([.data.lines[]|select(.itemCode=="16.11.01.012.2-CT")][0] | .kind == 2 and .requiredQty == 16 and .shortQty == 16)'
@@ -11463,6 +11467,99 @@ as "$PM_TOKEN" GET dashboards/portfolio-evm; check "pb7b epm: the project manage
 as "$ADMIN_TOKEN" GET dashboards/commitments; check "pb7b epm: the commitments forecast has 8 weekly buckets and its totals add up (overdue kept apart)" '.success and .data.period == "week" and .data.pricesMasked == false and (.data.buckets|length) == 8 and ((.data.total - ([.data.buckets[].total]|add))|fabs) < 0.01 and ((.data.totalWithOverdue - .data.total - .data.overdue)|fabs) < 0.01'
 as "$ADMIN_TOKEN" GET dashboards/delay-causes; check "pb7b epm: the delay-cause report answers for the PMO" '.success and (.data.byCause|type) == "array"'
 as "$WH_TOKEN" GET dashboards/delay-causes; no "pb7b epm: the warehouse keeper cannot read the delay-cause report"
+TOKEN=$ADMIN_TOKEN
+
+# --- PB8: operational data control (plausibility gates, exceptions, baseline conformance, engineering readiness gate, OPS-DATA seat).
+# Placed before the PB2 fix round on purpose: it receives and issues stock of an item of its own (PB8I) and uses no other item, so no figure of the PB2 fix round moves.
+TOKEN=$ADMIN_TOKEN
+OPS=opsdata
+item PB8I "{\"code\":\"PB8-ITEM-1\",\"title\":\"کالای آزمون کنترل داده\",\"unit\":\"عدد\",\"trackingMode\":0,\"weight\":10,\"requiresIncomingInspection\":false}" "pb8 data-control item (unit weight 10 kg)"
+# receipt 1: 100 pieces, the scale says 1200 kg, the item weight says 1000 kg: +20 %, between the warning (10) and the block (100) thresholds
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":100,\"unitPrice\":100000,\"weighedWeightKg\":1200}]}"; check "pb8 gate: the receipt with 1200 kg weighed for 100 pieces of 10 kg shows exactly one finding, the weight warning, in the form" '.success and (.data.opsFindings|length) == 1 and .data.opsFindings[0].ruleCode == "R-RCV-WEIGHT" and .data.opsFindings[0].severity == 1'
+PB8R1=$(val .data.id)
+call POST "inventory/documents/$PB8R1/confirm"; check "pb8 gate: a warning does not stop the confirmation" '.success and .data.status == 1'
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 gate: the warning is stored with the document: one open finding R-RCV-WEIGHT, source gate" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-RCV-WEIGHT" and .data.data[0].severity == 1 and .data.data[0].source == 1 and .data.data[0].status == 1'
+PB8F1=$(jq -r '.data.data[0].id' "$B")
+# receipt 2: the same price again (the second receipt of the history), the weight matches: no finding at all
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":10,\"unitPrice\":100000,\"weighedWeightKg\":100}]}"; check "pb8 gate: a plausible receipt shows no finding" '.success and (.data.opsFindings|length) == 0'
+PB8R2=$(val .data.id)
+call POST "inventory/documents/$PB8R2/confirm"; check "pb8 gate: the plausible receipt is confirmed" '.success and .data.status == 1'
+# receipt 3: the price typed 10 times too high (900 % over the last receipts, the block threshold is 300 %)
+call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":10,\"unitPrice\":1000000,\"weighedWeightKg\":100}]}"; check "pb8 gate: the receipt with a price 10 times the history is saved as a draft" '.success and .data.status == 0'
+PB8R3=$(val .data.id)
+call POST "inventory/documents/$PB8R3/confirm"; nomsg "pb8 gate: the confirmation of the 10x price is refused and the message names the rule" "R-RCV-PRICE"
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R3&State=open&PageSize=0"; check "pb8 gate: the refusal stored exactly one blocking finding R-RCV-PRICE with deviation 900 %" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-RCV-PRICE" and .data.data[0].severity == 2 and .data.data[0].deviationPercent == 900 and .data.data[0].exceptionId == null'
+PB8F3=$(jq -r '.data.data[0].id' "$B")
+call POST $OPS/exceptions "{\"findingId\":$PB8F3,\"justification\":\"\"}"; no "pb8 gate: an exception needs a justification text"
+call POST $OPS/exceptions "{\"findingId\":$PB8F3,\"justification\":\"آزمون: قیمت واقعاً ده برابر است (فاکتور ارزی)\"}"; check "pb8 gate: the creator of the document asks for the exception: it waits for a supervisor" '.success and .data.status == 0'
+PB8X3=$(val .data.id)
+call POST "inventory/documents/$PB8R3/confirm"; nomsg "pb8 gate: a pending exception does not let the confirmation pass" "R-RCV-PRICE"
+call POST $OPS/exceptions/decide "{\"id\":$PB8X3,\"approve\":true,\"reason\":\"خودتایید\"}"; no "pb8 gate: the creator cannot approve his own exception"
+as "$WH_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X3,\"approve\":true,\"reason\":\"انباردار سرپرست نیست\"}"; no "pb8 gate: a storekeeper who is not a supervisor cannot approve it"
+as "$PMO2_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X3,\"approve\":true,\"reason\":\"آزمون: فاکتور ارزی دیده شد\"}"; check "pb8 gate: the supervisor (another person) approves the exception" '.success and .data.status == 1'
+call POST "inventory/documents/$PB8R3/confirm"; check "pb8 gate: with the approved exception the confirmation passes" '.success and .data.status == 1'
+# data-quality list: exact counts for the three documents (1 warning on receipt 1, 1 block on receipt 3, nothing on receipt 2)
+call GET "$OPS/findings?DocumentType=InventoryDocument&State=all&PageSize=0"; check "pb8 quality: exactly two findings belong to the three receipts: the weight warning and the price block" "(.success) and ([.data.data[]|select(.documentId == $PB8R1 or .documentId == $PB8R2 or .documentId == $PB8R3)]|length) == 2 and ([.data.data[]|select(.documentId == $PB8R1 and .ruleCode == \"R-RCV-WEIGHT\")]|length) == 1 and ([.data.data[]|select(.documentId == $PB8R3 and .ruleCode == \"R-RCV-PRICE\" and .severity == 2)]|length) == 1"
+call POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"آزمون: ترازو دقیق است\"}"; no "pb8 quality: the creator of the document cannot verify the data of his own document"
+as "$PMO2_TOKEN" POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"\"}"; no "pb8 quality: verifying the data needs a reason"
+as "$PMO2_TOKEN" POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"آزمون: ترازو دقیق است\"}"; check "pb8 quality: a supervisor who is not the creator verifies the data" '.success'
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 quality: the verified finding is no longer open" '.success and (.data.data|length) == 0'
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=resolved&PageSize=0"; check "pb8 quality: it is listed as resolved, exactly once" '.success and (.data.data|length) == 1'
+
+# baseline conformance: the project PBWO has a BOM baseline (pb1); the item PB8I is not in it
+call POST inventory/material-requests "{\"requestDate\":\"${TODAY}T00:00:00\",\"workOrderId\":$PBWO,\"warehouseId\":$W1,\"purpose\":\"آزمون مطابقت با خط‌مبنا\",\"lines\":[{\"itemId\":$PB8I,\"quantity\":5}]}"; check "pb8 baseline: the material request of an item that is not in the project BOM is saved" '.success and .data.id > 0'
+PB8MR=$(val .data.id)
+call POST inventory/material-requests/action "{\"id\":$PB8MR,\"action\":\"submit\"}"; check "pb8 baseline: the request is submitted" '.success'
+call POST inventory/material-requests/action "{\"id\":$PB8MR,\"action\":\"approve-planning\"}"; check "pb8 baseline: planning approves it" '.success and .data.planningApproved'
+as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$PB8MR,\"action\":\"approve-manufacturing\"}"; check "pb8 baseline: manufacturing approves it" '.success and .data.status == 2'
+call POST inventory/documents "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$PB8MR,\"workOrderId\":$PBWO,\"lines\":[{\"itemId\":$PB8I,\"quantity\":5}]}"; check "pb8 baseline: the issue draft shows the baseline block R-BL-BOM-ITEM in the form" '.success and ([.data.opsFindings[]|select(.ruleCode == "R-BL-BOM-ITEM" and .severity == 2)]|length) == 1'
+PB8I1=$(val .data.id)
+call POST "inventory/documents/$PB8I1/confirm"; nomsg "pb8 baseline: the issue of an item that is not in the project BOM is refused" "R-BL-BOM-ITEM"
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8I1&State=open&PageSize=0"; check "pb8 baseline: exactly one open blocking finding R-BL-BOM-ITEM is stored" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-BL-BOM-ITEM" and .data.data[0].severity == 2'
+PB8F4=$(jq -r '.data.data[0].id' "$B")
+call POST $OPS/exceptions "{\"findingId\":$PB8F4,\"justification\":\"آزمون: کالای کمکی خارج از BOM به‌تأیید مهندسی\"}"; check "pb8 baseline: the exception is asked" '.success and .data.status == 0'
+PB8X4=$(val .data.id)
+as "$PMO2_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X4,\"approve\":true,\"reason\":\"آزمون: دیده شد\"}"; check "pb8 baseline: the supervisor approves the exception" '.success and .data.status == 1'
+call POST "inventory/documents/$PB8I1/confirm"; check "pb8 baseline: with the approved exception the issue passes" '.success and .data.status == 1'
+
+# engineering readiness gate: a new product with a released BOM and an approved WBS template, but no approved OPC and no released drawing
+as "$ENG_TOKEN" POST $PB/products '{"code":"77.11.00.000.2","title":"محصول آزمون آمادگی","platform":"T"}'; check "pb8 ready: the readiness test product is saved" '.success and .data.code == "77.11.00.000.2"'
+PB8PROD=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms "{\"productId\":$PB8PROD,\"assemblyPartNumber\":\"77.11.00.000.2\",\"title\":\"BOM آمادگی\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"77.11.01.001.2\",\"partName\":\"Plate\",\"qty\":1,\"unit\":\"عدد\",\"material\":\"WCB\",\"makeOrBuy\":1,\"netWeight\":10,\"grossWeight\":12}]}"; check "pb8 ready: the BOM draft with one make part is saved" '.success and .data.status == 0'
+PB8B=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms/submit "{\"id\":$PB8B}"; check "pb8 ready: the BOM is submitted" '.success and .data.status == 1'
+as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":1}"; check "pb8 ready: BOM check by a second engineer" '.success'
+as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":2}"; check "pb8 ready: BOM check by QC" '.success'
+as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":3}"; check "pb8 ready: BOM check by manufacturing" '.success'
+as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":4}"; check "pb8 ready: BOM approval by the PMO (four different signers, CEO decision D13)" '.success and .data.status == 2'
+as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PB8B}"; check "pb8 ready: the BOM is released" '.success and .data.status == 3'
+as "$ENG_TOKEN" POST $PB/templates/import-mspdi "{\"productId\":$PB8PROD,\"title\":\"قالب آمادگی\",\"xml\":\"$PBXML\"}"; check "pb8 ready: the WBS template is imported" '.success and .data.isApproved == false'
+PB8TPL=$(val .data.id)
+as "$ENG2_TOKEN" POST $PB/templates/$PB8TPL/approve; check "pb8 ready: first approval of the template" '.success and .data.isApproved == false'
+as "$PLAN2_TOKEN" POST $PB/templates/$PB8TPL/approve; check "pb8 ready: second approval of the template" '.success and .data.isApproved == true'
+call POST Contracts '{"code":"PB8-CT-01","title":"قرارداد آزمون آمادگی","status":1,"employer":"کارفرمای آزمون"}'; check "pb8 ready: the test contract is created" '.success and .data.id > 0'; PB8CT=$(val .data.id)
+call POST Equipments '{"code":"PB8-EQ-T","title":"Test turbine PB8"}'; check "pb8 ready: the test equipment is created" '.success and .data.id > 0'; PB8EQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PB8CT,\"equipmentId\":$PB8EQ,\"count\":1}"; check "pb8 ready: the equipment is attached to the contract" '.success'
+call POST WorkOrders "{\"contractId\":$PB8CT,\"equipmentId\":$PB8EQ,\"code\":\"PB8-WO-1\",\"title\":\"Turbine PB8\",\"description\":\"x\",\"count\":1}"; check "pb8 ready: the work order is created" '.success and .data.id > 0'; PB8WO=$(val .data.id)
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PB8WO&productId=$PB8PROD"; check "pb8 ready: the checklist is not ready, exactly the hard items RD-DRAWING and RD-OPC are missing (one make part each)" '.success and .data.ready == false and .data.hardMissing == 2 and ([.data.items[]|select(.hard and (.status == "Missing" or .status == "Partial"))|.code]|sort) == ["RD-DRAWING","RD-OPC"] and ([.data.items[]|select(.code == "RD-OPC")][0].missingCount) == 1 and ([.data.items[]|select(.code == "RD-OPC")][0].ownerTitle|length) > 0'
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB8WO,\"productId\":$PB8PROD}"; nomsg "pb8 ready: the baseline is refused while the OPC is missing: the message lists RD-OPC" "[RD-OPC]"
+nomsg "pb8 ready: the same message lists RD-DRAWING" "[RD-DRAWING]"
+as "$ENG_TOKEN" POST $PB/routings "{\"productId\":$PB8PROD,\"partNumber\":\"77.11.01.001.2\",\"title\":\"Plate\",\"steps\":[{\"seq\":1,\"stageCode2\":\"CA\",\"partName\":\"Plate\",\"standardHours\":2,\"workCenterId\":$MFWC1}]}"; check "pb8 ready: the OPC routing with a work centre and a standard time is saved" '.success and .data.status == 0'
+PB8OPC=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/routings/submit "{\"id\":$PB8OPC}"; check "pb8 ready: the routing is submitted" '.success and .data.status == 1'
+as "$ENG2_TOKEN" POST $PB/routings/check "{\"id\":$PB8OPC}"; check "pb8 ready: the routing is checked" '.success'
+as "$ADMIN_TOKEN" POST $PB/routings/approve "{\"id\":$PB8OPC}"; check "pb8 ready: the routing is approved" '.success and .data.status == 2'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PB8WO&productId=$PB8PROD"; check "pb8 ready: after the routing is approved only RD-DRAWING is missing" '.success and .data.ready == false and .data.hardMissing == 1 and ([.data.items[]|select(.hard and (.status == "Missing" or .status == "Partial"))|.code]) == ["RD-DRAWING"]'
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB8WO,\"productId\":$PB8PROD}"; nomsg "pb8 ready: the baseline is still refused while the drawing is missing" "[RD-DRAWING]"
+as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.RD-DRAWING.Hard","value":0}'; check "pb8 ready: the company makes the drawing item a soft one (setting)" '.success'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PB8WO&productId=$PB8PROD"; check "pb8 ready: with the drawing soft the checklist is ready and shows the drawing as a soft gap" '.success and .data.ready == true and .data.hardMissing == 0 and ([.data.items[]|select(.code == "RD-DRAWING")][0] | .hard == false and .status == "Missing")'
+as "$PLAN_TOKEN" POST $PB/projects/instantiate "{\"workOrderId\":$PB8WO,\"productId\":$PB8PROD}"; check "pb8 ready: the baseline is created once the hard items are met" '.success and .data.count == 1'
+as "$QA_TOKEN" POST quality/settings '{"key":"OpsReady.RD-DRAWING.Hard","value":1}'; check "pb8 ready: the drawing item is hard again (default)" '.success'
+as "$PLAN_TOKEN" GET "$OPS/readiness/summary"; check "pb8 ready: the PMO summary lists the project with its hard gap (the drawing, hard again)" ".success and ([.data.items[]|select(.workOrderId == $PB8WO)]|length) == 1 and ([.data.items[]|select(.workOrderId == $PB8WO)][0].hardMissing) == 1"
+
+# the OPS-DATA seat: a run by hand, then the same day again finds nothing new
+airun OPS-DATA "$TODAY"; check "pb8 seat: the OPS-DATA run succeeded" '.success and .data.status == 2 and .data.seatCode == "OPS-DATA"'
+airun OPS-DATA "$TODAY"; check "pb8 seat: the second run of the same day creates no finding and no note" '.success and .data.status == 2 and (.data.outputs|contains("findings=0; notes=0;"))'
 TOKEN=$ADMIN_TOKEN
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.

@@ -47,11 +47,13 @@ namespace Services.NasbNiro.ProductBank
     {
         private readonly IPcProjectService _project;
         private readonly global::Services.NasbNiro.ProjectBalance.IProjectBalanceService _balance;
+        private readonly global::Services.NasbNiro.OpsData.IOpsReadinessService _readiness;
 
-        public PbProductService(IUnitOfWork uow, IInventoryUserContext user, IPcProjectService project, global::Services.NasbNiro.ProjectBalance.IProjectBalanceService balance = null) : base(uow, user)
+        public PbProductService(IUnitOfWork uow, IInventoryUserContext user, IPcProjectService project, global::Services.NasbNiro.ProjectBalance.IProjectBalanceService balance = null, global::Services.NasbNiro.OpsData.IOpsReadinessService readiness = null) : base(uow, user)
         {
             _project = project ?? throw new ArgumentNullException(nameof(project));
             _balance = balance;
+            _readiness = readiness;
         }
 
         // -------------------------------------------------------------------------------- products
@@ -301,6 +303,13 @@ namespace Services.NasbNiro.ProductBank
                 int wo = r.Data?.WorkOrderId ?? 0;
                 if (wo > 0) await _balance.AfterChangeAsync(wo, "Instantiate", ct);
             }
+            // PB8: what engineering still owes stays open as obligations with an owner and a due date (the owners are told)
+            if (r.Success && _readiness != null && r.Data != null)
+            {
+                try { await _readiness.AfterBaselineAsync(r.Data.WorkOrderId, dto.ProductId, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception) { /* the baseline exists; the daily OPS-DATA run opens the obligations */ }
+            }
             return r;
         }
 
@@ -324,6 +333,12 @@ namespace Services.NasbNiro.ProductBank
             }
             PbBomHeader bomHead = await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == product.Id && h.Status == PbBomStatus.Released).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
             if (bomHead == null) return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این محصول BOM منتشرشده (Released) وجود ندارد.");
+            // PB8: the engineering readiness gate (hard checklist items); an exception approved by the PMO and the CEO lets it pass
+            if (_readiness != null)
+            {
+                global::Services.NasbNiro.OpsData.ReadinessGateResult ready = await _readiness.GateForBaselineAsync(wo.Id, product.Id, ct);
+                if (ready.Refusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(ready.Refusal);
+            }
             PbWbsTemplate tpl = await Uow.Set<PbWbsTemplate>().AsNoTracking().Where(t => !t.Deleted && t.ProductId == product.Id && t.IsApproved).OrderByDescending(t => t.Version).FirstOrDefaultAsync(ct);
             List<PbOpcRouting> routings = await Uow.Set<PbOpcRouting>().AsNoTracking().Where(r => !r.Deleted && r.ProductId == product.Id && r.Status == PbRoutingStatus.Approved).ToListAsync(ct);
             routings = routings.GroupBy(r => r.PartNumber).Select(g => g.OrderByDescending(r => r.Revision).First()).ToList();

@@ -127,7 +127,7 @@ namespace Services.NasbNiro.ProductBank
             catch (DbUpdateConcurrencyException) { return PbMessages.Concurrent; }
         }
 
-        /// <summary>The setting "the four BOM reviewers must be different people" (default false).</summary>
+        /// <summary>The setting "the four BOM reviewers must be different people" (default true, CEO decision D13).</summary>
         protected async Task<bool> DistinctReviewersAsync(CancellationToken ct) =>
             (await PbSettingKeys.LoadAsync(Uow, ct))[PbSettingKeys.DistinctReviewers] == "true";
 

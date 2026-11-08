@@ -50,9 +50,14 @@ namespace Services.NasbNiro.Production
         private readonly IInspectionService _inspections;
         private readonly IInventoryDocumentService _documents;
         private readonly MfFlow _flow;
+        private readonly global::Services.NasbNiro.OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
 
-        public MfProductionService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IInspectionService inspections, INotificationService notify = null)
+        public MfProductionService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IInspectionService inspections, INotificationService notify = null,
+            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
         {
+            _opsEvaluator = opsEvaluator;
+            _opsGate = opsGate;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _inspections = inspections ?? throw new ArgumentNullException(nameof(inspections));
@@ -771,6 +776,18 @@ namespace Services.NasbNiro.Production
                 if (activity == null) return Bad<OperationDto>("نقطه ITP این عملیات در برنامه بازرسی دستور کار پیدا نشد.");
                 if (dto.Result == QcResult.Accept && activity.Status != ItpActivityStatus.Done && activity.Status != ItpActivityStatus.Waived && activity.Status != ItpActivityStatus.NotApplicable)
                     return Bad<OperationDto>($"نقطه ITP «{activity.Activity}» هنوز آزاد نشده است؛ ابتدا در ماژول کیفیت ثبت و آزاد شود.");
+            }
+
+            // PB8: an acceptance must cover the mandatory points of the ITP and stay inside the baseline tolerance (a missing characteristic or an out-of-tolerance value needs a rejection or an approved exception)
+            if (_opsEvaluator != null && _opsGate != null && activity != null)
+            {
+                var opsMeasures = measurements.Select(m => new global::Services.NasbNiro.OpsData.OpsQcMeasure { Characteristic = m.Characteristic, Measured = m.Measured }).ToList();
+                global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateQcDecisionAsync(op.Id, dto.Result, activity.Id, opsMeasures, ct);
+                if (opsEv != null)
+                {
+                    global::Services.NasbNiro.OpsData.OpsGateResult opsRes = await _opsGate.CheckAsync(opsEv, ct);
+                    if (opsRes.Refusal != null) return Bad<OperationDto>(opsRes.Refusal);
+                }
             }
 
             DateTimeOffset now = DateTimeOffset.Now;

@@ -38,8 +38,13 @@ namespace Services.NasbNiro.Inventory
         private readonly IInventoryUserContext _user;
         private readonly IInventoryDocumentService _documents;
 
-        public InventoryWorkflowService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents)
+        private readonly OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly OpsData.IOpsGateService _opsGate;
+
+        public InventoryWorkflowService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, OpsData.IOpsDataEvaluator opsEvaluator = null, OpsData.IOpsGateService opsGate = null)
         {
+            _opsEvaluator = opsEvaluator;
+            _opsGate = opsGate;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _documents = documents ?? throw new ArgumentNullException(nameof(documents));
@@ -415,6 +420,13 @@ namespace Services.NasbNiro.Inventory
                 case "submit":
                     if (count.Status != StockCountStatus.Counting) return ResponseDtoHelper.BadRequest<StockCountDto>("شمارش قبلاً ارسال شده است.");
                     if (count.Lines.Any(l => !l.CountedQuantity.HasValue)) return ResponseDtoHelper.BadRequest<StockCountDto>("همه ردیف‌ها باید شمرده شوند (برای کالای پیدا نشده صفر بزنید).");
+                    // PB8: the real-time gate - a difference that is implausible (a digit typed wrong) needs an exception approved by the supervisor before the count goes on
+                    if (_opsEvaluator != null && _opsGate != null)
+                    {
+                        OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateStockCountAsync(count.Id, cancellationToken);
+                        OpsData.OpsGateResult opsRes = await _opsGate.CheckAsync(opsEv, cancellationToken);
+                        if (opsRes.Refusal != null) return ResponseDtoHelper.BadRequest<StockCountDto>(opsRes.Refusal);
+                    }
                     count.Status = StockCountStatus.Submitted;
                     count.SubmittedAt = now;
                     break;

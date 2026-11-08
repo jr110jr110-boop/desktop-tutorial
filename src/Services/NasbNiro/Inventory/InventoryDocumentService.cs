@@ -65,10 +65,15 @@ namespace Services.NasbNiro.Inventory
         private readonly Procurement.IPayablesService _payables;
         private readonly Quality.IReleaseService _release;
         private readonly IInventoryFreightService _freight;
+        private readonly OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly OpsData.IOpsGateService _opsGate;
 
         public InventoryDocumentService(IUnitOfWork uow, IInventoryUserContext user, Finance.ICostingService costing,
-            Procurement.IProcurementService procurement, Procurement.IPayablesService payables, Quality.IReleaseService release, IInventoryFreightService freight)
+            Procurement.IProcurementService procurement, Procurement.IPayablesService payables, Quality.IReleaseService release, IInventoryFreightService freight,
+            OpsData.IOpsDataEvaluator opsEvaluator, OpsData.IOpsGateService opsGate)
         {
+            _opsEvaluator = opsEvaluator ?? throw new ArgumentNullException(nameof(opsEvaluator));
+            _opsGate = opsGate ?? throw new ArgumentNullException(nameof(opsGate));
             _freight = freight ?? throw new ArgumentNullException(nameof(freight));
             _release = release ?? throw new ArgumentNullException(nameof(release));
             _procurement = procurement ?? throw new ArgumentNullException(nameof(procurement));
@@ -219,6 +224,8 @@ namespace Services.NasbNiro.Inventory
                         Description = l.Description,
                         Direction = l.Direction,
                         SourceRowNumber = l.SourceRowNumber,
+                        WeighedWeightKg = l.WeighedWeightKg,
+                        CertificateWeightKg = l.CertificateWeightKg,
                         SerialNumbers = l.Serials.OrderBy(s => s.Id).Select(s => s.SerialNumber).ToList(),
                     }).ToList(),
                 })
@@ -252,6 +259,7 @@ namespace Services.NasbNiro.Inventory
             document.FinanceApprovedByName = names.Name(raw.FinanceApprovedByUserId);
             document.ZeroPriceApprovedByName = names.Name(raw.ZeroPriceApprovedByUserId);
             await EnrichPb5Async(document, cancellationToken);
+            await EnrichOpsAsync(document, cancellationToken);
             return ResponseDtoHelper.Ok(document);
         }
 
@@ -502,6 +510,8 @@ namespace Services.NasbNiro.Inventory
                     Description = InventoryText.Clean(line.Description),
                     Direction = line.Direction,
                     SourceRowNumber = line.SourceRowNumber,
+                    WeighedWeightKg = line.WeighedWeightKg,
+                    CertificateWeightKg = line.CertificateWeightKg,
                     Serials = line.SerialNumbers.Select(s => new InventoryDocumentLineSerial { SerialNumber = s }).ToList(),
                 });
             }
@@ -957,6 +967,10 @@ namespace Services.NasbNiro.Inventory
             string writeOffRefusal = await CheckSerialWriteOffAsync(document.Type, document.WriteOffNcrId,
                 document.Lines.Where(l => l.Serials != null && l.Serials.Count > 0).SelectMany(l => l.Serials.Select(s => (l.ItemId, s.SerialNumber))).ToList(), cancellationToken);
             if (writeOffRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(writeOffRefusal);
+
+            // PB8: the real-time gate of operational data (plausibility and baseline conformance): a blocking finding stops the confirmation unless another supervisor approved an exception
+            string opsRefusal = await OpsGateRefusalAsync(document.Id, cancellationToken);
+            if (opsRefusal != null) return ResponseDtoHelper.BadRequest<DocumentDto>(opsRefusal);
 
             MaterialRequest request = null;
             if (type == InventoryDocumentType.Issue)

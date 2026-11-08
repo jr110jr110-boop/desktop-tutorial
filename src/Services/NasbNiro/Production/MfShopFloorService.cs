@@ -67,8 +67,27 @@ namespace Services.NasbNiro.Production
         public const string MaxBackdateKey = "Production:MaxBackdateDays";
         public const int MaxBackdateDefault = 7;
 
-        public MfShopFloorService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IAttendanceService attendance, INotificationService notify = null, IConfiguration configuration = null)
+        private readonly global::Services.NasbNiro.OpsData.IOpsDataEvaluator _opsEvaluator;
+        private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
+
+        /// <summary>PB8: the real-time gate on a production booking or the finish of an operation (time against the routing standard, scrap against history, sequence and work centre of the routing). The Persian refusal or null.</summary>
+        private async Task<string> OpsGateAsync(int operationId, MfBookingKind kind, decimal hours, decimal good, decimal scrap, CancellationToken ct)
         {
+            if (_opsEvaluator == null || _opsGate == null) return null;
+            var delta = new global::Services.NasbNiro.OpsData.OpsOperationDelta
+            {
+                SetupHours = kind == MfBookingKind.Setup ? hours : 0m, RunHours = kind == MfBookingKind.Run ? hours : 0m, Good = good, Scrap = scrap,
+            };
+            global::Services.NasbNiro.OpsData.OpsEvaluation ev = await _opsEvaluator.EvaluateOperationAsync(operationId, delta, ct);
+            if (ev == null) return null;
+            return (await _opsGate.CheckAsync(ev, ct)).Refusal;
+        }
+
+        public MfShopFloorService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IAttendanceService attendance, INotificationService notify = null, IConfiguration configuration = null,
+            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
+        {
+            _opsEvaluator = opsEvaluator;
+            _opsGate = opsGate;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _attendance = attendance ?? throw new ArgumentNullException(nameof(attendance));
@@ -542,6 +561,10 @@ namespace Services.NasbNiro.Production
             if (l.Op.Status != MfOperationStatus.InProgress && l.Op.Status != MfOperationStatus.Paused) return Bad<TerminalOperationDto>("فقط عملیاتی که شروع شده پایان می‌یابد.");
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید.");
+            // PB8: before anything is changed, the rules look at the time of the running booking and the quantities of this finish
+            decimal runningHours = booking.EndAt == null ? MfText.HoursOf(MinutesBetween(booking.StartAt, Now())) : 0m;
+            string opsRefusal = await OpsGateAsync(l.Op.Id, booking.Kind, runningHours, dto.GoodQty, dto.ScrapQty, ct);
+            if (opsRefusal != null) return Bad<TerminalOperationDto>(opsRefusal);
             string problem = await AddQuantityAsync(l, booking, dto, ct);
             if (problem != null) return Bad<TerminalOperationDto>(problem);
             decimal expected = ExpectedQuantity(l);
@@ -804,6 +827,9 @@ namespace Services.NasbNiro.Production
             string overlap = await OverlapAsync(dto.EmployeeId, start, end, 0, ct);
             if (overlap != null) return Bad<BookingDto>(overlap);
             if (l.Op.GoodQty + l.Op.ScrapQty + dto.GoodQty + dto.ScrapQty > ExpectedQuantity(l)) return Bad<BookingDto>("مجموع سالم و ضایعات از تعداد این عملیات بیشتر می‌شود.");
+            // PB8: the real-time gate on the hours and quantities of this booking
+            string opsRefusal = await OpsGateAsync(l.Op.Id, dto.Kind, MfText.HoursOf(MinutesBetween(start, end)), dto.GoodQty, dto.ScrapQty, ct);
+            if (opsRefusal != null) return Bad<BookingDto>(opsRefusal);
 
             DateTimeOffset stamp = DateTimeOffset.Now;
             int minutes = MinutesBetween(start, end);

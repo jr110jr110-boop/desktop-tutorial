@@ -268,6 +268,12 @@ namespace Entities.Model.NasbNiro.Inventory
         /// <summary>Stage conversion "in" line: row number of the "out" line it was made from (label genealogy).</summary>
         public int? SourceRowNumber { get; set; }
 
+        /// <summary>PB8: the weight (kg) found on the weighbridge or scale for this line; the plausibility rule R-RCV-WEIGHT compares it with unit weight x quantity and with the certificate.</summary>
+        public decimal? WeighedWeightKg { get; set; }
+
+        /// <summary>PB8: the weight (kg) the heat certificate states for the line.</summary>
+        public decimal? CertificateWeightKg { get; set; }
+
         public ICollection<InventoryDocumentLineSerial> Serials { get; set; }
     }
 

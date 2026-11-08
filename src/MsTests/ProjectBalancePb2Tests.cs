@@ -44,7 +44,7 @@ namespace MsTests
         private const string Bolt = "70.04.06.053.1";
         private const string Spare = "70.04.06.099.1";
 
-        private static AppHost NewHost(string name) => new AppHost("Pb2_" + name + "_" + Guid.NewGuid().ToString("N"));
+        private static AppHost NewHost(string name) => new AppHost("Pb2_" + name + "_" + Guid.NewGuid().ToString("N")).WithoutReadinessGate();
         private static Task<T> Run<T>(AppHost host, ClaimsPrincipal who, Func<IServiceProvider, Task<T>> call) => host.As(who, call);
 
         // ------------------------------------------------------------------------------------------ the rules without a database
