@@ -310,8 +310,8 @@ namespace Services.NasbNiro.Quality
                         var certs = await (from c in uow.Set<MaterialCertificate>().AsNoTracking()
                                            where !c.Deleted && c.Result == CertificateResult.Accepted && lotNumbers.Contains(c.Lot.LotNumber)
                                            orderby c.Lot.LotNumber, c.Number
-                                           select new { c.Lot.LotNumber, c.Lot.HeatNumber, c.Number, c.Type, c.Grade, c.Standard, c.Evaluation, c.InspectorOrganisation, c.InspectorName, c.ManufacturerSignatory }).ToListAsync(ct);
-                        snap.Certificates = certs.Select(c => new AsBuiltCertificateDto
+                                           select new { c.Lot.LotNumber, ItemCode = c.Lot.Item.Code, c.Lot.HeatNumber, c.Number, c.Type, c.Grade, c.Standard, c.Evaluation, c.InspectorOrganisation, c.InspectorName, c.ManufacturerSignatory }).ToListAsync(ct);
+                        snap.Certificates = certs.Where(c => snap.Installed.Any(i => i.LotNumber == c.LotNumber && i.ItemCode == c.ItemCode)).Select(c => new AsBuiltCertificateDto   // Fix round 1 (Low): the lot of the same item, not just the same lot number
                         {
                             LotNumber = c.LotNumber, HeatNumber = c.HeatNumber, Number = c.Number, Type = CertificateRules.TypeText(c.Type), Grade = c.Grade, Standard = c.Standard, Evaluation = c.Evaluation.ToString(),
                             Inspector = c.Type == CertificateType.T32 ? (c.InspectorOrganisation + " / " + c.InspectorName).Trim(' ', '/') : c.ManufacturerSignatory,

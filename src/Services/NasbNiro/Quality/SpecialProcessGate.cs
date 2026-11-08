@@ -58,11 +58,14 @@ namespace Services.NasbNiro.Quality
 
         // ================================================================== qualification
 
-        /// <summary>Null when the qualification is approved and its period covers the whole run.</summary>
+        /// <summary>
+        /// Null when the qualification was approved (it may have been superseded by a renewal since) and its period covers the whole run. Fix round 1 (M1): a run is judged by the state AT THE RUN, so a renewal does not
+        /// undo the runs made under the old qualification; only a voided, rejected or unfinished record fails.
+        /// </summary>
         public static string QualificationProblem(SpQualification q, DateTime from, DateTime to)
         {
             if (q == null) return "صلاحیت فرایند پیدا نشد.";
-            if (q.Status != SpQualStatus.Approved)
+            if (q.Status != SpQualStatus.Approved && q.Status != SpQualStatus.Superseded)
                 return $"صلاحیت فرایند {q.Number} در وضعیت «تاییدشده» نیست.";
             if (!SpecialProcessRules.Covers(q.ValidFrom, q.ValidTo, from) || !SpecialProcessRules.Covers(q.ValidFrom, q.ValidTo, to))
                 return $"صلاحیت فرایند {q.Number} در تاریخ اجرا ({Day(from)}) معتبر نیست (اعتبار: {Day(q.ValidFrom)} تا {Day(q.ValidTo)}).";
@@ -106,7 +109,7 @@ namespace Services.NasbNiro.Quality
                 }
             if (ids.Count > 0)
             {
-                string calibration = await QualityChecks.EquipmentAsync(uow, ids, runStart, ct);
+                string calibration = await QualityChecks.EquipmentOnDayAsync(uow, ids, runStart.Date, ct);   // the calibration valid on the day of the run, not today (M1)
                 if (calibration != null) return calibration;
             }
             return null;
@@ -122,7 +125,7 @@ namespace Services.NasbNiro.Quality
             bool blocked = await uow.Set<SupplierProfile>().AsNoTracking().AnyAsync(p => p.ProviderId == providerId.Value && p.Blocked, ct);
             if (blocked) return $"پیمانکار «{name}» در فهرست تامین‌کنندگان مجاز مسدود است.";
             int typeId = type.Id;
-            List<SpSupplierApproval> rows = await uow.Set<SpSupplierApproval>().AsNoTracking().Where(a => !a.Deleted && a.ProviderId == providerId.Value && a.TypeId == typeId && a.Status == SpApprovalStatus.Approved).ToListAsync(ct);
+            List<SpSupplierApproval> rows = await uow.Set<SpSupplierApproval>().AsNoTracking().Where(a => !a.Deleted && a.ProviderId == providerId.Value && a.TypeId == typeId && (a.Status == SpApprovalStatus.Approved || a.Status == SpApprovalStatus.Superseded)).ToListAsync(ct);
             if (rows.Count == 0) return $"پیمانکار «{name}» برای فرایند «{type.Title}» تایید نشده است؛ دامنه تایید تامین‌کننده را QA ثبت و نفر دوم تایید کند.";
             if (!rows.Any(a => SpecialProcessRules.Covers(a.ValidFrom, a.ValidTo, on)))
                 return $"تایید پیمانکار «{name}» برای فرایند «{type.Title}» در تاریخ {Day(on)} معتبر نیست.";
@@ -296,13 +299,15 @@ namespace Services.NasbNiro.Quality
                 string job = MfNames.Operation(c.Number, op.Sequence);
                 string issueNumber = op.SubcontractIssueId.HasValue ? await uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.Id == op.SubcontractIssueId.Value).Select(d => d.Number).FirstOrDefaultAsync(ct) : null;
                 bool linked = reference != null && (string.Equals(reference, job, StringComparison.OrdinalIgnoreCase) || (issueNumber != null && string.Equals(reference, issueNumber, StringComparison.OrdinalIgnoreCase)));
-                if (!linked) continue;
+                if (op.Status == MfOperationStatus.Done || op.Status == MfOperationStatus.Skipped || op.Status == MfOperationStatus.Rejected) continue;
+                // Fix round 1 (M2): a return of the same supplier on a work order with a live flagged outside step is tied to that step by its reference; an unlinked reference is refused, not skipped
+                if (!linked) return $"کالای برگشتی پیمانکار برای گام {job} ({op.Title}) فرایند ویژه است؛ شماره مرجع سند باید شماره کار {job}" + (issueNumber != null ? $" یا شماره حواله ارسال {issueNumber}" : string.Empty) + " باشد.";
                 SpProcessType type = await uow.Set<SpProcessType>().AsNoTracking().FirstOrDefaultAsync(t => t.Id == op.SpecialProcessTypeId.Value, ct);
                 if (type == null || type.ExistingControl) continue;
                 string head = $"کالای برگشتی برای گام {job} ({op.Title}) فرایند ویژه «{type.Title}» است: ";
                 List<SpRun> runs = await uow.Set<SpRun>().AsNoTracking().Where(r => !r.Deleted && r.OperationId == op.Id && r.Status == SpRunStatus.Recorded && r.IsSubcontract).ToListAsync(ct);
-                SpRun good = runs.Where(r => r.Result == SpRunResult.Pass && r.ReviewStatus != SpReviewStatus.Rejected).OrderByDescending(r => r.Id).FirstOrDefault();
-                if (good == null) return head + "مدرک اجرای پیمانکار (اجرای قبول با گواهی و نمودار) ثبت نشده است؛ پیش از پذیرش QC ثبت شود.";
+                SpRun good = runs.Where(r => r.Result == SpRunResult.Pass && r.ReviewStatus == SpReviewStatus.Approved).OrderByDescending(r => r.Id).FirstOrDefault();
+                if (good == null) return head + "مدرک اجرای پیمانکار (اجرای قبول با گواهی و نمودار که QA بازبینی کرده باشد) ثبت نشده است؛ پیش از پذیرش QC ثبت و بازبینی شود.";
                 string evidence = EvidenceProblem(good, settings);
                 if (evidence != null) return head + evidence;
                 string supplier = await SupplierProblemAsync(uow, good.SupplierId ?? receipt.ProviderId, type, good.EndedAt, ct);

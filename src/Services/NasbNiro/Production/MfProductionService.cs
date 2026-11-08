@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -708,6 +708,9 @@ namespace Services.NasbNiro.Production
                     return Bad<OperationDto>("برای این عملیات عملیات دوباره‌کاری ساخته شده است؛ ارفاق یا ضایعات روی عملیات دوباره‌کاری ثبت می‌شود.");
                 if (concession)
                 {
+                    // Fix round 1 (M2): a concession does not replace the process evidence of a flagged step: the passed, QA-reviewed run is needed here too
+                    string spConcession = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, op.GoodQty + op.ScrapQty, op.ScrapQty, ct);
+                    if (spConcession != null) return Bad<OperationDto>(spConcession);
                     op.AcceptedByConcession = true;
                     op.Status = MfOperationStatus.Done;
                     op.FinishedAt ??= now;
@@ -900,7 +903,7 @@ namespace Services.NasbNiro.Production
             {
                 OrderId = order.Id, Sequence = origin.Sequence, OperationTemplateId = origin.OperationTemplateId, Title = "دوباره‌کاری: " + origin.Title, WorkCenterId = origin.WorkCenterId,
                 Status = MfOperationStatus.Waiting, InspectionRequirement = origin.InspectionRequirement == MfInspectionRequirement.None ? MfInspectionRequirement.Qc : origin.InspectionRequirement,
-                ItpTestType = origin.ItpTestType, IsRework = true, ReworkOfOperationId = origin.Id, NcrId = ncrId, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
+                ItpTestType = origin.ItpTestType, IsSpecialProcess = origin.IsSpecialProcess, SpecialProcessTypeId = origin.SpecialProcessTypeId, IsWelding = origin.IsWelding, WpsId = origin.WpsId, IsRework = true, ReworkOfOperationId = origin.Id, NcrId = ncrId, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<MfOperation>().Add(rework);
             return rework;

@@ -15,6 +15,7 @@ namespace DataLayer.Context
         private static void AddSpecialProcess()
         {
             AuditPd(typeof(Q.SpProcessType), new[] { "Code", "Title", "RequiresMachine", "RequiresSurvey", "RequiredInstrumentClass", "ProcedureDeliverableId", "ExistingControl", "IsActive", "Deleted" }, "نوع فرایند ویژه");
+            AuditPd(typeof(Q.SpTypeChange), new[] { "TypeId", "PayloadJson", "Summary", "Reason", "Status", "DecidedByUserId", "DecidedAt", "DecisionNote", "Deleted" }, "تغییر تضعیف‌کننده نوع فرایند ویژه");
             AuditPd(typeof(Q.SpParameter), new[] { "TypeId", "SortOrder", "Name", "Unit", "Min", "Max", "Required" }, "پارامتر فرایند ویژه");
             AuditPd(typeof(Q.SpQualification), new[] { "Number", "TypeId", "Title", "ProcedureDeliverableId", "ProcedureRevisionId", "ProcedureNumber", "ProcedureRevisionCode", "ValidFrom", "ValidTo", "Status", "SubmittedAt", "ApprovedByUserId", "ApprovedAt", "RejectReason", "VoidReason", "VoidedByUserId", "VoidedAt", "SupersedesId", "EditorUserIds", "Deleted" }, "صلاحیت فرایند ویژه");
             AuditPd(typeof(Q.SpQualLimit), new[] { "QualificationId", "SortOrder", "Name", "Unit", "Min", "Max", "Required" }, "حد پارامتر صلاحیت فرایند");
@@ -30,7 +31,7 @@ namespace DataLayer.Context
             AuditPd(typeof(Q.CertificateValue), new[] { "CertificateId", "SortOrder", "Kind", "Name", "Unit", "Value", "Min", "Max", "Status" }, "مقدار شیمیایی/مکانیکی گواهی");
 
             // existing rows that gained columns (Qualification, Wps and the operation standard are audited with every column)
-            ExtendInspection(typeof(Q.MaterialCertificate), "HeatNumber", "Grade", "Standard", "SpecId", "InspectorOrganisation", "InspectorName", "InspectorStampNo", "ManufacturerSignatory", "Evaluation", "EvaluationText", "EvaluatedAt");
+            ExtendInspection(typeof(Q.MaterialCertificate), "HeatNumber", "Grade", "Standard", "SpecId", "InspectorOrganisation", "InspectorName", "InspectorStampNo", "ManufacturerSignatory", "Evaluation", "EvaluationText", "EvaluatedAt", "EditorUserIds");
             ExtendInspection(typeof(P.MfOperation), "IsSpecialProcess", "SpecialProcessTypeId");
         }
     }

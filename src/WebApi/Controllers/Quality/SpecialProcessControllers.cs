@@ -30,6 +30,9 @@ namespace WebApi.Controllers
         [HttpPost("types")]
         public async Task<IActionResult> SaveTypeAsync([FromBody] SaveSpTypeDto dto, CancellationToken ct) => Ok(await _service.SaveTypeAsync(dto, ct));
 
+        [HttpPost("types/change-action")]
+        public async Task<IActionResult> TypeChangeActionAsync([FromBody] SpActionDto dto, CancellationToken ct) => Ok(await _service.TypeChangeActionAsync(dto, ct));
+
         [HttpGet("qualifications")]
         [Authorize(Roles = QualityRoles.Readers)]
         public async Task<IActionResult> QualificationsAsync([FromQuery] SpQualQuery query, CancellationToken ct) => Ok((await _service.GetQualificationsAsync(query, ct)).ToPaginatedResultSafe());

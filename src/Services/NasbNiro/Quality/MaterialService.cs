@@ -93,6 +93,9 @@ namespace Services.NasbNiro.Quality
             if (!_user.IsInRole(QualityRoles.CertificateWriters)) return Bad<MaterialCertificateDto>(QualityText.NotAllowed);
             InventoryLot lot = await _uow.Set<InventoryLot>().FirstOrDefaultAsync(l => l.Id == dto.LotId && !l.Deleted, cancellationToken);
             if (lot == null) return Bad<MaterialCertificateDto>("بچ پیدا نشد.");
+            string fileProblem = await QualityChecks.FileProblemAsync(_uow, dto.DocumentId, "گواهی", cancellationToken);   // Fix round 1 (M4)
+            if (fileProblem != null) return Bad<MaterialCertificateDto>(fileProblem);
+            if ((dto.Values ?? new List<SaveCertificateValueDto>()).Any(v => v.Value.HasValue && Math.Abs(v.Value.Value) >= SpecialProcessRules.MaxNumber)) return Bad<MaterialCertificateDto>("یکی از مقدارهای گواهی بیش از حد مجاز بزرگ است.");
             DateTimeOffset now = DateTimeOffset.Now;
             MaterialCertificate cert;
             if (dto.Id.HasValue)
@@ -126,6 +129,7 @@ namespace Services.NasbNiro.Quality
             int vorder = 0;
             foreach (SaveCertificateValueDto r in rows) cert.Values.Add(new CertificateValue { SortOrder = vorder++, Kind = r.Kind, Name = Clean(r.Name), Unit = Clean(r.Unit), Value = r.Value.Value });
             await CertificateEngine.EvaluateAsync(_uow, cert, lot, cancellationToken);
+            cert.EditorUserIds = MaterialSpecService.WithEditor(cert.EditorUserIds, Me);   // Fix round 1 (M6): whoever entered or edited the values never verifies them
             cert.ModifyDate = now; cert.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await LoadAsync(_uow.Set<MaterialCertificate>().Where(c => c.Id == cert.Id), cancellationToken))[0]);
@@ -138,7 +142,7 @@ namespace Services.NasbNiro.Quality
             MaterialCertificate cert = await _uow.Set<MaterialCertificate>().Include(c => c.Lot).Include(c => c.Values).FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, cancellationToken);
             if (cert == null) return QualityText.NotFound<MaterialCertificateDto>("گواهی پیدا نشد.");
             if (cert.Result != CertificateResult.Pending) return Bad<MaterialCertificateDto>("این گواهی قبلاً بررسی شده است.");
-            if (cert.CreatorUserId == Me) return Bad<MaterialCertificateDto>(QualityText.SameUser);
+            if (cert.CreatorUserId == Me || MaterialSpecService.Editors(cert.EditorUserIds).Contains(Me)) return Bad<MaterialCertificateDto>(QualityText.SameUser + " (ثبت‌کننده، ویرایشگر یا واردکننده مقدارهای گواهی نمی‌تواند آن را بررسی کند)");
             if (dto.Accept && CertificateRules.NeedsValues(cert.Type))
             {
                 // the verdict is recomputed on the verification day: the specification may have changed since the certificate was entered

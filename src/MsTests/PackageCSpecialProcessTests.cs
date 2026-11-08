@@ -34,13 +34,15 @@ namespace MsTests
         private static readonly ClaimsPrincipal Qc = AppHost.Principal(54, "qc.one", "QC");
         private static readonly ClaimsPrincipal Qc2 = AppHost.Principal(55, "qc.two", "QC");
         private static readonly ClaimsPrincipal Commercial = AppHost.Principal(56, "commercial.one", "COMMERCIAL");
+        private static readonly ClaimsPrincipal ProdManager = AppHost.Principal(57, "prod.manager", "PRODUCTIONMANAGER");
+        private static readonly ClaimsPrincipal Qc3 = AppHost.Principal(58, "qc.three", "QC");
 
         private static AppHost NewHost(string name)
         {
             var host = new AppHost("PKC_" + name + "_" + Guid.NewGuid().ToString("N"));
             host.Write(u =>
             {
-                foreach (int id in new[] { 51, 52, 53, 54, 55, 56 }) AppHost.Add(u, new User { Id = id, UserName = "pkc.user" + id, Email = "pkc.user" + id + "@example.com", IsActive = true });
+                foreach (int id in new[] { 51, 52, 53, 54, 55, 56, 57, 58 }) AppHost.Add(u, new User { Id = id, UserName = "pkc.user" + id, Email = "pkc.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
             return host;
@@ -276,6 +278,7 @@ namespace MsTests
         private sealed class Plant
         {
             public int TypeId, QualId, OrderId, OpId, MachineId, InstrumentId, PersonId, ItemId, WorkOrderId, ProcDeliverable, ProcRevision;
+            public Guid Chart;
             public string OrderNumber;
         }
 
@@ -286,6 +289,21 @@ namespace MsTests
             new SpParameterDto { Name = "نرخ گرمایش", Unit = "C/h", Max = 200m },
             new SpParameterDto { Name = "نرخ سرمایش", Unit = "C/h", Max = 100m },
         };
+
+        private static List<SpParameterDto> PltLimits() => new List<SpParameterDto>
+        {
+            new SpParameterDto { Name = "ضخامت آبکاری", Unit = "um", Min = 8m, Max = 25m }, new SpParameterDto { Name = "دمای حمام", Unit = "C", Min = 20m, Max = 60m }, new SpParameterDto { Name = "زمان آبکاری", Unit = "min", Min = 5m, Max = 90m },
+        };
+
+        /// <summary>Writes the limits of the heat treatment into the master list (limits where there were none: a strengthening, applied at once).</summary>
+        private static async Task SetHtMasterLimits(AppHost host, int typeId)
+        {
+            var types = await Sp(host, Maker, s => s.GetTypesAsync(new SpTypeQuery(), default));
+            SpTypeDto t = types.Data.Single(x => x.Id == typeId);
+            var save = await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Id = t.Id, Code = t.Code, Title = t.Title, RequiresMachine = t.RequiresMachine, RequiresSurvey = t.RequiresSurvey, RequiredInstrumentClass = t.RequiredInstrumentClass, IsActive = true, RowVersion = t.RowVersion, Parameters = HtLimits() }, default));
+            Assert.IsTrue(save.Success, save.Message);
+            Assert.IsNull(save.Data.PendingChangeId);
+        }
 
         private static List<SaveSpRunValueDto> GoodRunValues() => new List<SaveSpRunValueDto>
         {
@@ -319,6 +337,7 @@ namespace MsTests
                 plant.MachineId = machine.Id; plant.InstrumentId = tc.Id; plant.PersonId = person.Id; plant.ItemId = item.Id; plant.WorkOrderId = wo.Id; plant.OrderId = order.Id; plant.OpId = op.Id;
                 plant.ProcDeliverable = deliverable.Id; plant.ProcRevision = rev.Id; plant.OrderNumber = order.Number;
             }, Seeder);
+            plant.Chart = NewFile(host);
             var save = await Sp(host, Maker, s => s.SaveQualificationAsync(new SaveSpQualDto
             {
                 TypeId = plant.TypeId, Title = "HT shaft qualification", ProcedureDeliverableId = plant.ProcDeliverable, ProcedureRevisionId = plant.ProcRevision, ValidFrom = DateTime.Today.AddDays(-5), ValidTo = DateTime.Today.AddDays(200),
@@ -343,7 +362,7 @@ namespace MsTests
         private static SaveSpRunDto RunDto(Plant p, List<SaveSpRunValueDto> values = null, decimal qty = 10m) => new SaveSpRunDto
         {
             OperationId = p.OpId, QualificationId = p.QualId, OperatorPersonId = p.PersonId, MachineId = p.MachineId, Quantity = qty, StartedAt = DateTime.Now.AddHours(-3), EndedAt = DateTime.Now.AddHours(-1),
-            ChartDocumentId = Guid.NewGuid(), ChartFileName = "chart.pdf", InstrumentIds = new List<int> { p.InstrumentId }, Values = values ?? GoodRunValues(),
+            ChartDocumentId = p.Chart, ChartFileName = "chart.pdf", InstrumentIds = new List<int> { p.InstrumentId }, Values = values ?? GoodRunValues(),
         };
 
         private static async Task<string> Gate(AppHost host, Plant p, decimal required = 10m, decimal scrap = 0m) =>
@@ -378,11 +397,12 @@ namespace MsTests
             var plt = types.Data.Single(t => t.Code == "PLT");
             var save = await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto
             {
-                Id = plt.Id, Code = "PLT", Title = "Plating (edited)", RequiresMachine = true, RequiresSurvey = false, IsActive = true, RowVersion = plt.RowVersion,
-                Parameters = new List<SpParameterDto> { new SpParameterDto { Name = "ضخامت", Unit = "um", Min = 8m, Max = 25m } },
+                Id = plt.Id, Code = "PLT", Title = "Plating (edited)", RequiresMachine = true, RequiresSurvey = false, RequiredInstrumentClass = plt.RequiredInstrumentClass, IsActive = true, RowVersion = plt.RowVersion, Parameters = PltLimits(),
             }, default));
             Assert.IsTrue(save.Success, save.Message);
-            Assert.AreEqual(1, save.Data.Parameters.Count);
+            Assert.IsNull(save.Data.PendingChangeId, "limits written where there were none only strengthen the control");
+            Assert.AreEqual(3, save.Data.Parameters.Count);
+            Assert.AreEqual(8m, save.Data.Parameters.Single(x => x.Name == "ضخامت آبکاری").Min);
             var dup = await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Code = "ht", Title = "Duplicate", Parameters = new List<SpParameterDto>() }, default));
             Assert.IsFalse(dup.Success, "the code is unique");
             var denied = await Sp(host, Qc, s => s.SaveTypeAsync(new SaveSpTypeDto { Code = "X1", Title = "x" }, default));
@@ -397,7 +417,7 @@ namespace MsTests
             var noLimit = await Sp(host, Maker, s => s.SaveQualificationAsync(new SaveSpQualDto
             {
                 Id = p.QualId, TypeId = p.TypeId, ProcedureDeliverableId = p.ProcDeliverable, ProcedureRevisionId = p.ProcRevision, ValidFrom = DateTime.Today, ValidTo = DateTime.Today.AddDays(100),
-                Limits = new List<SpParameterDto> { new SpParameterDto { Name = "دمای نگهداری", Unit = "C" } }, OperatorPersonIds = new List<int> { p.PersonId },
+                Limits = HtLimits().Select((l, i) => i == 0 ? new SpParameterDto { Name = l.Name, Unit = l.Unit } : l).ToList(), OperatorPersonIds = new List<int> { p.PersonId },
                 Equipments = new List<SaveSpQualEquipmentDto> { new SaveSpQualEquipmentDto { Kind = SpEquipmentKind.Machine, MachineId = p.MachineId, SurveyKind = SpSurveyKind.Tus, SurveyDate = DateTime.Today.AddDays(-1), SurveyDueDate = DateTime.Today.AddDays(100) },
                     new SaveSpQualEquipmentDto { Kind = SpEquipmentKind.Instrument, EquipmentId = p.InstrumentId } },
             }, default));
@@ -497,15 +517,16 @@ namespace MsTests
             AppHost host = NewHost("widerthanmaster");
             var types = await Sp(host, Maker, s => s.GetTypesAsync(new SpTypeQuery(), default));
             var plt = types.Data.Single(t => t.Code == "PLT");
-            Assert.IsTrue((await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Id = plt.Id, Code = "PLT", Title = plt.Title, RequiresMachine = true, IsActive = true, RowVersion = plt.RowVersion,
-                Parameters = new List<SpParameterDto> { new SpParameterDto { Name = "ضخامت", Unit = "um", Min = 8m, Max = 25m } } }, default))).Success);
+            Assert.IsTrue((await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Id = plt.Id, Code = "PLT", Title = plt.Title, RequiresMachine = true, RequiredInstrumentClass = plt.RequiredInstrumentClass, IsActive = true, RowVersion = plt.RowVersion, Parameters = PltLimits() }, default))).Success);
             Plant p = await NewPlant(host, false);
             var wide = await Sp(host, Maker, s => s.SaveQualificationAsync(new SaveSpQualDto
             {
                 TypeId = plt.Id, ProcedureDeliverableId = p.ProcDeliverable, ProcedureRevisionId = p.ProcRevision, ValidFrom = DateTime.Today, ValidTo = DateTime.Today.AddDays(100),
-                Limits = new List<SpParameterDto> { new SpParameterDto { Name = "ضخامت", Unit = "um", Min = 5m, Max = 20m } }, OperatorPersonIds = new List<int>(), Equipments = new List<SaveSpQualEquipmentDto>(),
+                Limits = new List<SpParameterDto> { new SpParameterDto { Name = "ضخامت آبکاری", Unit = "um", Min = 5m, Max = 20m }, new SpParameterDto { Name = "دمای حمام", Unit = "C", Min = 20m, Max = 60m }, new SpParameterDto { Name = "زمان آبکاری", Unit = "min", Min = 5m, Max = 90m } },
+                OperatorPersonIds = new List<int>(), Equipments = new List<SaveSpQualEquipmentDto>(),
             }, default));
             Assert.IsFalse(wide.Success, "a minimum below the master is refused");
+            Assert.IsTrue(wide.Message.Contains("کمتر"), wide.Message);
         }
 
         // ------------------------------------------------------------------------------------------------ run and gate
@@ -753,13 +774,14 @@ namespace MsTests
         {
             AppHost host = NewHost("subrun");
             Plant p = await NewPlant(host, false);
+            await SetHtMasterLimits(host, p.TypeId);
             int provider = 0;
             host.Write(u => { var pr = AppHost.Add(u, new Provider { Name = "Coating Co" }); u.SaveChanges(); provider = pr.Id; }, Seeder);
             int op = await NewSubcontractStep(host, p, provider);
             SaveSpRunDto Sub() => new SaveSpRunDto
             {
                 OperationId = op, IsSubcontract = true, SupplierId = provider, Quantity = 10m, StartedAt = DateTime.Now.AddHours(-30), EndedAt = DateTime.Now.AddHours(-10),
-                ChartDocumentId = Guid.NewGuid(), CertificateDocumentId = Guid.NewGuid(), CertificateNumber = "SUP-CERT-1", Values = GoodRunValues(),
+                ChartDocumentId = NewFile(host), CertificateDocumentId = NewFile(host), CertificateNumber = "SUP-CERT-1", Values = GoodRunValues(),
             };
             Assert.IsFalse((await Sp(host, Qc, s => s.SaveRunAsync(Sub(), default))).Success, "the supplier is not approved for the process");
             var appr = await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(new SaveSpSupplierApprovalDto { ProviderId = provider, TypeId = p.TypeId, ValidFrom = DateTime.Today.AddDays(-1), ValidTo = DateTime.Today.AddDays(300), AccreditationNumber = "AC-9" }, default));
@@ -783,6 +805,7 @@ namespace MsTests
         {
             AppHost host = NewHost("receipt");
             Plant p = await NewPlant(host, false);
+            await SetHtMasterLimits(host, p.TypeId);
             int provider = 0, receipt = 0;
             host.Write(u => { var pr = AppHost.Add(u, new Provider { Name = "Plating Co" }); u.SaveChanges(); provider = pr.Id; }, Seeder);
             int op = await NewSubcontractStep(host, p, provider);
@@ -797,10 +820,13 @@ namespace MsTests
             Assert.IsTrue((await Sp(host, Qa, s => s.SupplierApprovalActionAsync(new SpActionDto { Id = appr.Data.Id, Action = "approve" }, default))).Success);
             var run = await Sp(host, Qc, s => s.SaveRunAsync(new SaveSpRunDto
             {
-                OperationId = op, IsSubcontract = true, SupplierId = provider, Quantity = 10m, StartedAt = DateTime.Now.AddHours(-30), EndedAt = DateTime.Now.AddHours(-10), ChartDocumentId = Guid.NewGuid(), CertificateDocumentId = Guid.NewGuid(),
+                OperationId = op, IsSubcontract = true, SupplierId = provider, Quantity = 10m, StartedAt = DateTime.Now.AddHours(-30), EndedAt = DateTime.Now.AddHours(-10), ChartDocumentId = NewFile(host), CertificateDocumentId = NewFile(host),
                 CertificateNumber = "SUP-CERT-2", Values = GoodRunValues(),
             }, default));
             Assert.IsTrue(run.Success, run.Message);
+            string unreviewed = await host.As(Seeder, async sp => { IUnitOfWork uow = sp.GetRequiredService<IUnitOfWork>(); return await SpecialProcessGate.ReceiptEvidenceProblemAsync(uow, uow.Set<InventoryDocument>().Single(d => d.Id == receipt), default); });
+            Assert.IsNotNull(unreviewed, "a run the QA has not reviewed is not evidence for the receipt");
+            Assert.IsTrue((await Sp(host, Qa, s => s.RunActionAsync(new SpActionDto { Id = run.Data.Id, Action = "review" }, default))).Success);
             string after = await host.As(Seeder, async sp => { IUnitOfWork uow = sp.GetRequiredService<IUnitOfWork>(); return await SpecialProcessGate.ReceiptEvidenceProblemAsync(uow, uow.Set<InventoryDocument>().Single(d => d.Id == receipt), default); });
             Assert.IsNull(after, after);
         }
@@ -1041,6 +1067,403 @@ namespace MsTests
             Assert.IsTrue((await Mat(host, Qc2, m => m.VerifyCertificateAsync(new VerifyCertificateDto { Id = good.Data.Id, Accept = true }, default))).Success);
             var ok = await Ms(host, Qc, s => s.SheetAsync(good.Data.Id, default));
             Assert.IsTrue(ok.Data.ReceiptAcceptable, string.Join(" | ", ok.Data.Problems));
+        }
+
+        // ------------------------------------------------------------------------------------------------ fix round 1
+
+        private static SaveSpTypeDto TypeSave(SpTypeDto t, Action<SaveSpTypeDto> change = null)
+        {
+            var d = new SaveSpTypeDto
+            {
+                Id = t.Id, Code = t.Code, Title = t.Title, Description = t.Description, RequiresMachine = t.RequiresMachine, RequiresSurvey = t.RequiresSurvey, RequiredInstrumentClass = t.RequiredInstrumentClass,
+                ProcedureDeliverableId = t.ProcedureDeliverableId, ExistingControl = t.ExistingControl, IsActive = t.IsActive, RowVersion = t.RowVersion,
+                Parameters = t.Parameters.Select(x => new SpParameterDto { Id = x.Id, SortOrder = x.SortOrder, Name = x.Name, Unit = x.Unit, Min = x.Min, Max = x.Max, Required = x.Required }).ToList(),
+            };
+            change?.Invoke(d);
+            return d;
+        }
+
+        private static async Task<SpTypeDto> TypeOf(AppHost host, string code) =>
+            (await Sp(host, Maker, s => s.GetTypesAsync(new SpTypeQuery { IncludeInactive = true }, default))).Data.Single(t => t.Code == code);
+
+        [TestMethod]
+        public async Task AChangeThatWeakensAProcessTypeIsOnlyARequestUntilASecondPersonApprovesIt()
+        {
+            AppHost host = NewHost("typeweaken");
+            SpTypeDto ht = await TypeOf(host, "HT");
+            Assert.IsFalse((await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => d.RequiresSurvey = false), default))).Success, "a weakening needs a reason");
+            var asked = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => { d.RequiresSurvey = false; d.Reason = "the customer surveys the furnace"; }), default));
+            Assert.IsTrue(asked.Success, asked.Message);
+            Assert.IsTrue(asked.Data.RequiresSurvey, "nothing changes before the second person decides");
+            Assert.IsTrue(asked.Data.PendingChangeId.HasValue);
+            Assert.IsTrue(asked.Data.PendingSummary.Contains("TUS"));
+            int change = asked.Data.PendingChangeId.Value;
+            Assert.IsFalse((await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => d.Title = "other title"), default))).Success, "no other change while one waits");
+            Assert.IsFalse((await Sp(host, Maker, s => s.TypeChangeActionAsync(new SpActionDto { Id = change, Action = "approve" }, default))).Success, "engineering does not decide");
+            Assert.IsFalse((await Sp(host, Qc, s => s.TypeChangeActionAsync(new SpActionDto { Id = change, Action = "approve" }, default))).Success, "QC does not decide");
+            Assert.IsFalse((await Sp(host, Qa, s => s.TypeChangeActionAsync(new SpActionDto { Id = change, Action = "reject" }, default))).Success, "a rejection needs a reason");
+            var rejected = await Sp(host, Qa, s => s.TypeChangeActionAsync(new SpActionDto { Id = change, Action = "reject", Note = "survey stays" }, default));
+            Assert.IsTrue(rejected.Success, rejected.Message);
+            Assert.IsTrue(rejected.Data.RequiresSurvey);
+            Assert.IsNull(rejected.Data.PendingChangeId);
+
+            ht = await TypeOf(host, "HT");
+            var again = await Sp(host, Qa, s => s.SaveTypeAsync(TypeSave(ht, d => { d.RequiresSurvey = false; d.Reason = "second request"; }), default));
+            Assert.IsTrue(again.Success, again.Message);
+            int second = again.Data.PendingChangeId.Value;
+            Assert.IsFalse((await Sp(host, Qa, s => s.TypeChangeActionAsync(new SpActionDto { Id = second, Action = "approve" }, default))).Success, "the requester never approves his own request");
+            var seat = new AiActingUser { UserId = 99, UserName = "seat.qa", Roles = new[] { "QA" } };
+            var ai = await AiActing.RunAsync(host.Provider.GetRequiredService<IServiceScopeFactory>(), seat, "SEAT-QA", sp => sp.GetRequiredService<ISpecialProcessService>().TypeChangeActionAsync(new SpActionDto { Id = second, Action = "approve" }, default));
+            Assert.IsFalse(ai.Success, "an AI seat never decides");
+            var approved = await Sp(host, Qa2, s => s.TypeChangeActionAsync(new SpActionDto { Id = second, Action = "approve" }, default));
+            Assert.IsTrue(approved.Success, approved.Message);
+            Assert.IsFalse(approved.Data.RequiresSurvey, "approved by a second person: applied");
+            Assert.AreEqual(2, host.Read(u => u.Set<SpTypeChange>().Count(c => c.TypeId == ht.Id)), "both requests are kept for ever");
+            Assert.AreEqual(1, host.Read(u => u.Set<SpTypeChange>().Count(c => c.TypeId == ht.Id && c.Status == SpChangeStatus.Approved && c.DecidedByUserId == 53)));
+
+            ht = await TypeOf(host, "HT");
+            var back = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => d.RequiresSurvey = true), default));
+            Assert.IsTrue(back.Success && back.Data.RequiresSurvey && !back.Data.PendingChangeId.HasValue, "a strengthening applies at once");
+        }
+
+        [TestMethod]
+        public async Task EveryKindOfWeakeningOfAProcessTypeWaitsAndStrengtheningDoesNot()
+        {
+            AppHost host = NewHost("typekinds");
+            SpTypeDto ht0 = await TypeOf(host, "HT");
+            await SetHtMasterLimits(host, ht0.Id);
+            var weakening = new List<Action<SaveSpTypeDto>>
+            {
+                d => d.RequiresMachine = false, d => d.RequiredInstrumentClass = null, d => d.IsActive = false, d => d.Parameters[0].Max = 900m, d => d.Parameters[0].Min = 800m, d => d.Parameters[0].Max = null,
+                d => d.Parameters.RemoveAt(3), d => d.Parameters[1].Required = false,
+            };
+            int n = 0;
+            foreach (var change in weakening)
+            {
+                SpTypeDto ht = await TypeOf(host, "HT");
+                var asked = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => { change(d); d.Reason = "case " + n; }), default));
+                Assert.IsTrue(asked.Success && asked.Data.PendingChangeId.HasValue, "weakening " + n + ": " + asked.Message);
+                var done = await Sp(host, Qa, s => s.TypeChangeActionAsync(new SpActionDto { Id = asked.Data.PendingChangeId.Value, Action = "reject", Note = "no" }, default));
+                Assert.IsTrue(done.Success, done.Message);
+                n++;
+            }
+            SpTypeDto now = await TypeOf(host, "HT");
+            Assert.IsTrue(now.RequiresMachine && now.IsActive && now.RequiredInstrumentClass.HasValue && now.Parameters.Count == 4, "nothing was applied");
+            var narrower = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(now, d => { d.Parameters[0].Min = 845m; d.Parameters[0].Max = 855m; d.Parameters[2].Required = true; d.Parameters.Add(new SpParameterDto { Name = "Atmosphere", Unit = "-", Max = 5m }); }), default));
+            Assert.IsTrue(narrower.Success && !narrower.Data.PendingChangeId.HasValue, narrower.Message);
+            Assert.AreEqual(5, narrower.Data.Parameters.Count, "narrowing a limit and adding a parameter only strengthen");
+        }
+
+        [TestMethod]
+        public async Task TheCodeOfAUsedTypeAndTheExistingControlFlagAreFixed()
+        {
+            AppHost host = NewHost("typecode");
+            Plant p = await NewPlant(host, false);
+            SpTypeDto ht = await TypeOf(host, "HT");
+            var renamed = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => d.Code = "HT9"), default));
+            Assert.IsFalse(renamed.Success, "a qualification uses the code");
+            Assert.IsTrue(renamed.Message.Contains("استفاده شده"), renamed.Message);
+            SpTypeDto nit = await TypeOf(host, "NIT"), ndt = await TypeOf(host, "NDT");
+            var unused = await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(nit, d => d.Code = "NIT2"), default));
+            Assert.IsTrue(unused.Success, "a type nothing uses may still be renamed: " + unused.Message);
+            Assert.IsFalse((await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ht, d => d.ExistingControl = true), default))).Success, "the existing-control flag is not switched on through the API");
+            Assert.IsFalse((await Sp(host, Maker, s => s.SaveTypeAsync(TypeSave(ndt, d => d.ExistingControl = false), default))).Success, "nor off");
+            Assert.IsFalse((await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Code = "NEW1", Title = "new", RequiresMachine = false, ExistingControl = true, Parameters = new List<SpParameterDto>() }, default))).Success, "nor on creation");
+            Assert.IsTrue((await Sp(host, Maker, s => s.SaveTypeAsync(new SaveSpTypeDto { Code = "NEW1", Title = "new", RequiresMachine = false, Parameters = new List<SpParameterDto>() }, default))).Success);
+        }
+
+        [TestMethod]
+        public async Task AQualificationMustCarryEveryParameterTheMasterRequires()
+        {
+            AppHost host = NewHost("allparams");
+            Plant p = await NewPlant(host, false);
+            var missing = await Sp(host, Maker, s => s.SaveQualificationAsync(new SaveSpQualDto
+            {
+                Id = p.QualId, TypeId = p.TypeId, ProcedureDeliverableId = p.ProcDeliverable, ProcedureRevisionId = p.ProcRevision, ValidFrom = DateTime.Today, ValidTo = DateTime.Today.AddDays(100),
+                Limits = HtLimits().Take(2).ToList(), OperatorPersonIds = new List<int> { p.PersonId }, Equipments = new List<SaveSpQualEquipmentDto>(),
+            }, default));
+            Assert.IsFalse(missing.Success);
+            Assert.IsTrue(missing.Message.Contains("نرخ گرمایش"), "the missing required parameter is named: " + missing.Message);
+        }
+
+        private static SaveSpRunDto DatedRun(Plant p, int daysAgo)
+        {
+            SaveSpRunDto d = RunDto(p);
+            d.StartedAt = DateTime.Now.AddDays(-daysAgo).AddHours(-3); d.EndedAt = DateTime.Now.AddDays(-daysAgo).AddHours(-1);
+            return d;
+        }
+
+        [TestMethod]
+        public async Task ARunIsJudgedByTheStateAtTheRunSoARenewalOrALaterCalibrationLapseDoesNotBlockTheFinish()
+        {
+            AppHost host = NewHost("history");
+            Plant p0 = await NewPlant(host, true);
+            // the instrument was calibrated on the day of the run (3 days ago) and fell overdue yesterday
+            host.Write(u =>
+            {
+                var tc = u.Set<MeasuringEquipment>().Single(e => e.Id == p0.InstrumentId); tc.RequiresCalibration = true;
+                AppHost.Add(u, new CalibrationEvent { EquipmentId = tc.Id, EventDate = DateTime.Today.AddDays(-30), NextDue = DateTime.Today.AddDays(-1), AsLeftPass = true, AsFoundPass = true, IntervalMonths = 1, LabName = "Lab" });
+                u.SaveChanges();
+            }, Seeder);
+            var run = await Sp(host, Qc, s => s.SaveRunAsync(DatedRun(p0, 3), default));
+            Assert.IsTrue(run.Success, "valid on the day of the run: " + run.Message);
+            Assert.IsTrue((await Sp(host, Qa, s => s.RunActionAsync(new SpActionDto { Id = run.Data.Id, Action = "review" }, default))).Success);
+            Assert.IsNull(await Gate(host, p0), "the instrument is overdue today but was calibrated at the run");
+            var today = await Sp(host, Qc, s => s.SaveRunAsync(RunDto(p0), default));
+            Assert.IsFalse(today.Success, "a run of today with the lapsed instrument is refused");
+
+            // a renewal supersedes the qualification; the finished runs under the old one keep counting
+            var renewal = await Sp(host, Maker, s => s.SaveQualificationAsync(new SaveSpQualDto
+            {
+                TypeId = p0.TypeId, Title = "renewal", SupersedesId = p0.QualId, ProcedureDeliverableId = p0.ProcDeliverable, ProcedureRevisionId = p0.ProcRevision, ValidFrom = DateTime.Today, ValidTo = DateTime.Today.AddDays(300),
+                Limits = HtLimits(), OperatorPersonIds = new List<int> { p0.PersonId },
+                Equipments = new List<SaveSpQualEquipmentDto>
+                {
+                    new SaveSpQualEquipmentDto { Kind = SpEquipmentKind.Machine, MachineId = p0.MachineId, SurveyKind = SpSurveyKind.Tus, SurveyDate = DateTime.Today.AddDays(-20), SurveyDueDate = DateTime.Today.AddDays(160) },
+                    new SaveSpQualEquipmentDto { Kind = SpEquipmentKind.Instrument, EquipmentId = p0.InstrumentId },
+                },
+            }, default));
+            Assert.IsTrue(renewal.Success, renewal.Message);
+            host.Write(u => { var tc = u.Set<MeasuringEquipment>().Single(e => e.Id == p0.InstrumentId); tc.RequiresCalibration = false; u.SaveChanges(); }, Seeder);
+            Assert.IsTrue((await Sp(host, Maker, s => s.QualificationActionAsync(new SpActionDto { Id = renewal.Data.Id, Action = "submit" }, default))).Success);
+            var approved = await Sp(host, Qa, s => s.QualificationActionAsync(new SpActionDto { Id = renewal.Data.Id, Action = "approve" }, default));
+            Assert.IsTrue(approved.Success, approved.Message);
+            Assert.AreEqual(SpQualStatus.Superseded, host.Read(u => u.Set<SpQualification>().Single(q => q.Id == p0.QualId).Status));
+            host.Write(u => { var tc = u.Set<MeasuringEquipment>().Single(e => e.Id == p0.InstrumentId); tc.RequiresCalibration = true; u.SaveChanges(); }, Seeder);
+            Assert.IsNull(await Gate(host, p0), "the old qualification was valid at the run; its renewal does not undo the run");
+            host.Write(u => { u.Set<SpQualification>().Single(q => q.Id == p0.QualId).Status = SpQualStatus.Void; u.SaveChanges(); }, Seeder);
+            Assert.IsNotNull(await Gate(host, p0), "a voided qualification does invalidate its runs");
+        }
+
+        [TestMethod]
+        public async Task ASupplierRenewalSitsBesideTheCurrentApprovalAndSupersedesItOnApproval()
+        {
+            AppHost host = NewHost("suprenew");
+            Plant p = await NewPlant(host, false);
+            int provider = 0;
+            host.Write(u => { var pr = AppHost.Add(u, new Provider { Name = "Renew Co" }); u.SaveChanges(); provider = pr.Id; }, Seeder);
+            SaveSpSupplierApprovalDto Dto(string acc) => new SaveSpSupplierApprovalDto { ProviderId = provider, TypeId = p.TypeId, ValidFrom = DateTime.Today.AddDays(-1), ValidTo = DateTime.Today.AddDays(300), AccreditationNumber = acc };
+            var first = await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(Dto("AC-1"), default));
+            Assert.IsTrue((await Sp(host, Qa, s => s.SupplierApprovalActionAsync(new SpActionDto { Id = first.Data.Id, Action = "approve" }, default))).Success);
+            var renewal = await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(Dto("AC-2"), default));
+            Assert.IsTrue(renewal.Success, renewal.Message);
+            Assert.AreEqual(SpApprovalStatus.Pending, renewal.Data.Status);
+            Assert.AreEqual(SpApprovalStatus.Approved, host.Read(u => u.Set<SpSupplierApproval>().Single(a => a.Id == first.Data.Id).Status), "the current approval is not voided by the request");
+            Assert.IsFalse((await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(Dto("AC-3"), default))).Success, "one pending version at a time");
+            SpProcessType type = host.Read(u => u.Set<SpProcessType>().Single(t => t.Id == p.TypeId));
+            Assert.IsNull(await host.As(Seeder, sp => SpecialProcessGate.SupplierProblemAsync(sp.GetRequiredService<IUnitOfWork>(), provider, type, DateTime.Today, default)), "the supplier stays approved while the renewal waits");
+            Assert.IsFalse((await Sp(host, Commercial, s => s.SupplierApprovalActionAsync(new SpActionDto { Id = renewal.Data.Id, Action = "approve" }, default))).Success);
+            var approved = await Sp(host, Qa, s => s.SupplierApprovalActionAsync(new SpActionDto { Id = renewal.Data.Id, Action = "approve" }, default));
+            Assert.IsTrue(approved.Success, approved.Message);
+            Assert.AreEqual(SpApprovalStatus.Superseded, host.Read(u => u.Set<SpSupplierApproval>().Single(a => a.Id == first.Data.Id).Status), "the new version supersedes the old one");
+            Assert.AreEqual(1, host.Read(u => u.Set<SpSupplierApproval>().Count(a => a.ProviderId == provider && a.Status == SpApprovalStatus.Approved)));
+            Assert.IsNull(await host.As(Seeder, sp => SpecialProcessGate.SupplierProblemAsync(sp.GetRequiredService<IUnitOfWork>(), provider, type, DateTime.Today.AddDays(-1), default)), "a run made under the superseded approval still counts");
+            host.Write(u => { foreach (var a in u.Set<SpSupplierApproval>().Where(a => a.ProviderId == provider)) a.Status = SpApprovalStatus.Void; u.SaveChanges(); }, Seeder);
+            Assert.IsNotNull(await host.As(Seeder, sp => SpecialProcessGate.SupplierProblemAsync(sp.GetRequiredService<IUnitOfWork>(), provider, type, DateTime.Today, default)), "a voided approval counts for nothing");
+        }
+
+        [TestMethod]
+        public async Task ASubcontractRunWithoutDefinedLimitsCannotBeRecordedAndMissingFilesAreRefused()
+        {
+            AppHost host = NewHost("sublimits");
+            Plant p = await NewPlant(host, false);
+            int provider = 0;
+            host.Write(u => { var pr = AppHost.Add(u, new Provider { Name = "Limits Co" }); u.SaveChanges(); provider = pr.Id; }, Seeder);
+            int op = await NewSubcontractStep(host, p, provider);
+            var appr = await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(new SaveSpSupplierApprovalDto { ProviderId = provider, TypeId = p.TypeId, ValidFrom = DateTime.Today.AddDays(-1), ValidTo = DateTime.Today.AddDays(300), AccreditationNumber = "AC-L" }, default));
+            Assert.IsTrue((await Sp(host, Qa, s => s.SupplierApprovalActionAsync(new SpActionDto { Id = appr.Data.Id, Action = "approve" }, default))).Success);
+            SaveSpRunDto Sub() => new SaveSpRunDto
+            {
+                OperationId = op, IsSubcontract = true, SupplierId = provider, Quantity = 10m, StartedAt = DateTime.Now.AddHours(-30), EndedAt = DateTime.Now.AddHours(-10),
+                ChartDocumentId = NewFile(host), CertificateDocumentId = NewFile(host), CertificateNumber = "SUP-L", Values = GoodRunValues(),
+            };
+            var none = await Sp(host, Qc, s => s.SaveRunAsync(Sub(), default));
+            Assert.IsFalse(none.Success, "the master list has no limits: whatever value would pass, so nothing is recorded");
+            Assert.IsTrue(none.Message.Contains("حد قبول تعریف نشده"), none.Message);
+            await SetHtMasterLimits(host, p.TypeId);
+            Assert.IsTrue((await Sp(host, Qc, s => s.SaveRunAsync(Sub(), default))).Success, "with limits the run is judged");
+            var missingFile = await Sp(host, Qc, s => { var d = Sub(); d.ChartDocumentId = Guid.NewGuid(); return s.SaveRunAsync(d, default); });
+            Assert.IsFalse(missingFile.Success);
+            Assert.IsTrue(missingFile.Message.Contains("پیدا نشد"), missingFile.Message);
+            Assert.IsFalse((await Sp(host, Commercial, s => s.SaveSupplierApprovalAsync(new SaveSpSupplierApprovalDto { ProviderId = provider, TypeId = p.TypeId, ValidFrom = DateTime.Today, ValidTo = DateTime.Today.AddDays(50), EvidenceDocumentId = Guid.NewGuid() }, default))).Success, "evidence file that does not exist");
+            Guid exe; using (IServiceScope scope = host.Provider.CreateScope()) { var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>(); var d = new Entities.Model.Document("files/x.exe", "application/x-msdownload"); uow.Set<Entities.Model.Document>().Add(d); uow.SaveChanges(); exe = d.Id; }
+            var badType = await Sp(host, Qc, s => { var d = Sub(); d.CertificateDocumentId = exe; return s.SaveRunAsync(d, default); });
+            Assert.IsFalse(badType.Success);
+            Assert.IsTrue(badType.Message.Contains("مجاز نیست"), badType.Message);
+            Guid ext; using (IServiceScope scope = host.Provider.CreateScope()) { var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>(); var d = new Entities.Model.Document("files/y.pdf", ".pdf"); uow.Set<Entities.Model.Document>().Add(d); uow.SaveChanges(); ext = d.Id; }
+            Assert.IsNull(await QualityChecks.FileProblemAsync(host.Provider.CreateScope().ServiceProvider.GetRequiredService<IUnitOfWork>(), ext, "x", default), "the store keeps the extension as the type of older rows");
+        }
+
+        [TestMethod]
+        public async Task ARunHasABoundedQuantityAndBoundedNumbers()
+        {
+            AppHost host = NewHost("runbounds");
+            Plant p = await NewPlant(host, true);
+            var more = await Sp(host, Qc, s => s.SaveRunAsync(RunDto(p, qty: 11m), default));
+            Assert.IsFalse(more.Success, "the order is for 10 pieces");
+            Assert.IsTrue(more.Message.Contains("بیشتر"), more.Message);
+            var huge = GoodRunValues(); huge[0].Value = 1e15m;
+            var big = await Sp(host, Qc, s => s.SaveRunAsync(RunDto(p, huge), default));
+            Assert.IsFalse(big.Success, "a value that would overflow the column is a message, not an error 500");
+            Assert.IsTrue(big.Message.Contains("بزرگ"), big.Message);
+        }
+
+        private static async Task<(Plant Plant, int NcrId)> RejectedStepWithConcession(AppHost host)
+        {
+            Plant p = await NewPlant(host, true);
+            int ncrId = 0;
+            host.Write(u =>
+            {
+                var ncr = AppHost.Add(u, new NonConformance
+                {
+                    ItemId = p.ItemId, WorkOrderId = p.WorkOrderId, Number = "NCR-C-" + Guid.NewGuid().ToString("N").Substring(0, 6), ReportDate = DateTime.Today, Status = NcrStatus.Approved, Severity = NcrSeverity.Minor,
+                    Disposition = NcrDisposition.Concession, CreatorUserId = 1, Quantity = 1,
+                });
+                u.SaveChanges(); ncrId = ncr.Id;
+                u.Set<MfProductionOrder>().Single(o => o.Id == p.OrderId).Status = MfOrderStatus.Released;
+                var op = u.Set<MfOperation>().Single(o => o.Id == p.OpId); op.Status = MfOperationStatus.Rejected; op.NcrId = ncr.Id; op.GoodQty = 10m;
+                u.SaveChanges();
+            }, Seeder);
+            return (p, ncrId);
+        }
+
+        [TestMethod]
+        public async Task AConcessionOnAFlaggedStepStillNeedsThePassedAndReviewedRun()
+        {
+            AppHost host = NewHost("concession");
+            var (p, ncr) = await RejectedStepWithConcession(host);
+            var refused = await host.As(ProdManager, sp => sp.GetRequiredService<Services.NasbNiro.Production.IMfProductionService>().OperationActionAsync(new ViewModels.NasbNiro.ProductionDtos.OperationActionDto { Id = p.OpId, Action = "accept-by-concession", NcrId = ncr, Reason = "customer agreed" }, default));
+            Assert.IsFalse(refused.Success);
+            Assert.IsTrue(refused.Message.Contains("بدون ثبت اجرای فرایند"), refused.Message);
+            Assert.AreEqual(MfOperationStatus.Rejected, host.Read(u => u.Set<MfOperation>().Single(o => o.Id == p.OpId).Status), "the step stays rejected");
+            var run = await Sp(host, Qc, s => s.SaveRunAsync(RunDto(p), default));
+            Assert.IsTrue(run.Success, run.Message);
+            Assert.IsTrue((await Sp(host, Qa, s => s.RunActionAsync(new SpActionDto { Id = run.Data.Id, Action = "review" }, default))).Success);
+            var accepted = await host.As(ProdManager, sp => sp.GetRequiredService<Services.NasbNiro.Production.IMfProductionService>().OperationActionAsync(new ViewModels.NasbNiro.ProductionDtos.OperationActionDto { Id = p.OpId, Action = "accept-by-concession", NcrId = ncr, Reason = "customer agreed" }, default));
+            Assert.IsTrue(accepted.Success, accepted.Message);
+            Assert.AreEqual(MfOperationStatus.Done, host.Read(u => u.Set<MfOperation>().Single(o => o.Id == p.OpId).Status));
+        }
+
+        [TestMethod]
+        public async Task AReworkStepKeepsTheSpecialProcessFlagsSoItIsGatedToo()
+        {
+            AppHost host = NewHost("reworkflags");
+            var (p, ncr) = await RejectedStepWithConcession(host);
+            host.Write(u => { u.Set<NonConformance>().Single(n => n.Id == ncr).Disposition = NcrDisposition.Rework; u.SaveChanges(); }, Seeder);
+            var made = await host.As(ProdManager, sp => sp.GetRequiredService<Services.NasbNiro.Production.IMfProductionService>().ReworkAsync(new ViewModels.NasbNiro.ProductionDtos.ReworkOperationDto { OperationId = p.OpId, NcrId = ncr }, default));
+            Assert.IsTrue(made.Success, made.Message);
+            MfOperation rework = host.Read(u => u.Set<MfOperation>().Single(o => o.IsRework && o.ReworkOfOperationId == p.OpId));
+            Assert.IsTrue(rework.IsSpecialProcess && rework.SpecialProcessTypeId == p.TypeId, "the re-heat-treatment is a special process step too");
+        }
+
+        [TestMethod]
+        public async Task AReceiptWithAReferenceThatMatchesNoSpecialStepIsRefusedNotSkipped()
+        {
+            AppHost host = NewHost("receiptref");
+            Plant p = await NewPlant(host, false);
+            int provider = 0, receipt = 0;
+            host.Write(u => { var pr = AppHost.Add(u, new Provider { Name = "Ref Co" }); u.SaveChanges(); provider = pr.Id; }, Seeder);
+            await NewSubcontractStep(host, p, provider);
+            host.Write(u =>
+            {
+                var d = AppHost.Add(u, new InventoryDocument { Number = "SR-" + Guid.NewGuid().ToString("N").Substring(0, 5), Type = InventoryDocumentType.SubcontractReturn, WorkOrderId = p.WorkOrderId, ProviderId = provider, ReferenceNumber = "SOMETHING-ELSE", Status = InventoryDocumentStatus.Draft });
+                u.SaveChanges(); receipt = d.Id;
+            }, Seeder);
+            string problem = await host.As(Seeder, async sp => { IUnitOfWork uow = sp.GetRequiredService<IUnitOfWork>(); return await SpecialProcessGate.ReceiptEvidenceProblemAsync(uow, uow.Set<InventoryDocument>().Single(d => d.Id == receipt), default); });
+            Assert.IsNotNull(problem, "an unlinked reference on a work order with a live outside special step of the same supplier");
+            Assert.IsTrue(problem.Contains("شماره مرجع"), problem);
+        }
+
+        [TestMethod]
+        public async Task ACertificateMustBeOfOneOfTheSpecificationsTheItemRequiresWithTheSameStandard()
+        {
+            AppHost host = NewHost("certrequired");
+            int item = NewItemWithLot(host, "H-501", out int lot);
+            await ApprovedSpec(host, new[] { item });
+            // another grade is approved too, but the plate does not require it
+            var other = await Ms(host, Maker, s => { var d = SpecDto(); d.Grade = "S275JR"; return s.SaveAsync(d, default); });
+            Assert.IsTrue((await Ms(host, Maker, s => s.ActionAsync(new SpActionDto { Id = other.Data.Id, Action = "submit" }, default))).Success);
+            Assert.IsTrue((await Ms(host, Qa, s => s.ActionAsync(new SpActionDto { Id = other.Data.Id, Action = "approve" }, default))).Success);
+            var wrongGrade = CertDto(lot, NewFile(host)); wrongGrade.Grade = "S275JR";
+            var judged = await Mat(host, Qc, m => m.SaveCertificateAsync(wrongGrade, default));
+            Assert.AreEqual(CertRowStatus.Fail, judged.Data.Evaluation, "an approved grade the item does not require");
+            Assert.IsTrue(judged.Data.EvaluationText.Contains("گرید لازم: S355J2"), judged.Data.EvaluationText);
+            var blankStandard = CertDto(lot, NewFile(host)); blankStandard.Standard = null;
+            var blank = await Mat(host, Qc, m => m.SaveCertificateAsync(blankStandard, default));
+            Assert.AreEqual(CertRowStatus.Fail, blank.Data.Evaluation, "the required specification names a standard; a blank one does not match");
+            Assert.IsTrue(blank.Data.EvaluationText.Contains("EN 10025-2"), blank.Data.EvaluationText);
+            var right = await Mat(host, Qc, m => m.SaveCertificateAsync(CertDto(lot, NewFile(host)), default));
+            Assert.AreEqual(CertRowStatus.Pass, right.Data.Evaluation, right.Data.EvaluationText);
+            // an item without any requirement: the standard still matches exactly
+            int free = NewItemWithLot(host, "H-777", out int freeLot);
+            var freeBlank = CertDto(freeLot, NewFile(host), heat: "H-777"); freeBlank.Standard = null;
+            var freeJudged = await Mat(host, Qc, m => m.SaveCertificateAsync(freeBlank, default));
+            Assert.AreEqual(CertRowStatus.Fail, freeJudged.Data.Evaluation, "a blank standard matches no specification that names one");
+        }
+
+        [TestMethod]
+        public void TheRuleNamesTheRequiredGradeAndNeverMatchesAnotherStandard()
+        {
+            MaterialSpec spec = Spec(); spec.Id = 7;
+            CertificateEvaluation wrongStd = CertificateRules.Evaluate(CertificateType.T31, "H-1", "H-1", "S355J2", "EN 10025-3", spec, Good(), null, null, null, "A");
+            Assert.AreEqual(CertRowStatus.Fail, wrongStd.Status, "same grade, another standard");
+            Assert.IsTrue(wrongStd.Text.Contains("EN 10025-3"), wrongStd.Text);
+            MaterialSpec other = Spec(); other.Id = 8; other.Grade = "S275JR";
+            CertificateEvaluation notRequired = CertificateRules.Evaluate(CertificateType.T31, "H-1", "H-1", "S275JR", "EN 10025-2", other, Good(), null, null, null, "A", new List<MaterialSpec> { spec });
+            Assert.AreEqual(CertRowStatus.Fail, notRequired.Status);
+            Assert.IsTrue(notRequired.Text.Contains("گرید لازم: S355J2 / EN 10025-2"), notRequired.Text);
+            Assert.AreEqual(CertRowStatus.Pass, CertificateRules.Evaluate(CertificateType.T31, "H-1", "H-1", "S355J2", "EN 10025-2", spec, Good(), null, null, null, "A", new List<MaterialSpec> { spec }).Status);
+        }
+
+        [TestMethod]
+        public async Task WhoeverEnteredEditedOrImportedTheValuesOfACertificateCannotVerifyIt()
+        {
+            AppHost host = NewHost("certeditor");
+            int item = NewItemWithLot(host, "H-501", out int lot);
+            await ApprovedSpec(host, new[] { item });
+            var cert = await Mat(host, Qc, m => m.SaveCertificateAsync(CertDto(lot, NewFile(host)), default));
+            Assert.AreEqual(CertRowStatus.Pass, cert.Data.Evaluation);
+            var body = CertDto(lot, NewFile(host)); body.Id = cert.Data.Id; body.Number = cert.Data.Number; body.Values[1].Value = 381m;
+            var edited = await Mat(host, Qc2, m => m.SaveCertificateAsync(body, default));
+            Assert.IsTrue(edited.Success, edited.Message);
+            Assert.IsFalse((await Mat(host, Qc, m => m.VerifyCertificateAsync(new VerifyCertificateDto { Id = cert.Data.Id, Accept = true }, default))).Success, "the creator");
+            var editorTry = await Mat(host, Qc2, m => m.VerifyCertificateAsync(new VerifyCertificateDto { Id = cert.Data.Id, Accept = true }, default));
+            Assert.IsFalse(editorTry.Success, "the one who edited the values");
+            Assert.IsTrue(editorTry.Message.Contains("تفکیک وظایف"), editorTry.Message);
+            Assert.IsTrue((await Mat(host, Qc3, m => m.VerifyCertificateAsync(new VerifyCertificateDto { Id = cert.Data.Id, Accept = true }, default))).Success, "a third person verifies");
+            var fakeFile = CertDto(lot, Guid.NewGuid());
+            var noFile = await Mat(host, Qc, m => m.SaveCertificateAsync(fakeFile, default));
+            Assert.IsFalse(noFile.Success, "a certificate file that is not in the store");
+        }
+
+        [TestMethod]
+        public async Task TheSpecificationApprovalAndTheTransactionHelperKeepTheGradeApproved()
+        {
+            AppHost host = NewHost("specsingle");
+            int first = await ApprovedSpec(host);
+            var v2 = await Ms(host, Maker, s => { var d = SpecDto(); d.NewVersionOfId = first; d.Reason = "tightened carbon limit"; d.Limits[0].Max = 0.18m; return s.SaveAsync(d, default); });
+            Assert.IsTrue(v2.Success, v2.Message);
+            Assert.IsTrue((await Ms(host, Maker, s => s.ActionAsync(new SpActionDto { Id = v2.Data.Id, Action = "submit" }, default))).Success);
+            Assert.IsTrue((await Ms(host, Qa, s => s.ActionAsync(new SpActionDto { Id = v2.Data.Id, Action = "approve" }, default))).Success);
+            Assert.AreEqual(1, host.Read(u => u.Set<MaterialSpec>().Count(x => x.Status == MatSpecStatus.Approved)), "exactly one approved version of the grade at any time");
+            Assert.AreEqual(MatSpecStatus.Superseded, host.Read(u => u.Set<MaterialSpec>().Single(x => x.Id == first).Status));
+            int runs = 0;
+            string result = await host.As(Seeder, sp => QualityChecks.InTransactionAsync(sp.GetRequiredService<IUnitOfWork>(), () => { runs++; return Task.FromResult("done"); }, r => r == "done", default));
+            Assert.AreEqual("done", result);
+            Assert.AreEqual(1, runs, "the work runs once");
+        }
+
+        [TestMethod]
+        public async Task TheExpiryAlertsLinkToTheRealPagesAndTheGateStatusAsksTheTerminalQuantity()
+        {
+            AppHost host = NewHost("alertlinks");
+            Plant p = await NewPlant(host, true);
+            host.Write(u => { u.Set<SpQualification>().Single(x => x.Id == p.QualId).ValidTo = DateTime.Today.AddDays(10); u.SaveChanges(); }, Seeder);
+            Assert.AreEqual(1, await host.As(Seeder, sp => sp.GetRequiredService<ISpecialProcessService>().ExpiryAlertsAsync(default)));
+            var links = host.Read(u => u.Set<Entities.Model.NasbNiro.Office.OfInboxItem>().Where(i => i.SourceKey == "spq-expiry:" + p.QualId).Select(i => i.Link).ToList());
+            Assert.IsTrue(links.Count > 0 && links.All(l => l == "/quality/special-process-qualifications"), string.Join(",", links));
+            var status = await Sp(host, Qa, s => s.GateStatusAsync(p.OpId, null, default));
+            Assert.IsTrue(status.Success && status.Data.Applies, "the gate status answers with the quantity the terminal expects (10 for the first step)");
         }
     }
 }

@@ -35,6 +35,13 @@ namespace ViewModels.NasbNiro.QualityDtos
         public bool IsActive { get; set; }
         public List<SpParameterDto> Parameters { get; set; } = new List<SpParameterDto>();
         public string RowVersion { get; set; }
+
+        /// <summary>Fix round 1 (H1): a weakening change waiting for a second person.</summary>
+        public int? PendingChangeId { get; set; }
+        public string PendingSummary { get; set; }
+        public string PendingReason { get; set; }
+        public string PendingByName { get; set; }
+        public List<string> Actions { get; set; } = new List<string>();
     }
 
     public class SaveSpTypeDto
@@ -51,6 +58,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public bool IsActive { get; set; } = true;
         public List<SpParameterDto> Parameters { get; set; } = new List<SpParameterDto>();
         public string RowVersion { get; set; }
+
+        /// <summary>Why the change is made; required when the change weakens a control (it is then decided by a second person).</summary>
+        public string Reason { get; set; }
     }
 
     public class SpTypeQuery

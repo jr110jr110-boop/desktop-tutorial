@@ -51,6 +51,9 @@ namespace Entities.Model.NasbNiro.Quality
         public string EvaluationText { get; set; }
         public DateTimeOffset? EvaluatedAt { get; set; }
 
+        /// <summary>Fix round 1 (M6): the user ids (comma separated) who entered, edited or imported the values; none of them verifies the certificate.</summary>
+        public string EditorUserIds { get; set; }
+
         public ICollection<CertificateValue> Values { get; set; } = new List<CertificateValue>();
     }
 

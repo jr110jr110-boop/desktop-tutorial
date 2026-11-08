@@ -98,6 +98,9 @@ namespace Services.NasbNiro.Quality
             return result;
         }
 
+        /// <summary>Fix round 1 (Low): the columns are decimal(18,4); a value from 10^14 on would overflow the column (a 500), so it is refused with a message first.</summary>
+        public const decimal MaxNumber = 100000000000000m;
+
         public static string Num(decimal v) => v.ToString("0.####", CultureInfo.InvariantCulture);
 
         public static string Range(decimal? min, decimal? max) =>
@@ -116,7 +119,7 @@ namespace Services.NasbNiro.Quality
             if (machine.SurveyKind == SpSurveyKind.None || !machine.SurveyDate.HasValue || !machine.SurveyDueDate.HasValue)
                 return $"برای «{machineTitle}» بررسی یکنواختی دما (TUS) یا آزمون دقت سیستم (SAT) ثبت نشده است.";
             if (machine.SurveyDate.Value.Date > on.Date) return $"بررسی دمای «{machineTitle}» پس از تاریخ اجرا انجام شده است.";
-            if (machine.SurveyDueDate.Value.Date < on.Date) return $"سررسید بررسی دمای «{machineTitle}» ({machine.SurveyDueDate.Value:yyyy/MM/dd}) گذشته است.";
+            if (machine.SurveyDueDate.Value.Date < on.Date) return $"سررسید بررسی دمای «{machineTitle}» ({(global::Services.NasbNiro.Finance.FiscalCalendars.Text(machine.SurveyDueDate.Value))}) گذشته است.";
             return null;
         }
 
@@ -186,7 +189,7 @@ namespace Services.NasbNiro.Quality
         /// limits, a 3.2 names the inspector's organisation and the inspector (name or stamp), a 3.1 names the manufacturer's authorised signatory. A 2.2 certificate is not judged here.
         /// </summary>
         public static CertificateEvaluation Evaluate(CertificateType type, string heat, string lotHeat, string grade, string standard, MaterialSpec spec, IEnumerable<JudgeValue> values,
-            string inspectorOrganisation, string inspectorName, string inspectorStamp, string manufacturerSignatory)
+            string inspectorOrganisation, string inspectorName, string inspectorStamp, string manufacturerSignatory, IReadOnlyCollection<MaterialSpec> required = null)
         {
             var result = new CertificateEvaluation { Status = CertRowStatus.NotJudged };
             if (!NeedsValues(type)) return result;
@@ -205,14 +208,23 @@ namespace Services.NasbNiro.Quality
             }
             else if (string.IsNullOrWhiteSpace(manufacturerSignatory)) result.Problems.Add("گواهی 3.1 باید نام نماینده مجاز سازنده (امضاکننده) را داشته باشد.");
 
+            // Fix round 1 (H2): when the item (or its BOM line) requires specifications, the certificate must be of one of them: the same grade AND the same standard; another approved grade never passes
+            if (required != null && required.Count > 0 && (spec == null || !required.Any(x => x.Id == spec.Id)))
+            {
+                string wanted = string.Join(" ؛ ", required.Select(x => x.Grade + (string.IsNullOrWhiteSpace(x.Standard) ? string.Empty : " / " + x.Standard)));
+                string given = (grade ?? string.Empty).Trim() + (string.IsNullOrWhiteSpace(standard) ? string.Empty : " / " + standard.Trim());
+                result.Problems.Add($"گرید/استاندارد گواهی ({(given.Length == 0 ? "نامشخص" : given)}) همان مشخصات ماده لازم این کالا نیست؛ گرید لازم: {wanted}.");
+                result.Status = CertRowStatus.Fail;
+                return result;
+            }
             if (spec == null)
             {
                 if (!string.IsNullOrWhiteSpace(grade)) result.Problems.Add($"برای گرید «{grade.Trim()}»{(string.IsNullOrWhiteSpace(standard) ? "" : " / " + standard.Trim())} مشخصات ماده تاییدشده‌ای نیست؛ مهندسی باید آن را تعریف و تایید کند.");
                 result.Status = CertRowStatus.Fail;
                 return result;
             }
-            if (SpecialProcessRules.SpecKey(grade, standard) != spec.SpecKey && CharacteristicRules.Key(grade) != CharacteristicRules.Key(spec.Grade))
-                result.Problems.Add($"گرید گواهی ({grade}) با مشخصات ماده ({spec.Grade}) یکی نیست.");
+            if (CharacteristicRules.Key(grade) != CharacteristicRules.Key(spec.Grade) || CharacteristicRules.Key(standard) != CharacteristicRules.Key(spec.Standard))
+                result.Problems.Add($"گرید/استاندارد گواهی ({grade}{(string.IsNullOrWhiteSpace(standard) ? string.Empty : " / " + standard.Trim())}) با مشخصات ماده ({spec.Grade}{(string.IsNullOrWhiteSpace(spec.Standard) ? string.Empty : " / " + spec.Standard)}) یکی نیست.");
 
             var limits = spec.Limits.OrderBy(l => l.SortOrder).Select(l => new JudgeLimit { Name = l.Name, Unit = l.Unit, Min = l.Min, Max = l.Max, Required = l.Required, Kind = l.Kind }).ToList();
             Judgement j = SpecialProcessRules.Judge(limits, values);

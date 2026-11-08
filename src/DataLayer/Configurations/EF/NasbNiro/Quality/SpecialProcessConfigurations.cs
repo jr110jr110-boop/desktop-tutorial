@@ -30,6 +30,17 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.HasIndex(x => new { x.TypeId, x.Name }).IsUnique();
             });
 
+            builder.Entity<SpTypeChange>(b =>
+            {
+                b.ToTable("QaSpTypeChanges");
+                b.Property(x => x.PayloadJson).IsRequired();
+                b.Property(x => x.Summary).HasMaxLength(1000);
+                b.Property(x => x.Reason).HasMaxLength(1000);
+                b.Property(x => x.DecisionNote).HasMaxLength(1000);
+                b.HasIndex(x => new { x.TypeId, x.Status });
+                b.HasOne(x => x.Type).WithMany().HasForeignKey(x => x.TypeId).OnDelete(DeleteBehavior.Restrict);
+            });
+
             builder.Entity<SpQualification>(b =>
             {
                 b.ToTable("QaSpQualifications");
@@ -119,8 +130,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.VoidReason).HasMaxLength(1000);
                 b.Property(x => x.EditorUserIds).HasMaxLength(400);
                 b.HasIndex(x => new { x.ProviderId, x.TypeId, x.Status });
-                // one live approval (waiting or approved) per supplier and process
-                b.HasIndex(x => new { x.ProviderId, x.TypeId }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] IN (0, 1)").HasDatabaseName("UX_QaSpSupplierApprovals_LivePerProcess");
+                // one approved and one waiting (a renewal) approval per supplier and process; the renewal replaces the approved one when it is approved
+                b.HasIndex(x => new { x.ProviderId, x.TypeId }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] = 1").HasDatabaseName("UX_QaSpSupplierApprovals_ApprovedPerProcess");
+                b.HasIndex(x => new { x.ProviderId, x.TypeId }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] = 0").HasDatabaseName("UX_QaSpSupplierApprovals_PendingPerProcess");
                 b.HasOne(x => x.Type).WithMany().HasForeignKey(x => x.TypeId).OnDelete(DeleteBehavior.Restrict);
             });
 
@@ -180,6 +192,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
                 b.Property(x => x.InspectorStampNo).HasMaxLength(100);
                 b.Property(x => x.ManufacturerSignatory).HasMaxLength(200);
                 b.Property(x => x.EvaluationText).HasMaxLength(1000);
+                b.Property(x => x.EditorUserIds).HasMaxLength(400);
             });
             builder.Entity<Qualification>(b =>
             {

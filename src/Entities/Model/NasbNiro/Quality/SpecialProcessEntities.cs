@@ -24,7 +24,8 @@ namespace Entities.Model.NasbNiro.Quality
     /// <summary>Temperature uniformity survey (TUS) and system accuracy test (SAT) of a furnace.</summary>
     public enum SpSurveyKind { None = 0, Tus = 1, Sat = 2 }
 
-    public enum SpApprovalStatus { Pending = 0, Approved = 1, Rejected = 2, Void = 3 }
+    public enum SpApprovalStatus { Pending = 0, Approved = 1, Rejected = 2, Void = 3, Superseded = 4 }
+    public enum SpChangeStatus { Pending = 0, Approved = 1, Rejected = 2 }
 
     public enum MatSpecStatus { Draft = 0, Submitted = 1, Approved = 2, Superseded = 3, Void = 4 }
 
@@ -59,6 +60,25 @@ namespace Entities.Model.NasbNiro.Quality
 
         public ICollection<SpParameter> Parameters { get; set; } = new List<SpParameter>();
 
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>
+    /// Fix round 1 (H1): a change of a process type that WEAKENS a control (clears the machine, survey or instrument requirement, widens or removes a limit, deactivates the type) is requested here and applied only
+    /// when a second person (QA manager or PMO, never the requester, never an AI seat) approves it. The requested content is kept as JSON; the row is kept for ever.
+    /// </summary>
+    public class SpTypeChange : BaseEntity
+    {
+        public int TypeId { get; set; }
+        public SpProcessType Type { get; set; }
+        public string PayloadJson { get; set; }
+        public string Summary { get; set; }
+        public string Reason { get; set; }
+        public SpChangeStatus Status { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecisionNote { get; set; }
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
@@ -26,6 +27,8 @@ namespace Services.NasbNiro.Quality
     {
         Task<ResponseDto<List<SpTypeDto>>> GetTypesAsync(SpTypeQuery query, CancellationToken ct);
         Task<ResponseDto<SpTypeDto>> SaveTypeAsync(SaveSpTypeDto dto, CancellationToken ct);
+        /// <summary>Fix round 1 (H1): the second person approves or rejects a weakening change of a process type (action approve or reject; Id = the change).</summary>
+        Task<ResponseDto<SpTypeDto>> TypeChangeActionAsync(SpActionDto dto, CancellationToken ct);
 
         Task<ResponseDto<PagedList<SpQualDto>>> GetQualificationsAsync(SpQualQuery query, CancellationToken ct);
         Task<ResponseDto<SpQualDto>> GetQualificationAsync(int id, CancellationToken ct);
@@ -121,8 +124,13 @@ namespace Services.NasbNiro.Quality
         private async Task<SpTypeDto> TypeDtoAsync(SpProcessType t, CancellationToken ct)
         {
             string procedure = t.ProcedureDeliverableId.HasValue ? await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => d.Id == t.ProcedureDeliverableId.Value).Select(d => d.DocumentNumber).FirstOrDefaultAsync(ct) : null;
+            SpTypeChange pending = await _uow.Set<SpTypeChange>().AsNoTracking().Where(c => !c.Deleted && c.TypeId == t.Id && c.Status == SpChangeStatus.Pending).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
+            Dictionary<int, string> names = pending == null ? new Dictionary<int, string>() : await InventoryUsers.GetNamesAsync(_uow, new int?[] { pending.CreatorUserId }, ct);
+            var actions = new List<string>();
+            if (pending != null && _user.IsInRole(TypeApprovers) && pending.CreatorUserId != Me && !IsAi) { actions.Add("approve-change"); actions.Add("reject-change"); }
             return new SpTypeDto
             {
+                PendingChangeId = pending?.Id, PendingSummary = pending?.Summary, PendingReason = pending?.Reason, PendingByName = pending == null ? null : names.Name(pending.CreatorUserId), Actions = actions,
                 Id = t.Id, Code = t.Code, Title = t.Title, Description = t.Description, RequiresMachine = t.RequiresMachine, RequiresSurvey = t.RequiresSurvey, RequiredInstrumentClass = t.RequiredInstrumentClass,
                 ProcedureDeliverableId = t.ProcedureDeliverableId, ProcedureNumber = procedure, ExistingControl = t.ExistingControl, IsActive = t.IsActive, RowVersion = B64(t.RowVersion),
                 Parameters = t.Parameters.OrderBy(p => p.SortOrder).Select(p => new SpParameterDto { Id = p.Id, SortOrder = p.SortOrder, Name = p.Name, Unit = p.Unit, Min = p.Min, Max = p.Max, Required = p.Required }).ToList(),
@@ -153,41 +161,157 @@ namespace Services.NasbNiro.Quality
             return null;
         }
 
+        /// <summary>Who may decide a weakening change of a process type: the QA manager or the PMO, never the one who asked (checked where it is used) and never an AI seat.</summary>
+        public const string TypeApprovers = "QA,PMO";
+
+        private async Task<string> ValidateTypeAsync(SaveSpTypeDto dto, int? id, CancellationToken ct)
+        {
+            string code = QualityText.Upper(dto.Code), title = Clean(dto.Title);
+            if (code == null || code.Length > 30 || title == null || title.Length > 200) return "کد (حداکثر ۳۰ نویسه) و عنوان فرایند را بنویسید.";
+            if (dto.RequiredInstrumentClass.HasValue && !Enum.IsDefined(typeof(EquipmentType), dto.RequiredInstrumentClass.Value)) return "رده ابزار نامعتبر است.";
+            string problem = ValidateParameters(dto.Parameters);
+            if (problem != null) return problem;
+            if (dto.ProcedureDeliverableId.HasValue && !await _uow.Set<PcEngineeringDeliverable>().AnyAsync(d => d.Id == dto.ProcedureDeliverableId.Value && !d.Deleted, ct)) return "سند روش اجرایی در سامانه مدارک پیدا نشد.";
+            if (await _uow.Set<SpProcessType>().AnyAsync(t => !t.Deleted && t.Code == code && t.Id != (id ?? 0), ct)) return "این کد قبلاً برای فرایند دیگری ثبت شده است.";
+            return null;
+        }
+
+        /// <summary>Fix round 1 (H1): the process type is referenced once a qualification, run, supplier approval, routing step, step standard or operator competence record names it; its code is then fixed.</summary>
+        private async Task<bool> TypeReferencedAsync(SpProcessType t, CancellationToken ct)
+        {
+            int id = t.Id; string code = t.Code;
+            return await _uow.Set<SpQualification>().IgnoreQueryFilters().AnyAsync(x => x.TypeId == id, ct)
+                || await _uow.Set<SpRun>().IgnoreQueryFilters().AnyAsync(x => x.TypeId == id, ct)
+                || await _uow.Set<SpSupplierApproval>().IgnoreQueryFilters().AnyAsync(x => x.TypeId == id, ct)
+                || await _uow.Set<MfOperation>().IgnoreQueryFilters().AnyAsync(x => x.SpecialProcessTypeId == id, ct)
+                || await _uow.Set<MfOperationStandard>().IgnoreQueryFilters().AnyAsync(x => x.SpecialProcessTypeId == id, ct)
+                || await _uow.Set<Qualification>().IgnoreQueryFilters().AnyAsync(x => x.Kind == QualificationKind.SpecialProcessOperator && x.Method == code, ct);
+        }
+
+        /// <summary>What a requested change takes away from the control (empty = it only strengthens or leaves it as it is).</summary>
+        private static List<string> Weakening(SpProcessType old, SaveSpTypeDto dto)
+        {
+            var list = new List<string>();
+            if (old.RequiresMachine && !dto.RequiresMachine) list.Add("حذف الزام دستگاه");
+            if (old.RequiresSurvey && !(dto.RequiresSurvey && dto.RequiresMachine)) list.Add("حذف الزام بررسی دمایی (TUS/SAT)");
+            if (old.RequiredInstrumentClass.HasValue && dto.RequiredInstrumentClass != old.RequiredInstrumentClass) list.Add("حذف یا تغییر رده ابزار الزامی");
+            if (old.ProcedureDeliverableId.HasValue && !dto.ProcedureDeliverableId.HasValue) list.Add("حذف سند روش اجرایی");
+            if (old.IsActive && !dto.IsActive) list.Add("غیرفعال کردن فرایند");
+            foreach (SpParameter p in old.Parameters)
+            {
+                SpParameterDto n = (dto.Parameters ?? new List<SpParameterDto>()).FirstOrDefault(x => CharacteristicRules.Key(Clean(x.Name)) == CharacteristicRules.Key(p.Name));
+                if (n == null) { list.Add($"حذف پارامتر «{p.Name}»"); continue; }
+                if (p.Required && !n.Required) list.Add($"اختیاری شدن پارامتر «{p.Name}»");
+                if (p.Min.HasValue && (!n.Min.HasValue || n.Min.Value < p.Min.Value)) list.Add($"گشاد شدن حداقل «{p.Name}»");
+                if (p.Max.HasValue && (!n.Max.HasValue || n.Max.Value > p.Max.Value)) list.Add($"گشاد شدن حداکثر «{p.Name}»");
+            }
+            return list;
+        }
+
+        private void ApplyType(SpProcessType type, SaveSpTypeDto dto, DateTimeOffset now)
+        {
+            type.Code = QualityText.Upper(dto.Code); type.Title = Clean(dto.Title); type.Description = Clean(dto.Description); type.RequiresMachine = dto.RequiresMachine; type.RequiresSurvey = dto.RequiresSurvey && dto.RequiresMachine;
+            type.RequiredInstrumentClass = dto.RequiredInstrumentClass; type.ProcedureDeliverableId = dto.ProcedureDeliverableId; type.IsActive = dto.IsActive;
+            _uow.Set<SpParameter>().RemoveRange(type.Parameters.ToList());
+            type.Parameters.Clear();
+            int order = 0;
+            foreach (SpParameterDto p in dto.Parameters ?? new List<SpParameterDto>()) type.Parameters.Add(new SpParameter { SortOrder = order++, Name = Clean(p.Name), Unit = Clean(p.Unit), Min = p.Min, Max = p.Max, Required = p.Required });
+            type.ModifyDate = now; type.ModifierUserId = Me;
+        }
+
         public async Task<ResponseDto<SpTypeDto>> SaveTypeAsync(SaveSpTypeDto dto, CancellationToken ct)
         {
             if (dto == null) return Bad<SpTypeDto>(QualityText.InvalidData);
             if (!_user.IsInRole(Engineers + ",QA")) return Bad<SpTypeDto>(QualityText.NotAllowed);
             if (IsAi) return Bad<SpTypeDto>("فهرست فرایندهای ویژه را انسان ویرایش می‌کند.");
             await EnsureSeedAsync(ct);
-            string code = QualityText.Upper(dto.Code), title = Clean(dto.Title);
-            if (code == null || code.Length > 30 || title == null || title.Length > 200) return Bad<SpTypeDto>("کد (حداکثر ۳۰ نویسه) و عنوان فرایند را بنویسید.");
-            if (dto.RequiredInstrumentClass.HasValue && !Enum.IsDefined(typeof(EquipmentType), dto.RequiredInstrumentClass.Value)) return Bad<SpTypeDto>("رده ابزار نامعتبر است.");
-            string problem = ValidateParameters(dto.Parameters);
+            string problem = await ValidateTypeAsync(dto, dto.Id, ct);
             if (problem != null) return Bad<SpTypeDto>(problem);
-            if (dto.ProcedureDeliverableId.HasValue && !await _uow.Set<PcEngineeringDeliverable>().AnyAsync(d => d.Id == dto.ProcedureDeliverableId.Value && !d.Deleted, ct)) return Bad<SpTypeDto>("سند روش اجرایی در سامانه مدارک پیدا نشد.");
-            if (await _uow.Set<SpProcessType>().AnyAsync(t => !t.Deleted && t.Code == code && t.Id != (dto.Id ?? 0), ct)) return Bad<SpTypeDto>("این کد قبلاً برای فرایند دیگری ثبت شده است.");
             DateTimeOffset now = DateTimeOffset.Now;
-            SpProcessType type;
-            if (dto.Id.HasValue)
+            if (!dto.Id.HasValue)
             {
-                type = await _uow.Set<SpProcessType>().Include(t => t.Parameters).FirstOrDefaultAsync(t => t.Id == dto.Id.Value && !t.Deleted, ct);
-                if (type == null) return QualityText.NotFound<SpTypeDto>("فرایند پیدا نشد.");
-                if (!string.IsNullOrEmpty(dto.RowVersion))
-                    try { _uow.Entry(type).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); } catch (FormatException) { return Bad<SpTypeDto>(QualityText.InvalidData); }
-                _uow.Set<SpParameter>().RemoveRange(type.Parameters.ToList());
-                type.Parameters.Clear();
+                // Fix round 1 (H1): "control by the existing personnel qualification" is decided when the list is seeded, never through the API (it switches the whole gate off for the type)
+                if (dto.ExistingControl) return Bad<SpTypeDto>("وضعیت «کنترل با صلاحیت پرسنلی موجود» فقط با فهرست اولیه تعیین می‌شود و از این صفحه قابل تعیین نیست.");
+                var created = new SpProcessType { CreateDate = now, CreatorUserId = Me };
+                _uow.Set<SpProcessType>().Add(created);
+                ApplyType(created, dto, now);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<SpTypeDto>("این کد یا نام پارامتر تکراری است."); }
+                return ResponseDtoHelper.Ok(await TypeDtoAsync(created, ct));
+            }
+            SpProcessType type = await _uow.Set<SpProcessType>().Include(t => t.Parameters).FirstOrDefaultAsync(t => t.Id == dto.Id.Value && !t.Deleted, ct);
+            if (type == null) return QualityText.NotFound<SpTypeDto>("فرایند پیدا نشد.");
+            if (dto.ExistingControl != type.ExistingControl) return Bad<SpTypeDto>("وضعیت «کنترل با صلاحیت پرسنلی موجود» از این صفحه تغییر نمی‌کند.");
+            if (!string.Equals(QualityText.Upper(dto.Code), type.Code, StringComparison.Ordinal) && await TypeReferencedAsync(type, ct))
+                return Bad<SpTypeDto>("کد این فرایند در صلاحیت‌ها، اجراها، مسیر ساخت یا پرونده‌های صلاحیت استفاده شده است و تغییر نمی‌کند؛ عنوان را اصلاح کنید یا فرایند تازه بسازید.");
+            if (await _uow.Set<SpTypeChange>().AnyAsync(c => !c.Deleted && c.TypeId == type.Id && c.Status == SpChangeStatus.Pending, ct))
+                return Bad<SpTypeDto>("یک تغییر این فرایند منتظر تصمیم نفر دوم است؛ پس از تصمیم، تغییر تازه ثبت کنید.");
+            if (!string.IsNullOrEmpty(dto.RowVersion))
+                try { _uow.Entry(type).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); } catch (FormatException) { return Bad<SpTypeDto>(QualityText.InvalidData); }
+
+            List<string> weaker = type.ExistingControl ? new List<string>() : Weakening(type, dto);
+            if (type.ExistingControl && type.IsActive && !dto.IsActive) weaker.Add("غیرفعال کردن فرایند");
+            if (weaker.Count > 0)
+            {
+                // Fix round 1 (H1): a change that weakens a control is only a request here; QA manager or PMO (not the requester) decides it
+                string reason = Clean(dto.Reason);
+                if (reason == null || reason.Length < 5 || reason.Length > 1000) return Bad<SpTypeDto>("این تغییر کنترل را ضعیف می‌کند (" + string.Join("، ", weaker) + ")؛ دلیل آن را بنویسید (۵ تا ۱۰۰۰ نویسه) تا نفر دوم تصمیم بگیرد.");
+                SaveSpTypeDto payload = JsonSerializer.Deserialize<SaveSpTypeDto>(JsonSerializer.Serialize(dto));
+                payload.RowVersion = null;
+                string summary = string.Join("؛ ", weaker);
+                _uow.Set<SpTypeChange>().Add(new SpTypeChange
+                {
+                    TypeId = type.Id, PayloadJson = JsonSerializer.Serialize(payload), Summary = summary.Length > 1000 ? summary.Substring(0, 1000) : summary, Reason = reason, Status = SpChangeStatus.Pending,
+                    CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
+                });
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return Bad<SpTypeDto>(QualityText.Concurrency); }
+                return ResponseDtoHelper.Ok(await TypeDtoAsync(type, ct), "تغییر کنترل را ضعیف می‌کند و تا تایید نفر دوم (مدیر QA یا PMO) اعمال نمی‌شود.");
+            }
+            ApplyType(type, dto, now);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return Bad<SpTypeDto>(QualityText.Concurrency); }
+            catch (DbUpdateException) { return Bad<SpTypeDto>("این کد یا نام پارامتر تکراری است."); }
+            return ResponseDtoHelper.Ok(await TypeDtoAsync(type, ct));
+        }
+
+        public async Task<ResponseDto<SpTypeDto>> TypeChangeActionAsync(SpActionDto dto, CancellationToken ct)
+        {
+            if (dto == null) return Bad<SpTypeDto>(QualityText.InvalidData);
+            if (!_user.IsInRole(TypeApprovers)) return Bad<SpTypeDto>(QualityText.NotAllowed);
+            if (IsAi) return Bad<SpTypeDto>("تصمیم درباره تغییر کنترل فرایند ویژه با انسان است.");
+            string action = Clean(dto.Action)?.ToLowerInvariant();
+            if (action != "approve" && action != "reject") return Bad<SpTypeDto>("کار نامعتبر است.");
+            SpTypeChange change = await _uow.Set<SpTypeChange>().FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, ct);
+            if (change == null) return QualityText.NotFound<SpTypeDto>("درخواست تغییر پیدا نشد.");
+            if (change.Status != SpChangeStatus.Pending) return Bad<SpTypeDto>("درباره این درخواست قبلاً تصمیم گرفته شده است.");
+            if (change.CreatorUserId == Me) return Bad<SpTypeDto>(QualityText.SameUser);
+            if (!string.IsNullOrEmpty(dto.RowVersion))
+                try { _uow.Entry(change).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); } catch (FormatException) { return Bad<SpTypeDto>(QualityText.InvalidData); }
+            string note = Clean(dto.Note);
+            if (note != null && note.Length > 1000) return Bad<SpTypeDto>("توضیح تصمیم حداکثر ۱۰۰۰ نویسه است.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            SpProcessType type = await _uow.Set<SpProcessType>().Include(t => t.Parameters).FirstOrDefaultAsync(t => t.Id == change.TypeId && !t.Deleted, ct);
+            if (type == null) return QualityText.NotFound<SpTypeDto>("فرایند پیدا نشد.");
+            if (action == "reject")
+            {
+                if (note == null) return Bad<SpTypeDto>("دلیل رد را بنویسید.");
+                change.Status = SpChangeStatus.Rejected;
             }
             else
             {
-                type = new SpProcessType { CreateDate = now, CreatorUserId = Me };
-                _uow.Set<SpProcessType>().Add(type);
+                SaveSpTypeDto payload;
+                try { payload = JsonSerializer.Deserialize<SaveSpTypeDto>(change.PayloadJson); } catch (JsonException) { return Bad<SpTypeDto>(QualityText.InvalidData); }
+                if (payload == null) return Bad<SpTypeDto>(QualityText.InvalidData);
+                payload.Id = type.Id;
+                string problem = await ValidateTypeAsync(payload, type.Id, ct);
+                if (problem != null) return Bad<SpTypeDto>(problem);
+                if (!string.Equals(QualityText.Upper(payload.Code), type.Code, StringComparison.Ordinal) && await TypeReferencedAsync(type, ct)) return Bad<SpTypeDto>("کد این فرایند در این فاصله استفاده شده است و تغییر نمی‌کند.");
+                ApplyType(type, payload, now);
+                change.Status = SpChangeStatus.Approved;
             }
-            type.Code = code; type.Title = title; type.Description = Clean(dto.Description); type.RequiresMachine = dto.RequiresMachine; type.RequiresSurvey = dto.RequiresSurvey && dto.RequiresMachine;
-            type.RequiredInstrumentClass = dto.RequiredInstrumentClass; type.ProcedureDeliverableId = dto.ProcedureDeliverableId; type.ExistingControl = dto.ExistingControl; type.IsActive = dto.IsActive;
-            int order = 0;
-            foreach (SpParameterDto p in dto.Parameters ?? new List<SpParameterDto>()) type.Parameters.Add(new SpParameter { SortOrder = order++, Name = Clean(p.Name), Unit = Clean(p.Unit), Min = p.Min, Max = p.Max, Required = p.Required });
-            type.ModifyDate = now; type.ModifierUserId = Me;
-            try { await _uow.SaveChangesAsync(ct); }
+            change.DecidedByUserId = Me; change.DecidedAt = now; change.DecisionNote = note; change.ModifyDate = now; change.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(ct); }   // the type and the decision are one save: both or none
             catch (DbUpdateConcurrencyException) { return Bad<SpTypeDto>(QualityText.Concurrency); }
             catch (DbUpdateException) { return Bad<SpTypeDto>("این کد یا نام پارامتر تکراری است."); }
             return ResponseDtoHelper.Ok(await TypeDtoAsync(type, ct));
@@ -306,6 +430,9 @@ namespace Services.NasbNiro.Quality
                 if (master.Min.HasValue && (!l.Min.HasValue || l.Min.Value < master.Min.Value)) return Bad<SpQualDto>($"حداقل «{l.Name}» از حداقل مجاز فهرست فرایند ({SpecialProcessRules.Num(master.Min.Value)}) کمتر است.");
                 if (master.Max.HasValue && (!l.Max.HasValue || l.Max.Value > master.Max.Value)) return Bad<SpQualDto>($"حداکثر «{l.Name}» از حداکثر مجاز فهرست فرایند ({SpecialProcessRules.Num(master.Max.Value)}) بیشتر است.");
             }
+            // Fix round 1 (Low): every parameter the master requires is part of the qualification (a missing one would never be judged)
+            foreach (SpParameter master in type.Parameters.Where(p => p.Required))
+                if (!limits.Any(l => CharacteristicRules.Key(Clean(l.Name)) == CharacteristicRules.Key(master.Name))) return Bad<SpQualDto>($"پارامتر الزامی «{master.Name}» در حدود صلاحیت فرایند نیامده است.");
 
             var equipments = dto.Equipments ?? new List<SaveSpQualEquipmentDto>();
             foreach (SaveSpQualEquipmentDto e in equipments)
@@ -314,6 +441,8 @@ namespace Services.NasbNiro.Quality
                 {
                     if (!e.MachineId.HasValue || !await _uow.Set<Machine>().AnyAsync(m => m.Id == e.MachineId.Value, ct)) return Bad<SpQualDto>("دستگاه (کوره/خط) پیدا نشد.");
                     if (e.SurveyKind != SpSurveyKind.None && (!e.SurveyDate.HasValue || !e.SurveyDueDate.HasValue || e.SurveyDueDate.Value.Date < e.SurveyDate.Value.Date)) return Bad<SpQualDto>("تاریخ بررسی دما و سررسید بعدی آن را درست وارد کنید.");
+                    string surveyFile = await QualityChecks.FileProblemAsync(_uow, e.SurveyDocumentId, "گزارش بررسی دما", ct);   // M4
+                    if (surveyFile != null) return Bad<SpQualDto>(surveyFile);
                 }
                 else if (e.Kind == SpEquipmentKind.Instrument)
                 {
@@ -549,12 +678,14 @@ namespace Services.NasbNiro.Quality
             if (IsAi) return Bad<SpRunDto>("اجرای فرایند را انسان ثبت می‌کند؛ صندلی هوش مصنوعی آن را ثبت نمی‌کند.");
             if (dto.OperationId.HasValue == dto.PartOperationId.HasValue) return Bad<SpRunDto>("اجرا باید دقیقاً به یک گام (مرحله) تولید یا یک مرحله ردیابی وصل باشد.");
             if (!dto.Quantity.HasValue || dto.Quantity.Value <= 0) return Bad<SpRunDto>("تعداد قطعه‌های اجرا را وارد کنید.");
+            if (dto.Quantity.Value >= SpecialProcessRules.MaxNumber) return Bad<SpRunDto>("تعداد قطعه‌های اجرا بیش از حد مجاز است.");
+            if ((dto.Values ?? new List<SaveSpRunValueDto>()).Any(v => v.Value.HasValue && Math.Abs(v.Value.Value) >= SpecialProcessRules.MaxNumber)) return Bad<SpRunDto>("یکی از مقدارهای پارامتر بیش از حد مجاز بزرگ است.");
             if (dto.EndedAt < dto.StartedAt) return Bad<SpRunDto>("پایان اجرا پیش از آغاز آن است.");
             if (dto.EndedAt > DateTime.Now.AddMinutes(10)) return Bad<SpRunDto>("زمان پایان اجرا در آینده است.");
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, ct);
             if (dto.EndedAt.Date < DateTime.Today.AddDays(-(int)settings[QualitySettingKeys.MaxBackdateDays])) return Bad<SpRunDto>("تاریخ اجرا بیش از حد مجاز به گذشته است.");
 
-            int typeId; int? orderId = null, workOrderId = null, itemId = null, supplierOfStep = null; bool stepOutside; string stepText; int? lotId = dto.LotId;
+            int typeId; int? orderId = null, workOrderId = null, itemId = null, supplierOfStep = null; bool stepOutside; string stepText; int? lotId = dto.LotId; decimal? stepQuantity = null;
             if (dto.OperationId.HasValue)
             {
                 MfOperation op = await _uow.Set<MfOperation>().AsNoTracking().FirstOrDefaultAsync(o => o.Id == dto.OperationId.Value && !o.Deleted, ct);
@@ -562,6 +693,7 @@ namespace Services.NasbNiro.Quality
                 if (!op.IsSpecialProcess || !op.SpecialProcessTypeId.HasValue) return Bad<SpRunDto>("این گام «فرایند ویژه» نیست؛ مهندسی استاندارد عملیات را علامت بزند.");
                 if (op.Status == MfOperationStatus.Done || op.Status == MfOperationStatus.Skipped) return Bad<SpRunDto>("گام پایان یافته است؛ اجرای تازه ثبت نمی‌شود.");
                 MfProductionOrder order = await _uow.Set<MfProductionOrder>().AsNoTracking().FirstAsync(o => o.Id == op.OrderId, ct);
+                stepQuantity = order.Quantity;
                 typeId = op.SpecialProcessTypeId.Value; orderId = order.Id; workOrderId = order.WorkOrderId; itemId = order.ItemId; stepOutside = op.IsOutside; supplierOfStep = op.OutsideSupplierId;
                 stepText = MfNames.Operation(order.Number, op.Sequence);
             }
@@ -579,6 +711,12 @@ namespace Services.NasbNiro.Quality
             SpProcessType type = await _uow.Set<SpProcessType>().Include(t => t.Parameters).FirstOrDefaultAsync(t => t.Id == typeId, ct);
             if (type == null) return Bad<SpRunDto>("نوع فرایند ویژه پیدا نشد.");
             if (dto.IsSubcontract != stepOutside) return Bad<SpRunDto>(stepOutside ? "این گام برون‌سپاری شده است؛ اجرای پیمانکار ثبت کنید." : "این گام داخلی است؛ اجرای پیمانکار ثبت نمی‌شود.");
+            if (stepQuantity.HasValue && dto.Quantity.Value > stepQuantity.Value) return Bad<SpRunDto>($"تعداد اجرا ({SpecialProcessRules.Num(dto.Quantity.Value)}) از تعداد سفارش تولید ({SpecialProcessRules.Num(stepQuantity.Value)}) بیشتر است.");
+            foreach ((Guid? id, string label) file in new[] { (dto.ChartDocumentId, "نمودار فرایند"), (dto.CertificateDocumentId, "گواهی پیمانکار") })
+            {
+                string fileProblem = await QualityChecks.FileProblemAsync(_uow, file.id, file.label, ct);   // M4
+                if (fileProblem != null) return Bad<SpRunDto>(fileProblem);
+            }
 
             var limits = new List<JudgeLimit>();
             int? qualificationId = null, personId = dto.OperatorPersonId;
@@ -593,6 +731,9 @@ namespace Services.NasbNiro.Quality
                 if (!dto.ChartDocumentId.HasValue || !dto.CertificateDocumentId.HasValue || Clean(dto.CertificateNumber) == null)
                     if (SpecialProcessGate.On(settings, QualitySettingKeys.PkcSpSubcontractEvidence)) return Bad<SpRunDto>("برای اجرای پیمانکار، فایل نمودار، فایل گواهی و شماره گواهی لازم است.");
                 limits = type.Parameters.Select(p => new JudgeLimit { Name = p.Name, Unit = p.Unit, Min = p.Min, Max = p.Max, Required = p.Required }).ToList();
+                // Fix round 1 (M3): a subcontract run is judged against the limits of the process list; a required parameter with no limit at all would pass whatever the value is
+                string undefined = string.Join("، ", limits.Where(l => l.Required && !l.Min.HasValue && !l.Max.HasValue).Select(l => l.Name));
+                if (undefined.Length > 0) return Bad<SpRunDto>($"برای پارامتر الزامی ({undefined}) حد قبول تعریف نشده است؛ مهندسی/QA حدود فرایند را در فهرست فرایندهای ویژه تعیین کند، سپس اجرای پیمانکار ثبت شود.");
                 personId = null;
             }
             else
@@ -627,30 +768,35 @@ namespace Services.NasbNiro.Quality
             if (judged.Missing.Count > 0) return Bad<SpRunDto>("مقدار پارامتر الزامی ثبت نشده: " + string.Join("، ", judged.Missing) + ".");
             if (judged.Unknown.Count > 0) return Bad<SpRunDto>("پارامتر ناشناس برای این فرایند: " + string.Join("، ", judged.Unknown) + ".");
 
-            DateTimeOffset now = DateTimeOffset.Now;
-            var run = new SpRun
+            // Fix round 1 (M5): the run, its NCR and the link between them are one unit (a failed run never stays without its report)
+            ResponseDto<SpRunDto> saved = await QualityChecks.InTransactionAsync(_uow, async () =>
             {
-                Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.SpRun, "SPR", dto.EndedAt.Date, ct),
-                TypeId = type.Id, QualificationId = qualificationId, IsSubcontract = dto.IsSubcontract, SupplierId = dto.IsSubcontract ? dto.SupplierId : null, ReceiptDocumentId = dto.ReceiptDocumentId,
-                OrderId = orderId, OperationId = dto.OperationId, PartOperationId = dto.PartOperationId, WorkOrderId = workOrderId, ItemId = itemId, LotId = lotId, SerialNumbers = Clean(dto.SerialNumbers),
-                Quantity = dto.Quantity.Value, OperatorPersonId = personId, MachineId = dto.IsSubcontract ? null : dto.MachineId, StartedAt = dto.StartedAt, EndedAt = dto.EndedAt, ChartDocumentId = dto.ChartDocumentId,
-                ChartFileName = Clean(dto.ChartFileName), CertificateDocumentId = dto.CertificateDocumentId, CertificateNumber = Clean(dto.CertificateNumber), Result = judged.Pass ? SpRunResult.Pass : SpRunResult.Fail,
-                Status = SpRunStatus.Recorded, ReviewStatus = SpReviewStatus.None, Note = Clean(dto.Note), ResultText = judged.Text(), CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
-            };
-            int order2 = 0;
-            foreach (JudgedRow row in judged.Rows) run.Values.Add(new SpRunValue { SortOrder = order2++, Name = row.Name, Unit = row.Unit, Value = row.Value, Min = row.Min, Max = row.Max, Pass = row.Pass });
-            foreach (int id in instruments) run.Instruments.Add(new SpRunInstrument { EquipmentId = id });
-            _uow.Set<SpRun>().Add(run);
-            if (run.Result == SpRunResult.Fail)
-            {
-                if (!itemId.HasValue) return Bad<SpRunDto>("اجرای مردود باید گزارش عدم انطباق بسازد و کالای این گام مشخص نیست.");
-                NonConformance ncr = await QualityNcrFactory.DraftAsync(_uow, Me, NcrSource.InProcess, itemId.Value, lotId, run.Quantity, run.SerialNumbers, workOrderId,
-                    $"فرایند ویژه {type.Title}: پارامترها در حد صلاحیت فرایند", $"اجرای {run.Number} در گام {stepText} مردود شد: {run.ResultText}", run.Number, null, ct);
+                DateTimeOffset now = DateTimeOffset.Now;
+                var run = new SpRun
+                {
+                    Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.SpRun, "SPR", dto.EndedAt.Date, ct),
+                    TypeId = type.Id, QualificationId = qualificationId, IsSubcontract = dto.IsSubcontract, SupplierId = dto.IsSubcontract ? dto.SupplierId : null, ReceiptDocumentId = dto.ReceiptDocumentId,
+                    OrderId = orderId, OperationId = dto.OperationId, PartOperationId = dto.PartOperationId, WorkOrderId = workOrderId, ItemId = itemId, LotId = lotId, SerialNumbers = Clean(dto.SerialNumbers),
+                    Quantity = dto.Quantity.Value, OperatorPersonId = personId, MachineId = dto.IsSubcontract ? null : dto.MachineId, StartedAt = dto.StartedAt, EndedAt = dto.EndedAt, ChartDocumentId = dto.ChartDocumentId,
+                    ChartFileName = Clean(dto.ChartFileName), CertificateDocumentId = dto.CertificateDocumentId, CertificateNumber = Clean(dto.CertificateNumber), Result = judged.Pass ? SpRunResult.Pass : SpRunResult.Fail,
+                    Status = SpRunStatus.Recorded, ReviewStatus = SpReviewStatus.None, Note = Clean(dto.Note), ResultText = judged.Text(), CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
+                };
+                int order2 = 0;
+                foreach (JudgedRow row in judged.Rows) run.Values.Add(new SpRunValue { SortOrder = order2++, Name = row.Name, Unit = row.Unit, Value = row.Value, Min = row.Min, Max = row.Max, Pass = row.Pass });
+                foreach (int id in instruments) run.Instruments.Add(new SpRunInstrument { EquipmentId = id });
+                _uow.Set<SpRun>().Add(run);
+                if (run.Result == SpRunResult.Fail)
+                {
+                    if (!itemId.HasValue) return Bad<SpRunDto>("اجرای مردود باید گزارش عدم انطباق بسازد و کالای این گام مشخص نیست.");
+                    NonConformance ncr = await QualityNcrFactory.DraftAsync(_uow, Me, NcrSource.InProcess, itemId.Value, lotId, run.Quantity, run.SerialNumbers, workOrderId,
+                        $"فرایند ویژه {type.Title}: پارامترها در حد صلاحیت فرایند", $"اجرای {run.Number} در گام {stepText} مردود شد: {run.ResultText}", run.Number, null, ct);
+                    await _uow.SaveChangesAsync(ct);
+                    run.NcrId = ncr.Id;
+                }
                 await _uow.SaveChangesAsync(ct);
-                run.NcrId = ncr.Id;
-            }
-            await _uow.SaveChangesAsync(ct);
-            return ResponseDtoHelper.Ok(await RunDtoAsync((await FullRun().AsNoTracking().FirstAsync(r => r.Id == run.Id, ct)), ct));
+                return ResponseDtoHelper.Ok(await RunDtoAsync((await FullRun().AsNoTracking().FirstAsync(r => r.Id == run.Id, ct)), ct));
+            }, r => r.Success, ct);
+            return saved;
         }
 
         public async Task<ResponseDto<SpRunDto>> RunActionAsync(SpActionDto dto, CancellationToken ct)
@@ -710,7 +856,9 @@ namespace Services.NasbNiro.Quality
                 status.Applies = type != null && !type.ExistingControl; status.TypeId = type?.Id; status.TypeTitle = type?.Title;
                 if (status.Applies)
                 {
-                    decimal required = op.GoodQty > 0 ? op.GoodQty + op.ReworkQty : order.Quantity;
+                    // Fix round 1 (Low): the same quantity the terminal asks for (what the step before handed over), not a different count
+                    List<MfOperation> chain = await _uow.Set<MfOperation>().AsNoTracking().Where(o => o.OrderId == order.Id && !o.Deleted).ToListAsync(ct);
+                    decimal required = MfQuantityRules.Expected(chain, op, order.Quantity);
                     status.Problem = await SpecialProcessGate.FinishProblemAsync(_uow, order, op, required, op.ScrapQty, ct);
                     status.Ready = status.Problem == null;
                 }
@@ -777,6 +925,8 @@ namespace Services.NasbNiro.Quality
             if (dto.ValidTo.Date < dto.ValidFrom.Date) return Bad<SpSupplierApprovalDto>("پایان اعتبار پیش از آغاز آن است.");
             if ((dto.ValidTo.Date - dto.ValidFrom.Date).TotalDays > 366 * 3) return Bad<SpSupplierApprovalDto>("اعتبار تایید بیش از سه سال نیست.");
             if (!dto.EvidenceDocumentId.HasValue && Clean(dto.AccreditationNumber) == null) return Bad<SpSupplierApprovalDto>("مدرک ممیزی/اعتبارنامه (فایل یا شماره) را ثبت کنید.");
+            string evidenceFile = await QualityChecks.FileProblemAsync(_uow, dto.EvidenceDocumentId, "مدرک ممیزی/اعتبارنامه", ct);   // M4
+            if (evidenceFile != null) return Bad<SpSupplierApprovalDto>(evidenceFile);
             DateTimeOffset now = DateTimeOffset.Now;
             SpSupplierApproval a;
             if (dto.Id.HasValue)
@@ -790,17 +940,9 @@ namespace Services.NasbNiro.Quality
             }
             else
             {
-                SpSupplierApproval live = await _uow.Set<SpSupplierApproval>().FirstOrDefaultAsync(x => !x.Deleted && x.ProviderId == dto.ProviderId && x.TypeId == dto.TypeId && (x.Status == SpApprovalStatus.Pending || x.Status == SpApprovalStatus.Approved), ct);
-                if (live != null)
-                {
-                    if (live.Status == SpApprovalStatus.Approved && live.ValidTo.Date < DateTime.Today)
-                    {
-                        // a renewal after the old approval ended: the old one is voided with the reason, the new one waits for the second person
-                        live.Status = SpApprovalStatus.Void; live.VoidReason = "منقضی‌شده؛ با تایید تازه جایگزین شد."; live.VoidedByUserId = Me; live.VoidedAt = now; live.ModifyDate = now; live.ModifierUserId = Me;
-                        await _uow.SaveChangesAsync(ct);
-                    }
-                    else return Bad<SpSupplierApprovalDto>("برای این تامین‌کننده و فرایند، تایید در انتظار یا معتبر وجود دارد؛ اول آن را باطل کنید.");
-                }
+                // Fix round 1 (M1): a renewal is a new Pending version beside the Approved one (the gate keeps accepting the current approval); approving it supersedes the old one. Only one Pending per supplier and process.
+                bool pendingExists = await _uow.Set<SpSupplierApproval>().AnyAsync(x => !x.Deleted && x.ProviderId == dto.ProviderId && x.TypeId == dto.TypeId && x.Status == SpApprovalStatus.Pending, ct);
+                if (pendingExists) return Bad<SpSupplierApprovalDto>("برای این تامین‌کننده و فرایند، تایید در انتظار تصمیم وجود دارد؛ آن را ویرایش یا باطل کنید.");
                 a = new SpSupplierApproval { ProviderId = dto.ProviderId, TypeId = dto.TypeId, Status = SpApprovalStatus.Pending, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SpSupplierApproval>().Add(a);
             }
@@ -834,7 +976,8 @@ namespace Services.NasbNiro.Quality
                     if (editor) return Bad<SpSupplierApprovalDto>(QualityText.SameUser + " (ثبت‌کننده نمی‌تواند تایید کند)");
                     if (!approve && note == null) return Bad<SpSupplierApprovalDto>("دلیل رد را بنویسید.");
                     if (approve && a.ValidTo.Date < DateTime.Today) return Bad<SpSupplierApprovalDto>("پایان اعتبار گذشته است.");
-                    a.Status = approve ? SpApprovalStatus.Approved : SpApprovalStatus.Rejected; a.ApprovedByUserId = Me; a.ApprovedAt = now; a.RejectReason = approve ? null : note;
+                    if (approve) return await ApproveSupplierAsync(a.Id, now, ct);
+                    a.Status = SpApprovalStatus.Rejected; a.ApprovedByUserId = Me; a.ApprovedAt = now; a.RejectReason = note;
                     break;
                 case "void":
                     if (!_user.IsInRole(QualApprovers + ",PMO")) return Bad<SpSupplierApprovalDto>(QualityText.NotAllowed);
@@ -850,6 +993,34 @@ namespace Services.NasbNiro.Quality
             catch (DbUpdateConcurrencyException) { return Bad<SpSupplierApprovalDto>(QualityText.Concurrency); }
             if (a.Status == SpApprovalStatus.Void) await _notify.CloseAsync("spa-expiry:" + a.Id, "تایید تامین‌کننده باطل شد.", ct);
             return ResponseDtoHelper.Ok(await SupplierDtoAsync(a, ct));
+        }
+
+        /// <summary>
+        /// Fix round 1 (M1, M5): approving a version makes the Approved version before it Superseded (history stays valid for the runs it covered) and the new one Approved, as one unit: a failure in between never leaves the supplier
+        /// without an approval or with two.
+        /// </summary>
+        private async Task<ResponseDto<SpSupplierApprovalDto>> ApproveSupplierAsync(int id, DateTimeOffset now, CancellationToken ct)
+        {
+            return await QualityChecks.InTransactionAsync(_uow, async () =>
+            {
+                SpSupplierApproval a = await _uow.Set<SpSupplierApproval>().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
+                if (a == null) return QualityText.NotFound<SpSupplierApprovalDto>("تایید تامین‌کننده پیدا نشد.");
+                if (a.Status != SpApprovalStatus.Pending) return Bad<SpSupplierApprovalDto>("فقط تایید در انتظار تصمیم‌گیری می‌شود.");
+                List<SpSupplierApproval> before = await _uow.Set<SpSupplierApproval>().Where(x => !x.Deleted && x.ProviderId == a.ProviderId && x.TypeId == a.TypeId && x.Id != a.Id && x.Status == SpApprovalStatus.Approved).ToListAsync(ct);
+                try
+                {
+                    if (before.Count > 0)
+                    {
+                        foreach (SpSupplierApproval old in before) { old.Status = SpApprovalStatus.Superseded; old.ModifyDate = now; old.ModifierUserId = Me; }
+                        await _uow.SaveChangesAsync(ct);
+                    }
+                    a.Status = SpApprovalStatus.Approved; a.ApprovedByUserId = Me; a.ApprovedAt = now; a.RejectReason = null; a.ModifyDate = now; a.ModifierUserId = Me;
+                    await _uow.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException) { return Bad<SpSupplierApprovalDto>(QualityText.Concurrency); }
+                catch (DbUpdateException) { return Bad<SpSupplierApprovalDto>("برای این تامین‌کننده و فرایند هم‌زمان تایید دیگری ثبت شد."); }
+                return ResponseDtoHelper.Ok(await SupplierDtoAsync(a, ct));
+            }, r => r.Success, ct);
         }
 
         // ================================================================== expiry alerts
@@ -868,7 +1039,7 @@ namespace Services.NasbNiro.Quality
                 {
                     int left = SpecialProcessRules.DaysLeft(q.ValidTo, today);
                     string title = left < 0 ? $"صلاحیت فرایند {q.Number} ({q.Type?.Title}) منقضی شده است" : $"صلاحیت فرایند {q.Number} ({q.Type?.Title}) {left} روز دیگر منقضی می‌شود";
-                    await _notify.NotifyAsync(new NotifyRequest { SourceKey = key, Module = "quality", SourceType = "sp-qualification-expiry", SourceId = q.Id, Title = title, Link = "/quality/special-process/qualifications/" + q.Id, Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = q.ValidTo }, ct);
+                    await _notify.NotifyAsync(new NotifyRequest { SourceKey = key, Module = "quality", SourceType = "sp-qualification-expiry", SourceId = q.Id, Title = title, Link = "/quality/special-process-qualifications", Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = q.ValidTo }, ct);
                     open++;
                 }
                 else if (q.Status != SpQualStatus.Approved || q.ValidTo.Date > horizon) await _notify.CloseAsync(key, "صلاحیت فرایند دیگر در آستانه انقضا نیست.", ct);
@@ -881,7 +1052,7 @@ namespace Services.NasbNiro.Quality
                 {
                     int left = SpecialProcessRules.DaysLeft(a.ValidTo, today);
                     string title = left < 0 ? $"تایید تامین‌کننده برای {a.Type?.Title} منقضی شده است" : $"تایید تامین‌کننده برای {a.Type?.Title} {left} روز دیگر منقضی می‌شود";
-                    await _notify.NotifyAsync(new NotifyRequest { SourceKey = key, Module = "quality", SourceType = "sp-supplier-expiry", SourceId = a.Id, Title = title, Link = "/quality/special-process/suppliers", Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = a.ValidTo }, ct);
+                    await _notify.NotifyAsync(new NotifyRequest { SourceKey = key, Module = "quality", SourceType = "sp-supplier-expiry", SourceId = a.Id, Title = title, Link = "/quality/special-process-suppliers", Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Roles = "QA", DueDate = a.ValidTo }, ct);
                     open++;
                 }
                 else if (a.Status != SpApprovalStatus.Approved || a.ValidTo.Date > horizon) await _notify.CloseAsync(key, "تایید تامین‌کننده دیگر در آستانه انقضا نیست.", ct);

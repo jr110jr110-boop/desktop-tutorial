@@ -84,17 +84,26 @@ namespace Services.NasbNiro.Quality
             if (g.Length == 0) return null;
             string s = CharacteristicRules.Key(standard);
             List<MaterialSpec> approved = await uow.Set<MaterialSpec>().AsNoTracking().Include(x => x.Limits).Include(x => x.Items).Where(x => !x.Deleted && x.Status == MatSpecStatus.Approved).ToListAsync(ct);
-            IEnumerable<MaterialSpec> match = approved.Where(x => CharacteristicRules.Key(x.Grade) == g && (s.Length == 0 || CharacteristicRules.Key(x.Standard) == s));
+            IEnumerable<MaterialSpec> match = approved.Where(x => CharacteristicRules.Key(x.Grade) == g && CharacteristicRules.Key(x.Standard) == s);   // Fix round 1 (H2): the standard matches exactly (a blank one matches only a spec without a standard)
             return match.OrderByDescending(x => x.Items.Any(i => i.ItemId == itemId)).ThenBy(x => x.Id).FirstOrDefault();
         }
 
         /// <summary>Judges the certificate (its values must be loaded) and stores the verdict on it and on every value row. The caller saves.</summary>
         public static async Task<CertificateEvaluation> EvaluateAsync(IUnitOfWork uow, MaterialCertificate cert, InventoryLot lot, CancellationToken ct)
         {
-            MaterialSpec spec = CertificateRules.NeedsValues(cert.Type) ? await FindSpecAsync(uow, lot.ItemId, cert.Grade, cert.Standard, ct) : null;
+            RequiredCertificate required = CertificateRules.NeedsValues(cert.Type) ? await RequiredAsync(uow, lot.ItemId, ct) : null;
+            MaterialSpec spec = null;
+            if (required != null)
+            {
+                string g = CharacteristicRules.Key(cert.Grade), st = CharacteristicRules.Key(cert.Standard);
+                // the required specifications first (the certificate must be one of them); only an item without any requirement falls back to the approved specification of the printed grade and standard
+                spec = required.Specs.Count > 0
+                    ? (g.Length == 0 ? null : required.Specs.FirstOrDefault(x => CharacteristicRules.Key(x.Grade) == g && CharacteristicRules.Key(x.Standard) == st))
+                    : await FindSpecAsync(uow, lot.ItemId, cert.Grade, cert.Standard, ct);
+            }
             var values = cert.Values.Select(v => new JudgeValue { Name = v.Name, Kind = v.Kind, Value = v.Value }).ToList();
             CertificateEvaluation ev = CertificateRules.Evaluate(cert.Type, cert.HeatNumber, lot.HeatNumber, cert.Grade, cert.Standard, spec, values,
-                cert.InspectorOrganisation, cert.InspectorName, cert.InspectorStampNo, cert.ManufacturerSignatory);
+                cert.InspectorOrganisation, cert.InspectorName, cert.InspectorStampNo, cert.ManufacturerSignatory, required?.Specs);
             cert.SpecId = spec?.Id;
             cert.Evaluation = ev.Status;
             cert.EvaluationText = ev.Text.Length > 1000 ? ev.Text.Substring(0, 1000) : ev.Text;
@@ -330,14 +339,7 @@ namespace Services.NasbNiro.Quality
                     if (s.Status != MatSpecStatus.Submitted) return Bad<MaterialSpecDto>("فقط مشخصات ارسال‌شده تصمیم می‌گیرد.");
                     if (editor) return Bad<MaterialSpecDto>(QualityText.SameUser + " (نویسنده یا ویرایشگر مشخصات نمی‌تواند آن را تایید کند)");
                     if (!approve && note == null) return Bad<MaterialSpecDto>("دلیل بازگشت را بنویسید.");
-                    if (approve)
-                    {
-                        s.ContentHash = Hash(s);
-                        List<MaterialSpec> olds = await _uow.Set<MaterialSpec>().Where(x => !x.Deleted && x.SpecKey == s.SpecKey && x.Status == MatSpecStatus.Approved && x.Id != s.Id).ToListAsync(ct);
-                        foreach (MaterialSpec old in olds) { old.Status = MatSpecStatus.Superseded; old.ModifyDate = now; old.ModifierUserId = Me; }
-                        if (olds.Count > 0) await _uow.SaveChangesAsync(ct);
-                        s.Status = MatSpecStatus.Approved; s.ApprovedByUserId = Me; s.ApprovedAt = now;
-                    }
+                    if (approve) return await ApproveSpecAsync(s.Id, now, ct);
                     else { s.Status = MatSpecStatus.Draft; s.Reason = note; }
                     break;
                 case "void":
@@ -354,6 +356,34 @@ namespace Services.NasbNiro.Quality
             catch (DbUpdateConcurrencyException) { return Bad<MaterialSpecDto>(QualityText.Concurrency); }
             catch (DbUpdateException) { return Bad<MaterialSpecDto>("برای این گرید و استاندارد هم‌زمان نسخه تاییدشده دیگری ثبت شد."); }
             return ResponseDtoHelper.Ok(await ToDtoAsync(s, ct));
+        }
+
+        /// <summary>
+        /// Fix round 1 (M5): the old approved version becomes Superseded and the new one Approved as one unit; a failure between the two saves never leaves the grade without an approved specification (every receipt of it would block).
+        /// </summary>
+        private async Task<ResponseDto<MaterialSpecDto>> ApproveSpecAsync(int id, DateTimeOffset now, CancellationToken ct)
+        {
+            return await QualityChecks.InTransactionAsync(_uow, async () =>
+            {
+                MaterialSpec s = await Full().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
+                if (s == null) return QualityText.NotFound<MaterialSpecDto>("مشخصات ماده پیدا نشد.");
+                if (s.Status != MatSpecStatus.Submitted) return Bad<MaterialSpecDto>("فقط مشخصات ارسال‌شده تصمیم می‌گیرد.");
+                try
+                {
+                    s.ContentHash = Hash(s);
+                    List<MaterialSpec> olds = await _uow.Set<MaterialSpec>().Where(x => !x.Deleted && x.SpecKey == s.SpecKey && x.Status == MatSpecStatus.Approved && x.Id != s.Id).ToListAsync(ct);
+                    if (olds.Count > 0)
+                    {
+                        foreach (MaterialSpec old in olds) { old.Status = MatSpecStatus.Superseded; old.ModifyDate = now; old.ModifierUserId = Me; }
+                        await _uow.SaveChangesAsync(ct);
+                    }
+                    s.Status = MatSpecStatus.Approved; s.ApprovedByUserId = Me; s.ApprovedAt = now; s.ModifyDate = now; s.ModifierUserId = Me;
+                    await _uow.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException) { return Bad<MaterialSpecDto>(QualityText.Concurrency); }
+                catch (DbUpdateException) { return Bad<MaterialSpecDto>("برای این گرید و استاندارد هم‌زمان نسخه تاییدشده دیگری ثبت شد."); }
+                return ResponseDtoHelper.Ok(await ToDtoAsync(s, ct));
+            }, r => r.Success, ct);
         }
 
         public async Task<ResponseDto<RequiredCertificateDto>> RequiredAsync(int itemId, CancellationToken ct)
@@ -475,6 +505,7 @@ namespace Services.NasbNiro.Quality
                 }
                 result.Rows.Add(new CertExcelRowDto { Row = row, Name = name, Ok = message == null, Message = message });
             }
+            if (good.Any(g => Math.Abs(g.Value) >= SpecialProcessRules.MaxNumber)) return Bad<CertExcelResultDto>("یکی از مقدارهای فایل بیش از حد مجاز بزرگ است.");   // Fix round 1 (Low)
             result.ValidRows = result.Rows.Count(r => r.Ok);
             result.ErrorRows = result.Rows.Count - result.ValidRows;
             if (result.ErrorRows > 0) { result.Warnings.Add("فایل ردیف نامعتبر دارد؛ هیچ مقداری ثبت نشد."); return ResponseDtoHelper.Ok(result); }
@@ -485,6 +516,7 @@ namespace Services.NasbNiro.Quality
             int order = 0;
             foreach (CertificateValue v in good) { v.SortOrder = order++; cert.Values.Add(v); }
             await CertificateEngine.EvaluateAsync(_uow, cert, cert.Lot, ct);
+            cert.EditorUserIds = WithEditor(cert.EditorUserIds, Me);   // Fix round 1 (M6)
             cert.ModifyDate = DateTimeOffset.Now; cert.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Bad<CertExcelResultDto>(QualityText.Concurrency); }
