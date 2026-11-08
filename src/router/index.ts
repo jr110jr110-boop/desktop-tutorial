@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
+import { EcRoles } from "@/composables/engChange";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { AccountRoles, AiRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
@@ -708,6 +709,12 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/product-bank/routings", name: "ProductBankRoutings", component: () => import("@/views/productBank/Routings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/routings/:id", name: "ProductBankRoutingEdit", component: () => import("@/views/productBank/RoutingEdit.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/stages", name: "ProductBankStages", component: () => import("@/views/productBank/Stages.vue"), meta: { roles: PbRoles.readers } },
+  // Package A2: engineering change requests / orders, impact, dispositions, effectivity
+  { path: "/eng-change/requests", name: "EngChangeRequests", component: () => import("@/views/engChange/Requests.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/requests/:id", name: "EngChangeRequestEdit", component: () => import("@/views/engChange/RequestEdit.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/orders", name: "EngChangeOrders", component: () => import("@/views/engChange/Orders.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/orders/:id", name: "EngChangeOrderEdit", component: () => import("@/views/engChange/OrderEdit.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/history", name: "EngChangeHistory", component: () => import("@/views/engChange/History.vue"), meta: { roles: EcRoles.readers } },
   { path: "/product-bank/mappings", name: "ProductBankMappings", component: () => import("@/views/productBank/Mappings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/deviations", name: "ProductBankDeviations", component: () => import("@/views/productBank/Deviations.vue"), meta: { roles: PbRoles.readers } },
   { path: "/project-balance", name: "ProjectBalance", component: () => import("@/views/projectBalance/Balance.vue"), meta: { roles: BalanceRoles.readers } },
