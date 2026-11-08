@@ -51,6 +51,8 @@ namespace Services.NasbNiro.Production.Dnc
 
         /// <summary>The background job (no user): the pending transfers of the server-driven links.</summary>
         Task<NcRunPendingResultDto> ProcessPendingAsync(CancellationToken ct);
+        Task<NcRunPendingResultDto> ProcessPendingAsync(int? machineId, CancellationToken ct);
+        Task<List<int>> PendingMachinesAsync(CancellationToken ct);
 
         Task<ResponseDto<PagedList<NcRunDto>>> GetRunsAsync(NcRunQuery query, CancellationToken ct);
         Task<ResponseDto<TerminalNcDto>> GetTerminalAsync(TerminalNcQuery query, CancellationToken ct);
@@ -94,6 +96,23 @@ namespace Services.NasbNiro.Production.Dnc
         }
 
         private int Me => _user.UserId;
+
+        /// <summary>The folders the administrator allowed for network-folder links (Dnc:FolderRoots, a list or one text with ';'): a machine folder must be one of them or inside one.</summary>
+        private IReadOnlyList<string> FolderRoots
+        {
+            get
+            {
+                var roots = new List<string>();
+                IConfigurationSection section = _configuration?.GetSection("Dnc:FolderRoots");
+                if (section == null) return roots;
+                if (!string.IsNullOrWhiteSpace(section.Value)) roots.AddRange(section.Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                roots.AddRange(section.GetChildren().Select(c => c.Value).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()));
+                return roots;
+            }
+        }
+
+        /// <summary>Only the tests reach a converter or FTP server on the server itself (Dnc:AllowLoopback=true); the machines are always on the LAN.</summary>
+        private bool AllowLoopback => string.Equals(_configuration?["Dnc:AllowLoopback"], "true", StringComparison.OrdinalIgnoreCase);
         private static string Clean(string s) => MfText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => MfText.Bad<T>(m);
         private static bool IsAi => global::Services.NasbNiro.Ai.AiActing.IsActing;
@@ -120,7 +139,8 @@ namespace Services.NasbNiro.Production.Dnc
 
         private NcLinkTarget TargetOf(MfMachineConnection c) => new NcLinkTarget
         {
-            Host = c.Host, Port = c.Port, RemotePath = c.RemotePath, BaudRate = c.BaudRate, Family = c.ControllerFamily,
+            Host = c.Host, Port = c.Port, RemotePath = c.RemotePath, BaudRate = c.BaudRate, Family = c.ControllerFamily, FolderRoots = FolderRoots,
+            MaxBytes = c.MaxProgramBytes ?? MfNcRules.GlobalMaxBytes,
             User = CredentialUser(c.CredentialKey), Password = string.IsNullOrWhiteSpace(c.CredentialKey) ? null : _configuration?["Dnc:Credentials:" + c.CredentialKey + ":Password"],
         };
 
@@ -234,10 +254,21 @@ namespace Services.NasbNiro.Production.Dnc
             if (machine == null) return Bad<MachineConnectionDto>("ماشین پیدا نشد.");
             string host = Clean(dto.Host), path = Clean(dto.RemotePath), credential = Clean(dto.CredentialKey), format = Clean(dto.ProgramNameFormat), ext = Clean(dto.FileExtension);
             string axes = Clean(dto.Axes)?.ToUpperInvariant();
-            if (host != null && (host.Length > 200 || host.Any(char.IsWhiteSpace))) return Bad<MachineConnectionDto>("نشانی دستگاه نامعتبر است.");
+            if (host != null && (host.Length > 200 || host.Any(char.IsWhiteSpace) || NcLan.HasControl(host))) return Bad<MachineConnectionDto>("نشانی دستگاه نامعتبر است.");
+            if (NcLan.HasControl(dto.RemotePath)) return Bad<MachineConnectionDto>("مسیر پوشه نویسه کنترلی دارد و پذیرفته نمی‌شود.");
+            // review finding 9: the server talks only to the machines of the LAN, by address (no outside host gets the FTP password, no inner scan through the test button)
+            if (host != null && (dto.LinkKind == MfNcLinkKind.Ftp || dto.LinkKind == MfNcLinkKind.SerialGateway) && !NcLan.IsLanHost(host, AllowLoopback))
+                return Bad<MachineConnectionDto>("نشانی دستگاه باید نشانی IP شبکه داخلی کارگاه باشد (مثلاً 192.168.10.21).");
+            // review finding 1: a network folder only under the folders allowed in the server settings, never the application folder
+            if (dto.LinkKind == MfNcLinkKind.NetworkFolder && path != null)
+            {
+                if (NcLan.FullFolder(path) == null) return Bad<MachineConnectionDto>("مسیر پوشه ماشین باید مسیر کامل باشد (مثلاً \\\\cnc-pc\\nc یا D:\\DNC\\Mikron).");
+                if (NcLan.TouchesApplication(path) || !NcLan.UnderRoot(path, FolderRoots))
+                    return Bad<MachineConnectionDto>("این پوشه در فهرست پوشه‌های مجاز ماشین‌ها در تنظیمات سرور (Dnc:FolderRoots) نیست؛ مدیر سیستم باید آن را اضافه کند.");
+            }
             if (dto.Port.HasValue && (dto.Port.Value < 1 || dto.Port.Value > 65535)) return Bad<MachineConnectionDto>("درگاه باید بین ۱ و ۶۵۵۳۵ باشد.");
             if (credential != null && !CredentialName.IsMatch(credential)) return Bad<MachineConnectionDto>("نام کلید اعتبارنامه فقط حروف لاتین، رقم، خط تیره و زیرخط است (رمز در تنظیمات سرور ثبت می‌شود، نه این‌جا).");
-            if (ext != null && !Extension.IsMatch(ext)) return Bad<MachineConnectionDto>("پسوند فایل نامعتبر است (مثلاً .H یا .NC).");
+            if (ext != null && (!Extension.IsMatch(ext) || !MfNcRules.IsNcExtension(ext))) return Bad<MachineConnectionDto>("پسوند فایل باید پسوند برنامه CNC باشد (مثلاً .H، .NC یا .MPF).");
             if (axes != null && (axes.Length > 9 || axes.Any(ch => "XYZABCUVW".IndexOf(ch) < 0) || axes.Distinct().Count() != axes.Length))
                 return Bad<MachineConnectionDto>("محورها را با حروف X Y Z A B C U V W و بدون تکرار وارد کنید (مثلاً XYZ).");
             if (dto.MaxProgramBytes.HasValue && (dto.MaxProgramBytes.Value < 1024 || dto.MaxProgramBytes.Value > MfNcRules.GlobalMaxBytes))
@@ -248,6 +279,8 @@ namespace Services.NasbNiro.Production.Dnc
             if (dto.LinkKind == MfNcLinkKind.NetworkFolder && path == null) return Bad<MachineConnectionDto>("برای اتصال پوشه شبکه، مسیر پوشه لازم است.");
             if (format != null)
             {
+                if (!format.Contains("{number}") && !format.Contains("{O}") && !format.Contains("{code}"))
+                    return Bad<MachineConnectionDto>("قالب نام برنامه باید یکی از {number}، {O} یا {code} را داشته باشد (نام ثابت پذیرفته نمی‌شود).");
                 var sample = MfNcRules.TargetName(format, ext, "O1234", "P-1", "sample.nc");
                 if (sample.Error != null) return Bad<MachineConnectionDto>("قالب نام برنامه روی کنترلر نامعتبر است: " + sample.Error);
             }
@@ -404,6 +437,15 @@ namespace Services.NasbNiro.Production.Dnc
                 if (!MfConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<NcProgramDto>(MfText.Concurrency);
                 if (row.CurrentRevisionId.HasValue && row.ControllerFamily != dto.ControllerFamily)
                     return Bad<NcProgramDto>("خانواده کنترلر برنامه‌ای که نسخه تأییدشده دارد تغییر نمی‌کند؛ برنامه تازه‌ای باز کنید.");
+                // review finding 4: what an approved program serves (part, step, work centre, machine) is part of what was approved; one person does not move it elsewhere
+                if (row.CurrentRevisionId.HasValue && (row.ItemId != dto.ItemId || row.OperationTemplateId != dto.OperationTemplateId || row.WorkCenterId != dto.WorkCenterId || row.MachineId != dto.MachineId))
+                    return Bad<NcProgramDto>("قطعه، مرحله، مرکز کار یا ماشین برنامه‌ای که نسخه تأییدشده دارد تغییر نمی‌کند؛ برای کاربرد دیگر برنامه تازه‌ای باز کنید.");
+                // switching an approved program off (or on again) takes an approver and a written reason: it opens or closes the start gate of the step
+                if (row.CurrentRevisionId.HasValue && row.Status != dto.Status)
+                {
+                    if (!_user.IsInRole(DncRoles.Approvers)) return Bad<NcProgramDto>("تغییر وضعیت برنامه‌ای که نسخه تأییدشده دارد با تأییدکنندگان برنامه است.");
+                    if (Clean(dto.Note) == null || Clean(dto.Note) == row.Note) return Bad<NcProgramDto>("دلیل تغییر وضعیت برنامه را در توضیح بنویسید.");
+                }
             }
             else
             {
@@ -630,7 +672,14 @@ namespace Services.NasbNiro.Production.Dnc
 
         private async Task SaveQuietAsync(CancellationToken ct)
         {
-            try { await _uow.SaveChangesAsync(ct); } catch (DbUpdateException) { /* the findings are refreshed again next time */ }
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { ClearTracker(); /* refreshed next time; nothing failed stays tracked for the next save (review finding 5) */ }
+        }
+
+        /// <summary>Forgets every tracked change after a failed save, so the next save of this unit of work does not retry it.</summary>
+        private void ClearTracker()
+        {
+            if (_uow is DbContext db) db.ChangeTracker.Clear();
         }
 
         private Task<byte[]> ContentAsync(int revisionId, CancellationToken ct) =>
@@ -827,7 +876,8 @@ namespace Services.NasbNiro.Production.Dnc
                 MfNcRevision r = await _uow.Set<MfNcRevision>().AsNoTracking().FirstAsync(x => x.Id == p.CurrentRevisionId.Value, ct);
                 name = MfNcRules.TargetName(c.ProgramNameFormat, c.FileExtension, r.ProgramNumber, p.Code, r.FileName).Name;
             }
-            if (name == null || !ControlName.IsMatch(name)) return Bad<NcTransferDto>("نام برنامه روی کنترلر را درست وارد کنید (حروف لاتین، رقم، نقطه، خط تیره؛ حداکثر ۳۲ نویسه).");
+            if (name == null || !ControlName.IsMatch(name) || !MfNcRules.IsNcFileName(name))
+                return Bad<NcTransferDto>("نام برنامه روی کنترلر را درست وارد کنید (حروف لاتین، رقم، نقطه، خط تیره؛ حداکثر ۳۲ نویسه؛ با پسوند برنامه CNC یا بدون پسوند).");
             DateTimeOffset now = DateTimeOffset.Now;
             var transfer = new MfNcTransfer
             {
@@ -873,6 +923,7 @@ namespace Services.NasbNiro.Production.Dnc
                 case "retry":
                     if (!(mine || supervisor)) return Bad<NcTransferDto>(MfText.NotAllowed);
                     if (t.Status != MfNcTransferStatus.Failed) return Bad<NcTransferDto>("فقط انتقال ناموفق دوباره تلاش می‌شود.");
+                    if (t.Direction == MfNcTransferDirection.ToMachine && await StaleReasonAsync(t, ct) is string stale) return Bad<NcTransferDto>(stale + " به جای تلاش دوباره، نسخه جاری را ارسال کنید.");
                     t.Status = MfNcTransferStatus.Queued; t.Attempts = 0; t.NextAttemptAt = null;
                     break;
                 default:
@@ -885,6 +936,25 @@ namespace Services.NasbNiro.Production.Dnc
             return ResponseDtoHelper.Ok(await TransferDtoAsync(t.Id, ct));
         }
 
+        /// <summary>
+        /// Null while the transfer still carries the current approved revision of an active program; else the Persian reason (review finding 2: a late retry of an older revision must never write over the
+        /// program the operator confirmed on the control).
+        /// </summary>
+        private async Task<string> StaleReasonAsync(MfNcTransfer t, CancellationToken ct)
+        {
+            if (t.Direction != MfNcTransferDirection.ToMachine) return null;
+            var p = await _uow.Set<MfNcProgram>().AsNoTracking().Where(x => x.Id == t.ProgramId).Select(x => new { x.Deleted, x.Status, x.CurrentRevisionId }).FirstOrDefaultAsync(ct);
+            if (p == null || p.Deleted || p.Status != MfNcProgramStatus.Active) return "برنامه این انتقال دیگر فعال نیست.";
+            if (p.CurrentRevisionId != t.RevisionId) return "پس از درخواست این انتقال نسخه دیگری از برنامه جاری شده است.";
+            return null;
+        }
+
+        /// <summary>Cancels a transfer the system will not deliver any more (no person pressed cancel: the reason says why).</summary>
+        private static void CancelBySystem(MfNcTransfer t, string reason, DateTimeOffset now)
+        {
+            t.Status = MfNcTransferStatus.Cancelled; t.CancelledAt = now; t.CancelReason = "لغو خودکار: " + reason; t.NextAttemptAt = null; t.ModifyDate = now;
+        }
+
         /// <summary>The bytes that go out: the stored content with the line endings of the machine.</summary>
         private static byte[] Outgoing(byte[] content, MfMachineConnection c) => MfNcRules.Normalise(content, c?.LineEnding ?? MfNcLineEnding.CrLf);
 
@@ -895,6 +965,7 @@ namespace Services.NasbNiro.Production.Dnc
             if (t == null) return MfText.NotFound<NcFileDto>("انتقال پیدا نشد.");
             if (t.Direction != MfNcTransferDirection.ToMachine || t.LinkKind != MfNcLinkKind.Manual || (t.Status != MfNcTransferStatus.Queued && t.Status != MfNcTransferStatus.Delivered))
                 return Bad<NcFileDto>("فایل فقط برای انتقال دستیِ در جریان داده می‌شود.");
+            if (await StaleReasonAsync(t, ct) is string stale) return Bad<NcFileDto>(stale);
             MfMachineConnection c = await _uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(x => x.MachineId == t.MachineId && !x.Deleted, ct);
             MfNcRevision r = await _uow.Set<MfNcRevision>().AsNoTracking().FirstAsync(x => x.Id == t.RevisionId, ct);
             byte[] content = await ContentAsync(r.Id, ct);
@@ -918,18 +989,55 @@ namespace Services.NasbNiro.Production.Dnc
 
         private static bool ServerDriven(MfNcLinkKind kind) => kind == MfNcLinkKind.Ftp || kind == MfNcLinkKind.NetworkFolder || kind == MfNcLinkKind.SerialGateway;
 
-        public async Task<NcRunPendingResultDto> ProcessPendingAsync(CancellationToken ct)
+        public Task<NcRunPendingResultDto> ProcessPendingAsync(CancellationToken ct) => ProcessPendingAsync(null, ct);
+
+        /// <summary>The machines with server-driven transfers waiting (the background job works each of them on its own, one transfer at a time per machine: review finding 6).</summary>
+        public async Task<List<int>> PendingMachinesAsync(CancellationToken ct)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            return await _uow.Set<MfNcTransfer>().AsNoTracking()
+                .Where(t => !t.Deleted && (t.LinkKind == MfNcLinkKind.Ftp || t.LinkKind == MfNcLinkKind.NetworkFolder || t.LinkKind == MfNcLinkKind.SerialGateway)
+                    && (t.Status == MfNcTransferStatus.Queued || t.Status == MfNcTransferStatus.Sending
+                        || (t.Status == MfNcTransferStatus.Failed && t.Attempts < MaxAttempts && t.NextAttemptAt != null && t.NextAttemptAt <= now)))
+                .Select(t => t.MachineId).Distinct().ToListAsync(ct);
+        }
+
+        /// <summary>
+        /// How long a transfer may stay "sending" before it counts as left in the middle: ten minutes, plus for a serial line the time the bytes need at its baud rate (10 bits a byte), so a long program at
+        /// 9600 baud is never declared stale and sent a second time while it is still on the wire (review finding 6).
+        /// </summary>
+        public static TimeSpan AllowedSending(MfNcLinkKind kind, long bytes, int? baud)
+        {
+            if (kind != MfNcLinkKind.SerialGateway) return StaleSending;
+            int rate = baud is > 0 ? baud.Value : 9600;
+            return StaleSending + TimeSpan.FromSeconds(Math.Max(0, bytes) * 10.0 / rate * 1.25);
+        }
+
+        public async Task<NcRunPendingResultDto> ProcessPendingAsync(int? machineId, CancellationToken ct)
         {
             var result = new NcRunPendingResultDto();
             DateTimeOffset now = DateTimeOffset.Now, stale = now - StaleSending;
             // a transfer the server left in the middle (it stopped) is failed, so it is retried or seen by a person
             List<MfNcTransfer> stuck = await _uow.Set<MfNcTransfer>().Where(t => !t.Deleted && t.Status == MfNcTransferStatus.Sending && t.ModifyDate < stale
+                && (machineId == null || t.MachineId == machineId)
                 && (t.LinkKind == MfNcLinkKind.Ftp || t.LinkKind == MfNcLinkKind.NetworkFolder || t.LinkKind == MfNcLinkKind.SerialGateway)).ToListAsync(ct);
-            foreach (MfNcTransfer t in stuck) Fail(t, "انتقال نیمه‌کاره ماند (سرور در میانه کار متوقف شد).", now);
-            if (stuck.Count > 0) await SaveQuietAsync(ct);
+            bool anyStuck = false;
+            foreach (MfNcTransfer t in stuck)
+            {
+                MfMachineConnection sc = await _uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(x => x.MachineId == t.MachineId && !x.Deleted, ct);
+                long size = t.Direction == MfNcTransferDirection.ToMachine && t.RevisionId.HasValue
+                    ? await _uow.Set<MfNcRevision>().AsNoTracking().Where(r => r.Id == t.RevisionId.Value).Select(r => (long)r.SizeBytes).FirstOrDefaultAsync(ct)
+                    : sc?.MaxProgramBytes ?? MfNcRules.GlobalMaxBytes;
+                if (now - t.ModifyDate < AllowedSending(t.LinkKind, size, sc?.BaudRate)) continue;
+                Fail(t, "انتقال نیمه‌کاره ماند (سرور در میانه کار متوقف شد).", now);
+                anyStuck = true;
+            }
+            if (anyStuck) await SaveQuietAsync(ct);
+            else if (stuck.Count > 0) ClearTracker();
 
             List<int> ids = await _uow.Set<MfNcTransfer>().AsNoTracking()
                 .Where(t => !t.Deleted && (t.LinkKind == MfNcLinkKind.Ftp || t.LinkKind == MfNcLinkKind.NetworkFolder || t.LinkKind == MfNcLinkKind.SerialGateway)
+                    && (machineId == null || t.MachineId == machineId)
                     && (t.Status == MfNcTransferStatus.Queued || (t.Status == MfNcTransferStatus.Failed && t.Attempts < MaxAttempts && t.NextAttemptAt != null && t.NextAttemptAt <= now)))
                 .OrderBy(t => t.Id).Select(t => t.Id).Take(20).ToListAsync(ct);
             foreach (int id in ids)
@@ -937,10 +1045,12 @@ namespace Services.NasbNiro.Production.Dnc
                 ct.ThrowIfCancellationRequested();
                 MfNcTransfer t = await _uow.Set<MfNcTransfer>().FirstOrDefaultAsync(x => x.Id == id, ct);
                 if (t == null || !(t.Status == MfNcTransferStatus.Queued || t.Status == MfNcTransferStatus.Failed)) continue;
+                // one transfer in flight per machine: while another is on its way to (or from) this machine, the next one waits
+                if (await _uow.Set<MfNcTransfer>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Id != id && x.MachineId == t.MachineId && x.Status == MfNcTransferStatus.Sending, ct)) continue;
                 // claim the row: a second worker (or a person pressing "run") gets a concurrency error and leaves it
                 t.Status = MfNcTransferStatus.Sending; t.Attempts++; t.ModifyDate = DateTimeOffset.Now;
                 try { await _uow.SaveChangesAsync(ct); }
-                catch (DbUpdateConcurrencyException) { _uow.Entry(t).State = EntityState.Detached; continue; }
+                catch (DbUpdateException) { ClearTracker(); continue; }
                 result.Processed++;
                 MfMachineConnection c = await _uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(x => x.MachineId == t.MachineId && !x.Deleted, ct);
                 string title = await _uow.Set<Machine>().AsNoTracking().Where(m => m.Id == t.MachineId).Select(m => m.Title).FirstOrDefaultAsync(ct);
@@ -955,7 +1065,16 @@ namespace Services.NasbNiro.Production.Dnc
                 try { await _uow.SaveChangesAsync(ct); }
                 catch (DbUpdateException ex)
                 {
-                    result.Messages.Add("انتقال " + t.Id + ": " + ex.GetBaseException().Message);
+                    // review finding 5: nothing of the failed save stays tracked, and the row is closed for a person (never left "sending" to be retried and delivered a second time)
+                    result.Messages.Add("انتقال " + id + ": " + ex.GetBaseException().Message);
+                    ClearTracker();
+                    MfNcTransfer again = await _uow.Set<MfNcTransfer>().FirstOrDefaultAsync(x => x.Id == id, ct);
+                    if (again != null && again.Status == MfNcTransferStatus.Sending)
+                    {
+                        Fail(again, "نتیجه انتقال ذخیره نشد؛ پیش از تلاش دوباره وضعیت برنامه روی کنترلر را بررسی کنید.", DateTimeOffset.Now, final: true);
+                        result.Failed++;
+                        await SaveQuietAsync(ct);
+                    }
                     continue;
                 }
                 if (t.Status == MfNcTransferStatus.Failed) await DncGates.TransferFailedAsync(_notify, t, title, ct);
@@ -980,6 +1099,12 @@ namespace Services.NasbNiro.Production.Dnc
 
         private async Task DeliverAsync(MfNcTransfer t, MfMachineConnection c, IMfNcLink link, NcRunPendingResultDto result, CancellationToken ct)
         {
+            if (await StaleReasonAsync(t, ct) is string stale)
+            {
+                CancelBySystem(t, stale, DateTimeOffset.Now);
+                result.Messages.Add("انتقال " + t.Id + ": " + stale);
+                return;
+            }
             MfNcRevision r = t.RevisionId.HasValue ? await _uow.Set<MfNcRevision>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == t.RevisionId.Value, ct) : null;
             byte[] content = r == null ? null : await ContentAsync(r.Id, ct);
             if (r == null || content == null || MfNcRules.Sha256Hex(content) != r.Sha256)
@@ -1088,11 +1213,12 @@ namespace Services.NasbNiro.Production.Dnc
             if (p.CurrentRevisionId.HasValue)
                 dto.CurrentRevision = await _uow.Set<MfNcRevision>().AsNoTracking().Where(r => r.Id == p.CurrentRevisionId.Value).Select(r => (int?)r.Revision).FirstOrDefaultAsync(ct);
             MfMachineConnection c = await _uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(x => x.MachineId == query.MachineId && !x.Deleted, ct);
-            dto.Required = c != null && c.IsActive && c.RequireConfirmedProgram && p.CurrentRevisionId.HasValue;
+            dto.Required = c != null && c.IsActive && c.RequireConfirmedProgram;
             var gate = await MfDncGate.CheckStartAsync(_uow, op, query.MachineId, MfBookingKind.Run, ct);
             dto.CanStart = gate.Error == null;
             dto.Problem = gate.Error;
-            if (!p.CurrentRevisionId.HasValue) dto.Problem = "این برنامه هنوز نسخه تأییدشده ندارد.";
+            // review finding 11: the problem text and "can start" never disagree; a program without an approved revision on a machine that does not require one is shown, not blocking
+            if (dto.Problem == null && !p.CurrentRevisionId.HasValue && dto.Required) dto.Problem = "این برنامه هنوز نسخه تأییدشده ندارد.";
             MfNcTransfer last = await _uow.Set<MfNcTransfer>().AsNoTracking()
                 .Where(t => !t.Deleted && t.MachineId == query.MachineId && t.ProgramId == p.Id && t.Direction == MfNcTransferDirection.ToMachine).OrderByDescending(t => t.Id).FirstOrDefaultAsync(ct);
             if (last != null) dto.LastTransfer = (await TransferDtosAsync(new List<MfNcTransfer> { last }, ct))[0];
@@ -1111,21 +1237,45 @@ namespace Services.NasbNiro.Production.Dnc
             byte[] given = Encoding.UTF8.GetBytes(HashKey(key)), stored = Encoding.UTF8.GetBytes(c.GatewayKeyHash);
             if (given.Length != stored.Length || !CryptographicOperations.FixedTimeEquals(given, stored)) return null;
             if (!DeviceAddress.Allows(c.AllowedAddresses, remote)) return null;
-            c.LastSeenAt = DateTimeOffset.Now;
+            await TouchAsync(c, ct);
             return c;
+        }
+
+        /// <summary>
+        /// Writes the last-seen time of a gateway without touching the row version of the link (review finding 7: a poll every few seconds must not turn every save of the link editor into a concurrency
+        /// error). SQL Server: one UPDATE of that column; the in-memory test database: the tracked row.
+        /// </summary>
+        private async Task TouchAsync(MfMachineConnection c, CancellationToken ct)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (_uow is DbContext db && db.Database.IsRelational())
+            {
+                int id = c.Id;
+                await db.Set<MfMachineConnection>().Where(x => x.Id == id).ExecuteUpdateAsync(u => u.SetProperty(x => x.LastSeenAt, now), ct);
+                return;
+            }
+            c.LastSeenAt = now;
+            await SaveQuietAsync(ct);
         }
 
         public async Task<ResponseDto<List<GatewayJobDto>>> GatewayJobsAsync(string machine, string key, string remote, CancellationToken ct)
         {
             MfMachineConnection c = await GatewayAsync(machine, key, remote, ct);
             if (c == null) return Unauthorized<List<GatewayJobDto>>();
-            await SaveQuietAsync(ct);
             var rows = await _uow.Set<MfNcTransfer>().AsNoTracking()
                 .Where(t => !t.Deleted && t.MachineId == c.MachineId && t.LinkKind == MfNcLinkKind.EdgeGateway && (t.Status == MfNcTransferStatus.Queued || t.Status == MfNcTransferStatus.Sending))
                 .OrderBy(t => t.Id).Take(20).ToListAsync(ct);
             var jobs = new List<GatewayJobDto>();
+            bool cancelled = false;
             foreach (MfNcTransfer t in rows)
             {
+                if (await StaleReasonAsync(t, ct) is string stale)
+                {
+                    MfNcTransfer row = await _uow.Set<MfNcTransfer>().FirstAsync(x => x.Id == t.Id, ct);
+                    CancelBySystem(row, stale, DateTimeOffset.Now);
+                    cancelled = true;
+                    continue;
+                }
                 var job = new GatewayJobDto { TransferId = t.Id, Direction = t.Direction, TargetName = t.TargetName };
                 if (t.Direction == MfNcTransferDirection.ToMachine && t.RevisionId.HasValue)
                 {
@@ -1135,6 +1285,7 @@ namespace Services.NasbNiro.Production.Dnc
                 }
                 jobs.Add(job);
             }
+            if (cancelled) await SaveQuietAsync(ct);
             return ResponseDtoHelper.Ok(jobs);
         }
 
@@ -1150,9 +1301,15 @@ namespace Services.NasbNiro.Production.Dnc
         public async Task<ResponseDto<NcFileDto>> GatewayContentAsync(string machine, string key, string remote, int transferId, CancellationToken ct)
         {
             var g = await GatewayTransferAsync<NcFileDto>(machine, key, remote, transferId, ct);
-            if (g.Refusal != null) { await SaveQuietAsync(ct); return g.Refusal; }
+            if (g.Refusal != null) return g.Refusal;
             MfNcTransfer t = g.Transfer;
             if (t.Direction != MfNcTransferDirection.ToMachine || (t.Status != MfNcTransferStatus.Queued && t.Status != MfNcTransferStatus.Sending)) return Bad<NcFileDto>("این کار ارسالی در جریان نیست.");
+            if (await StaleReasonAsync(t, ct) is string stale)
+            {
+                CancelBySystem(t, stale, DateTimeOffset.Now);
+                await SaveQuietAsync(ct);
+                return Bad<NcFileDto>(stale + " این کار لغو شد.");
+            }
             MfNcRevision r = await _uow.Set<MfNcRevision>().AsNoTracking().FirstAsync(x => x.Id == t.RevisionId, ct);
             byte[] content = await ContentAsync(r.Id, ct);
             if (MfNcRules.Sha256Hex(content) != r.Sha256) return Bad<NcFileDto>("محتوای نسخه با اثر انگشت آن نمی‌خواند.");
@@ -1169,7 +1326,7 @@ namespace Services.NasbNiro.Production.Dnc
         {
             if (dto == null) return Bad<NcTransferDto>(MfText.InvalidData);
             var g = await GatewayTransferAsync<NcTransferDto>(machine, key, remote, dto.TransferId, ct);
-            if (g.Refusal != null) { await SaveQuietAsync(ct); return g.Refusal; }
+            if (g.Refusal != null) return g.Refusal;
             MfNcTransfer t = g.Transfer;
             if (t.Direction != MfNcTransferDirection.ToMachine || t.Status != MfNcTransferStatus.Sending) return Bad<NcTransferDto>("این کار ارسالی در جریان نیست (ابتدا محتوا را بگیرید).");
             DateTimeOffset now = DateTimeOffset.Now;
@@ -1185,7 +1342,7 @@ namespace Services.NasbNiro.Production.Dnc
         {
             if (dto == null || string.IsNullOrWhiteSpace(dto.ContentBase64)) return Bad<NcTransferDto>(MfText.InvalidData);
             var g = await GatewayTransferAsync<NcTransferDto>(machine, key, remote, dto.TransferId, ct);
-            if (g.Refusal != null) { await SaveQuietAsync(ct); return g.Refusal; }
+            if (g.Refusal != null) return g.Refusal;
             MfNcTransfer t = g.Transfer;
             if (t.Direction != MfNcTransferDirection.FromMachine || (t.Status != MfNcTransferStatus.Queued && t.Status != MfNcTransferStatus.Sending)) return Bad<NcTransferDto>("درخواست دریافتی در جریان نیست.");
             if (dto.ContentBase64.Length > (MfNcRules.GlobalMaxBytes / 3 + 1) * 4 + 8) return Bad<NcTransferDto>("حجم فایل بیش از ۴ مگابایت است.");

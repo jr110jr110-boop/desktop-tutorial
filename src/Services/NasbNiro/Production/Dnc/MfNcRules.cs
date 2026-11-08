@@ -180,6 +180,9 @@ namespace Services.NasbNiro.Production.Dnc
 
         private static decimal Num(string s) => decimal.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal d) ? d : 0m;
 
+        /// <summary>The whole part of a word value, or -1 when it does not fit an int (a malformed word such as G123456789012 is not a G code; it must never throw).</summary>
+        private static int Whole(decimal v) => v > int.MaxValue || v < int.MinValue ? -1 : (int)Math.Truncate(v);
+
         /// <summary>The check of a program against one machine. Errors stop the submission and the transfer; warnings are shown.</summary>
         public static NcAnalysis Analyse(byte[] bytes, NcProfile profile)
         {
@@ -302,7 +305,7 @@ namespace Services.NasbNiro.Production.Dnc
                 if (line.Trim().Length == 0) continue;
                 MatchCollection words = IsoWord.Matches(line);
                 var g = new HashSet<int>();
-                foreach (Match w in words) if (w.Groups[1].Value == "G") g.Add((int)Num(w.Groups[2].Value));
+                foreach (Match w in words) if (w.Groups[1].Value == "G") g.Add(Whole(Num(w.Groups[2].Value)));
                 if (g.Contains(96)) surfaceSpeed = true;
                 if (g.Contains(97)) surfaceSpeed = false;
                 if (g.Contains(95) || (p.IsLathe && g.Contains(99))) feedPerRev = true;
@@ -331,8 +334,13 @@ namespace Services.NasbNiro.Production.Dnc
                         case 'T':
                             if (p.ToolCapacity.HasValue)
                             {
-                                int tool = (int)Math.Truncate(Math.Abs(value));
-                                if (p.IsLathe && w.Groups[2].Value.TrimStart('+', '-').Length >= 3) tool /= 100;   // T0101: tool 01, offset 01
+                                int tool = Whole(Math.Abs(value));
+                                if (p.IsLathe)
+                                {
+                                    // T0101: tool 01, offset 01. A two-digit T on a lathe (T12) is tool+offset in a one-digit form on some controls and offset 12 of tool 0 on others: not checked
+                                    if (w.Groups[2].Value.TrimStart('+', '-').Length < 3) break;
+                                    tool /= 100;
+                                }
                                 if (tool > p.ToolCapacity.Value)
                                     Add(a, NcSeverity.Error, i + 1, "TOOL", $"خط {i + 1}: ابزار {tool} بیش از ظرفیت ابزار ماشین {p.Name} ({p.ToolCapacity.Value}) است.");
                             }
@@ -354,6 +362,29 @@ namespace Services.NasbNiro.Production.Dnc
         // ------------------------------------------------------------------------------------------ program name on the control
 
         private static readonly Regex SafeName = new Regex(@"^[A-Za-z0-9._\-]{1,32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// The file extensions of CNC programs a link may read or write (review finding 1): Heidenhain .H / .I, Siemens .MPF / .SPF, the ISO tape forms and none at all (a Fanuc O-number).
+        /// Nothing else (.json, .config, .dll ...) ever goes to or comes from a machine folder.
+        /// </summary>
+        public static readonly string[] NcExtensions = { ".H", ".I", ".NC", ".MPF", ".SPF", ".TAP", ".PRG", ".CNC", ".MIN", ".EIA", ".PIM", ".ISO", ".PGM", ".DNC", ".ANC", ".PIT" };
+
+        /// <summary>True for an extension of <see cref="NcExtensions"/> (with or without the dot).</summary>
+        public static bool IsNcExtension(string extension)
+        {
+            string e = (extension ?? "").Trim();
+            if (e.Length == 0) return true;
+            if (!e.StartsWith(".", StringComparison.Ordinal)) e = "." + e;
+            return NcExtensions.Contains(e, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>A program name a control may hold: Latin letters, digits, dot, dash, underscore (1..32), not starting with a dot, and a CNC extension or none.</summary>
+        public static bool IsNcFileName(string name)
+        {
+            if (name == null || !SafeName.IsMatch(name) || name.StartsWith(".", StringComparison.Ordinal) || name.Contains("..", StringComparison.Ordinal)) return false;
+            int dot = name.LastIndexOf('.');
+            return dot < 0 || IsNcExtension(name.Substring(dot));
+        }
 
         /// <summary>
         /// The name the program gets on the control: the format of the machine with "{number}" (the program number of the file without its letter), "{O}" (the number with its letter, for example O1234) and "{code}"
@@ -384,6 +415,7 @@ namespace Services.NasbNiro.Production.Dnc
                 }
             }
             if (!SafeName.IsMatch(name)) return (null, $"نام برنامه روی کنترلر ({name}) معتبر نیست: فقط حروف لاتین، رقم، نقطه، خط تیره و زیرخط و حداکثر ۳۲ نویسه.");
+            if (!IsNcFileName(name)) return (null, $"نام برنامه روی کنترلر ({name}) پسوند برنامه CNC ندارد (مثلاً .H، .NC، .MPF یا بدون پسوند).");
             return (name, null);
         }
 
@@ -531,6 +563,9 @@ namespace Services.NasbNiro.Production.Dnc
 
         // ------------------------------------------------------------------------------------------ the start gate
 
+        /// <summary>The bookings that run a program on the machine: setup, run and rework (review finding 3).</summary>
+        public static bool Machining(MfBookingKind kind) => kind == MfBookingKind.Run || kind == MfBookingKind.Setup || kind == MfBookingKind.Rework;
+
         public sealed class GateTransfer
         {
             public int Id { get; init; }
@@ -547,7 +582,7 @@ namespace Services.NasbNiro.Production.Dnc
         public static (GateTransfer Transfer, string Error) StartGate(bool machineRequires, MfBookingKind kind, string programCode, int? currentRevisionId, DateTimeOffset? revisionApprovedAt,
             int machineId, IEnumerable<GateTransfer> transfers)
         {
-            if (!machineRequires || (kind != MfBookingKind.Run && kind != MfBookingKind.Setup) || !currentRevisionId.HasValue) return (null, null);
+            if (!machineRequires || !Machining(kind) || !currentRevisionId.HasValue) return (null, null);
             GateTransfer ok = (transfers ?? Enumerable.Empty<GateTransfer>())
                 .Where(t => t.MachineId == machineId && t.RevisionId == currentRevisionId && t.Status == MfNcTransferStatus.Confirmed && t.ConfirmedAt.HasValue
                     && (!revisionApprovedAt.HasValue || t.ConfirmedAt.Value >= revisionApprovedAt.Value))

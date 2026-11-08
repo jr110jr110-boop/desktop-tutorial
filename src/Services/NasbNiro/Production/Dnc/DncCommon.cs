@@ -100,16 +100,19 @@ namespace Services.NasbNiro.Production.Dnc
         {
             public string Error { get; init; }
 
-            /// <summary>The record of what ran, to be added in the same save as the booking (the caller fills the employee, the time and the user).</summary>
-            public MfNcRun Run { get; init; }
+            /// <summary>The records of what ran (one per program of the step with an approved revision), to be added in the same save as the booking (the caller fills the employee, the time and the user).</summary>
+            public List<MfNcRun> Runs { get; init; } = new List<MfNcRun>();
         }
 
         private static readonly Result Pass = new Result();
 
-        /// <summary>The program the terminal uses for the operation on the machine: an active program of the routing step, the one bound to this machine first, then to the work centre, then any; ties by id.</summary>
-        public static async Task<MfNcProgram> ProgramForAsync(IUnitOfWork uow, MfOperation op, int machineId, CancellationToken ct)
+        /// <summary>
+        /// Every active program of the routing step that fits the machine (bound to it, to its work centre or to neither, same controller family): a step may need more than one program (two clampings).
+        /// Order: programs with an approved revision first (review finding 3), then bound to this machine, then to the work centre; ties by id.
+        /// </summary>
+        public static async Task<List<MfNcProgram>> ProgramsForAsync(IUnitOfWork uow, MfOperation op, int machineId, CancellationToken ct)
         {
-            if (op?.OperationTemplateId == null) return null;
+            if (op?.OperationTemplateId == null) return new List<MfNcProgram>();
             int templateId = op.OperationTemplateId.Value;
             List<MfNcProgram> candidates = await uow.Set<MfNcProgram>().AsNoTracking()
                 .Where(p => !p.Deleted && p.Status == MfNcProgramStatus.Active && p.OperationTemplateId == templateId
@@ -118,29 +121,63 @@ namespace Services.NasbNiro.Production.Dnc
             MfMachineConnection connection = await uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(c => c.MachineId == machineId && !c.Deleted, ct);
             MfNcControllerFamily family = connection?.ControllerFamily ?? MfNcControllerFamily.Unknown;
             return candidates.Where(p => DncText.Fits(p.ControllerFamily, family))
-                .OrderBy(p => p.MachineId == machineId ? 0 : p.WorkCenterId != null ? 1 : 2).ThenBy(p => p.Id).FirstOrDefault();
+                .OrderBy(p => p.CurrentRevisionId.HasValue ? 0 : 1).ThenBy(p => p.MachineId == machineId ? 0 : p.WorkCenterId != null ? 1 : 2).ThenBy(p => p.Id).ToList();
         }
 
+        /// <summary>The program the terminal shows first for the operation on the machine (see <see cref="ProgramsForAsync"/>).</summary>
+        public static async Task<MfNcProgram> ProgramForAsync(IUnitOfWork uow, MfOperation op, int machineId, CancellationToken ct) =>
+            (await ProgramsForAsync(uow, op, machineId, ct)).FirstOrDefault();
+
+        /// <summary>
+        /// May the setup, run or rework start? On a machine that requires the confirmed program every program of the step must have an approved revision, sent to this machine and confirmed on the control
+        /// after the approval, and nothing else may have been written over that file on the machine since (another revision, another program with the same name, a late retry: review finding 2).
+        /// </summary>
         public static async Task<Result> CheckStartAsync(IUnitOfWork uow, MfOperation op, int? machineId, MfBookingKind kind, CancellationToken ct)
         {
-            if (!machineId.HasValue || op == null || (kind != MfBookingKind.Run && kind != MfBookingKind.Setup)) return Pass;
-            MfNcProgram program = await ProgramForAsync(uow, op, machineId.Value, ct);
-            if (program?.CurrentRevisionId == null) return Pass;
-            MfMachineConnection connection = await uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(c => c.MachineId == machineId.Value && !c.Deleted, ct);
+            if (!machineId.HasValue || op == null || !MfNcRules.Machining(kind)) return Pass;
+            int machine = machineId.Value;
+            List<MfNcProgram> programs = await ProgramsForAsync(uow, op, machine, ct);
+            if (programs.Count == 0) return Pass;
+            MfMachineConnection connection = await uow.Set<MfMachineConnection>().AsNoTracking().FirstOrDefaultAsync(c => c.MachineId == machine && !c.Deleted, ct);
             bool requires = connection != null && connection.IsActive && connection.RequireConfirmedProgram;
-            MfNcRevision current = await uow.Set<MfNcRevision>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == program.CurrentRevisionId.Value, ct);
-            int revisionId = program.CurrentRevisionId.Value, machine = machineId.Value;
-            List<MfDncRulesTransfer> transfers = await uow.Set<MfNcTransfer>().AsNoTracking()
-                .Where(t => !t.Deleted && t.MachineId == machine && t.RevisionId == revisionId && t.Direction == MfNcTransferDirection.ToMachine && t.Status == MfNcTransferStatus.Confirmed)
-                .Select(t => new MfDncRulesTransfer { Id = t.Id, MachineId = t.MachineId, RevisionId = t.RevisionId, Status = t.Status, ConfirmedAt = t.ConfirmedAt })
+            if (requires)
+            {
+                MfNcProgram unapproved = programs.FirstOrDefault(p => !p.CurrentRevisionId.HasValue);
+                if (unapproved != null)
+                    return new Result { Error = $"برنامه {unapproved.Code} این مرحله هنوز نسخه تأییدشده ندارد؛ پیش از شروع باید تأیید، به این ماشین ارسال و روی کنترلر تأیید شود (DNC)." };
+            }
+            List<int> revisionIds = programs.Where(p => p.CurrentRevisionId.HasValue).Select(p => p.CurrentRevisionId.Value).ToList();
+            if (revisionIds.Count == 0) return Pass;
+            Dictionary<int, DateTimeOffset?> approvedAt = await uow.Set<MfNcRevision>().AsNoTracking().Where(r => revisionIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.ApprovedAt, ct);
+            // every program written to this machine (on its way or there): a confirmation counts only while its file was not written over afterwards
+            List<MfDncRulesTransfer> written = await uow.Set<MfNcTransfer>().AsNoTracking()
+                .Where(t => !t.Deleted && t.MachineId == machine && t.Direction == MfNcTransferDirection.ToMachine
+                    && (t.Status == MfNcTransferStatus.Sending || t.Status == MfNcTransferStatus.Delivered || t.Status == MfNcTransferStatus.Confirmed))
+                .Select(t => new MfDncRulesTransfer { Id = t.Id, MachineId = t.MachineId, RevisionId = t.RevisionId, Status = t.Status, ConfirmedAt = t.ConfirmedAt, DeliveredAt = t.DeliveredAt, TargetName = t.TargetName })
                 .ToListAsync(ct);
-            var gate = MfNcRules.StartGate(requires, kind, program.Code, revisionId, current?.ApprovedAt, machine,
-                transfers.Select(t => new MfNcRules.GateTransfer { Id = t.Id, MachineId = t.MachineId, RevisionId = t.RevisionId, Status = t.Status, ConfirmedAt = t.ConfirmedAt }));
-            if (gate.Error != null) return new Result { Error = gate.Error };
-            // the run is recorded whether or not the machine requires the confirmation: the revision that is current is the one the operation runs by
-            int? transferId = gate.Transfer?.Id ?? transfers.OrderByDescending(t => t.ConfirmedAt).Select(t => (int?)t.Id).FirstOrDefault();
-            return new Result { Run = new MfNcRun { OperationId = op.Id, MachineId = machine, ProgramId = program.Id, RevisionId = revisionId, TransferId = transferId, Kind = kind } };
+            var runs = new List<MfNcRun>();
+            foreach (MfNcProgram program in programs.Where(p => p.CurrentRevisionId.HasValue))
+            {
+                int revisionId = program.CurrentRevisionId.Value;
+                List<MfDncRulesTransfer> valid = written.Where(t => t.RevisionId == revisionId && t.Status == MfNcTransferStatus.Confirmed && !Overwritten(t, written)).ToList();
+                var gate = MfNcRules.StartGate(requires, kind, program.Code, revisionId, approvedAt.TryGetValue(revisionId, out DateTimeOffset? at) ? at : null, machine,
+                    valid.Select(t => new MfNcRules.GateTransfer { Id = t.Id, MachineId = t.MachineId, RevisionId = t.RevisionId, Status = t.Status, ConfirmedAt = t.ConfirmedAt }));
+                if (gate.Error != null)
+                {
+                    bool replaced = written.Any(t => t.RevisionId == revisionId && t.Status == MfNcTransferStatus.Confirmed) && valid.Count == 0;
+                    return new Result { Error = replaced ? $"پس از تأیید برنامه {program.Code} روی کنترلر، فایل دیگری روی همان نام در این ماشین نوشته شده است؛ نسخه جاری را دوباره ارسال و تأیید کنید (DNC)." : gate.Error };
+                }
+                // the run is recorded whether or not the machine requires the confirmation: the revision that is current is the one the operation runs by
+                int? transferId = gate.Transfer?.Id ?? valid.OrderByDescending(t => t.ConfirmedAt).Select(t => (int?)t.Id).FirstOrDefault();
+                runs.Add(new MfNcRun { OperationId = op.Id, MachineId = machine, ProgramId = program.Id, RevisionId = revisionId, TransferId = transferId, Kind = kind });
+            }
+            return new Result { Runs = runs };
         }
+
+        /// <summary>True when another revision (or another program) went to the same file of the machine after this one was delivered, or is being written right now.</summary>
+        private static bool Overwritten(MfDncRulesTransfer confirmed, List<MfDncRulesTransfer> written) =>
+            written.Any(o => o.Id != confirmed.Id && o.RevisionId != confirmed.RevisionId && string.Equals(o.TargetName, confirmed.TargetName, StringComparison.OrdinalIgnoreCase)
+                && (o.Status == MfNcTransferStatus.Sending || (o.DeliveredAt.HasValue && (!confirmed.DeliveredAt.HasValue || o.DeliveredAt.Value > confirmed.DeliveredAt.Value))));
 
         private sealed class MfDncRulesTransfer
         {
@@ -149,6 +186,8 @@ namespace Services.NasbNiro.Production.Dnc
             public int? RevisionId { get; init; }
             public MfNcTransferStatus Status { get; init; }
             public DateTimeOffset? ConfirmedAt { get; init; }
+            public DateTimeOffset? DeliveredAt { get; init; }
+            public string TargetName { get; init; }
         }
     }
 }

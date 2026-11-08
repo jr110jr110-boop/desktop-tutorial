@@ -45,12 +45,14 @@ namespace Services.NasbNiro.Production.Dnc
         private readonly IInventoryUserContext _user;
         private readonly IMfModbusReader _modbus;
         private readonly INotificationService _notify;
+        private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
 
         /// <summary>Server local time (the bookings use it too); replaceable in tests.</summary>
         internal Func<DateTime> Clock { get; set; } = () => DateTime.Now;
 
-        public MfMonitorService(IUnitOfWork uow, IInventoryUserContext user, IMfModbusReader modbus = null, INotificationService notify = null)
+        public MfMonitorService(IUnitOfWork uow, IInventoryUserContext user, IMfModbusReader modbus = null, INotificationService notify = null, Microsoft.Extensions.Configuration.IConfiguration configuration = null)
         {
+            _configuration = configuration;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _modbus = modbus ?? new ModbusTcpReader();
@@ -121,6 +123,8 @@ namespace Services.NasbNiro.Production.Dnc
             if (dto.Source == MfMonitorSource.ModbusInputs)
             {
                 if (host == null || host.Length > 200 || host.Any(char.IsWhiteSpace)) return Bad<MachineMonitorDto>("نشانی ماژول ورودی را وارد کنید.");
+                if (!NcLan.IsLanHost(host, string.Equals(_configuration?["Dnc:AllowLoopback"], "true", StringComparison.OrdinalIgnoreCase)))
+                    return Bad<MachineMonitorDto>("نشانی ماژول ورودی باید نشانی IP شبکه داخلی کارگاه باشد (مثلاً 192.168.10.51).");
                 if (dto.Port is < 1 or > 65535) return Bad<MachineMonitorDto>("درگاه باید بین ۱ و ۶۵۵۳۵ باشد.");
                 if (dto.UnitId < 0 || dto.UnitId > 247 || dto.StartAddress < 0 || dto.StartAddress > 65535) return Bad<MachineMonitorDto>("شناسه واحد یا نشانی شروع نامعتبر است.");
                 if (!dto.RunInput.HasValue) return Bad<MachineMonitorDto>("ورودی «در حال کار» (چراغ سبز یا اسپیندل) را مشخص کنید.");
@@ -140,7 +144,8 @@ namespace Services.NasbNiro.Production.Dnc
                 row = new MfMachineMonitor { MachineId = dto.MachineId, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<MfMachineMonitor>().Add(row);
             }
-            else if (!MfConcurrency.Apply(_uow, row, dto.RowVersion)) return Bad<MachineMonitorDto>(MfText.Concurrency);
+            // no row-version check against the page: the poll writes the live fields of this row every few seconds, so the version the editor saw is always old (review finding 7); the save takes
+            // the row as it is now and replaces only the settings (two editors at once: the last one wins, both saves are in the audit trail)
             row.Source = dto.Source; row.Host = host; row.Port = dto.Port; row.UnitId = (byte)dto.UnitId; row.Function = dto.Function; row.StartAddress = dto.StartAddress;
             row.RunInput = dto.RunInput; row.AlarmInput = dto.AlarmInput; row.PowerInput = dto.PowerInput; row.InvertMask = dto.InvertMask & 0x7FFFFFFF; row.PollSeconds = dto.PollSeconds;
             row.AlarmCreatesRequest = dto.AlarmCreatesRequest; row.MismatchMinutes = dto.MismatchMinutes; row.IsActive = dto.IsActive; row.Note = Clean(dto.Note);

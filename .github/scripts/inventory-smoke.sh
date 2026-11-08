@@ -26,7 +26,8 @@ B="$OUT/inv-body.tmp"
 mkdir -p "$OUT"; : > "$R"; : > "$F"
 
 cd src/WebApi
-Finance__AutoPost=false dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
+# Dnc__FolderRoots__0: P2 DNC, the only folder the network-folder links of the smoke may use (the "machine" folder of the DNC section is made inside it)
+Finance__AutoPost=false Dnc__FolderRoots__0="$OUT" dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
 APP_PID=$!
 cd ../..
 for i in $(seq 1 120); do
@@ -11769,6 +11770,9 @@ DNCB64=$(printf '%s' "$DNCPRG" | base64 -w0); DNCSHA=$(printf '%s' "$DNCPRG" | s
 as "$MOP_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\"}"; nomsg "dnc: an operator does not set the link of a machine" "مجوز"
 as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"controllerModel\":\"TNC 426/430\",\"linkKind\":3}"; nomsg "dnc: an FTP link without the address of the control is refused" "نشانی دستگاه لازم است"
 as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"credentialKey\":\"pass word\"}"; nomsg "dnc: a credential key with a space is refused (the secret itself lives in the server settings)" "نام کلید اعتبارنامه"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$PWD/src/WebApi\",\"programNameFormat\":\"{number}\",\"fileExtension\":\".H\"}"; nomsg "dnc review: a folder outside the allowed machine folders of the server settings (here the application folder) is refused" "Dnc:FolderRoots"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"programNameFormat\":\"appsettings\",\"fileExtension\":\".json\"}"; nomsg "dnc review: a fixed program name with a non-CNC extension is refused" "پسوند فایل باید پسوند برنامه CNC"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":3,\"host\":\"8.8.8.8\"}"; nomsg "dnc review: an FTP control outside the LAN is refused (no password leaves the shop network)" "شبکه داخلی"
 as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"controllerModel\":\"TNC 426/430\",\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"programNameFormat\":\"{number}\",\"fileExtension\":\".H\",\"axes\":\"XYZ\",\"maxSpindleRpm\":12000,\"toolCapacity\":30}"; check "dnc: the production manager links machine R1M as a Heidenhain TNC through a folder; the start gate is on by default and no secret is configured" ".success and .data.id > 0 and .data.machineId == $R1M and .data.linkKind == 2 and .data.controllerFamily == 3 and .data.requireConfirmedProgram == true and .data.credentialConfigured == false and .data.axes == \"XYZ\""
 as "$MMT_TOKEN" POST $DNC/connections/test "{\"machineId\":$R1M}"; check "dnc: maintenance tests the link: the folder answers" '.success and .data.ok == true'
 as "$MOP_TOKEN" POST $DNC/programs "{\"code\":\"DNC-100\",\"title\":\"x\",\"controllerFamily\":3}"; nomsg "dnc: an operator does not open programs" "مجوز"

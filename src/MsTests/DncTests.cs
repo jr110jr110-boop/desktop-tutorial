@@ -14,6 +14,7 @@ using Entities.Model.NasbNiro.Constract;
 using Entities.Model.NasbNiro.Production;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Inventory;
@@ -522,6 +523,201 @@ namespace MsTests
             finally { Directory.Delete(folder, true); }
         }
 
+        // ------------------------------------------------------------------------------------------ review fixes (independent review of the DNC backend)
+
+        [TestMethod]
+        public void Lan_Addresses_Folder_Paths_And_Program_Names_Are_Checked()
+        {
+            Assert.IsTrue(NcLan.IsLanHost("192.168.10.21", false));
+            Assert.IsTrue(NcLan.IsLanHost("10.0.0.5", false));
+            Assert.IsTrue(NcLan.IsLanHost("172.20.1.1", false));
+            Assert.IsFalse(NcLan.IsLanHost("8.8.8.8", false), "an outside host never gets the FTP password");
+            Assert.IsFalse(NcLan.IsLanHost("172.32.0.1", false));
+            Assert.IsFalse(NcLan.IsLanHost("cnc.example.com", false), "addresses only, no names");
+            Assert.IsFalse(NcLan.IsLanHost("10.1", false), "the short form is refused");
+            Assert.IsFalse(NcLan.IsLanHost("127.0.0.1", false), "the server itself only when the settings allow it");
+            Assert.IsTrue(NcLan.IsLanHost("127.0.0.1", true));
+            Assert.IsTrue(NcLan.HasControl("nc\r\nDELE O1234"));
+
+            string root = Path.Combine(Path.GetTempPath(), "dnc-r");
+            Assert.IsTrue(NcLan.UnderRoot(Path.Combine(root, "mikron"), new[] { root }));
+            Assert.IsFalse(NcLan.UnderRoot(root + "-other", new[] { root }), "a sibling folder with the same prefix is not inside");
+            Assert.IsFalse(NcLan.UnderRoot(Path.Combine(root, "..", "etc"), new[] { root }));
+            Assert.IsTrue(NcLan.TouchesApplication(AppContext.BaseDirectory));
+            Assert.IsNull(NcLan.FileIn(root, "../x.H"));
+            Assert.IsNull(NcLan.FileIn(root, ".."));
+            Assert.IsNotNull(NcLan.FileIn(root, "100.H"));
+
+            Assert.IsTrue(MfNcRules.IsNcFileName("100.H"));
+            Assert.IsTrue(MfNcRules.IsNcFileName("O1234"));
+            Assert.IsTrue(MfNcRules.IsNcFileName("PART_1.MPF"));
+            Assert.IsFalse(MfNcRules.IsNcFileName("appsettings.json"));
+            Assert.IsFalse(MfNcRules.IsNcFileName("web.config"));
+            Assert.IsFalse(MfNcRules.IsNcFileName(".H"));
+            Assert.IsNotNull(MfNcRules.TargetName("{code}", ".json", "100", "appsettings", "x.h").Error, "a CNC extension only");
+        }
+
+        [TestMethod]
+        public void A_Malformed_Number_In_A_Program_Is_Not_A_Crash()
+        {
+            var profile = new NcProfile { Family = MfNcControllerFamily.Fanuc, ToolCapacity = 12, MaxSpindleRpm = 4000, IsLathe = true, Name = "CMZ" };
+            NcAnalysis a = MfNcRules.Analyse(Ascii("%\nO0012\nG123456789012 X0\nT99999999999999\nT12\nM30\n%\n"), profile);
+            Assert.IsNotNull(a, "the analysis answers instead of throwing");
+            Assert.IsFalse(a.Findings.Any(x => x.Code == "TOOL" && x.Text.Contains(" 12 ")), "a two-digit lathe T is not read as tool 12");
+        }
+
+        [TestMethod]
+        public void A_Serial_Transfer_Gets_The_Time_Its_Bytes_Need()
+        {
+            Assert.AreEqual(TimeSpan.FromMinutes(10), MfDncService.AllowedSending(MfNcLinkKind.Ftp, 4_000_000, null));
+            Assert.IsTrue(MfDncService.AllowedSending(MfNcLinkKind.SerialGateway, 4_000_000, 9600) > TimeSpan.FromMinutes(80), "4 MB at 9600 baud needs about 70 minutes");
+        }
+
+        [TestMethod]
+        public async Task The_Folder_Link_Stays_Inside_The_Allowed_Roots_And_Refuses_Big_Files()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "dnc-root-" + Guid.NewGuid().ToString("N")), machine = Path.Combine(root, "mikron");
+            string outside = Path.Combine(Path.GetTempPath(), "dnc-out-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(machine);
+            Directory.CreateDirectory(outside);
+            try
+            {
+                var link = new NetworkFolderLink();
+                byte[] program = Ascii(GoodTnc);
+                Assert.IsTrue((await link.SendAsync(new NcLinkTarget { RemotePath = machine, FolderRoots = new[] { root } }, "100.H", program, CancellationToken.None)).Ok);
+                Assert.IsFalse((await link.SendAsync(new NcLinkTarget { RemotePath = outside, FolderRoots = new[] { root } }, "100.H", program, CancellationToken.None)).Ok, "outside the roots");
+                Assert.IsFalse((await link.SendAsync(new NcLinkTarget { RemotePath = machine, FolderRoots = Array.Empty<string>() }, "100.H", program, CancellationToken.None)).Ok, "no root allowed");
+                Assert.IsFalse((await link.ReceiveAsync(new NcLinkTarget { RemotePath = machine, FolderRoots = new[] { root } }, "../../x.H", CancellationToken.None)).Ok, "the name never leaves the folder");
+                Assert.IsFalse((await link.ReceiveAsync(new NcLinkTarget { RemotePath = machine, FolderRoots = new[] { root }, MaxBytes = 10 }, "100.H", CancellationToken.None)).Ok, "bigger than the control's memory");
+                Assert.IsFalse(File.Exists(Path.Combine(outside, "100.H")));
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+                Directory.Delete(outside, true);
+            }
+        }
+
+        [TestMethod]
+        public async Task A_Link_Editor_Cannot_Point_A_Machine_At_Server_Files_Or_Outside_Hosts()
+        {
+            using var f = new Flow();
+            f.Db.Set<Machine>().Add(new Machine { Id = 1, Title = "Mikron VCP 710", IsActive = true });
+            await f.Db.SaveChangesAsync();
+            f.NewRequest(1, "PRODUCTIONMANAGER");
+            SaveMachineConnectionDto Link(MfNcLinkKind kind, string host = null, string path = null, string format = "{number}", string ext = ".H") => new SaveMachineConnectionDto
+            {
+                MachineId = 1, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, LinkKind = kind, Host = host, Port = 21, RemotePath = path, ProgramNameFormat = format, FileExtension = ext,
+            };
+            StringAssert.Contains((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: AppContext.BaseDirectory), default)).Message, "Dnc:FolderRoots", "the application folder");
+            StringAssert.Contains((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: Path.GetTempPath()), default)).Message, "Dnc:FolderRoots", "a folder outside the roots");
+            Assert.IsFalse((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: "relative\\nc"), default)).Success, "a relative path");
+            Assert.IsFalse((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: f.FolderRoot, ext: ".json"), default)).Success, "not a CNC extension");
+            StringAssert.Contains((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: f.FolderRoot, format: "web", ext: ".H"), default)).Message, "{number}", "a fixed name");
+            StringAssert.Contains((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.Ftp, host: "8.8.8.8"), default)).Message, "شبکه داخلی");
+            Assert.IsFalse((await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.Ftp, host: "192.168.10.21", path: "nc\r\nDELE O1"), default)).Success, "CR LF in the FTP folder");
+            Ok(await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.NetworkFolder, path: Path.Combine(f.FolderRoot, "mikron")), default), "a machine folder under the allowed root");
+            Ok(await f.Dnc.SaveConnectionAsync(Link(MfNcLinkKind.Ftp, host: "192.168.10.21", path: "/nc"), default), "an FTP control on the LAN");
+        }
+
+        /// <summary>Program 3 (machine 2, folder link under the allowed root) with approved revisions 30 (current unless told) and 31.</summary>
+        private static async Task<string> SeedFolderMachineAsync(Flow f, int currentRevision)
+        {
+            string folder = Path.Combine(f.FolderRoot, "reiden");
+            Directory.CreateDirectory(folder);
+            ApplicationDbContext db = f.Db;
+            db.Set<Machine>().Add(new Machine { Id = 2, Title = "Reiden", IsActive = true });
+            db.Set<Entities.Model.NasbNiro.Inventory.OperationTemplate>().Add(new Entities.Model.NasbNiro.Inventory.OperationTemplate { Id = 5, Title = "فرز کاری" });
+            db.Set<MfMachineConnection>().Add(new MfMachineConnection
+            {
+                Id = 2, MachineId = 2, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, LinkKind = MfNcLinkKind.NetworkFolder, RemotePath = folder, ProgramNameFormat = "{number}",
+                FileExtension = ".H", IsActive = true, RequireConfirmedProgram = true,
+            });
+            db.Set<MfNcProgram>().Add(new MfNcProgram { Id = 3, Code = "R-1", Title = "x", MachineId = 2, OperationTemplateId = 5, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, Status = MfNcProgramStatus.Active, CurrentRevisionId = currentRevision, CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+            byte[] p1 = Ascii(GoodTnc), p2 = Ascii(GoodTnc.Replace("F300", "F250"));
+            DateTimeOffset approved = DateTimeOffset.Now.AddHours(-2);
+            db.Set<MfNcRevision>().Add(new MfNcRevision { Id = 30, ProgramId = 3, Revision = 1, Status = MfNcRevisionStatus.Approved, FileName = "100.h", Sha256 = MfNcRules.Sha256Hex(p1), ProgramNumber = "100", SizeBytes = p1.Length, ApprovedAt = approved, CreateDate = approved });
+            db.Set<MfNcRevision>().Add(new MfNcRevision { Id = 31, ProgramId = 3, Revision = 2, Status = MfNcRevisionStatus.Approved, FileName = "100.h", Sha256 = MfNcRules.Sha256Hex(p2), ProgramNumber = "100", SizeBytes = p2.Length, ApprovedAt = approved, CreateDate = approved });
+            db.Set<MfNcContent>().Add(new MfNcContent { Id = 30, RevisionId = 30, Bytes = p1 });
+            db.Set<MfNcContent>().Add(new MfNcContent { Id = 31, RevisionId = 31, Bytes = p2 });
+            db.Set<MfOperation>().Add(new MfOperation { Id = 1, OrderId = 1, Sequence = 10, OperationTemplateId = 5, Title = "فرز کاری", Status = MfOperationStatus.Ready });
+            await db.SaveChangesAsync();
+            return folder;
+        }
+
+        [TestMethod]
+        public async Task A_Late_Retry_Of_An_Older_Revision_Never_Overwrites_The_Current_Program()
+        {
+            using var f = new Flow();
+            string folder = await SeedFolderMachineAsync(f, 31);
+            DateTimeOffset now = DateTimeOffset.Now;
+            // revision 1 failed earlier and waits for its automatic retry; meanwhile revision 2 became current, was delivered and confirmed
+            f.Db.Set<MfNcTransfer>().Add(new MfNcTransfer { Id = 1, Direction = MfNcTransferDirection.ToMachine, MachineId = 2, ProgramId = 3, RevisionId = 30, TargetName = "100.H", LinkKind = MfNcLinkKind.NetworkFolder,
+                Status = MfNcTransferStatus.Failed, Attempts = 1, NextAttemptAt = now.AddSeconds(-1), RequestedByUserId = 13, RequestedAt = now.AddHours(-1), ModifyDate = now.AddHours(-1) });
+            f.Db.Set<MfNcTransfer>().Add(new MfNcTransfer { Id = 2, Direction = MfNcTransferDirection.ToMachine, MachineId = 2, ProgramId = 3, RevisionId = 31, TargetName = "100.H", LinkKind = MfNcLinkKind.NetworkFolder,
+                Status = MfNcTransferStatus.Confirmed, Attempts = 1, DeliveredAt = now.AddMinutes(-5), ConfirmedAt = now.AddMinutes(-4), RequestedByUserId = 13, RequestedAt = now.AddMinutes(-6), ModifyDate = now.AddMinutes(-4) });
+            await f.Db.SaveChangesAsync();
+            File.WriteAllBytes(Path.Combine(folder, "100.H"), Ascii(GoodTnc.Replace("F300", "F250")));
+
+            f.NewRequest(1, "PRODUCTIONMANAGER");
+            NcRunPendingResultDto r = await f.Dnc.ProcessPendingAsync(default);
+            Assert.AreEqual(0, r.Delivered);
+            f.NewRequest(1, "PRODUCTIONMANAGER");
+            MfNcTransfer old = await f.Db.Set<MfNcTransfer>().AsNoTracking().FirstAsync(t => t.Id == 1);
+            Assert.AreEqual(MfNcTransferStatus.Cancelled, old.Status, "the old revision is cancelled by the system");
+            CollectionAssert.AreEqual(Ascii(GoodTnc.Replace("F300", "F250")), File.ReadAllBytes(Path.Combine(folder, "100.H")), "the confirmed revision stays on the control");
+            MfOperation op = await f.Db.Set<MfOperation>().AsNoTracking().FirstAsync();
+            Assert.IsNull((await MfDncGate.CheckStartAsync(f.Db, op, 2, MfBookingKind.Run, default)).Error);
+        }
+
+        [TestMethod]
+        public async Task A_Confirmation_Stops_Counting_Once_Another_Program_Was_Written_To_The_Same_File()
+        {
+            using var f = new Flow();
+            await SeedFolderMachineAsync(f, 31);
+            DateTimeOffset now = DateTimeOffset.Now;
+            f.Db.Set<MfNcTransfer>().Add(new MfNcTransfer { Id = 2, Direction = MfNcTransferDirection.ToMachine, MachineId = 2, ProgramId = 3, RevisionId = 31, TargetName = "100.H", LinkKind = MfNcLinkKind.NetworkFolder,
+                Status = MfNcTransferStatus.Confirmed, DeliveredAt = now.AddMinutes(-30), ConfirmedAt = now.AddMinutes(-29), RequestedByUserId = 13, RequestedAt = now.AddMinutes(-31), ModifyDate = now.AddMinutes(-29) });
+            // another program with the same number (BEGIN PGM 100) was delivered to the same file afterwards
+            f.Db.Set<MfNcTransfer>().Add(new MfNcTransfer { Id = 3, Direction = MfNcTransferDirection.ToMachine, MachineId = 2, ProgramId = 99, RevisionId = 990, TargetName = "100.H", LinkKind = MfNcLinkKind.NetworkFolder,
+                Status = MfNcTransferStatus.Delivered, DeliveredAt = now.AddMinutes(-10), RequestedByUserId = 13, RequestedAt = now.AddMinutes(-11), ModifyDate = now.AddMinutes(-10) });
+            await f.Db.SaveChangesAsync();
+            MfOperation op = await f.Db.Set<MfOperation>().AsNoTracking().FirstAsync();
+            var gate = await MfDncGate.CheckStartAsync(f.Db, op, 2, MfBookingKind.Run, default);
+            StringAssert.Contains(gate.Error, "نام", "the start is closed: the file on the control was written over");
+            Assert.IsNotNull((await MfDncGate.CheckStartAsync(f.Db, op, 2, MfBookingKind.Rework, default)).Error, "rework runs the program too");
+            Assert.IsNull((await MfDncGate.CheckStartAsync(f.Db, op, 2, MfBookingKind.Waiting, default)).Error);
+        }
+
+        [TestMethod]
+        public async Task Every_Program_Of_The_Step_Must_Be_Approved_On_A_Machine_That_Requires_It()
+        {
+            using var f = new Flow();
+            await SeedFolderMachineAsync(f, 31);
+            DateTimeOffset now = DateTimeOffset.Now;
+            f.Db.Set<MfNcTransfer>().Add(new MfNcTransfer { Id = 2, Direction = MfNcTransferDirection.ToMachine, MachineId = 2, ProgramId = 3, RevisionId = 31, TargetName = "100.H", LinkKind = MfNcLinkKind.NetworkFolder,
+                Status = MfNcTransferStatus.Confirmed, DeliveredAt = now.AddMinutes(-5), ConfirmedAt = now.AddMinutes(-4), RequestedByUserId = 13, RequestedAt = now.AddMinutes(-6), ModifyDate = now.AddMinutes(-4) });
+            // the second clamping of the same step: a program with drafts only
+            f.Db.Set<MfNcProgram>().Add(new MfNcProgram { Id = 4, Code = "R-1B", Title = "گیره دوم", OperationTemplateId = 5, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, Status = MfNcProgramStatus.Active, CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+            await f.Db.SaveChangesAsync();
+            MfOperation op = await f.Db.Set<MfOperation>().AsNoTracking().FirstAsync();
+            StringAssert.Contains((await MfDncGate.CheckStartAsync(f.Db, op, 2, MfBookingKind.Setup, default)).Error, "R-1B");
+            Assert.AreEqual(3, (await MfDncGate.ProgramForAsync(f.Db, op, 2, default)).Id, "the terminal shows the approved program first");
+
+            // the program is no longer needed: one writer cannot switch it off or move it; an approver can, with a reason
+            f.NewRequest(11, "ENGINEERING");
+            NcProgramDto approvedProgram = (await f.Dnc.GetProgramAsync(3, default)).Data;
+            var move = new SaveNcProgramDto { Id = 3, Code = "R-1", Title = "x", MachineId = 2, OperationTemplateId = null, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, Status = MfNcProgramStatus.Active, RowVersion = approvedProgram.RowVersion };
+            StringAssert.Contains((await f.Dnc.SaveProgramAsync(move, default)).Message, "تغییر نمی‌کند");
+            f.NewRequest(1, "PMO");
+            var obsolete = new SaveNcProgramDto { Id = 3, Code = "R-1", Title = "x", MachineId = 2, OperationTemplateId = 5, ControllerFamily = MfNcControllerFamily.HeidenhainConversational, Status = MfNcProgramStatus.Obsolete, RowVersion = approvedProgram.RowVersion };
+            StringAssert.Contains((await f.Dnc.SaveProgramAsync(obsolete, default)).Message, "تأییدکنندگان");
+            f.NewRequest(12, "PRODUCTIONMANAGER");
+            StringAssert.Contains((await f.Dnc.SaveProgramAsync(obsolete, default)).Message, "دلیل");
+            obsolete.Note = "قطعه از تولید خارج شد";
+            Ok(await f.Dnc.SaveProgramAsync(obsolete, default), "obsolete with a reason");
+        }
+
         // ------------------------------------------------------------------------------------------ the model
 
         [TestMethod]
@@ -566,10 +762,16 @@ namespace MsTests
             public ApplicationDbContext Db => Scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             public IMfDncService Dnc => Scope.ServiceProvider.GetRequiredService<IMfDncService>();
 
+            /// <summary>The one folder the server settings allow for network-folder links in this test (Dnc:FolderRoots).</summary>
+            public string FolderRoot { get; } = Path.Combine(Path.GetTempPath(), "dnc-root-" + Guid.NewGuid().ToString("N"));
+
             public Flow()
             {
+                Directory.CreateDirectory(FolderRoot);
+                var settings = new Dictionary<string, string> { ["Dnc:AllowLoopback"] = "true", ["Dnc:FolderRoots:0"] = FolderRoot };
                 Provider = CeoOverviewServiceTests.InMemory(s =>
                 {
+                    s.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
                     s.AddScoped<IInventoryUserContext>(_ => User);
                     s.AddSingleton<IMfNcLinkFactory, MfNcLinkFactory>();
                     s.AddScoped<IMfDncService, MfDncService>();
@@ -591,6 +793,7 @@ namespace MsTests
                 Scope.Dispose();
                 Provider.Dispose();
                 Converter.Dispose();
+                try { Directory.Delete(FolderRoot, true); } catch (IOException) { }
             }
         }
 
@@ -682,11 +885,12 @@ namespace MsTests
             Assert.AreEqual(MfNcTransferStatus.Confirmed, confirmed.Data.Status);
             var pass = await MfDncGate.CheckStartAsync(f.Db, op, 1, MfBookingKind.Run, default);
             Assert.IsNull(pass.Error);
-            Assert.AreEqual(r1.Data.Id, pass.Run.RevisionId);
-            Assert.AreEqual(delivered.Id, pass.Run.TransferId);
-            pass.Run.StartedAt = new DateTime(2026, 11, 8, 10, 0, 0);
-            pass.Run.RecordedByUserId = Operator;
-            f.Db.Set<MfNcRun>().Add(pass.Run);
+            MfNcRun passRun = pass.Runs.Single();
+            Assert.AreEqual(r1.Data.Id, passRun.RevisionId);
+            Assert.AreEqual(delivered.Id, passRun.TransferId);
+            passRun.StartedAt = new DateTime(2026, 11, 8, 10, 0, 0);
+            passRun.RecordedByUserId = Operator;
+            f.Db.Set<MfNcRun>().Add(passRun);
             await f.Db.SaveChangesAsync();
             var runs = await f.Dnc.GetRunsAsync(new NcRunQuery { OperationId = 1 }, default);
             Ok(runs, "runs");

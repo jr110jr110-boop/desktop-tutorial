@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -29,6 +30,77 @@ namespace Services.NasbNiro.Production.Dnc
         public int ReceiveIdleSeconds { get; init; } = 8;
 
         public int TimeoutSeconds { get; init; } = 20;
+
+        /// <summary>
+        /// The folders of the server settings (Dnc:FolderRoots) a network-folder link may use; null = not checked (the link used on its own, as in the unit tests). The service always passes them, so a link
+        /// never reads or writes outside the machine folders the administrator allowed (never the application folder, whatever a link editor typed).
+        /// </summary>
+        public IReadOnlyList<string> FolderRoots { get; init; }
+
+        /// <summary>Largest file a receive reads (bytes); 0 = the global limit.</summary>
+        public long MaxBytes { get; init; }
+    }
+
+    /// <summary>The address and path rules of the machine links (review findings 1 and 9): LAN addresses only, no control characters, folders only under the allowed roots.</summary>
+    public static class NcLan
+    {
+        /// <summary>True when the text holds a control character (CR or LF in an FTP folder would become extra FTP commands).</summary>
+        public static bool HasControl(string text) => text != null && text.Any(char.IsControl);
+
+        /// <summary>A literal IPv4 address of the LAN (10/8, 172.16/12, 192.168/16, 169.254/16); the loopback only when the server settings allow it (Dnc:AllowLoopback, for the tests).</summary>
+        public static bool IsLanHost(string host, bool allowLoopback)
+        {
+            if (string.IsNullOrWhiteSpace(host) || !System.Net.IPAddress.TryParse(host.Trim(), out System.Net.IPAddress ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            if (host.Trim().Count(ch => ch == '.') != 3) return false;   // "10.1" is parsed as an address too; only the full dotted form is taken
+            byte[] b = ip.GetAddressBytes();
+            if (b[0] == 127) return allowLoopback;
+            return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
+        }
+
+        /// <summary>The full form of a folder path with one trailing separator, or null when it is not an absolute path.</summary>
+        public static string FullFolder(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || HasControl(path)) return null;
+            try
+            {
+                if (!Path.IsPathRooted(path)) return null;
+                string full = Path.GetFullPath(path.Trim());
+                return full.EndsWith(Path.DirectorySeparatorChar) ? full : full + Path.DirectorySeparatorChar;
+            }
+            catch (Exception) { return null; }
+        }
+
+        private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        /// <summary>True when the folder is one of the roots or inside one of them.</summary>
+        public static bool UnderRoot(string folder, IEnumerable<string> roots)
+        {
+            string full = FullFolder(folder);
+            if (full == null || roots == null) return false;
+            foreach (string root in roots)
+            {
+                string r = FullFolder(root);
+                if (r != null && full.StartsWith(r, PathComparison)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>True when the folder is the application folder, inside it or holds it (a link must never touch the server's own files).</summary>
+        public static bool TouchesApplication(string folder)
+        {
+            string full = FullFolder(folder), app = FullFolder(AppContext.BaseDirectory);
+            if (full == null || app == null) return true;
+            return full.StartsWith(app, PathComparison) || app.StartsWith(full, PathComparison);
+        }
+
+        /// <summary>The full path of the file in the folder, or null when the name would leave the folder.</summary>
+        public static string FileIn(string folder, string name)
+        {
+            string full = FullFolder(folder);
+            if (full == null || string.IsNullOrEmpty(name) || HasControl(name) || name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name == "." || name == "..") return null;
+            string path = Path.GetFullPath(Path.Combine(full, name));
+            return string.Equals(Path.GetDirectoryName(path) + Path.DirectorySeparatorChar, full, PathComparison) ? path : null;
+        }
     }
 
     public sealed class NcLinkResult
@@ -89,14 +161,27 @@ namespace Services.NasbNiro.Production.Dnc
 
         private static string Folder(NcLinkTarget t) => string.IsNullOrWhiteSpace(t?.RemotePath) ? null : t.RemotePath.Trim();
 
+        /// <summary>Null, or why this folder may not be used: outside the allowed roots of the server settings, or the application's own folder.</summary>
+        private static string Refused(NcLinkTarget t, string folder)
+        {
+            if (NcLan.FullFolder(folder) == null) return "مسیر پوشه ماشین باید مسیر کامل باشد.";
+            if (t.FolderRoots == null) return null;
+            if (NcLan.TouchesApplication(folder) || !NcLan.UnderRoot(folder, t.FolderRoots)) return "پوشه ماشین در فهرست پوشه‌های مجاز تنظیمات سرور (Dnc:FolderRoots) نیست.";
+            return null;
+        }
+
         public async Task<NcLinkResult> SendAsync(NcLinkTarget target, string name, byte[] bytes, CancellationToken ct)
         {
             string folder = Folder(target);
             if (folder == null) return NcLinkResult.Fail("مسیر پوشه اشتراکی ماشین تعریف نشده است.");
+            string refused = Refused(target, folder);
+            if (refused != null) return NcLinkResult.Fail(refused);
+            string path = NcLan.FileIn(folder, name);
+            if (path == null) return NcLinkResult.Fail("نام فایل برنامه برای پوشه ماشین مجاز نیست.");
             try
             {
                 if (!Directory.Exists(folder)) return NcLinkResult.Fail("پوشه اشتراکی ماشین در دسترس نیست: " + folder);
-                string path = Path.Combine(folder, name), temp = path + ".pmis-tmp";
+                string temp = path + ".pmis-tmp";
                 await File.WriteAllBytesAsync(temp, bytes, ct);
                 File.Move(temp, path, true);
                 return NcLinkResult.Success("فایل در پوشه ماشین نوشته شد.");
@@ -111,10 +196,15 @@ namespace Services.NasbNiro.Production.Dnc
         {
             string folder = Folder(target);
             if (folder == null) return NcLinkResult.Fail("مسیر پوشه اشتراکی ماشین تعریف نشده است.");
+            string refused = Refused(target, folder);
+            if (refused != null) return NcLinkResult.Fail(refused);
+            string path = NcLan.FileIn(folder, name);
+            if (path == null) return NcLinkResult.Fail("نام فایل برنامه برای پوشه ماشین مجاز نیست.");
             try
             {
-                string path = Path.Combine(folder, name);
                 if (!File.Exists(path)) return NcLinkResult.Fail("فایل " + name + " در پوشه ماشین پیدا نشد.");
+                long max = target.MaxBytes > 0 ? target.MaxBytes : MfNcRules.GlobalMaxBytes;
+                if (new FileInfo(path).Length > max) return NcLinkResult.Fail("فایل " + name + " از ظرفیت مجاز برنامه بزرگ‌تر است و خوانده نمی‌شود.");
                 return NcLinkResult.Success(null, await File.ReadAllBytesAsync(path, ct));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -127,6 +217,8 @@ namespace Services.NasbNiro.Production.Dnc
         {
             string folder = Folder(target);
             if (folder == null) return Task.FromResult(NcLinkResult.Fail("مسیر پوشه اشتراکی ماشین تعریف نشده است."));
+            string refused = Refused(target, folder);
+            if (refused != null) return Task.FromResult(NcLinkResult.Fail(refused));
             try
             {
                 return Task.FromResult(Directory.Exists(folder) ? NcLinkResult.Success("پوشه در دسترس است.") : NcLinkResult.Fail("پوشه اشتراکی ماشین در دسترس نیست: " + folder));
@@ -237,6 +329,7 @@ namespace Services.NasbNiro.Production.Dnc
                 if (code != 230) throw new IOException("ورود به سرور FTP پذیرفته نشد (نام کاربری یا رمز را در تنظیمات سرور بررسی کنید).");
                 (code, text) = await s.CommandAsync("TYPE I", ct);
                 if (code != 200) throw new IOException("حالت دودویی FTP پذیرفته نشد: " + text);
+                if (NcLan.HasControl(t.RemotePath) || NcLan.HasControl(t.User) || NcLan.HasControl(t.Password)) throw new IOException("مسیر یا اعتبارنامه FTP نویسه کنترلی دارد و پذیرفته نمی‌شود.");
                 if (!string.IsNullOrWhiteSpace(t.RemotePath))
                 {
                     (code, text) = await s.CommandAsync("CWD " + t.RemotePath.Trim(), ct);
