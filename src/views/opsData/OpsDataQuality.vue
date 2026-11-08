@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import KsDatePicker from "@/components/common/KsDatePicker.vue";
+import { OpsDataRoles, hasRole } from "@/composables/roles";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import Pb6Table from "@/components/common/Pb6Table.vue";
-import { decideOpsException, decideReadinessException, getOpsExceptions, getOpsFindings, getOpsRules, getOpsSummary, getReadinessExceptions, getReadinessObligations, getReadinessSummary, resolveOpsFinding } from "@/api/OpsDataAPIs";
+import { decideOpsException, decideReadinessException, getOpsExceptions, getOpsFindings, getOpsRules, getOpsSummary, getReadinessExceptions, getReadinessObligations, getReadinessSummary, requestOpsException, resolveOpsFinding } from "@/api/OpsDataAPIs";
 import { fail, ok } from "@/composables/inventory";
 
 // «کیفیت داده»: findings of the real-time gates and the OPS-DATA seat, exceptions, rules and the engineering readiness of the projects.
-const tab = ref<"findings" | "exceptions" | "rules" | "readiness">("findings");
+const route = useRoute();
+const tabs = ["findings", "exceptions", "rules", "readiness"];
+const queryTab = String(route.query.tab || "");   // the links of the notifications open the right tab (?tab=exceptions)
+const tab = ref<"findings" | "exceptions" | "rules" | "readiness">((tabs.includes(queryTab) ? queryTab : "findings") as any);
+const canResolve = hasRole(OpsDataRoles.makers);
+const canRequest = hasRole(OpsDataRoles.makers);
+const canDecideReady = hasRole(OpsDataRoles.readinessDeciders);
+const canDecide = hasRole(OpsDataRoles.supervisors);
+const justification = ref("");
 const rows = ref<any[]>([]);
 const summary = ref<any>(null);
 const readiness = ref<any>(null);
@@ -64,6 +75,7 @@ function switchTab(t: any) {
 function open(r: any) {
   current.value = r;
   reason.value = "";
+  justification.value = "";
   correctiveId.value = null;
 }
 async function run(fn: () => Promise<any>, msg: string) {
@@ -75,8 +87,10 @@ async function run(fn: () => Promise<any>, msg: string) {
   load();
 }
 const resolve = (kind: string) => run(() => resolveOpsFinding(current.value.id, kind, reason.value, correctiveId.value), kind === "verified" ? "درستی داده تایید شد." : "یافته با سند اصلاحی رفع شد.");
+const requestException = () => run(() => requestOpsException(current.value.id, justification.value), "درخواست استثنا ثبت شد؛ سرپرست دیگر واحد باید تصمیم بگیرد.");
 const decide = (approve: boolean) => run(() => decideOpsException(current.value.id, approve, reason.value), approve ? "استثنا تایید شد." : "استثنا رد شد.");
 const decideReady = (id: number, approve: boolean) => run(() => decideReadinessException(id, approve, reason.value), approve ? "تایید ثبت شد." : "رد ثبت شد.");
+watch(() => [filter.value.from, filter.value.to], () => { if (tab.value === "findings") load(); });
 onMounted(load);
 </script>
 
@@ -100,14 +114,18 @@ onMounted(load);
           <select v-model="filter.unit" class="form-select form-select-sm w-auto" @change="load"><option v-for="u in units" :key="u.v" :value="u.v">{{ u.t }}</option></select>
           <input v-model="filter.rule" class="form-control form-control-sm w-auto" placeholder="کد قاعده" @change="load" />
           <select v-model="filter.state" class="form-select form-select-sm w-auto" @change="load"><option v-for="s in states" :key="s.v" :value="s.v">{{ s.t }}</option></select>
-          <input v-model="filter.from" type="date" class="form-control form-control-sm w-auto" @change="load" />
-          <input v-model="filter.to" type="date" class="form-control form-control-sm w-auto" @change="load" />
+          <KsDatePicker v-model="filter.from" element-tag="ops-from" placeholder="از تاریخ" />
+          <KsDatePicker v-model="filter.to" element-tag="ops-to" placeholder="تا تاریخ" />
         </div>
         <Pb6Table :columns="findingCols" :rows="rows" @select="open" />
         <div v-if="current" class="border rounded p-2 mt-2">
           <p class="mb-1">{{ current.message }}</p>
           <router-link v-if="current.link" :to="current.link">مشاهده‌ی سند</router-link>
-          <template v-if="current.status === 1">
+          <template v-if="current.status === 1 && canRequest && current.severity === 2 && !current.exceptionId">
+            <input v-model="justification" class="form-control form-control-sm mt-2" placeholder="توجیه درخواست استثنا (دست‌کم چند کلمه)" />
+            <button class="btn btn-sm btn-outline-warning mt-1" :disabled="busy || justification.trim().length < 10" @click="requestException">درخواست استثنا</button>
+          </template>
+          <template v-if="current.status === 1 && canResolve">
             <input v-model="reason" class="form-control form-control-sm mt-2" placeholder="دلیل / توضیح" />
             <input v-model.number="correctiveId" type="number" class="form-control form-control-sm mt-1" placeholder="شناسه‌ی سند اصلاحی (برای «رفع شد با سند اصلاحی»)" />
             <div class="mt-2 d-flex gap-2">
@@ -122,7 +140,7 @@ onMounted(load);
         <Pb6Table :columns="exceptionCols" :rows="rows" @select="open" />
         <div v-if="current" class="border rounded p-2 mt-2">
           <p class="mb-1">{{ current.message }}</p>
-          <template v-if="current.canDecide">
+          <template v-if="current.canDecide && canDecide">
             <input v-model="reason" class="form-control form-control-sm" placeholder="دلیل تصمیم" />
             <div class="mt-2 d-flex gap-2">
               <button class="btn btn-sm btn-success" :disabled="busy" @click="decide(true)">تایید استثنا</button>
@@ -142,7 +160,7 @@ onMounted(load);
         <Pb6Table :columns="obligationCols" :rows="obligations" />
         <h2 class="h6 mt-3">درخواست‌های استثنا</h2>
         <Pb6Table :columns="readyExCols" :rows="readyExceptions" />
-        <div v-if="readyExceptions.some((x: any) => x.status === 'Pending')" class="mt-2">
+        <div v-if="canDecideReady && readyExceptions.some((x: any) => x.status === 'Pending')" class="mt-2">
           <input v-model="reason" class="form-control form-control-sm mb-1" placeholder="دلیل تصمیم" />
           <div v-for="x in readyExceptions.filter((y: any) => y.status === 'Pending')" :key="x.id" class="d-flex gap-2 align-items-center mb-1">
             <span class="small">{{ x.workOrderCode }}</span>

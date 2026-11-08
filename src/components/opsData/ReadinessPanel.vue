@@ -3,11 +3,13 @@
 import { onMounted, ref, watch } from "vue";
 import { getReadiness, requestReadinessException } from "@/api/OpsDataAPIs";
 import { fail, ok } from "@/composables/inventory";
+import { OpsDataRoles, hasRole } from "@/composables/roles";
 
 const props = defineProps<{ productId?: number | null; workOrderId?: number | null }>();
 const data = ref<any>(null);
 const justification = ref("");
 const busy = ref(false);
+const canRequest = hasRole(OpsDataRoles.readinessRequesters);
 const statusText: Record<string, string> = { OK: "کامل", Missing: "ناقص", Partial: "نیمه‌کامل", NotApplicable: "غیرقابل اعمال" };
 
 async function load() {
@@ -18,9 +20,10 @@ async function load() {
   data.value = d;
 }
 async function requestException() {
-  if (!data.value || !justification.value.trim()) return;
+  const workOrderId = data.value?.workOrderId || props.workOrderId;
+  if (!data.value || !workOrderId || !justification.value.trim()) return;   // an exception belongs to a project (work order): never a request with work order 0
   busy.value = true;
-  const [, e] = await requestReadinessException(data.value.workOrderId || props.workOrderId || 0, data.value.productId, justification.value.trim());
+  const [, e] = await requestReadinessException(workOrderId, data.value.productId, justification.value.trim());
   busy.value = false;
   if (e) return fail(e);
   ok("درخواست استثنا ثبت شد؛ تایید مسئول دفتر پروژه و مدیرعامل لازم است.");
@@ -55,7 +58,8 @@ watch(() => [props.productId, props.workOrderId], load);
         </tr>
       </tbody>
     </table>
-    <div v-if="!data.ready && !data.hasApprovedException" class="mt-2">
+    <p v-if="!data.ready && !data.hasApprovedException && !(data.workOrderId || workOrderId)" class="small inv-muted mt-2 mb-0">درخواست استثنا برای یک پروژه (دستور کار) ثبت می‌شود؛ از صفحه‌ی «مبنای BOM پروژه» درخواست کنید.</p>
+    <div v-else-if="canRequest && !data.ready && !data.hasApprovedException" class="mt-2">
       <textarea v-model="justification" class="form-control form-control-sm" rows="2" placeholder="توجیه درخواست استثنا (تایید مسئول دفتر پروژه و مدیرعامل لازم است)"></textarea>
       <button class="btn btn-sm btn-outline-danger mt-1" :disabled="busy || !justification.trim() || !!data.pendingExceptionId" @click="requestException">درخواست استثنا</button>
       <span v-if="data.pendingExceptionId" class="small inv-muted ms-2">درخواست در انتظار تایید است.</span>

@@ -530,4 +530,11 @@ export const DashboardRoles = {
 /** PB8: operational data control (OpsRoles.Readers in the API; the API checks again on every call). */
 export const OpsDataRoles = {
   readers: list("PMO,CEO,PLANNING,WAREHOUSE,WHSUPERVISOR,SHOPSUPERVISOR,PRODUCTIONMANAGER,QC,QA,FINANCIAL,FINANCEMANAGER,AUDITOR,COMMERCIAL"),
+  /** who may ask for an exception or verify / resolve a finding (OpsRoles.*Makers + *Supervisors in the API) */
+  makers: list("PMO,WAREHOUSE,WHSUPERVISOR,PLANNING,SHOPSUPERVISOR,PRODUCTIONMANAGER,OPERATOR,ASSEMBLER,ENGINEER,ENGINEERING,QC,QA,FINANCIAL,FINANCEMANAGER,COMMERCIAL"),
+  /** who may decide an exception (the supervisors of the units; never the maker himself, the API checks that) */
+  supervisors: list("WHSUPERVISOR,PMO,SHOPSUPERVISOR,PRODUCTIONMANAGER,QA,FINANCEMANAGER"),
+  /** readiness exception: asked by the project side, decided by the PMO and the CEO */
+  readinessRequesters: list("PMO,ENGINEERING,ENGINEER,PLANNING,PROJECTMANAGER,CONSTRUCTION,PRODUCTIONMANAGER"),
+  readinessDeciders: list("PMO,CEO"),
 };
