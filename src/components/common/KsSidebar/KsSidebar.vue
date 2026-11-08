@@ -122,6 +122,23 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.audit"
+        has-sub
+        route-name="Audit"
+        tag="audit-collapse"
+        title="ممیزی داخلی هوشمند">
+        <CopyIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="
+            String($route.name || '').startsWith('Audit')
+              ? Colors.primary
+              : Colors.primaryLight
+          "
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.productBank"
         has-sub
         route-name="ProductBank"
@@ -303,6 +320,7 @@ import { Features } from "@/utils/features";
 import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { EcRoles } from "@/composables/engChange";
+import { AuditRoles } from "@/composables/audit";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -438,6 +456,14 @@ const links = {
     { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
+  ] as Links[],
+  audit: [
+    { title: "یافته‌های ممیزی", routeName: "AuditFindings", disabled: !hasRole(AuditRoles.actioners) },
+    { title: "گزارش‌های ممیزی", routeName: "AuditReports", disabled: !hasRole(AuditRoles.readers) },
+    { title: "فهرست قواعد", routeName: "AuditRules", disabled: !hasRole(AuditRoles.readers) },
+    { title: "اجراهای ممیز", routeName: "AuditRuns", disabled: !hasRole(AuditRoles.readers) },
+    { title: "برنامه‌ی ممیزی", routeName: "AuditPrograms", disabled: !hasRole(AuditRoles.readers) },
+    { title: "ممیزی فرایند", routeName: "AuditProcessAudits", disabled: !hasRole(AuditRoles.readers) },
   ] as Links[],
   productBank: [
     { title: "بانک محصول", routeName: "ProductBankProducts" },

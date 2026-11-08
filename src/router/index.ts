@@ -5,6 +5,7 @@ import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
 import { DesignRoles } from "@/composables/designControl";
 import { EcRoles } from "@/composables/engChange";
+import { AuditRoles } from "@/composables/audit";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { AccountRoles, AiRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
@@ -715,6 +716,13 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/eng-change/requests/:id", name: "EngChangeRequestEdit", component: () => import("@/views/engChange/RequestEdit.vue"), meta: { roles: EcRoles.readers } },
   { path: "/eng-change/orders", name: "EngChangeOrders", component: () => import("@/views/engChange/Orders.vue"), meta: { roles: EcRoles.readers } },
   { path: "/eng-change/orders/:id", name: "EngChangeOrderEdit", component: () => import("@/views/engChange/OrderEdit.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/audit/findings", name: "AuditFindings", component: () => import("@/views/audit/Findings.vue"), meta: { roles: AuditRoles.actioners } },
+  { path: "/audit/findings/:id", name: "AuditFinding", component: () => import("@/views/audit/FindingDetail.vue"), meta: { roles: AuditRoles.actioners } },
+  { path: "/audit/rules", name: "AuditRules", component: () => import("@/views/audit/Rules.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/runs", name: "AuditRuns", component: () => import("@/views/audit/Runs.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/reports", name: "AuditReports", component: () => import("@/views/audit/Reports.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/programs", name: "AuditPrograms", component: () => import("@/views/audit/Programs.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/process-audits", name: "AuditProcessAudits", component: () => import("@/views/audit/ProcessAudits.vue"), meta: { roles: AuditRoles.readers } },
   { path: "/eng-change/history", name: "EngChangeHistory", component: () => import("@/views/engChange/History.vue"), meta: { roles: EcRoles.readers } },
   { path: "/product-bank/mappings", name: "ProductBankMappings", component: () => import("@/views/productBank/Mappings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/deviations", name: "ProductBankDeviations", component: () => import("@/views/productBank/Deviations.vue"), meta: { roles: PbRoles.readers } },

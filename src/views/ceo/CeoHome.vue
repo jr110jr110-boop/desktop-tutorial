@@ -24,6 +24,7 @@ import CeoKpiCluster from "@/components/ceo/CeoKpiCluster.vue";
 import CeoPulse from "@/components/ceo/CeoPulse.vue";
 import CeoSectionPanel from "@/components/ceo/CeoSection.vue";
 import OpsWidget from "@/components/opsData/OpsWidget.vue";
+import AuditWidget from "@/components/audit/AuditWidget.vue";
 import CeoSideColumn from "@/components/ceo/CeoSideColumn.vue";
 import CeoVoiceCapsule from "@/components/ceo/CeoVoiceCapsule.vue";
 import { agoText, COMPANY_NAME, faDigits, faNum, morningLine, openableLink, suggestedQuestions, todayText, useCeoTheme, voiceCommands, type AnalysisState } from "@/composables/ceo";
@@ -600,6 +601,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="px-3"><OpsWidget :readiness="true" /></div>
+    <div class="px-3"><AuditWidget /></div>
 
     <CeoVoiceCapsule v-if="!drawerOpen" :voice="voice" @open-drawer="drawerOpen = true" />
     <CeoAssistantDrawer
