@@ -24,6 +24,8 @@ namespace Services.NasbNiro.ProductBank
         /// <summary>The shortest reason (characters) of a conflict resolution, a waiver, a conditional acceptance and a void.</summary>
         public const string ReasonMinChars = "Design.ReasonMinChars";
 
+        /// <summary>Fix round 1 (H6): the cut-over day as a Shamsi number yyyyMMdd; 0 = the day recorded by the first gate decision (PbDesignActivation). Revisions released before it are legacy.</summary>
+        public const string ControlStartDate = "Design.ControlStartDate";
         public const string Source = "★ تصمیم مدیرعامل (ISO 9001 بند 8.3 و ISO 10007؛ عدم تحمل انحراف)";
 
         public static IEnumerable<QualitySetting> Defaults()
@@ -31,6 +33,7 @@ namespace Services.NasbNiro.ProductBank
             yield return new QualitySetting { Key = VerificationRequired, Value = 1, Title = "انتشار BOM و نقشه خروجی طراحی، آمادگی پروژه و ممیزی پیکربندی عملکردی: بازبینی تایید طراحی (Verification) بسته‌شده و پذیرفته", Source = Source };
             yield return new QualitySetting { Key = ValidationRequired, Value = 1, Title = "ممیزی پیکربندی عملکردی هنگام ترخیص: صحه‌گذاری طراحی (Validation) بسته‌شده و پذیرفته", Source = Source };
             yield return new QualitySetting { Key = MinIndependent, Value = 1, Title = "حداقل شرکت‌کننده مستقل (غیر از تهیه‌کنندگان خروجی‌ها) در هر بازبینی طراحی", Source = Source };
+            yield return new QualitySetting { Key = ControlStartDate, Value = 0, Title = "روز آغاز کنترل طراحی (تاریخ شمسی به‌صورت yyyyMMdd؛ ۰ = روز ثبت‌شده در نخستین تصمیم گیت): بازنگری‌های منتشرشده پیش از آن «قدیمی، بدون تایید طراحی» شمرده می‌شوند", Source = Source };
             yield return new QualitySetting { Key = ReasonMinChars, Value = 15, Title = "حداقل نویسه دلیل (رفع تعارض ورودی، معافیت صحه‌گذاری، پذیرش مشروط، ابطال)", Source = Source };
         }
 
@@ -42,12 +45,22 @@ namespace Services.NasbNiro.ProductBank
                 case VerificationRequired: case ValidationRequired: max = 1; return true;
                 case MinIndependent: min = 1; max = 5; return true;
                 case ReasonMinChars: min = 5; max = 200; return true;
+                case ControlStartDate: min = 0; max = 99991231; return true;
                 default: return false;
             }
         }
     }
 
     /// <summary>Roles of the design control. The services check the role of each step again; reads need a signed-in user only.</summary>
+    /// <summary>Fix round 1 (M3): the maximum length of every free-text field; it is the column length (DesignControlConfigurations), so a too long text is refused in Persian and never reaches the database.</summary>
+    public static class DesignLimits
+    {
+        public const int Note = 1000, Reason = 1000, Description = 1000, Evidence = 1000, EvidenceRef = 300, Minutes = 4000, Outcome = 2000, ValidationEvidence = 2000, CustomerRef = 500, Title = 300, Scope = 2000,
+            StageNote = 1000, Role = 40, RoleText = 100, Interface = 500, Group = 100, AdoptionEvidence = 500;
+
+        public static string Over(string text, int max, string label) => text != null && text.Trim().Length > max ? $"{label} بیش از {max.ToString(System.Globalization.CultureInfo.InvariantCulture)} نویسه است." : null;
+    }
+
     public static class DesignRoles
     {
         /// <summary>Prepares a plan (engineering).</summary>
@@ -197,25 +210,43 @@ namespace Services.NasbNiro.ProductBank
             type == DesignReviewType.Verification || (type == DesignReviewType.Validation && (kind == DesignInputKind.Functional || kind == DesignInputKind.Performance || kind == DesignInputKind.CustomerSpec));
 
         /// <summary>
-        /// The inputs that are not covered by a passed acceptance criterion of the review: the input is not in the review, has a failed criterion, has no passed criterion or is in conflict. Pure; the caller supplies the rows.
+        /// The inputs of a review that its judgements do not cover. Fix round 1: the scope is the inputs the review selected (a supplementary review for the new inputs can close; the GATE decides over all live inputs). An input is
+        /// covered when it has a PASSED criterion against every BOM of the review (or, with no BOM, against some output) and no failed one anywhere; one check does not cover everything.
         /// </summary>
-        public static List<DesignUncoveredDto> Uncovered(DesignReviewType type, IEnumerable<PbDesignInput> liveInputs, ISet<int> reviewInputIds, IEnumerable<PbDesignTrace> traces)
+        public static List<DesignUncoveredDto> Uncovered(DesignReviewType type, IEnumerable<PbDesignInput> liveInputs, ISet<int> reviewInputIds, IEnumerable<PbDesignTrace> traces, IReadOnlyCollection<(int Id, DesignOutputKind Kind, string Label)> outputs)
         {
             var result = new List<DesignUncoveredDto>();
             List<PbDesignTrace> rows = (traces ?? new PbDesignTrace[0]).ToList();
-            foreach (PbDesignInput input in liveInputs.Where(i => InScope(type, i.Kind)).OrderBy(i => i.Code, StringComparer.Ordinal))
+            var boms = outputs.Where(o => o.Kind == DesignOutputKind.Bom).ToList();
+            foreach (PbDesignInput input in liveInputs.Where(i => InScope(type, i.Kind) && reviewInputIds.Contains(i.Id)).OrderBy(i => i.Code, StringComparer.Ordinal))
             {
                 string reason = null;
                 if (input.Status == DesignInputStatus.Conflict) reason = "ورودی در وضعیت تعارض است و هنوز رفع نشده است.";
-                else if (!reviewInputIds.Contains(input.Id)) reason = "ورودی در دامنه این بازبینی نیست (پس از تشکیل جلسه ثبت شده یا انتخاب نشده است).";
                 else if (rows.Any(t => t.InputId == input.Id && t.Result == DesignTraceResult.Failed)) reason = "معیار پذیرش این ورودی «رد» شده است.";
+                else if (boms.Count > 0)
+                {
+                    var lacking = boms.FirstOrDefault(o => !rows.Any(t => t.InputId == input.Id && t.OutputId == o.Id && t.Result == DesignTraceResult.Passed));
+                    if (lacking.Label != null || lacking.Id != 0) reason = $"برای {lacking.Label} معیار پذیرش قبول‌شده‌ای با مدرک ثبت نشده است (هر ورودی در برابر هر BOM جداگانه قضاوت می‌شود).";
+                }
                 else if (!rows.Any(t => t.InputId == input.Id && t.Result == DesignTraceResult.Passed)) reason = "هیچ معیار پذیرش قبول‌شده‌ای با مدرک برای این ورودی ثبت نشده است.";
                 if (reason != null) result.Add(new DesignUncoveredDto { InputId = input.Id, Code = input.Code, Statement = input.Statement, Reason = reason });
             }
             return result;
         }
 
-        /// <summary>The kinds of input that have no live input and are not declared not applicable.</summary>
+        /// <summary>The outputs of a review with no passed criterion at all or with a failed one (an output with zero checks is not verified).</summary>
+        public static List<string> OutputsWithoutEvidence(IEnumerable<PbDesignTrace> traces, IEnumerable<(int Id, DesignOutputKind Kind, string Label)> outputs)
+        {
+            List<PbDesignTrace> rows = (traces ?? new PbDesignTrace[0]).ToList();
+            var list = new List<string>();
+            foreach (var o in outputs)
+            {
+                if (rows.Any(t => t.OutputId == o.Id && t.Result == DesignTraceResult.Failed)) list.Add($"{o.Label}: دست‌کم یک معیار مردود شده است.");
+                else if (!rows.Any(t => t.OutputId == o.Id && t.Result == DesignTraceResult.Passed)) list.Add($"{o.Label}: هیچ معیار قبول‌شده‌ای برای این خروجی ثبت نشده است.");
+            }
+            return list;
+        }
+
         public static List<DesignInputKind> MissingKinds(IEnumerable<PbDesignInput> liveInputs, IEnumerable<int> notApplicable)
         {
             HashSet<int> na = new HashSet<int>(notApplicable ?? new int[0]);

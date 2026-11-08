@@ -253,6 +253,7 @@ namespace Services.NasbNiro.ProductBank
             Dictionary<string, decimal> st = await DesignGate.SettingsAsync(Uow, ct);
             int reasonMin = (int)st[DesignSettingKeys.ReasonMinChars];
             string note = PbText.Clean(dto.Note);
+            if (DesignLimits.Over(note, DesignLimits.Note, "شرح") is string longNote) return Bad<DesignPlanDto>(longNote);
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
@@ -347,7 +348,7 @@ namespace Services.NasbNiro.ProductBank
             Stamp(n, true);
             foreach (PbDesignStage s in from.Stages.Where(x => !x.Deleted).OrderBy(x => x.Seq))
             {
-                var c = new PbDesignStage { Seq = s.Seq, Kind = s.Kind, Title = s.Title, ResponsibleRole = s.ResponsibleRole, ResponsibleUserId = s.ResponsibleUserId, PlannedStart = s.PlannedStart, PlannedEnd = s.PlannedEnd, Status = s.Status, ActualEnd = s.ActualEnd, CompletedByUserId = s.CompletedByUserId, Note = s.Note };
+                var c = new PbDesignStage { Seq = s.Seq, Kind = s.Kind, Title = s.Title, ResponsibleRole = s.ResponsibleRole, ResponsibleUserId = s.ResponsibleUserId, PlannedStart = s.PlannedStart, PlannedEnd = s.PlannedEnd, Status = DesignStageStatus.NotStarted, Note = s.Note };   // a new version starts again: the stages are done under the plan in force, the progress of the old version does not carry over (fix round 1, M7)
                 Stamp(c, true);
                 n.Stages.Add(c);
             }
@@ -399,6 +400,7 @@ namespace Services.NasbNiro.ProductBank
             if (!(InRole(DesignRoles.ReviewMakers) || s.ResponsibleUserId == Me)) return Bad<DesignPlanDto>(DesignRules.NotAllowed);
             string action = dto.Action.Trim().ToLowerInvariant();
             string note = PbText.Clean(dto.Note);
+            if (DesignLimits.Over(note, DesignLimits.StageNote, "یادداشت مرحله") is string longStage) return Bad<DesignPlanDto>(longStage);
             List<PbDesignStage> ordered = p.Stages.Where(x => !x.Deleted).OrderBy(x => x.Seq).ToList();
             PbDesignStage before = ordered.LastOrDefault(x => x.Seq < s.Seq);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -464,8 +466,9 @@ namespace Services.NasbNiro.ProductBank
         {
             var g = new DesignGateStatusDto { Subject = subject, Required = required, Passed = !required || c.Passed };
             if (required && !c.Passed) g.Missing.AddRange(c.Missing);
+            if (c.Adoption != null) g.Missing.Clear();
             Dictionary<int, string> plans = new Dictionary<int, string>();
-            foreach (PbDesignReview r in c.Related)
+            foreach (PbDesignReview r in (c.Passed && c.Coverers.Count > 0 ? c.Coverers : c.Related))
                 g.Reviews.Add(new DesignReviewListDto { Id = r.Id, Number = r.Number, ProductId = r.ProductId, ProductRevision = r.ProductRevision, PlanId = r.PlanId, Type = r.Type, TypeText = DesignRules.TypeText(r.Type), Title = r.Title, Status = r.Status, Outcome = r.Outcome, ScheduledDate = r.ScheduledDate, HeldDate = r.HeldDate, ClosedAt = r.ClosedAt, CreateDate = r.CreateDate });
             await Task.CompletedTask;
             return g;

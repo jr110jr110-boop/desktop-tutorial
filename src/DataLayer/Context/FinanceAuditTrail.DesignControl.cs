@@ -21,6 +21,8 @@ namespace DataLayer.Context
             AuditPd(typeof(PbDesignReviewOutput), new[] { "ReviewId", "Kind", "DeliverableId", "RevisionId", "BomHeaderId", "OpcRoutingId", "Label", "RevisionText", "ContentHash", "Deleted" }, "خروجی بازبینی طراحی");
             AuditPd(typeof(PbDesignTrace), new[] { "ReviewId", "InputId", "OutputId", "Result", "Evidence", "EvidenceRef", "JudgedByUserId", "JudgedAt", "Deleted" }, "ماتریس ردیابی طراحی");
             AuditPd(typeof(PbDesignFinding), new[] { "ReviewId", "Seq", "Description", "OwnerUserId", "DueDate", "Status", "RaisedByUserId", "DoneAt", "DoneNote", "ClosedByUserId", "ClosedAt", "CloseNote", "VoidReason", "Deleted" }, "یافته بازبینی طراحی");
+            AuditPd(typeof(PbDesignAdoption), new[] { "BomHeaderId", "ProductId", "ProductRevision", "Status", "Reason", "EvidenceRef", "RequestedByUserId", "RequestedAt", "AcceptedByUserId", "AcceptedAt", "AcceptNote", "VoidReason", "ContentHash", "Deleted" }, "پذیرش طراحی موجود");
+            AuditPd(typeof(PbDesignActivation), new[] { "StartDate", "RecordedByUserId", "Note", "Deleted" }, "آغاز کنترل طراحی");
         }
     }
 }

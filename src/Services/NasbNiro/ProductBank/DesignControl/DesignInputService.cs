@@ -175,6 +175,7 @@ namespace Services.NasbNiro.ProductBank
             if (i == null) return ResponseDtoHelper.NotFound<DesignInputDto>(PbMessages.NotFound);
             int reasonMin = (int)(await DesignGate.SettingsAsync(Uow, ct))[DesignSettingKeys.ReasonMinChars];
             string note = PbText.Clean(dto.Note);
+            if (DesignLimits.Over(note, DesignLimits.Note, "شرح") is string longNote) return Bad<DesignInputDto>(longNote);
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
@@ -217,6 +218,7 @@ namespace Services.NasbNiro.ProductBank
                 case "void":
                     if (!(i.CreatorUserId == Me || InRole(DesignRoles.Resolvers)) || !InRole(DesignRoles.InputWriters)) return Bad<DesignInputDto>(DesignRules.NotAllowed);
                     if (i.Status == DesignInputStatus.Void || i.Status == DesignInputStatus.Superseded) return Bad<DesignInputDto>("این ورودی پیش‌تر کنار گذاشته شده است.");
+                    if (i.Status == DesignInputStatus.Conflict) return Bad<DesignInputDto>("ورودی در تعارض باطل نمی‌شود؛ تعارض را نفر دوم رفع می‌کند و پس از آن ورودی باطل یا جایگزین می‌شود (تفکیک وظایف).");
                     if (note == null || note.Length < reasonMin) return Bad<DesignInputDto>($"دلیل ابطال دست‌کم {reasonMin} نویسه باشد.");
                     if (await Uow.Set<PbDesignReviewInput>().AnyAsync(ri => !ri.Deleted && ri.InputId == i.Id && !ri.Review.Deleted && ri.Review.Status != DesignReviewStatus.Void, ct))
                         return Bad<DesignInputDto>("بازبینی طراحی به این ورودی ارجاع دارد؛ ابتدا بازبینی را باطل کنید یا ورودی را با ورودی دیگر جایگزین کنید.");
@@ -298,7 +300,7 @@ namespace Services.NasbNiro.ProductBank
                 List<string> names = XlsxReader.SheetNames(file);
                 Office.XlsxSheet sheet = XlsxReader.Read(file, names.FirstOrDefault(), 502);
                 XlsxRow head = sheet.Rows.FirstOrDefault(x => x.RowNumber == 1);
-                for (int c = 0; c < 4; c++)
+                for (int c = 0; c < Header.Length; c++)
                     if (head == null || (head.Cell(c)?.AsText() ?? string.Empty).Trim() != Header[c]) return Bad<DesignInputExcelResultDto>("سطر عنوان فایل با قالب ورودی‌های طراحی یکی نیست؛ قالب را از سامانه بگیرید.");
                 foreach (XlsxRow r in sheet.Rows.Where(x => x.RowNumber > 1).OrderBy(x => x.RowNumber))
                 {
@@ -315,6 +317,7 @@ namespace Services.NasbNiro.ProductBank
             var result = new DesignInputExcelResultDto { Preview = request.Preview, RowCount = cells.Count };
             var lines = new List<SaveDesignInputDto>();
             var seen = new HashSet<string>();
+            HashSet<string> existingStatements = (await Uow.Set<PbDesignInput>().AsNoTracking().Where(x => !x.Deleted && x.ProductId == request.ProductId && x.ProductRevision == request.ProductRevision && (x.Status == DesignInputStatus.Open || x.Status == DesignInputStatus.Conflict)).Select(x => x.Statement).ToListAsync(ct)).Select(x => x.Trim()).ToHashSet();
             foreach (var (row, a) in cells)
             {
                 string message = null;
@@ -329,6 +332,7 @@ namespace Services.NasbNiro.ProductBank
                     };
                     message = DesignRules.InputProblem(kind, line.Statement, line.Source, line.AcceptanceCriterion, line.StandardEdition, line.PreviousDesignRef, null, null, line.RefText, line.RefRevisionText);
                     if (message == null && PbText.Clean(line.FailureConsequence) != null && line.FailureConsequence.Trim().Length > 1000) message = "پیامد خرابی بیش از ۱۰۰۰ نویسه است.";
+                    if (message == null && existingStatements.Contains(line.Statement.Trim())) message = "این الزام در ثبت ورودی‌های همین محصول و بازنگری هست.";
                     if (message == null && !seen.Add(line.Statement.Trim())) message = "الزام در همین فایل تکراری است.";
                 }
                 result.Rows.Add(new DesignInputExcelRowDto { Row = row, Statement = a[1], Ok = message == null, Message = message });

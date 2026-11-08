@@ -391,7 +391,9 @@ namespace MsTests
             int doc = NewDeliverable(host, NewContract(host));
             var link = await Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-400" }, default));
             Assert.IsFalse((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id }, default))).Success);
-            Assert.IsTrue((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "wrong part" }, default))).Success);
+            Assert.IsFalse((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "the part number was wrong here" }, default))).Success, "A1: the link of a design drawing is removed by ENGINEERING or QA, not the document controller");
+            Assert.IsFalse((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "wrong part" }, default))).Success, "A1: the reason has the minimum length");
+            Assert.IsTrue((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "the part number was wrong here" }, default))).Success);
             Assert.AreEqual(0, (await Edms(host, Pmo, s => s.GetLinksAsync(new PcDocLinkQuery { DeliverableId = doc }, default))).Data.Count);
             Assert.AreEqual(1, host.Read(u => u.Set<PcDocumentLink>().IgnoreQueryFilters().Count(l => l.Id == link.Data.Id && l.Deleted)));
         }
@@ -796,8 +798,9 @@ namespace MsTests
             int doc = NewDeliverable(host, NewContract(host));
             var link = await Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-LK" }, default));
             Assert.IsTrue((await Edms(host, Dcc, s => s.CheckOutAsync(new PcCheckOutDto { DeliverableId = doc }, default))).Success);
-            Assert.IsFalse((await Edms(host, Dcc2, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
-            Assert.IsTrue((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
+            Assert.IsFalse((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed for the part" }, default))).Success, "somebody else holds the check-out");
+            Assert.IsTrue((await Edms(host, Dcc, s => s.CheckInAsync(new PcCheckOutDto { DeliverableId = doc }, default))).Success);
+            Assert.IsTrue((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed for the part" }, default))).Success);
             PcRevisionDto r = await Draft(host, doc);
             int fileId = r.Files.Count > 0 ? r.Files[0].Id : (await Edms(host, Dcc, s => s.GetRevisionAsync(r.Id, default))).Data.Files[0].Id;
             Assert.IsTrue((await Edms(host, Dcc, s => s.RemoveFileAsync(new PcRevisionFileRemoveDto { FileId = fileId, Reason = "wrong file" }, default))).Success);

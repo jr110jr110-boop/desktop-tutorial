@@ -38,6 +38,7 @@ namespace Entities.Model.NasbNiro.ProductBank
     public enum DesignFindingStatus { Open = 0, Done = 1, Closed = 2, Void = 3 }
 
     public enum DesignValidationMethod { None = 0, Test = 1, Trial = 2, Simulation = 3 }
+    public enum DesignAdoptionStatus { Requested = 0, Accepted = 1, Void = 2 }
 
     /// <summary>The design plan of a product revision. A new version copies the plan, is approved by a different person than its preparer and supersedes the old one.</summary>
     public class PbDesignPlan : BaseEntity
@@ -289,5 +290,36 @@ namespace Entities.Model.NasbNiro.ProductBank
         public DateTimeOffset? ClosedAt { get; set; }
         public string CloseNote { get; set; }
         public string VoidReason { get; set; }
+    }
+
+    /// <summary>
+    /// Fix round 1 (H6): the adoption of an existing design. A BOM revision that was released before the design control started is "legacy, not design-verified"; engineering asks (with a reason and an evidence reference)
+    /// and QA, a second person, accepts: the accepted record counts as the verification and validation of that exact BOM content. Never deleted; voided with a reason.
+    /// </summary>
+    public class PbDesignAdoption : BaseEntity
+    {
+        public int BomHeaderId { get; set; }
+        public int? ProductId { get; set; }
+        public int ProductRevision { get; set; }
+        public DesignAdoptionStatus Status { get; set; }
+        public string Reason { get; set; }
+        public string EvidenceRef { get; set; }
+        public int RequestedByUserId { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public int? AcceptedByUserId { get; set; }
+        public DateTimeOffset? AcceptedAt { get; set; }
+        public string AcceptNote { get; set; }
+        public string VoidReason { get; set; }
+        public string ContentHash { get; set; }
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>Fix round 1 (H6): the day the design control started, recorded once by the first gate decision (a revision released before this day is legacy). One live row.</summary>
+    public class PbDesignActivation : BaseEntity
+    {
+        public DateTime StartDate { get; set; }
+        public int? RecordedByUserId { get; set; }
+        public string Note { get; set; }
     }
 }

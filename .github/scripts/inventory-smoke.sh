@@ -1254,19 +1254,20 @@ ITP2=$(val .data.id)
 # --- Package A1 (design and development control, ISO 9001 8.3): the helpers that give the chains below REAL design data (no gate is switched off for them).
 # Since A1 the release of a product BOM and the release of a part drawing (a design output) need a closed, ACCEPTED design verification (setting Design.VerificationRequired, strict default 1),
 # and the project start needs the readiness item RD-DESIGN (approved plan, inputs declared complete, accepted verification). Every request is checked; the ids are read right after their request.
-# pka1_input PRODUCTID KIND : the JSON of one design input (every kind carries what it needs: a standard its edition, a previous design its reference, a customer specification its document and revision).
-pka1_input() { jq -nc --argjson p "$1" --argjson k "$2" '{productId:$p,productRevision:0,kind:$k,statement:("الزام طراحی از نوع "+($k|tostring)),source:"قرارداد بند ۳",acceptanceCriterion:"آزمون مطابق بند ۳ قبول"} + (if $k == 4 then {standardEdition:"ASME 2019"} else {} end) + (if $k == 5 then {previousDesignRef:"DP-1403-001"} else {} end) + (if $k == 6 then {refText:"مشخصات فنی مشتری",refRevisionText:"B"} else {} end)'; }
-# pka1_design PRODUCTID TAG : engineering prepares the design plan of revision 00 and submits it, QA (a second person) approves it, engineering records one input of each of the seven kinds, QA declares the inputs complete. Sets PKA1PLAN.
+PKA1PB=product-bank # the helpers run long before $PB (the supplier) is re-pointed to the product bank, so they never use $PB (fix round 1, H1)
+# pka1_input PRODUCTID KIND [REVISION] : the JSON of one design input (every kind carries what it needs: a standard its edition, a previous design its reference, a customer specification its document and revision).
+pka1_input() { jq -nc --argjson p "$1" --argjson k "$2" --argjson r "${3:-0}" '{productId:$p,productRevision:$r,kind:$k,statement:("الزام طراحی از نوع "+($k|tostring)),source:"قرارداد بند ۳",acceptanceCriterion:"آزمون مطابق بند ۳ قبول"} + (if $k == 4 then {standardEdition:"ASME 2019"} else {} end) + (if $k == 5 then {previousDesignRef:"DP-1403-001"} else {} end) + (if $k == 6 then {refText:"مشخصات فنی مشتری",refRevisionText:"B"} else {} end)'; }
+# pka1_design PRODUCTID TAG [REVISION] : engineering prepares the design plan of the revision (default 00) and submits it, QA (a second person) approves it, engineering records one input of each of the seven kinds, QA declares the inputs complete. Sets PKA1PLAN.
 pka1_design() {
-  local p=$1 t=$2 k plan st
+  local p=$1 t=$2 rv=${3:-0} k plan st
   st=$(jq -nc --argjson u "$ENGID" --arg s "$(dd 0)" --arg e "$(dd 30)" '[[1,"ENGINEERING"],[2,"ENGINEER"],[3,"ENGINEERING"],[4,"QA"],[5,"QA"],[6,"ENGINEERING"]] | map({kind:.[0],responsibleRole:.[1],responsibleUserId:$u,plannedStart:$s,plannedEnd:$e})')
-  as "$ENG_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$p" --argjson st "$st" '{productId:$p,productRevision:0,title:"برنامه طراحی",scope:"طراحی و تایید محصول",validationRequired:true,stages:$st}')"; check "pka1 $t: engineering prepares the design plan of revision 00" '.success and .data.status == 0'; plan=$(val .data.id)
-  as "$ENG_TOKEN" POST $PB/design/plans/action "{\"id\":$plan,\"action\":\"submit\"}"; check "pka1 $t: the plan is submitted" '.success and .data.status == 1'
-  as "$QA_TOKEN" POST $PB/design/plans/action "{\"id\":$plan,\"action\":\"approve\"}"; check "pka1 $t: QA, a second person, approves the plan" '.success and .data.status == 2'
+  as "$ENG_TOKEN" POST $PKA1PB/design/plans "$(jq -nc --argjson p "$p" --argjson st "$st" --argjson rv "$rv" '{productId:$p,productRevision:$rv,title:"برنامه طراحی",scope:"طراحی و تایید محصول",validationRequired:true,stages:$st}')"; check "pka1 $t: engineering prepares the design plan of revision $rv" '.success and .data.status == 0'; plan=$(val .data.id)
+  as "$ENG_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"submit\"}"; check "pka1 $t: the plan is submitted" '.success and .data.status == 1'
+  as "$QA_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"approve\"}"; check "pka1 $t: QA, a second person, approves the plan" '.success and .data.status == 2'
   for k in 1 2 3 4 5 6 7; do
-    as "$ENG_TOKEN" POST $PB/design/inputs "$(pka1_input "$p" "$k")"; check "pka1 $t: the design input of kind $k is recorded" '.success and .data.id > 0'
+    as "$ENG_TOKEN" POST $PKA1PB/design/inputs "$(pka1_input "$p" "$k" "$rv")"; check "pka1 $t: the design input of kind $k is recorded" '.success and .data.id > 0'
   done
-  as "$QA_TOKEN" POST $PB/design/plans/action "{\"id\":$plan,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; check "pka1 $t: QA declares the design inputs complete" '.success and .data.inputsCompleteByUserId > 0'
+  as "$QA_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; check "pka1 $t: QA declares the design inputs complete" '.success and .data.inputsCompleteByUserId > 0'
   PKA1PLAN=$plan
 }
 # pka1_verify KIND ID PLAN TAG : the closed, accepted design verification of one output under the approved plan PLAN (KIND bom: the BOM header id, KIND drawing: the drawing revision id). Engineering plans and holds
@@ -1275,19 +1276,33 @@ pka1_verify() {
   local kind=$1 id=$2 plan=$3 t=$4 out rid rows
   [ -n "${PKA1PMO2:-}" ] || PKA1PMO2=$(uid "$PMO2_TOKEN")
   if [ "$kind" = bom ]; then out="{\"kind\":2,\"bomHeaderId\":$id}"; else out="{\"kind\":1,\"revisionId\":$id}"; fi
-  as "$ENG_TOKEN" POST $PB/design/reviews "{\"planId\":$plan,\"type\":2,\"title\":\"تایید طراحی $t\",\"outputs\":[$out],\"participants\":[{\"userId\":$QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1PMO2,\"roleText\":\"PMO\"}]}"; check "pka1 $t: engineering plans the design verification (QA and the second PMO user take part)" '.success and .data.status == 0'; rid=$(val .data.id)
-  as "$ENG_TOKEN" POST $PB/design/reviews/action "{\"id\":$rid,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; check "pka1 $t: the meeting is recorded with its minutes" '.success and .data.status == 1'
+  as "$ENG_TOKEN" POST $PKA1PB/design/reviews "{\"planId\":$plan,\"type\":2,\"title\":\"تایید طراحی $t\",\"outputs\":[$out],\"participants\":[{\"userId\":$QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1PMO2,\"roleText\":\"PMO\"}]}"; check "pka1 $t: engineering plans the design verification (QA and the second PMO user take part)" '.success and .data.status == 0'; rid=$(val .data.id)
+  as "$ENG_TOKEN" POST $PKA1PB/design/reviews/action "{\"id\":$rid,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; check "pka1 $t: the meeting is recorded with its minutes" '.success and .data.status == 1'
   rows=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"اندازه‌گیری و آزمون مطابق معیار",evidenceRef:"QR-1"}]' "$B")
-  as "$QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$rid,\"rows\":$rows}"; check "pka1 $t: QA judges every input against the output as passed, with its evidence" '.success'
-  as "$PMO2_TOKEN" POST $PB/design/reviews/action "{\"id\":$rid,\"action\":\"close\",\"outcome\":1}"; check "pka1 $t: the second PMO user closes the verification as accepted" '.success and .data.status == 2 and .data.outcome == 1'
+  as "$QA_TOKEN" POST $PKA1PB/design/reviews/traces "{\"reviewId\":$rid,\"rows\":$rows}"; check "pka1 $t: QA judges every input against the output as passed, with its evidence" '.success'
+  as "$PMO2_TOKEN" POST $PKA1PB/design/reviews/action "{\"id\":$rid,\"action\":\"close\",\"outcome\":1}"; check "pka1 $t: the second PMO user closes the verification as accepted" '.success and .data.status == 2 and .data.outcome == 1'
   PKA1REV=$rid
 }
-# pka1_umbrella : the part drawings (design outputs of parts that are no product of their own) are verified under the plan of ONE product that stands for them. Sets PKA1UMB (its plan id) once.
+# pka1_umbrella : the part drawings are verified under the plan of ONE product whose draft BOM lists the parts (a drawing must belong to the BOM tree of the plan product: fix round 1, M5). Sets PKA1UMB (its plan id) once.
 pka1_umbrella() {
   local up
   [ -z "${PKA1UMB:-}" ] || return 0
-  as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.000.2","title":"محصول چتری نقشه‌های قطعات","platform":"T"}'; check "pka1: the product that holds the design plan of the part drawings is saved" '.success and .data.id > 0'; up=$(val .data.id)
+  as "$ENG_TOKEN" POST $PKA1PB/products '{"code":"77.10.00.000.2","title":"محصول چتری نقشه‌های قطعات","platform":"T"}'; check "pka1: the product that holds the design plan of the part drawings is saved" '.success and .data.id > 0'; up=$(val .data.id)
+  PKA1UMBPROD=$up; PKA1UMBLINES='[{"isHeading":true,"partName":"قطعات"}]'; PKA1UMBBOM=""
   pka1_design "$up" "drawings"; PKA1UMB=$PKA1PLAN
+}
+# pka1_part ITEMID : the part is added as a line of the draft BOM of that product (the line carries the item code), so its drawing belongs to the product structure.
+pka1_part() {
+  local code n
+  pka1_umbrella
+  as "$ADMIN_TOKEN" GET "inventory/items/$1"; check "pka1 part: the item $1 is read" '.success and (.data.code|length) > 0'; code=$(val .data.code)
+  n=$(jq -r 'length' <<<"$PKA1UMBLINES")
+  PKA1UMBLINES=$(jq -c --arg c "$code" --argjson n "$n" '. + [{itemNumber:$n,partNumber:$c,partName:("قطعه "+$c),qty:1,unit:"عدد",material:"St37",makeOrBuy:1,netWeight:1,grossWeight:1,parentIndex:0}]' <<<"$PKA1UMBLINES")
+  if [ -z "$PKA1UMBBOM" ]; then
+    as "$ENG_TOKEN" POST $PKA1PB/boms "{\"productId\":$PKA1UMBPROD,\"assemblyPartNumber\":\"77.10.00.000.2\",\"title\":\"ساختار نقشه‌های قطعات\",\"lines\":$PKA1UMBLINES}"; check "pka1 part: the draft BOM of the product lists the part $code" '.success and .data.status == 0'; PKA1UMBBOM=$(val .data.id)
+  else
+    as "$ENG_TOKEN" POST $PKA1PB/boms "{\"id\":$PKA1UMBBOM,\"assemblyPartNumber\":\"77.10.00.000.2\",\"lines\":$PKA1UMBLINES}"; check "pka1 part: the draft BOM lists the part $code" '.success and .data.status == 0'
+  fi
 }
 
 # --- Package B (inspection and release integrity): the drawing, the released characteristic list and the «بدون نقشه» flag that the quality records, the incoming inspections and the shop floor now rest on
@@ -1310,7 +1325,7 @@ pkb_drawing() {
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"review\",\"note\":\"checked\"}"; check "package b: the PMO reviews $num" '.success and .data.status == 2'
   as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"approve\"}"; check "package b: the engineering manager approves $num" '.success and .data.status == 3'
   if [ -n "${PKA1PROBE:-}" ]; then as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"release\"}"; nomsg "$PKA1PROBE" "خروجی طراحی (نقشه قطعه)"; fi
-  pka1_umbrella; pka1_verify drawing "$rev" "$PKA1UMB" "$num" # A1: the part drawing is a design output: its release needs a closed, accepted design verification
+  pka1_part "$item"; pka1_verify drawing "$rev" "$PKA1UMB" "$num" # A1: the part drawing is a design output: its release needs a closed, accepted design verification
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"release\"}"; check "package b: the PMO releases $num" '.success and .data.status == 4'
   PKBREV=$rev
   as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBLIST"; check "package b: releasing the drawing released its list in the same step (the list of $num is Released)" '.success and .data.status == 3 and .data.revisionInForce == true'
@@ -11998,7 +12013,7 @@ PKA1MKID=$(uid "$PKA1MK_TOKEN"); PKA1MGID=$(uid "$PKA1MG_TOKEN"); PKA1QAID=$(uid
 
 # --- the settings, the strict profile and the two-person route
 as "$PKA1QA_TOKEN" GET quality/settings; check "pka1 settings: the four design settings start at their strict values (verification on, validation on, one independent participant, 15 characters)" '.success and ([.data[]|select(.key=="Design.VerificationRequired")|.value][0]) == 1 and ([.data[]|select(.key=="Design.ValidationRequired")|.value][0]) == 1 and ([.data[]|select(.key=="Design.MinIndependentReviewers")|.value][0]) == 1 and ([.data[]|select(.key=="Design.ReasonMinChars")|.value][0]) == 15'
-as "$ADMIN_TOKEN" GET safety/profile; check "pka1 safety: exactly four design settings are on the safety profile, none deviates, and the readiness item RD-DESIGN has its two switches (Enabled, Hard)" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))]|length) == 4 and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))|select(.deviates == false and .current == .strict)]|length) == 4 and ([.data[]|select(.store == "Quality" and (.key|startswith("OpsReady.RD-DESIGN.")))]|length) == 2'
+as "$ADMIN_TOKEN" GET safety/profile; check "pka1 safety: exactly five design settings are on the safety profile, none deviates, and the readiness item RD-DESIGN has its two switches (Enabled, Hard)" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))]|length) == 5 and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))|select(.deviates == false and .current == .strict)]|length) == 5 and ([.data[]|select(.store == "Quality" and (.key|startswith("OpsReady.RD-DESIGN.")))]|length) == 2'
 as "$PKA1QA_TOKEN" POST quality/settings '{"key":"Design.VerificationRequired","value":0}'; no "pka1 safety: the verification gate cannot be switched off through the ordinary settings page"
 safety_set Quality Design.ReasonMinChars 5; check "pka1 safety: a shorter minimum reason is a weakening that waits for a second person and is then applied" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "15" and .data.newValue == "5"'
 as "$ADMIN_TOKEN" GET safety/deviations; check "pka1 safety: the deviation list shows the minimum reason as a weaker value (5 against the strict 15)" '.success and ([.data.items[]|select(.store == "Quality" and .key == "Design.ReasonMinChars")][0]|.deviates == true and .weaker == true and .current == "5" and .strict == "15")'
@@ -12096,9 +12111,18 @@ as "$PKA1MK_TOKEN" POST $PB/design/inputs "{\"id\":$PKA1IN3,\"productId\":$PKA1P
 as "$PKA1MK_TOKEN" GET "$PB/design/inputs/$PKA1IN3"; check "pka1 inputs: the replaced input stays as history (Superseded)" '.success and .data.status == 2 and .data.usedByReview == true'
 as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the replacement came after the declaration, so the design item is missing again" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
 as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"الزام قانونی اصلاح‌شده نیز بررسی شد\"}"; check "pka1 inputs: the declaration is made again after the replacement" ".success and .data.inputsCompleteByUserId == $PKA1QAID"
-as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the design item is OK again" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "OK")'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the declaration alone does not restore the design item: the verification no longer covers the replacing input (still Missing, hard)" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the BOM is no longer covered after the input was replaced: exactly one gap, the stale text, and the old review is still listed" '.success and .data.passed == false and (.data.missing|length) == 1 and (.data.missing[0]|startswith("تصدیق طراحی پس از تغییر ورودی‌ها باید تکرار/تکمیل شود")) and (.data.reviews|length) == 1'
+as "$PKA1MK_TOKEN" POST $PB/design/reviews "{\"planId\":$PKA1PLAN,\"type\":2,\"title\":\"تصدیق تکمیلی ورودی جایگزین\",\"inputIds\":[$PKA1IN3N],\"outputs\":[{\"kind\":2,\"bomHeaderId\":$PKA1BOM}],\"participants\":[{\"userId\":$PKA1QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1QBID,\"roleText\":\"QA\"},{\"userId\":$PKA1MGID,\"roleText\":\"ENGINEERING\"}]}"; check "pka1 review: a supplementary verification is planned for the replacing input alone" '.success and .data.status == 0 and (.data.inputs|length) == 1'; PKA1REV2=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و ورودی جایگزین بررسی شد\"}"; check "pka1 review: the supplementary meeting is recorded" '.success and .data.status == 1'
+PKA1ROWS2=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"اندازه‌گیری و آزمون مطابق معیار",evidenceRef:"QR-2"}]' "$B")
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1REV2,\"rows\":$PKA1ROWS2}"; check "pka1 review: QA judges the replacing input as passed" '.success'
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"close\",\"outcome\":1}"; check "pka1 review: the engineering manager closes the supplementary verification as accepted" '.success and .data.status == 2 and .data.outcome == 1'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the two reviews together cover the BOM again" '.success and .data.passed == true and (.data.missing|length) == 0 and (.data.reviews|length) == 2'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the design item is OK again after the supplementary verification" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "OK")'
 as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; no "pka1 review: the engineering manager cannot void a closed review (only QA)"
 as "$PKA1QB_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; check "pka1 review: the QA manager voids the closed review with a reason; it is kept, never deleted" '.success and .data.status == 3'
+as "$PKA1QB_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; check "pka1 review: the QA manager voids the supplementary review too" '.success and .data.status == 3'
 as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the voided review no longer covers the BOM: exactly one gap, no verification review" '.success and .data.passed == false and (.data.missing|length) == 1 and (.data.reviews|length) == 0'
 as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the design item is missing again (hard) after the verification was voided" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
 
@@ -12165,6 +12189,35 @@ as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignReview&EntityId=$PKA1REV&Pa
 as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignInput&EntityId=$PKA1IN3&PageSize=0"; check "pka1 audit: the replaced input has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
 as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignFinding&EntityId=$PKA1FIND&PageSize=0"; check "pka1 audit: the finding has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
 as "$FM_TOKEN" GET finance/audit/verify; check "pka1 audit: the whole hash chain still fits after the design records" '.success and .data.ok == true'
+
+# --- PKA1 fix round 1: a drawing stays a design output after its link is removed (a second person, with a reason), the cut-over day and the adoption of an existing design, and the bounded texts
+as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"PKA1-DWG-S\",\"title\":\"نقشه آزمون پیوند\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "pka1 sticky: the document controller registers a drawing" '.success and .data.id > 0'; PKA1SDOC=$(val .data.id)
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKA1SDOC}"; check "pka1 sticky: the first revision of the drawing is a draft" '.success and .data.code == "00" and .data.status == 1'; PKA1SREV=$(val .data.id)
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKA1SDOC,\"kind\":3,\"partNumber\":\"PKA1-SX-001\"}"; check "pka1 sticky: the drawing is linked to a part number (that makes it a design output)" '.success and .data.id > 0'; PKA1SL=$(val .data.id)
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/drawing/$PKA1SREV"; check "pka1 sticky: the drawing gate is required and not passed" '.success and .data.required == true and .data.passed == false'
+as "$DCC_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"پیوند اشتباه ثبت شده بود و اصلاح می‌شود\"}"; no "pka1 sticky: the document controller cannot remove the link of a design drawing (ENGINEERING or QA only)"
+as "$QA_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"کوتاه\"}"; nomsg "pka1 sticky: the reason of removing a design link has the minimum length" "دست‌کم"
+as "$QA_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"پیوند اشتباه ثبت شده بود و اصلاح می‌شود\"}"; check "pka1 sticky: a second person (QA, not the maker of the link) removes the link with a reason; it is kept as history" '.success'
+as "$DCC_TOKEN" GET "edms/links?DeliverableId=$PKA1SDOC"; check "pka1 sticky: the drawing has no live link now" '.success and (.data|length) == 0'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/drawing/$PKA1SREV"; check "pka1 sticky: removing the link did not clear the design-output status: the gate is still required and not passed" '.success and .data.required == true and .data.passed == false'
+# --- the cut-over day: a BOM released before it is legacy (soft note) until two people adopt its design
+safety_set Quality Design.ControlStartDate 14990101; check "pka1 cutover: moving the start day of the design control later is a weakening, applied with a second person" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "0" and .data.newValue == "14990101"'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 cutover: the released BOM is now legacy: the design item shows a note, no longer hard" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == false and .status == "Missing")'
+as "$PKA1MK_TOKEN" GET "$PB/design/adoptions?ProductId=$PKA1PROD"; check "pka1 cutover: the legacy list holds the released BOM with no adoption asked yet" ".success and ([.data[]|select(.bomHeaderId == $PKA1BOM)]|length) == 1 and ([.data[]|select(.bomHeaderId == $PKA1BOM)][0]|.legacy == true and .adoptionId == null)"
+as "$PKA1MK_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"طراحی سال‌ها در بهره‌برداری است\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; no "pka1 cutover: only ENGINEERING asks for the adoption (the design engineer cannot)"
+as "$ENG_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"کوتاه\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; nomsg "pka1 cutover: the reason of the adoption has the minimum length" "دست‌کم"
+as "$ENG_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"طراحی سال‌ها در بهره‌برداری است\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; check "pka1 cutover: engineering asks for the adoption of the existing design with its reason and evidence" '.success and .data.status == 0'; PKA1ADID=$(val .data.adoptionId)
+as "$ENG_TOKEN" POST $PB/design/adoptions/action "{\"id\":$PKA1ADID,\"action\":\"accept\",\"note\":\"پذیرفته شد\"}"; no "pka1 cutover: the person who asked cannot accept his own adoption"
+as "$QA_TOKEN" POST $PB/design/adoptions/action "{\"id\":$PKA1ADID,\"action\":\"accept\",\"note\":\"مدرک بهره‌برداری بررسی و پذیرفته شد\"}"; check "pka1 cutover: QA, a second person, accepts the adoption" '.success and .data.status == 1'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 cutover: the adopted design makes the design item OK again" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.status == "OK")'
+safety_set Quality Design.ControlStartDate 0; check "pka1 cutover: the start day is put back to the recorded day with a second person" '.success and .data.status == "Approved" and .data.newValue == "0"'
+as "$ADMIN_TOKEN" GET safety/profile; check "pka1 cutover: no design setting deviates after the restore" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")) and .deviates == true)]|length) == 0'
+# --- every text is bounded by its column; a conflict is not voided by one person
+PKA1LONG=$(printf 'x%.0s' $(seq 1 1001))
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1 | jq -c '.statement = "الزام آزمون تعارض و طول متن"')"; check "pka1 limits: one more input is recorded for the conflict and length checks" '.success and .data.id > 0'; PKA1INX=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"conflict\",\"note\":\"$PKA1LONG\"}"; nomsg "pka1 limits: a conflict note over 1000 characters is refused" "بیش از 1000 نویسه"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"conflict\",\"note\":\"با الزام دیگر ناسازگار است و باید بررسی شود\"}"; check "pka1 limits: the input is marked as in conflict" '.success and .data.status == 1'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"void\",\"note\":\"می‌خواهم ورودی را کنار بگذارم بدون رفع تعارض\"}"; nomsg "pka1 limits: a conflicting input is not voided by one person" "باطل نمی‌شود"
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

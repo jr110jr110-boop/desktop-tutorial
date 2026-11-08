@@ -133,4 +133,23 @@ namespace WebApi.Controllers
         [HttpPost("traces")]
         public async Task<IActionResult> TraceAsync([FromBody] SaveDesignTraceDto dto, CancellationToken ct) => Ok(await _service.SaveTraceAsync(dto, ct));
     }
+
+    [ApiController]
+    [Authorize]
+    [Route("api/v1/product-bank/design/adoptions")]
+    [RolesCheckedInService]
+    public class DesignAdoptionController : ControllerBase
+    {
+        private readonly IDesignAdoptionService _service;
+        public DesignAdoptionController(IDesignAdoptionService service) => _service = service;
+
+        [HttpGet]
+        public async Task<IActionResult> ListAsync([FromQuery] DesignAdoptionQuery query, CancellationToken ct) => Ok(await _service.GetListAsync(query, ct));
+
+        [HttpPost]
+        public async Task<IActionResult> RequestAsync([FromBody] SaveDesignAdoptionDto dto, CancellationToken ct) => Ok(await _service.RequestAsync(dto, ct));
+
+        [HttpPost("action")]
+        public async Task<IActionResult> ActionAsync([FromBody] DesignAdoptionActionDto dto, CancellationToken ct) => Ok(await _service.ActionAsync(dto, ct));
+    }
 }

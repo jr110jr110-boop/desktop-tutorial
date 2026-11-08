@@ -152,7 +152,7 @@ namespace MsTests
             return this;
         }
 
-        /// <summary>Package A1: writes the two design control settings at their strict value (after WithoutReadinessGate, which switches them off).</summary>
+        /// <summary>Package A1: writes the two design control settings at their strict value (they are on by default; this call is only needed after WithoutDesignControl).</summary>
         public AppHost WithDesignControl()
         {
             SetDesignControl(true);
@@ -226,8 +226,7 @@ namespace MsTests
                 Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = Services.NasbNiro.OpsData.OpsReadinessCatalog.MasterSwitch, Value = 0, Title = "readiness gate off (test)", Source = "test" });
                 uow.SaveChanges();
             });
-            SetDesignControl(false);
-            return this;
+            return this;   // fix round 1 (M4): the design control stays ON; a test that releases a BOM gives it design data (DesignTestData)
         }
 
         /// <summary>Reads with a new scope and no user.</summary>

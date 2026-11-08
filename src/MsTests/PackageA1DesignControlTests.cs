@@ -12,6 +12,7 @@ using Entities.Model.NasbNiro.Integrity;
 using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Quality;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Ai;
@@ -60,7 +61,7 @@ namespace MsTests
                 foreach (int id in new[] { 2, 11, 12, 13, 14, 61, 62, 63, 64, 65, 71, 72, 73, 74, 75, 76, 77 }) AppHost.Add(u, new User { Id = id, UserName = "pka1.user" + id, Email = "pka1.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
-            return control ? host.WithoutReadinessGate().WithDesignControl() : host.WithoutReadinessGate();
+            return control ? host.WithoutReadinessGate() : host.WithoutReadinessGate().WithoutDesignControl();
         }
 
         private static Task<T> Plans<T>(AppHost h, ClaimsPrincipal who, Func<IDesignPlanService, Task<T>> call) => h.As(who, p => call(p.GetRequiredService<IDesignPlanService>()));
@@ -490,9 +491,12 @@ namespace MsTests
             var ai = await AiActing.RunAsync(h.Provider.GetRequiredService<IServiceScopeFactory>(), seat, "ENG", sp => sp.GetRequiredService<IDesignReviewService>().ActionAsync(new DesignReviewActionDto { Id = held.Id, Action = "close", Outcome = DesignReviewOutcome.Accepted }, Ct));
             Assert.IsFalse(ai.Success, "an AI seat never closes");
             Assert.IsTrue((await Inputs(h, Maker, s => s.SaveAsync(In(product, DesignInputKind.Performance, "الزام پس از جلسه"), Ct))).Success);
-            var stale = await Close(h, held.Id);
-            Assert.IsFalse(stale.Success, "the new input is not in the review");
-            StringAssert.Contains(stale.Message, "پوشش");
+            // fix round 1: the review of the inputs it selected closes; the GATE decides over every live input, so the BOM stays unreleasable until the new input is covered
+            var closed = await Close(h, held.Id);
+            Assert.IsTrue(closed.Success, closed.Message);
+            var refused = await Boms(h, Pmo2, s => s.ReleaseAsync(new PbBomActionDto { Id = bom }, Ct));
+            Assert.IsFalse(refused.Success, "the new input is not covered");
+            StringAssert.Contains(refused.Message, DesignGate.StaleText);
         }
 
         [TestMethod]
@@ -686,6 +690,267 @@ namespace MsTests
             Assert.IsTrue(full.Passed, string.Join(" | ", full.Problems));
             Assert.AreEqual(2, full.Reviews.Count);
             Assert.IsFalse((await DesignGateOffFca(h, 999)).Applicable, "a work order without a baseline is not applicable");
+        }
+
+
+        // ------------------------------------------------------------------------------------------ fix round 1
+
+        private static Task<string> Release(AppHost h, int bomId) => h.Read2(async u =>
+        {
+            PbBomHeader head = await u.Set<PbBomHeader>().AsNoTracking().FirstAsync(x => x.Id == bomId);
+            return await DesignGate.CheckReleaseAsync(u, head, null, null, Ct);
+        });
+
+        private static Task<string> ReleaseOfDrawing(AppHost h, int revisionId) => h.Read2(async u =>
+        {
+            PcDocumentRevision rev = await u.Set<PcDocumentRevision>().AsNoTracking().FirstAsync(x => x.Id == revisionId);
+            PcEngineeringDeliverable d = await u.Set<PcEngineeringDeliverable>().AsNoTracking().FirstAsync(x => x.Id == rev.DeliverableId);
+            return await DesignGate.CheckReleaseAsync(u, null, d, rev, Ct);
+        });
+
+        private static SaveDesignReviewDto ScopedReview(int planId, int bomId, params int[] inputs)
+        {
+            SaveDesignReviewDto dto = ReviewDto(planId, DesignReviewType.Verification, BomOut(bomId));
+            dto.InputIds = inputs.ToList();
+            return dto;
+        }
+
+        [TestMethod]
+        public async Task AClosedVerificationIsStaleWhenAnInputIsAddedOrReplacedAndASupplementaryVerificationRestoresIt()
+        {
+            AppHost h = NewHost("stale");
+            var (product, plan, bom) = await Ready(h);
+            await AcceptedVerification(h, plan, bom);
+            Assert.IsNull(await Release(h, bom), "covered");
+            var added = await Inputs(h, Maker, s => s.SaveAsync(In(product, DesignInputKind.Performance, "الزام تازه پس از بستن"), Ct));
+            Assert.IsTrue(added.Success, added.Message);
+            string stale = await Release(h, bom);
+            Assert.IsNotNull(stale);
+            StringAssert.Contains(stale, DesignGate.StaleText);
+            StringAssert.Contains(stale, added.Data.Code);
+            // a supplementary verification that covers only the delta restores it
+            DesignReviewDto held = await Held(h, ScopedReview(plan, bom, added.Data.Id));
+            await Judge(h, held);
+            Assert.IsTrue((await Close(h, held.Id)).Success);
+            Assert.IsNull(await Release(h, bom), "the supplementary verification covers the new input");
+            // an input that a review used is replaced, never edited: the replacement is a new input and the coverage is stale again
+            int used = (await Inputs(h, Maker, s => s.GetListAsync(new DesignInputQuery { ProductId = product, ProductRevision = 0 }, Ct))).Data.First().Id;
+            var edit = await Inputs(h, Maker, s => s.SaveAsync(new SaveDesignInputDto { Id = used, ProductId = product, ProductRevision = 0, Kind = DesignInputKind.Functional, Statement = "الزام اصلاح‌شده", Source = "قرارداد بند ۴", AcceptanceCriterion = "آزمون بند ۴" }, Ct));
+            Assert.IsTrue(edit.Success, edit.Message);
+            StringAssert.Contains(await Release(h, bom) ?? string.Empty, DesignGate.StaleText);
+        }
+
+        [TestMethod]
+        public async Task AReviewWhoseInputWasVoidedAfterItClosedIsStaleUntilALaterReviewCloses()
+        {
+            AppHost h = NewHost("voided");
+            var (product, plan, bom) = await Ready(h);
+            DesignReviewDto accepted = await AcceptedVerification(h, plan, bom);
+            int voided = accepted.Inputs.First().InputId;
+            h.Write(u => { PbDesignInput i = u.Set<PbDesignInput>().First(x => x.Id == voided); i.Status = DesignInputStatus.Void; i.ModifyDate = DateTimeOffset.Now.AddMinutes(5); u.SaveChanges(); }, Seeder);
+            StringAssert.Contains(await Release(h, bom) ?? string.Empty, DesignGate.StaleText);
+            DesignReviewDto again = await Held(h, ReviewDto(plan, DesignReviewType.Verification, BomOut(bom)));
+            await Judge(h, again);
+            var closed = await Close(h, again.Id);
+            Assert.IsTrue(closed.Success, closed.Message);
+            h.Write(u => { PbDesignReview r = u.Set<PbDesignReview>().First(x => x.Id == again.Id); r.ClosedAt = DateTimeOffset.Now.AddMinutes(10); u.SaveChanges(); }, Seeder);
+            Assert.IsNull(await Release(h, bom), "a later accepted verification restores it");
+        }
+
+        [TestMethod]
+        public async Task ADrawingWhoseFilesChangedAfterTheVerificationOrWasRejectedToDraftIsNoLongerVerified()
+        {
+            AppHost h = NewHost("fingerprint");
+            var (product, plan, bom) = await Ready(h);
+            var d = await DrawingRevision(h, "99.11.01.001.2", true);
+            DesignReviewDto held = await Held(h, ReviewDto(plan, DesignReviewType.Verification, new SaveDesignOutputDto { Kind = DesignOutputKind.Drawing, RevisionId = d.Revision }));
+            Assert.IsFalse(string.IsNullOrEmpty(held.Outputs.Single().ContentHash), "the drawing output carries the fingerprint of its files");
+            await Judge(h, held);
+            Assert.IsTrue((await Close(h, held.Id)).Success);
+            Assert.IsNull(await ReleaseOfDrawing(h, d.Revision), "covered");
+            Guid fid = Guid.Empty;
+            h.Write(u => { var doc = new Entities.Model.Document("files/" + Guid.NewGuid().ToString("N") + ".dwg", "application/octet-stream"); u.Set<Entities.Model.Document>().Add(doc); u.SaveChanges(); fid = doc.Id; }, Seeder);
+            Assert.IsTrue((await h.As(Dcc, p => p.GetRequiredService<IEdmsService>().AddFileAsync(new PcRevisionFileAddDto { RevisionId = d.Revision, DocumentId = fid, FileName = "b.dwg", Role = PcRevisionFileRole.Native }, Ct))).Success);
+            string changed = await ReleaseOfDrawing(h, d.Revision);
+            Assert.IsNotNull(changed);
+            StringAssert.Contains(changed, "تغییر کرده");
+            StringAssert.Contains(changed, "DWG-");
+            // a verification of the new file set restores it; the revision rejected to draft afterwards is stale again
+            DesignReviewDto held2 = await Held(h, ReviewDto(plan, DesignReviewType.Verification, new SaveDesignOutputDto { Kind = DesignOutputKind.Drawing, RevisionId = d.Revision }));
+            await Judge(h, held2);
+            Assert.IsTrue((await Close(h, held2.Id)).Success);
+            Assert.IsNull(await ReleaseOfDrawing(h, d.Revision));
+            foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "reject") })
+            {
+                var r = await h.As(step.Item1, p => p.GetRequiredService<IEdmsService>().ActionAsync(new PcRevisionActionDto { Id = d.Revision, Action = step.Item2, Note = "برگشت برای اصلاح" }, Ct));
+                Assert.IsTrue(r.Success, step.Item2 + ": " + r.Message);
+            }
+            StringAssert.Contains(await ReleaseOfDrawing(h, d.Revision) ?? string.Empty, "پیش‌نویس");
+        }
+
+        [TestMethod]
+        public async Task ADrawingOrAnOutputWithNoPassedCheckIsNotVerifiedAndOneCheckDoesNotCoverEveryOutput()
+        {
+            AppHost h = NewHost("zerochecks");
+            var (product, plan, bom) = await Ready(h);
+            var d = await DrawingRevision(h, "99.11.01.001.2", true);
+            DesignReviewDto held = await Held(h, ReviewDto(plan, DesignReviewType.Verification, BomOut(bom), new SaveDesignOutputDto { Kind = DesignOutputKind.Drawing, RevisionId = d.Revision }));
+            Assert.AreEqual(2, held.Outputs.Count);
+            // every input is judged against the BOM only: the drawing has no check at all
+            var rows = held.Inputs.Select(i => new SaveDesignTraceRowDto { InputId = i.InputId, OutputId = held.Outputs.First(o => o.Kind == DesignOutputKind.Bom).Id, Result = DesignTraceResult.Passed, Evidence = "اندازه‌گیری مطابق معیار", EvidenceRef = "QR-1" }).ToList();
+            Assert.IsTrue((await Reviews(h, Qa, s => s.SaveTraceAsync(new SaveDesignTraceDto { ReviewId = held.Id, Rows = rows }, Ct))).Success);
+            var refused = await Close(h, held.Id);
+            Assert.IsFalse(refused.Success, "the drawing has no passed check");
+            StringAssert.Contains(refused.Message, "هیچ معیار قبول‌شده‌ای");
+            // the drawing gets one passed check against one input: the review closes and the drawing is verified (an input needs a check against the BOM, a drawing needs at least one)
+            var one = new List<SaveDesignTraceRowDto> { new SaveDesignTraceRowDto { InputId = held.Inputs.First().InputId, OutputId = held.Outputs.First(o => o.Kind == DesignOutputKind.Drawing).Id, Result = DesignTraceResult.Passed, Evidence = "بررسی نقشه", EvidenceRef = "QR-2" } };
+            Assert.IsTrue((await Reviews(h, Qa, s => s.SaveTraceAsync(new SaveDesignTraceDto { ReviewId = held.Id, Rows = one }, Ct))).Success);
+            Assert.IsTrue((await Close(h, held.Id)).Success);
+            Assert.IsNull(await ReleaseOfDrawing(h, d.Revision));
+        }
+
+        [TestMethod]
+        public async Task ADrawingThatIsNoPartOfTheStructureOfTheProductIsRefusedInTheReview()
+        {
+            AppHost h = NewHost("structure");
+            var (product, plan, bom) = await Ready(h);
+            var outside = await DrawingRevision(h, "55.55.55.555.2", true);
+            var refused = await Reviews(h, Maker, s => s.SaveAsync(ReviewDto(plan, DesignReviewType.Verification, new SaveDesignOutputDto { Kind = DesignOutputKind.Drawing, RevisionId = outside.Revision }), Ct));
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains(refused.Message, "ساختار BOM");
+            var unlinked = await DrawingRevision(h, "x", false);
+            Assert.IsFalse((await Reviews(h, Maker, s => s.SaveAsync(ReviewDto(plan, DesignReviewType.Verification, new SaveDesignOutputDto { Kind = DesignOutputKind.Drawing, RevisionId = unlinked.Revision }), Ct))).Success, "a document linked to no part is no output of the design");
+        }
+
+        [TestMethod]
+        public async Task ADrawingStaysADesignOutputAfterItsLinkIsRemovedAndRemovingTheLinkNeedsASecondPerson()
+        {
+            AppHost h = NewHost("sticky");
+            var (product, plan, bom) = await Ready(h);
+            var d = await DrawingRevision(h, "99.11.01.001.2", true);
+            int link = h.Read(u => u.Set<PcDocumentLink>().Where(l => l.DeliverableId == d.Deliverable).Select(l => l.Id).Single());
+            Assert.IsFalse((await h.As(Dcc, p => p.GetRequiredService<IEdmsService>().VoidLinkAsync(new PcDocLinkVoidDto { Id = link, Reason = "پیوند اشتباه ثبت شده بود" }, Ct))).Success, "the link of a part drawing is removed by engineering or QA, not by the person who made it");
+            Assert.IsFalse((await h.As(Mgr, p => p.GetRequiredService<IEdmsService>().VoidLinkAsync(new PcDocLinkVoidDto { Id = link, Reason = "کوتاه" }, Ct))).Success, "a real reason of at least the minimum is needed");
+            var removed = await h.As(Mgr, p => p.GetRequiredService<IEdmsService>().VoidLinkAsync(new PcDocLinkVoidDto { Id = link, Reason = "پیوند به قطعه اشتباه ثبت شده بود" }, Ct));
+            Assert.IsTrue(removed.Success, removed.Message);
+            var release = await ReleaseDrawing(h, d.Revision);
+            Assert.IsFalse(release.Success, "unlink - release without a verification is no way round the gate");
+            StringAssert.Contains(release.Message, "تایید طراحی");
+        }
+
+        [TestMethod]
+        public async Task ASubAssemblyBomWithoutAProductIsVerifiedUnderTheProductThatContainsItAndTheStartDayIsRecorded()
+        {
+            AppHost h = NewHost("subbom");
+            var (product, plan, bom) = await Ready(h);
+            var sub = await Boms(h, Eng1, s => s.SaveAsync(new SavePbBomDto
+            {
+                AssemblyPartNumber = "99.11.01.001.2", Title = "sub", Lines = new List<SavePbBomLineDto> { new SavePbBomLineDto { ItemNumber = 1, PartNumber = "99.11.09.001.2", PartName = "Screw", Qty = 4, Unit = "عدد", Material = "ST37", MakeOrBuy = PbMakeOrBuy.Make, NetWeight = 1m, GrossWeight = 1.1m } },
+            }, Ct));
+            Assert.IsTrue(sub.Success, sub.Message);
+            Assert.IsTrue((await Boms(h, Eng1, s => s.SubmitAsync(new PbBomActionDto { Id = sub.Data.Id }, Ct))).Success);
+            foreach (var (who, step) in new[] { (Eng2, PbBomSignature.Checked), (Qc, PbBomSignature.QcChecked), (Shop, PbBomSignature.ManufacturingChecked), (Pmo, PbBomSignature.Approved) })
+                Assert.IsTrue((await Boms(h, who, x => x.SignAsync(new PbSignDto { Id = sub.Data.Id, Step = step }, Ct))).Success);
+            StringAssert.Contains(await Release(h, sub.Data.Id) ?? string.Empty, "هیچ بازبینی");
+            DesignReviewDto held = await Held(h, ReviewDto(plan, DesignReviewType.Verification, BomOut(sub.Data.Id)));
+            await Judge(h, held);
+            Assert.IsTrue((await Close(h, held.Id)).Success);
+            Assert.IsNull(await Release(h, sub.Data.Id), "a BOM without a product is covered by a verification that lists it");
+            var released = await Boms(h, Pmo2, s => s.ReleaseAsync(new PbBomActionDto { Id = sub.Data.Id }, Ct));
+            Assert.IsTrue(released.Success, released.Message);
+            Assert.AreEqual(1, h.Read(u => u.Set<PbDesignActivation>().Count(a => !a.Deleted)), "the start day of the design control is recorded once, by the first gate decision");
+            var other = await Boms(h, Eng1, s => s.SaveAsync(new SavePbBomDto { AssemblyPartNumber = "11.22.33.444.2", Title = "unrelated", Lines = new List<SavePbBomLineDto> { new SavePbBomLineDto { ItemNumber = 1, PartNumber = "11.22.33.445.2", PartName = "P", Qty = 1, Unit = "عدد", Material = "ST37", MakeOrBuy = PbMakeOrBuy.Make, NetWeight = 1m, GrossWeight = 1m } } }, Ct));
+            Assert.IsTrue(other.Success, other.Message);
+            Assert.IsTrue((await Boms(h, Eng1, s => s.SubmitAsync(new PbBomActionDto { Id = other.Data.Id }, Ct))).Success);
+            Assert.IsFalse((await Reviews(h, Maker, s => s.SaveAsync(ReviewDto(plan, DesignReviewType.Verification, BomOut(other.Data.Id)), Ct))).Success, "a BOM outside the structure of the product is refused");
+        }
+
+        [TestMethod]
+        public async Task AReviewUnderASupersededPlanNoLongerOpensTheGateAndANewVersionStartsFromScratch()
+        {
+            AppHost h = NewHost("supersede");
+            var (product, plan, bom) = await Ready(h);
+            await AcceptedVerification(h, plan, bom);
+            Assert.IsNull(await Release(h, bom));
+            var v2 = await Plans(h, Maker, s => s.ActionAsync(new DesignPlanActionDto { Id = plan, Action = "new-version" }, Ct));
+            Assert.IsTrue(v2.Success, v2.Message);
+            Assert.IsTrue(v2.Data.Stages.All(x => x.Status == DesignStageStatus.NotStarted), "the stages of a new version start again");
+            Assert.IsTrue((await Plans(h, Maker, s => s.ActionAsync(new DesignPlanActionDto { Id = v2.Data.Id, Action = "submit" }, Ct))).Success);
+            Assert.IsTrue((await Plans(h, Qa, s => s.ActionAsync(new DesignPlanActionDto { Id = v2.Data.Id, Action = "approve" }, Ct))).Success);
+            string problem = await Release(h, bom);
+            Assert.IsNotNull(problem, "the review belongs to the superseded plan");
+            StringAssert.Contains(problem, "برنامه طراحی");
+        }
+
+        [TestMethod]
+        public async Task AConflictingInputIsNotVoidedByItsCreatorAndEveryTextIsBoundedByItsColumn()
+        {
+            AppHost h = NewHost("limits");
+            var (product, plan, bom) = await Ready(h);
+            var input = (await Inputs(h, Maker, s => s.SaveAsync(In(product, DesignInputKind.Functional, "الزام آزمایشی تعارض"), Ct))).Data;
+            Assert.IsTrue((await Inputs(h, Maker, s => s.ActionAsync(new DesignInputActionDto { Id = input.Id, Action = "conflict", Note = "با الزام دیگر ناسازگار است و باید بررسی شود" }, Ct))).Success);
+            var voided = await Inputs(h, Maker, s => s.ActionAsync(new DesignInputActionDto { Id = input.Id, Action = "void", Note = "می‌خواهم ورودی را کنار بگذارم بدون رفع تعارض" }, Ct));
+            Assert.IsFalse(voided.Success, "a conflict is resolved by a second person first");
+            StringAssert.Contains(voided.Message, "تعارض");
+            string tooLong = new string('ا', 1001);
+            Assert.IsFalse((await Inputs(h, Mgr, s => s.ActionAsync(new DesignInputActionDto { Id = input.Id, Action = "resolve", Note = tooLong }, Ct))).Success);
+            DesignReviewDto held = await Held(h, ReviewDto(plan, DesignReviewType.Verification, BomOut(bom)));
+            var evidenceRef = await Reviews(h, Qa, s => s.SaveTraceAsync(new SaveDesignTraceDto { ReviewId = held.Id, Rows = new List<SaveDesignTraceRowDto> { new SaveDesignTraceRowDto { InputId = held.Inputs.First().InputId, OutputId = held.Outputs.First().Id, Result = DesignTraceResult.Passed, Evidence = "اندازه‌گیری مطابق معیار", EvidenceRef = new string('Q', 301) } } }, Ct));
+            Assert.IsFalse(evidenceRef.Success, "the reference of the evidence is bounded by its column (300)");
+            var voidReview = await Reviews(h, Mgr, s => s.ActionAsync(new DesignReviewActionDto { Id = held.Id, Action = "void", Note = tooLong }, Ct));
+            Assert.IsFalse(voidReview.Success);
+        }
+
+        [TestMethod]
+        public async Task ABomReleasedBeforeTheCutOverIsLegacyAndShownUntilTwoPeopleAdoptItsDesign()
+        {
+            AppHost h = NewHost("legacy", false);
+            int product = await NewProduct(h);
+            int bom = await ApprovedBom(h, product);
+            Assert.IsTrue((await Boms(h, Pmo2, s => s.ReleaseAsync(new PbBomActionDto { Id = bom }, Ct))).Success, "released before the design control existed");
+            h.WithDesignControl();
+            h.Write(u => { foreach (PbDesignActivation old in u.Set<PbDesignActivation>().ToList()) u.Set<PbDesignActivation>().Remove(old); u.SaveChanges(); AppHost.Add(u, new PbDesignActivation { StartDate = DateTime.Today.AddDays(1), Note = "cut-over after the release" }); AppHost.Add(u, new PbProjectBaseline { WorkOrderId = 801, ProductId = product, BomHeaderId = bom, SourceBomCode = "B", SourceBomRevision = 0, IsCurrent = true, CopiedAt = DateTimeOffset.Now }); u.SaveChanges(); }, Seeder);
+            DesignReadinessResult ready = await h.Read2(async u => await DesignGate.ReadinessAsync(u, await u.Set<PbBomHeader>().AsNoTracking().FirstAsync(x => x.Id == bom), Ct));
+            Assert.IsTrue(ready.Legacy);
+            Assert.AreEqual(1, ready.Problems.Count);
+            StringAssert.Contains(ready.Problems[0], "قدیمی");
+            DesignFcaResult fca = await h.Read2(u => DesignGate.FcaAsync(u, 801, Ct));
+            Assert.IsFalse(fca.Applicable, "legacy: not applicable, with the note");
+            Assert.IsTrue(fca.Legacy);
+            StringAssert.Contains(fca.NotApplicableReason, "قدیمی");
+            // adoption: engineering asks, QA (a second person) accepts
+            Assert.IsFalse((await h.As(Maker, p => p.GetRequiredService<IDesignAdoptionService>().RequestAsync(new SaveDesignAdoptionDto { BomHeaderId = bom, Reason = "طراحی سال‌ها در بهره‌برداری است", EvidenceRef = "گزارش بهره‌برداری ۱۴۰۳" }, Ct))).Success, "only ENGINEERING asks");
+            var asked = await h.As(Mgr, p => p.GetRequiredService<IDesignAdoptionService>().RequestAsync(new SaveDesignAdoptionDto { BomHeaderId = bom, Reason = "طراحی سال‌ها در بهره‌برداری است", EvidenceRef = "گزارش بهره‌برداری ۱۴۰۳" }, Ct));
+            Assert.IsTrue(asked.Success, asked.Message);
+            Assert.AreEqual(DesignAdoptionStatus.Requested, asked.Data.Status);
+            Assert.IsFalse((await h.As(Mgr, p => p.GetRequiredService<IDesignAdoptionService>().ActionAsync(new DesignAdoptionActionDto { Id = asked.Data.AdoptionId.Value, Action = "accept" }, Ct))).Success, "not by the person who asked, nor by a non-QA");
+            Assert.IsFalse((await h.As(Maker, p => p.GetRequiredService<IDesignAdoptionService>().ActionAsync(new DesignAdoptionActionDto { Id = asked.Data.AdoptionId.Value, Action = "accept" }, Ct))).Success);
+            var accepted = await h.As(Qa, p => p.GetRequiredService<IDesignAdoptionService>().ActionAsync(new DesignAdoptionActionDto { Id = asked.Data.AdoptionId.Value, Action = "accept", Note = "مدارک بررسی شد" }, Ct));
+            Assert.IsTrue(accepted.Success, accepted.Message);
+            Assert.AreEqual(DesignAdoptionStatus.Accepted, accepted.Data.Status);
+            ready = await h.Read2(async u => await DesignGate.ReadinessAsync(u, await u.Set<PbBomHeader>().AsNoTracking().FirstAsync(x => x.Id == bom), Ct));
+            Assert.AreEqual(0, ready.Problems.Count, "the adopted design is complete");
+            fca = await h.Read2(u => DesignGate.FcaAsync(u, 801, Ct));
+            Assert.IsTrue(fca.Applicable);
+            Assert.IsTrue(fca.Passed);
+            // a BOM released after the cut-over cannot be adopted: it needs the full verification
+            var voidAdoption = await h.As(Qa, p => p.GetRequiredService<IDesignAdoptionService>().ActionAsync(new DesignAdoptionActionDto { Id = asked.Data.AdoptionId.Value, Action = "void", Note = "پذیرش با مدرک بهتر جایگزین می‌شود" }, Ct));
+            Assert.IsTrue(voidAdoption.Success, voidAdoption.Message);
+            h.Write(u => { PbBomHeader x = u.Set<PbBomHeader>().First(y => y.Id == bom); x.ReleasedAt = DateTimeOffset.Now.AddDays(3); u.SaveChanges(); }, Seeder);
+            var late = await h.As(Mgr, p => p.GetRequiredService<IDesignAdoptionService>().RequestAsync(new SaveDesignAdoptionDto { BomHeaderId = bom, Reason = "طراحی سال‌ها در بهره‌برداری است", EvidenceRef = "گزارش بهره‌برداری ۱۴۰۳" }, Ct));
+            Assert.IsFalse(late.Success);
+            StringAssert.Contains(late.Message, "پس از آغاز");
+        }
+
+        [TestMethod]
+        public void TheCutOverDayIsASettingOnTheSafetyProfileAndConvertsFromTheShamsiNumber()
+        {
+            Assert.IsNotNull(SafetyProfile.Find(SafetyStore.Quality, DesignSettingKeys.ControlStartDate));
+            Assert.IsTrue(SafetyProfile.IsWeaker(SafetyProfile.Find(SafetyStore.Quality, DesignSettingKeys.ControlStartDate), "14050101"), "moving the cut-over is a weakening");
+            Assert.IsFalse(SafetyProfile.IsWeaker(SafetyProfile.Find(SafetyStore.Quality, DesignSettingKeys.ControlStartDate), "0"));
+            Assert.AreEqual("1405/01/01", DesignGate.ShamsiText(DesignGate.ShamsiDay(14050101m).Value), "the Shamsi number converts to a day and back");
+            Assert.IsNull(DesignGate.ShamsiDay(0m));
+            Assert.IsNull(DesignGate.ShamsiDay(14051399m), "an invalid day is read as not set");
         }
 
         private static Task<DesignFcaResult> DesignGateOffFca(AppHost h, int wo) => h.Read2(u => DesignGate.FcaAsync(u, wo, Ct));

@@ -57,6 +57,7 @@ namespace MsTests
                 var s = await Run(host, who, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = saved.Data.Id, Step = step }, Ct));
                 Assert.IsTrue(s.Success, step + ": " + s.Message);
             }
+            await DesignTestData.VerifyBomAsync(host, saved.Data.Id);   // Package A1: the design control stays on; the BOM is verified before it is released
             var rel = await Run(host, Pmo2, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = saved.Data.Id }, Ct));
             Assert.IsTrue(rel.Success, rel.Message);
             return rel.Data;
@@ -174,6 +175,7 @@ namespace MsTests
             var twice = await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct));
             Assert.IsFalse(twice.Success);
             Assert.IsTrue((await Run(host, Pmo, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success);
+            await DesignTestData.VerifyBomAsync(host, id);   // Package A1
             Assert.IsFalse((await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = id }, Ct))).Success, "the preparer does not release");
             Assert.IsTrue((await Run(host, Pmo2, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = id }, Ct))).Success);
 

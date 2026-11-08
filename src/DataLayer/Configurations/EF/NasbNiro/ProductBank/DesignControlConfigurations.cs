@@ -118,6 +118,24 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.EvidenceRef).HasMaxLength(300);
                 b.HasIndex(x => new { x.ReviewId, x.InputId, x.OutputId }).IsUnique().HasFilter(NotDeleted);
             });
+            builder.Entity<PbDesignAdoption>(b =>
+            {
+                b.ToTable("PbDesignAdoptions");
+                b.Property(x => x.Reason).HasMaxLength(1000).IsRequired();
+                b.Property(x => x.EvidenceRef).HasMaxLength(500).IsRequired();
+                b.Property(x => x.AcceptNote).HasMaxLength(1000);
+                b.Property(x => x.VoidReason).HasMaxLength(1000);
+                b.Property(x => x.ContentHash).HasMaxLength(80);
+                b.HasOne<PbBomHeader>().WithMany().HasForeignKey(x => x.BomHeaderId).OnDelete(DeleteBehavior.Restrict);
+                // one live record (requested or accepted) per BOM revision
+                b.HasIndex(x => x.BomHeaderId).IsUnique().HasFilter("[Deleted] = 0 AND [Status] IN (0, 1)").HasDatabaseName("UX_PbDesignAdoptions_LivePerBom");
+                b.HasIndex(x => new { x.ProductId, x.ProductRevision });
+            });
+            builder.Entity<PbDesignActivation>(b =>
+            {
+                b.ToTable("PbDesignActivations");
+                b.Property(x => x.Note).HasMaxLength(500);
+            });
             builder.Entity<PbDesignFinding>(b =>
             {
                 b.ToTable("PbDesignFindings");

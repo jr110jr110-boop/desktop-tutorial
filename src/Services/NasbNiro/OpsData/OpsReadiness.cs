@@ -182,6 +182,9 @@ namespace Services.NasbNiro.OpsData
         public bool DesignRequired { get; set; }
         public List<string> DesignProblems { get; set; } = new List<string>();
 
+        /// <summary>Fix round 1 (H6): the released BOM predates the design control and has no adoption; the item is then Soft with the note.</summary>
+        public bool DesignLegacy { get; set; }
+
         // project level (only with a work order)
         public int ItpActivities { get; set; }
         public int ItpActivitiesWithCharacteristics { get; set; }
@@ -302,7 +305,8 @@ namespace Services.NasbNiro.OpsData
                     case ReadinessCodes.Design:
                         if (!f.DesignRequired || !f.BomReleased) { item = Make(d, s, 0, off); item.Status = NotApplicable; break; }
                         foreach (string problem in f.DesignProblems) off.Add(Off(problem, f.ProductLink));
-                        item = Make(d, s, 1, off);
+                        item = Make(d, s, Math.Max(1, off.Count), off);
+                        if (f.DesignLegacy && off.Count > 0) { item.Hard = false; item.Severity = "Soft"; }   // legacy, not design-verified: visible, not blocking
                         break;
                     case ReadinessCodes.Weight:
                         foreach (ReadinessPart p in lines.Where(p => p.MetalWithoutWeight)) off.Add(Off(PartText(p) + ": وزن واحد کالا ثبت نشده است.", f.ProductLink));

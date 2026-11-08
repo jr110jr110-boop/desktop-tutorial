@@ -14,6 +14,8 @@ namespace Services.NasbNiro.Integrity
             yield return new SafetySettingSpec { Store = Q, Key = DesignSettingKeys.ValidationRequired, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "ممیزی پیکربندی عملکردی: صحه‌گذاری طراحی (Validation) پذیرفته پیش از ترخیص" };
             yield return new SafetySettingSpec { Store = Q, Key = DesignSettingKeys.MinIndependent, Kind = SafetyKind.NumberAtLeast, Strict = "1", Min = 1, Max = 5, Title = "حداقل شرکت‌کننده مستقل در بازبینی طراحی" };
             yield return new SafetySettingSpec { Store = Q, Key = DesignSettingKeys.ReasonMinChars, Kind = SafetyKind.NumberAtLeast, Strict = "15", Min = 5, Max = 200, Title = "حداقل نویسه دلیل در کنترل طراحی (رفع تعارض، معافیت، پذیرش مشروط، ابطال)" };
+            // fix round 1 (H6): the cut-over day. 0 is strict (the day recorded by the first gate decision); any stored day is an override of it, so moving the cut-over later is a weakening and goes through the two-person route
+            yield return new SafetySettingSpec { Store = Q, Key = DesignSettingKeys.ControlStartDate, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 99991231, Title = "روز آغاز کنترل طراحی جابه‌جا نشود (جابه‌جایی به روز دیرتر، بازنگری‌های بیشتری را «قدیمی» و معاف می‌کند)" };
         }
     }
 }

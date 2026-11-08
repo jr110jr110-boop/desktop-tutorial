@@ -71,7 +71,10 @@ namespace Services.NasbNiro.ProductBank
                 PbOpcRouting h = await Uow.Set<PbOpcRouting>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == o.OpcRoutingId, ct);
                 return h != null && !h.Deleted && string.Equals(h.ContentHash ?? string.Empty, o.ContentHash ?? string.Empty, StringComparison.Ordinal);
             }
-            return true;
+            // a drawing: the files it holds now must be the files that were verified, and the revision must still be in play
+            PcDocumentRevision rev = await Uow.Set<PcDocumentRevision>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == o.RevisionId, ct);
+            if (rev == null || rev.Deleted || rev.Status == PcDocStatus.Obsolete || rev.Status == PcDocStatus.Superseded) return false;
+            return string.Equals(await DesignGate.DrawingFingerprintAsync(Uow, rev.Id, ct), o.ContentHash ?? string.Empty, StringComparison.Ordinal);
         }
 
         private async Task<State> StateAsync(PbDesignReview r, CancellationToken ct)
@@ -86,8 +89,9 @@ namespace Services.NasbNiro.ProductBank
             s.Live = await DesignQueries.LiveInputsAsync(Uow, r.ProductId, r.ProductRevision, false, ct);
             s.Independent = DesignRules.IndependentCount(r.Participants.Where(p => !p.Deleted).Select(p => p.UserId), s.Authors);
             HashSet<int> inputIds = r.Inputs.Where(x => !x.Deleted).Select(x => x.InputId).ToHashSet();
+            var outTuples = outputs.Select(o => (o.Id, o.Kind, o.Label)).ToList();
             if (r.Type != DesignReviewType.Review)
-                s.Uncovered = DesignRules.Uncovered(r.Type, s.Live, inputIds, r.Traces.Where(t => !t.Deleted));
+                s.Uncovered = DesignRules.Uncovered(r.Type, s.Live, inputIds, r.Traces.Where(t => !t.Deleted), outTuples);
             Dictionary<string, decimal> st = await DesignGate.SettingsAsync(Uow, ct);
             int minIndependent = (int)st[DesignSettingKeys.MinIndependent];
 
@@ -101,6 +105,7 @@ namespace Services.NasbNiro.ProductBank
             {
                 if (inputIds.Count == 0) s.Blockers.Add("هیچ ورودی طراحی در بازبینی نیست.");
                 if (s.Uncovered.Count > 0) s.Blockers.Add($"{DesignRules.Num(s.Uncovered.Count)} ورودی با مدرک و معیار پذیرش قبول‌شده پوشش داده نشده است.");
+                s.Blockers.AddRange(DesignRules.OutputsWithoutEvidence(r.Traces.Where(t => !t.Deleted), outTuples));
             }
             if (r.Type == DesignReviewType.Validation)
             {
@@ -213,13 +218,16 @@ namespace Services.NasbNiro.ProductBank
 
         private static DesignStageKind StageOf(DesignReviewType t) => t == DesignReviewType.Review ? DesignStageKind.DesignReview : t == DesignReviewType.Verification ? DesignStageKind.Verification : DesignStageKind.Validation;
 
-        private async Task<(PbDesignReviewOutput Row, string Error)> BuildOutputAsync(SaveDesignOutputDto o, PbDesignPlan plan, CancellationToken ct)
+        private async Task<(PbDesignReviewOutput Row, string Error)> BuildOutputAsync(SaveDesignOutputDto o, PbDesignPlan plan, DesignStructure structure, CancellationToken ct)
         {
             if (o.Kind == DesignOutputKind.Bom)
             {
                 if (!o.BomHeaderId.HasValue) return (null, "BOM انتخاب نشده است.");
                 PbBomHeader h = await Uow.Set<PbBomHeader>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == o.BomHeaderId.Value && !x.Deleted, ct);
-                if (h == null || h.ProductId != plan.ProductId || h.Revision != plan.ProductRevision) return (null, "BOM باید برای همین محصول و بازنگری برنامه باشد.");
+                if (h == null) return (null, "BOM پیدا نشد.");
+                bool ownBom = h.ProductId == plan.ProductId && h.Revision == plan.ProductRevision;
+                // fix round 1 (H5): any BOM revision of the structure of the product, a sub-assembly without a product of its own included
+                if (!ownBom && !structure.HeaderIds.Contains(h.Id)) return (null, "BOM باید BOM همین محصول و بازنگری برنامه، یا یکی از BOMهای زیرمجموعه آن (ساختار BOM) باشد.");
                 if (h.Status == PbBomStatus.Obsolete || h.Status == PbBomStatus.Superseded) return (null, $"BOM {h.Code} منسوخ یا جایگزین‌شده است.");
                 if (string.IsNullOrEmpty(h.ContentHash) && h.Status != PbBomStatus.Released) return (null, $"BOM {h.Code} هنوز برای بازبینی ارسال نشده است (اثر انگشت محتوا ندارد).");   // a BOM released from paper (the FY seed) has no hash: it is verified as it stands
                 return (new PbDesignReviewOutput { Kind = o.Kind, BomHeaderId = h.Id, Label = $"BOM {h.Code}", RevisionText = DesignRules.Rev(h.Revision), ContentHash = h.ContentHash }, null);
@@ -232,10 +240,13 @@ namespace Services.NasbNiro.ProductBank
                 return (new PbDesignReviewOutput { Kind = o.Kind, OpcRoutingId = h.Id, Label = $"مسیر ساخت {h.PartNumber}", RevisionText = DesignRules.Rev(h.Revision), ContentHash = h.ContentHash }, null);
             }
             if (!o.RevisionId.HasValue) return (null, "بازنگری نقشه انتخاب نشده است.");
-            var rev = await Uow.Set<PcDocumentRevision>().AsNoTracking().Where(x => x.Id == o.RevisionId.Value && !x.Deleted).Select(x => new { x.Id, x.Code, x.DeliverableId }).FirstOrDefaultAsync(ct);
+            var rev = await Uow.Set<PcDocumentRevision>().AsNoTracking().Where(x => x.Id == o.RevisionId.Value && !x.Deleted).Select(x => new { x.Id, x.Code, x.DeliverableId, x.Status }).FirstOrDefaultAsync(ct);
             if (rev == null) return (null, "بازنگری نقشه پیدا نشد.");
             string number = await Uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => d.Id == rev.DeliverableId).Select(d => d.DocumentNumber).FirstAsync(ct);
-            return (new PbDesignReviewOutput { Kind = DesignOutputKind.Drawing, DeliverableId = rev.DeliverableId, RevisionId = rev.Id, Label = $"نقشه {number}", RevisionText = rev.Code }, null);
+            if (rev.Status == PcDocStatus.Obsolete || rev.Status == PcDocStatus.Superseded) return (null, $"نقشه {number} بازنگری {rev.Code} منسوخ یا جایگزین‌شده است.");
+            // fix round 1 (M5): the drawing belongs to the structure of the product of the plan (a part of its BOM tree)
+            if (!await DesignGate.DrawingInStructureAsync(Uow, rev.DeliverableId, structure, ct)) return (null, $"نقشه {number} به هیچ قطعه‌ای از ساختار BOM این محصول پیوند نشده است؛ نقشه در بازبینی طراحی همان محصولی می‌آید که قطعه‌اش را دارد.");
+            return (new PbDesignReviewOutput { Kind = DesignOutputKind.Drawing, DeliverableId = rev.DeliverableId, RevisionId = rev.Id, Label = $"نقشه {number}", RevisionText = rev.Code, ContentHash = await DesignGate.DrawingFingerprintAsync(Uow, rev.Id, ct) }, null);
         }
 
         public async Task<ResponseDto<DesignReviewDto>> SaveAsync(SaveDesignReviewDto dto, CancellationToken ct)
@@ -248,13 +259,20 @@ namespace Services.NasbNiro.ProductBank
             if (plan.Status != DesignPlanStatus.Approved) return Bad<DesignReviewDto>("بازبینی برای برنامه طراحی تاییدشده ثبت می‌شود.");
             if (dto.Type == DesignReviewType.Validation && !plan.ValidationRequired) return Bad<DesignReviewDto>("برنامه طراحی صحه‌گذاری را معاف کرده است.");
             string title = PbText.Clean(dto.Title) ?? $"{DesignRules.TypeText(dto.Type)} {plan.Product.Code} بازنگری {DesignRules.Rev(plan.ProductRevision)}";
-            if (title.Length > 300) return Bad<DesignReviewDto>("عنوان بیش از ۳۰۰ نویسه است.");
+            if (title.Length > DesignLimits.Title) return Bad<DesignReviewDto>("عنوان بیش از ۳۰۰ نویسه است.");
+            if (dto.PreviousReviewId.HasValue)
+            {
+                PbDesignReview prev = await Uow.Set<PbDesignReview>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.PreviousReviewId.Value && !x.Deleted, ct);
+                if (prev == null || prev.ProductId != plan.ProductId || prev.ProductRevision != plan.ProductRevision || prev.Type != dto.Type || prev.Status != DesignReviewStatus.Closed || prev.Outcome == DesignReviewOutcome.Accepted)
+                    return Bad<DesignReviewDto>("بازبینی قبلی باید بازبینی بسته‌شده با نتیجه رد یا مشروط از همین نوع، محصول و بازنگری باشد.");
+            }
+            DesignStructure structure = await DesignGate.StructureAsync(Uow, plan.ProductId, plan.ProductRevision, ct);
 
             // outputs
             var outputs = new List<PbDesignReviewOutput>();
             foreach (SaveDesignOutputDto o in dto.Outputs ?? new List<SaveDesignOutputDto>())
             {
-                var (row, err) = await BuildOutputAsync(o, plan, ct);
+                var (row, err) = await BuildOutputAsync(o, plan, structure, ct);
                 if (err != null) return Bad<DesignReviewDto>(err);
                 if (outputs.Any(x => x.Kind == row.Kind && x.RevisionId == row.RevisionId && x.BomHeaderId == row.BomHeaderId && x.OpcRoutingId == row.OpcRoutingId)) return Bad<DesignReviewDto>("یک خروجی دو بار آمده است.");
                 outputs.Add(row);
@@ -278,7 +296,7 @@ namespace Services.NasbNiro.ProductBank
             List<SaveDesignParticipantDto> parts = dto.Participants ?? new List<SaveDesignParticipantDto>();
             if (parts.Count == 0) return Bad<DesignReviewDto>("شرکت‌کنندگان بازبینی را مشخص کنید.");
             if (parts.Select(p => p.UserId).Distinct().Count() != parts.Count) return Bad<DesignReviewDto>("یک نفر دو بار به عنوان شرکت‌کننده آمده است.");
-            if (parts.Any(p => PbText.Clean(p.RoleText) != null && p.RoleText.Trim().Length > 100)) return Bad<DesignReviewDto>("نقش شرکت‌کننده بیش از ۱۰۰ نویسه است.");
+            if (parts.Any(p => PbText.Clean(p.RoleText) != null && p.RoleText.Trim().Length > DesignLimits.RoleText)) return Bad<DesignReviewDto>("نقش شرکت‌کننده بیش از ۱۰۰ نویسه است.");
             string person = await DesignQueries.PersonProblemAsync(Uow, parts.Select(p => p.UserId), ct);
             if (person != null) return Bad<DesignReviewDto>(person);
             var authors = new HashSet<int>();
@@ -353,6 +371,7 @@ namespace Services.NasbNiro.ProductBank
                     if (r.Status == DesignReviewStatus.Void) return Bad<DesignReviewDto>("بازبینی پیش‌تر باطل شده است.");
                     if (r.Status == DesignReviewStatus.Closed ? !InRole(DesignRoles.QaOnly) : !(r.CreatorUserId == Me || InRole(DesignRoles.Resolvers))) return Bad<DesignReviewDto>(DesignRules.NotAllowed);
                     if (note == null || note.Length < reasonMin) return Bad<DesignReviewDto>($"دلیل ابطال دست‌کم {reasonMin} نویسه باشد.");
+                    if (DesignLimits.Over(note, DesignLimits.Reason, "دلیل ابطال") is string longVoid) return Bad<DesignReviewDto>(longVoid);
                     r.Status = DesignReviewStatus.Void; r.VoidReason = note;
                     Stamp(r, false);
                     return await SaveAndGetAsync(r.Id, ct);
@@ -367,7 +386,7 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(DesignRoles.ReviewMakers)) return Bad<DesignReviewDto>(DesignRules.NotAllowed);
             string minutes = PbText.Clean(dto.Minutes);
             if (minutes == null || minutes.Length < reasonMin) return Bad<DesignReviewDto>($"صورتجلسه دست‌کم {reasonMin} نویسه باشد.");
-            if (minutes.Length > 4000) return Bad<DesignReviewDto>("صورتجلسه بیش از ۴۰۰۰ نویسه است.");
+            if (minutes.Length > DesignLimits.Minutes) return Bad<DesignReviewDto>("صورتجلسه بیش از ۴۰۰۰ نویسه است.");
             DateTime held = (dto.HeldDate ?? DateTime.Today).Date;
             if (held > DateTime.Today) return Bad<DesignReviewDto>("تاریخ برگزاری در آینده نیست.");
             State s = await StateAsync(r, ct);
@@ -388,7 +407,7 @@ namespace Services.NasbNiro.ProductBank
             if (s.Authors.Contains(Me)) return Bad<DesignReviewDto>("بازبینی را کسی می‌بندد که تهیه‌کننده هیچ‌یک از خروجی‌های بازبینی نباشد.");
             string note = PbText.Clean(dto.Note);
             if (dto.Outcome != DesignReviewOutcome.Accepted && (note == null || note.Length < reasonMin)) return Bad<DesignReviewDto>($"برای نتیجه «پذیرفته با شرط» یا «رد» شرح دست‌کم {reasonMin} نویسه بنویسید.");
-            if (note != null && note.Length > 2000) return Bad<DesignReviewDto>("شرح بیش از ۲۰۰۰ نویسه است.");
+            if (note != null && note.Length > DesignLimits.Outcome) return Bad<DesignReviewDto>("شرح بیش از ۲۰۰۰ نویسه است.");
             if (dto.Outcome == DesignReviewOutcome.AcceptedWithConditions && !r.Findings.Any(f => !f.Deleted && f.Status != DesignFindingStatus.Void)) return Bad<DesignReviewDto>("پذیرش مشروط باید شرط‌ها را به صورت یافته (با مالک و مهلت) ثبت کرده باشد.");
             if (dto.Outcome == DesignReviewOutcome.Accepted)
             {
@@ -433,7 +452,7 @@ namespace Services.NasbNiro.ProductBank
             if (dto.Method == DesignValidationMethod.None || !Enum.IsDefined(typeof(DesignValidationMethod), dto.Method)) return Bad<DesignReviewDto>("روش صحه‌گذاری را انتخاب کنید: آزمون، آزمایش میدانی یا شبیه‌سازی.");
             string evidence = PbText.Clean(dto.Evidence);
             if (evidence == null || evidence.Length < reasonMin) return Bad<DesignReviewDto>($"مدرک صحه‌گذاری (مرجع گزارش آزمون یا شبیه‌سازی) دست‌کم {reasonMin} نویسه باشد.");
-            if (evidence.Length > 2000) return Bad<DesignReviewDto>("مدرک بیش از ۲۰۰۰ نویسه است.");
+            if (evidence.Length > DesignLimits.ValidationEvidence) return Bad<DesignReviewDto>("مدرک بیش از ۲۰۰۰ نویسه است.");
             string cref = PbText.Clean(dto.CustomerAcceptanceRef), cnote = PbText.Clean(dto.CustomerAcceptanceNote);
             if (dto.CustomerAcceptanceNotApplicable)
             {
@@ -441,7 +460,7 @@ namespace Services.NasbNiro.ProductBank
                 cref = null;
             }
             else if (cref == null) return Bad<DesignReviewDto>("مدرک پذیرش مشتری را بنویسید یا «مشتری ندارد» را با توضیح انتخاب کنید.");
-            if ((cref ?? string.Empty).Length > 500 || (cnote ?? string.Empty).Length > 1000) return Bad<DesignReviewDto>("متن پذیرش مشتری بیش از اندازه مجاز است.");
+            if ((cref ?? string.Empty).Length > DesignLimits.CustomerRef || (cnote ?? string.Empty).Length > DesignLimits.Note) return Bad<DesignReviewDto>("متن پذیرش مشتری بیش از اندازه مجاز است (مدرک ۵۰۰ و توضیح ۱۰۰۰ نویسه).");
             r.ValidationMethod = dto.Method; r.ValidationEvidence = evidence; r.CustomerAcceptanceRef = cref; r.CustomerAcceptanceNotApplicable = dto.CustomerAcceptanceNotApplicable; r.CustomerAcceptanceNote = cnote;
             Stamp(r, false);
             return await SaveAndGetAsync(r.Id, ct);
@@ -459,7 +478,7 @@ namespace Services.NasbNiro.ProductBank
             if (r.Status != DesignReviewStatus.Planned && r.Status != DesignReviewStatus.Held) return Bad<DesignReviewDto>("یافته فقط پیش از بستن بازبینی ثبت می‌شود.");
             string desc = PbText.Clean(dto.Description);
             if (desc == null || desc.Length < 5) return Bad<DesignReviewDto>("شرح یافته را بنویسید.");
-            if (desc.Length > 1000) return Bad<DesignReviewDto>("شرح یافته بیش از ۱۰۰۰ نویسه است.");
+            if (desc.Length > DesignLimits.Description) return Bad<DesignReviewDto>("شرح یافته بیش از ۱۰۰۰ نویسه است.");
             if (dto.DueDate.Date < DateTime.Today) return Bad<DesignReviewDto>("مهلت یافته در گذشته است.");
             string person = await DesignQueries.PersonProblemAsync(Uow, new[] { dto.OwnerUserId }, ct);
             if (person != null) return Bad<DesignReviewDto>(person);
@@ -494,6 +513,7 @@ namespace Services.NasbNiro.ProductBank
             if (f.Review.Status == DesignReviewStatus.Void) return Bad<DesignReviewDto>("بازبینی باطل است.");
             int reasonMin = (int)(await DesignGate.SettingsAsync(Uow, ct))[DesignSettingKeys.ReasonMinChars];
             string note = PbText.Clean(dto.Note);
+            if (DesignLimits.Over(note, DesignLimits.Note, "شرح") is string longNote) return Bad<DesignReviewDto>(longNote);
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Action.Trim().ToLowerInvariant())
             {
@@ -548,7 +568,8 @@ namespace Services.NasbNiro.ProductBank
                 if (input == null || input.Status == DesignInputStatus.Conflict) return Bad<DesignReviewDto>("ورودی در تعارض یا کنار گذاشته شده است.");
                 string evidence = PbText.Clean(row.Evidence);
                 if (row.Result != DesignTraceResult.Pending && (evidence == null || evidence.Length < 5)) return Bad<DesignReviewDto>($"برای ورودی {input.Code} مدرک (شرح اندازه‌گیری، آزمون یا بررسی) را بنویسید.");
-                if ((evidence ?? string.Empty).Length > 1000 || (PbText.Clean(row.EvidenceRef) ?? string.Empty).Length > 500) return Bad<DesignReviewDto>("مدرک بیش از اندازه مجاز است.");
+                if ((evidence ?? string.Empty).Length > DesignLimits.Evidence) return Bad<DesignReviewDto>("مدرک بیش از ۱۰۰۰ نویسه است.");
+                if ((PbText.Clean(row.EvidenceRef) ?? string.Empty).Length > DesignLimits.EvidenceRef) return Bad<DesignReviewDto>("مرجع مدرک بیش از ۳۰۰ نویسه است.");
                 PbDesignTrace t = r.Traces.FirstOrDefault(x => !x.Deleted && x.InputId == row.InputId && x.OutputId == row.OutputId);
                 if (row.Result == DesignTraceResult.Pending)
                 {

@@ -92,7 +92,10 @@ namespace Services.NasbNiro.OpsData
             // Package A1: design control of the released BOM
             f.DesignRequired = await global::Services.NasbNiro.ProductBank.DesignGate.VerificationRequiredAsync(_uow, ct);
             if (f.DesignRequired && head != null)
-                f.DesignProblems = await global::Services.NasbNiro.ProductBank.DesignGate.ReadinessProblemsAsync(_uow, head, ct);
+            {
+                global::Services.NasbNiro.ProductBank.DesignReadinessResult dr = await global::Services.NasbNiro.ProductBank.DesignGate.ReadinessAsync(_uow, head, ct);
+                f.DesignProblems = dr.Problems; f.DesignLegacy = dr.Legacy;
+            }
 
             // the lines of the released BOM at every level (alternatives are options, not requirements)
             var lines = new List<PbBomLine>();

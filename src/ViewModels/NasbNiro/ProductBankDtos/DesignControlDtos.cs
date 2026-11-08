@@ -587,6 +587,62 @@ namespace ViewModels.NasbNiro.ProductBankDtos
         public int OpenFindings { get; set; }
         public int ConflictCount { get; set; }
     }
+
+    // ------------------------------------------------------------------------------------------ adoption of an existing design (fix round 1, H6)
+
+    public class DesignAdoptionQuery
+    {
+        /// <summary>Only the BOM revisions released before the design control started (default true); false lists the adoption records of any BOM.</summary>
+        public bool OnlyLegacy { get; set; } = true;
+        public int? ProductId { get; set; }
+        public string Contains { get; set; }
+    }
+
+    /// <summary>A legacy BOM revision with the state of its adoption (AdoptionId null = none asked yet).</summary>
+    public class DesignAdoptionDto
+    {
+        public int? AdoptionId { get; set; }
+        public int BomHeaderId { get; set; }
+        public string BomCode { get; set; }
+        public int BomRevision { get; set; }
+        public int? ProductId { get; set; }
+        public string ProductCode { get; set; }
+        public DateTimeOffset? ReleasedAt { get; set; }
+        public bool Legacy { get; set; }
+        public DesignAdoptionStatus? Status { get; set; }
+        public string StatusText { get; set; }
+        public string Reason { get; set; }
+        public string EvidenceRef { get; set; }
+        public int? RequestedByUserId { get; set; }
+        public string RequestedByName { get; set; }
+        public DateTimeOffset? RequestedAt { get; set; }
+        public int? AcceptedByUserId { get; set; }
+        public string AcceptedByName { get; set; }
+        public DateTimeOffset? AcceptedAt { get; set; }
+        public string AcceptNote { get; set; }
+        public string VoidReason { get; set; }
+        public bool CanRequest { get; set; }
+        public bool CanAccept { get; set; }
+        public bool CanVoid { get; set; }
+        public string RowVersion { get; set; }
+    }
+
+    public class SaveDesignAdoptionDto
+    {
+        public int BomHeaderId { get; set; }
+        public string Reason { get; set; }
+        public string EvidenceRef { get; set; }
+    }
+
+    public class DesignAdoptionActionDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>accept | void</summary>
+        public string Action { get; set; }
+        public string Note { get; set; }
+        public string RowVersion { get; set; }
+    }
 }
 
 namespace ViewModels.NasbNiro.QualityDtos

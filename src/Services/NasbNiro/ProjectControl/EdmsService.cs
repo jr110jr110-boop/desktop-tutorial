@@ -250,7 +250,7 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     string listProblem = await global::Services.NasbNiro.Quality.CharacteristicRelease.ReleaseProblemAsync(_uow, d.Id, r.Id, ct);
                     if (listProblem != null) return Bad<PcRevisionDto>(listProblem);
-                    string designProblem = await global::Services.NasbNiro.ProductBank.DesignGate.DrawingReleaseProblemAsync(_uow, d, r, ct);   // Package A1: design output needs a closed, accepted design verification
+                    string designProblem = await global::Services.NasbNiro.ProductBank.DesignGate.CheckReleaseAsync(_uow, null, d, r, ct);   // Package A1: design output needs a closed, accepted design verification
                     if (designProblem != null) return Bad<PcRevisionDto>(designProblem);
                 }
                 List<PcDocumentRevisionFile> files = await _uow.Set<PcDocumentRevisionFile>().Where(f => !f.Deleted && f.RevisionId == r.Id).OrderBy(f => f.Id).ToListAsync(ct);
