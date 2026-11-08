@@ -5,6 +5,7 @@ import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
+import { DncRoles } from "@/composables/dnc";
 import { AccountRoles, AiRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
@@ -647,6 +648,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/production/maintenance-requests/:id", name: "MfMaintenanceRequest", component: () => import("@/views/production/Maintenance.vue"), meta: { roles: ProductionRoles.masterReaders } },
   { path: "/production/oee", name: "MfOee", component: () => import("@/views/production/Oee.vue"), meta: { roles: ProductionRoles.readers } },
   { path: "/production/cost", name: "MfCost", component: () => import("@/views/production/Cost.vue"), meta: { roles: ProductionRoles.costReaders } },
+  // production P2 (DNC): the CNC program library, transfers, machine links; /production/dnc/programs/:id is the inbox link of a revision waiting for approval
+  { path: "/production/dnc", name: "MfDnc", component: () => import("@/views/production/Dnc.vue"), meta: { roles: DncRoles.readers } },
+  { path: "/production/dnc/programs/:id", name: "MfDncProgram", component: () => import("@/views/production/Dnc.vue"), meta: { roles: DncRoles.readers } },
+  { path: "/production/dnc/transfers", name: "MfDncTransfers", component: () => import("@/views/production/Dnc.vue"), meta: { roles: DncRoles.readers } },
 
   // Sales (فروش). meta.roles = who may open the page (the API checks every call again). The extra paths are the links the API writes into inbox items and CEO alerts:
   // /sales/bid-decisions[/:id] (id = the INQUIRY id), /sales/proposals/:id, /sales/orders/:id, /sales/inquiries, /sales/proposals; pages read route.params.id.

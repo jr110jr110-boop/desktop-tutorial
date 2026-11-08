@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ShopDocuments from "@/components/pc/edms/ShopDocuments.vue";
+import DncTerminalPanel from "@/components/production/dnc/DncTerminalPanel.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -247,6 +248,8 @@ onBeforeUnmount(() => {
               <button v-for="m in machines" :key="m.machineId" :class="{ on: f.machineId === m.machineId }" class="tm-btn" @click="f.machineId = f.machineId === m.machineId ? null : m.machineId">{{ m.title }}</button>
             </div>
           </template>
+          <!-- P2 (DNC): the program of the operation on the chosen machine (send, confirm on the control); the API refuses the start until it is confirmed when the machine requires it -->
+          <DncTerminalPanel v-if="f.machineId && dialog.op && f.kind !== 4" :machine-id="f.machineId" :operation-id="dialog.op.id" />
         </template>
 
         <template v-if="dialog.type === 'pause'">

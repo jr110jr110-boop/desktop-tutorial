@@ -302,6 +302,7 @@
 import { Features } from "@/utils/features";
 import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
+import { DncRoles } from "@/composables/dnc";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -642,6 +643,7 @@ const productionLinks = computed<Links[]>(() => [
   { title: "ثبت زمان و مغایرت حضور", routeName: "MfBookings", disabled: !hasRole(ProductionRoles.bookingsPage) },
   { title: "مراکز کار و ماشین‌ها", routeName: "MfWorkCenters", disabled: !hasRole(ProductionRoles.workCenterReaders) },
   { title: "مسیرهای ساخت و استانداردها", routeName: "MfRoutings", disabled: !hasRole(ProductionRoles.readers) },
+  { title: "برنامه‌های CNC (DNC)", routeName: "MfDnc", disabled: !hasRole(DncRoles.readers) },
   { title: "نگهداری و تعمیرات", routeName: "MfMaintenance", disabled: !hasRole(ProductionRoles.masterReaders) },
   { title: "اثربخشی تجهیزات (OEE)", routeName: "MfOee", disabled: !hasRole(ProductionRoles.readers) },
   { title: "هزینه‌یابی تولید", routeName: "MfCost", disabled: !hasRole(ProductionRoles.costReaders) },
