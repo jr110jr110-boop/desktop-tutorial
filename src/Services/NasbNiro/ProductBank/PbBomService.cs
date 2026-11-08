@@ -250,7 +250,7 @@ namespace Services.NasbNiro.ProductBank
                 Uow.Set<PbBomHeader>().Add(h);
                 Stamp(h, true);
             }
-            int? productId = dto.ProductId;
+            int? productId = dto.ProductId ?? h.ProductId;   // an edit that does not name the product keeps the product of the revision (a new revision inherits it; clearing it would detach the BOM from its design plan)
             if (!productId.HasValue)
                 productId = await Uow.Set<PbProduct>().Where(p => !p.Deleted && p.Code == assembly).Select(p => (int?)p.Id).FirstOrDefaultAsync(ct);
             else if (!await Uow.Set<PbProduct>().AnyAsync(p => p.Id == productId.Value && !p.Deleted, ct))
