@@ -238,11 +238,16 @@ namespace Services.NasbNiro.Inventory
                     return ResponseDtoHelper.BadRequest<InspectionDto>($"برای اندازه‌گیری «{name ?? m.CharacteristicId.ToString()}» ابزار اندازه‌گیری به‌کاررفته را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
                 inputs.Add(new Quality.PickInput { CharacteristicId = m.CharacteristicId, Name = name, Measured = m.Measured, EquipmentId = m.EquipmentId });
             }
-            Quality.PickOutcome pick = await Quality.CharacteristicPicker.BuildAsync(_uow, inspection.ItemId, Entities.Model.NasbNiro.Quality.QcRecordType.Dimensional, null, inspection.Quantity, Entities.Model.NasbNiro.Quality.QcResult.Hold, inputs, cancellationToken);
+            // M9: a receipt is sampled by pieces (a bulk lot in kg / m / l: by the configured number of samples per lot or heat, never per kilogram)
+            string itemUnit = await _uow.Set<InventoryItem>().AsNoTracking().Where(x => x.Id == inspection.ItemId).Select(x => x.Unit).FirstOrDefaultAsync(cancellationToken);
+            Dictionary<string, decimal> incomingSettings = await Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            decimal sampleUnits = Quality.CharacteristicRules.InspectionUnits(itemUnit, inspection.Quantity, (int)incomingSettings[Quality.QualitySettingKeys.PkbIncomingBulkSamples]);
+            // H1: the incoming mode: a part without a released list is decided on its certificate and visual evidence (no typed nominal or tolerance); with a list every picker rule applies
+            Quality.PickOutcome pick = await Quality.CharacteristicPicker.BuildAsync(_uow, inspection.ItemId, Entities.Model.NasbNiro.Quality.QcRecordType.Dimensional, null, sampleUnits, Entities.Model.NasbNiro.Quality.QcResult.Hold, inputs, cancellationToken, incoming: true);
             if (pick.Error != null) return ResponseDtoHelper.BadRequest<InspectionDto>(pick.Error);
             if (pick.Governed && dto.AcceptedQuantity > 0)
             {
-                List<string> missing = Quality.CharacteristicRules.Missing(pick.Scope, pick.Values, inspection.Quantity, false);
+                List<string> missing = Quality.CharacteristicRules.Missing(pick.Scope, pick.Values, sampleUnits, false);
                 if (missing.Count > 0) return ResponseDtoHelper.BadRequest<InspectionDto>("قبول بازرسی ممکن نیست؛ مشخصه‌های الزامی اندازه‌گیری نشده‌اند: " + string.Join("، ", missing) + ".");
             }
             var measurements = pick.Measurements.Select(m => new InspectionMeasurementDto

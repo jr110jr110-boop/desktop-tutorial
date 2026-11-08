@@ -21,6 +21,7 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<AsBuiltDto>> GetByIdAsync(int id, CancellationToken ct);
         Task<ResponseDto<AsBuiltDto>> GetBySerialAsync(string serial, int? itemId, CancellationToken ct);
         Task<ResponseDto<AsBuiltDto>> ReissueAsync(ReissueAsBuiltDto dto, CancellationToken ct);
+        Task<ResponseDto<AsBuiltDto>> DecideReissueAsync(DecideAsBuiltDto dto, CancellationToken ct);
     }
 
     /// <summary>
@@ -41,6 +42,7 @@ namespace Services.NasbNiro.Quality
         private static string Clean(string s) => QualityText.Clean(s);
 
         public const string Reissuers = "QA";
+        public const string Approvers = "PMO,CEO";
 
         public async Task<ResponseDto<PagedList<AsBuiltListDto>>> GetAsync(AsBuiltQuery query, CancellationToken ct)
         {
@@ -115,11 +117,39 @@ namespace Services.NasbNiro.Quality
             ReleaseNote note = await _uow.Set<ReleaseNote>().AsNoTracking().FirstAsync(n => n.Id == a.ReleaseNoteId, ct);
             if (note.Status != ReleaseNoteStatus.Released) return QualityText.Bad<AsBuiltDto>("برگه ترخیص این واحد دیگر در وضعیت ترخیص‌شده نیست.");
             WorkOrder wo = await _uow.Set<WorkOrder>().AsNoTracking().FirstAsync(w => w.Id == a.WorkOrderId, ct);
-            List<AsBuiltRecord> created = await AsBuiltBuilder.IssueAsync(_uow, note, wo, reason, DateTimeOffset.Now, Me, ct, a.ItemId, a.SerialNumber);
+            if (await _uow.Set<AsBuiltRecord>().AnyAsync(x => !x.Deleted && x.WorkOrderId == a.WorkOrderId && x.ItemId == a.ItemId && x.SerialNumber == a.SerialNumber && x.Status == AsBuiltStatus.Pending, ct))
+                return QualityText.Bad<AsBuiltDto>("برای این واحد یک درخواست صدور مجدد در انتظار تایید است.");
+            // M6: QA asks (maker); PMO or the CEO decides (checker). The new version stays Pending and the current one stays in force until the approval
+            List<AsBuiltRecord> created = await AsBuiltBuilder.IssueAsync(_uow, note, wo, reason, DateTimeOffset.Now, Me, ct, a.ItemId, a.SerialNumber, pending: true);
             if (created.Count == 0) return QualityText.Bad<AsBuiltDto>("این واحد در برگه ترخیص پیدا نشد.");
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return QualityText.Bad<AsBuiltDto>("هم‌زمان نسخه دیگری صادر شد؛ صفحه را تازه کنید."); }
             return ResponseDtoHelper.Ok(await ToDtoAsync(created[0], ct));
+        }
+
+        public async Task<ResponseDto<AsBuiltDto>> DecideReissueAsync(DecideAsBuiltDto dto, CancellationToken ct)
+        {
+            if (dto == null) return QualityText.Bad<AsBuiltDto>(QualityText.InvalidData);
+            if (!_user.IsInRole(Approvers)) return QualityText.Bad<AsBuiltDto>(QualityText.NotAllowed);
+            if (Ai.AiActing.IsActing) return QualityText.Bad<AsBuiltDto>("تایید صدور مجدد پیکربندی ساخته‌شده با انسان است؛ صندلی هوش مصنوعی آن را تصمیم نمی‌گیرد.");
+            AsBuiltRecord p = await _uow.Set<AsBuiltRecord>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
+            if (p == null) return QualityText.NotFound<AsBuiltDto>("رکورد پیکربندی ساخته‌شده پیدا نشد.");
+            if (p.Status != AsBuiltStatus.Pending) return QualityText.Bad<AsBuiltDto>("فقط درخواست در انتظار تایید تصمیم‌گیری می‌شود.");
+            if (p.CreatorUserId == Me) return QualityText.Bad<AsBuiltDto>(QualityText.SameUser + " (درخواست‌کننده صدور مجدد نمی‌تواند آن را تایید کند)");
+            string note = Clean(dto.Note);
+            if (!dto.Approve && note == null) return QualityText.Bad<AsBuiltDto>("دلیل رد را بنویسید.");
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (dto.Approve)
+            {
+                AsBuiltRecord current = await _uow.Set<AsBuiltRecord>().FirstOrDefaultAsync(x => !x.Deleted && x.WorkOrderId == p.WorkOrderId && x.ItemId == p.ItemId && x.SerialNumber == p.SerialNumber && x.Status == AsBuiltStatus.Current, ct);
+                if (current != null) { current.Status = AsBuiltStatus.Superseded; current.SupersededByVersion = p.Version; current.ModifyDate = now; current.ModifierUserId = Me; }
+                p.Status = AsBuiltStatus.Current;
+            }
+            else { p.Status = AsBuiltStatus.Rejected; p.Reason = ((p.Reason ?? string.Empty) + " | رد شد: " + note).Trim(' ', '|'); if (p.Reason.Length > 1000) p.Reason = p.Reason.Substring(0, 1000); }
+            p.ModifyDate = now; p.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return QualityText.Bad<AsBuiltDto>("هم‌زمان نسخه دیگری جاری شد؛ صفحه را تازه کنید."); }
+            return ResponseDtoHelper.Ok(await ToDtoAsync(p, ct));
         }
     }
 }

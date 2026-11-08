@@ -23,7 +23,9 @@ namespace Services.NasbNiro.Quality
         public string NoDrawingReason { get; set; }
 
         public bool HasDrawing => Drawings.Count > 0;
-        public bool HasList => Lines.Count > 0;
+        /// <summary>A released list exists for the drawing in force (it may be an approved empty list: «بدون مشخصه قابل اندازه‌گیری»).</summary>
+        public bool HasList => Lists.Count > 0;
+        public bool HasLines => Lines.Count > 0;
 
         /// <summary>The numbers of the drawings in force, joined (cut to the column length).</summary>
         public string DrawingNumber => Cut(string.Join("، ", Drawings.Select(d => d.Number)), 200);
@@ -105,7 +107,7 @@ namespace Services.NasbNiro.Quality
     public static class CharacteristicPicker
     {
         public static async Task<PickOutcome> BuildAsync(IUnitOfWork uow, int? itemId, QcRecordType type, int? operationSeq, decimal quantity, QcResult result,
-            IReadOnlyList<PickInput> inputs, CancellationToken ct)
+            IReadOnlyList<PickInput> inputs, CancellationToken ct, bool incoming = false)
         {
             var outcome = new PickOutcome();
             inputs ??= new List<PickInput>();
@@ -122,8 +124,10 @@ namespace Services.NasbNiro.Quality
                     outcome.Error = resolved.HasDrawing
                         ? "برای نقشه منتشرشده این قطعه فهرست مشخصه‌های منتشرشده وجود ندارد؛ مهندسی باید فهرست مشخصه‌ها را تهیه و با نقشه منتشر کند. اندازه‌گیری با نام و تلرانس دستی پذیرفته نمی‌شود."
                         : "برای این قطعه نقشه منتشرشده و فهرست مشخصه وجود ندارد؛ اندازه‌گیری با نام و تلرانس دستی پذیرفته نمی‌شود.";
-                else if (type == QcRecordType.Dimensional || type == QcRecordType.FirstArticle)
-                    outcome.Error = "بازرسی ابعادی و نمونه اول به فهرست مشخصه‌های منتشرشده نقشه نیاز دارد؛ برای این قطعه فهرستی منتشر نشده است.";
+                else if (!incoming && resolved.HasDrawing && result == QcResult.Accept)
+                    outcome.Error = "برای نقشه منتشرشده این قطعه فهرست مشخصه‌های منتشرشده وجود ندارد؛ بدون آن قبول بازرسی ممکن نیست. مهندسی باید فهرست مشخصه‌ها (یا فهرست خالی «بدون مشخصه قابل اندازه‌گیری» با دلیل) را تهیه و منتشر کند.";
+                else if (!incoming && (type == QcRecordType.Dimensional || type == QcRecordType.FirstArticle))
+                    outcome.Error = "بازرسی ابعادی و نمونه اول به فهرست مشخصه‌های منتشرشده نیاز دارد؛ برای این قطعه فهرستی منتشر نشده است.";
                 return outcome;
             }
             outcome.Governed = true;
@@ -145,11 +149,13 @@ namespace Services.NasbNiro.Quality
                     outcome.Error = $"برای اندازه‌گیری «{line.No} {line.Name}» تجهیز اندازه‌گیری (ابزار) را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.";
                     return outcome;
                 }
-                if (equipment.TryGetValue(m.EquipmentId.Value, out var eq))
+                if (!equipment.TryGetValue(m.EquipmentId.Value, out var eq))
                 {
-                    string instrument = CharacteristicRules.InstrumentProblem(line, eq.Type, eq.Code);
-                    if (instrument != null) { outcome.Error = instrument; return outcome; }
+                    outcome.Error = $"ابزار اندازه‌گیری انتخاب‌شده برای «{line.No} {line.Name}» در فهرست تجهیزات نیست.";
+                    return outcome;
                 }
+                string instrument = CharacteristicRules.InstrumentProblem(line, eq.Type, eq.Code);
+                if (instrument != null) { outcome.Error = instrument; return outcome; }
                 outcome.Measurements.Add(new QcMeasurement
                 {
                     Characteristic = line.Name, CharacteristicId = line.Id, CharacteristicNo = line.No, Nominal = line.Nominal, TolPlus = line.TolPlus, TolMinus = line.TolMinus,

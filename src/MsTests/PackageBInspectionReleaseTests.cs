@@ -403,5 +403,122 @@ namespace MsTests
             SafetySettingSpec fai = SafetyProfile.Find(SafetyStore.Quality, QualitySettingKeys.PkbFaiEnforce);
             Assert.IsTrue(SafetyProfile.IsWeaker(fai, "0"), "switching the first article off is a weakening");
         }
+
+        // ------------------------------------------------------------------------------------------------ fix round 1
+
+        [TestMethod]
+        public void BulkMaterialIsSampledPerLotAndCountedPartsPerPiece()
+        {
+            Assert.IsTrue(CharacteristicRules.IsBulkUnit("kg"));
+            Assert.IsFalse(CharacteristicRules.IsBulkUnit("عدد"));
+            Assert.AreEqual(1m, CharacteristicRules.InspectionUnits("kg", 2500m, 1), "one sample per heat, not 2500");
+            Assert.AreEqual(3m, CharacteristicRules.InspectionUnits("kg", 2500m, 3));
+            Assert.AreEqual(40m, CharacteristicRules.InspectionUnits("عدد", 40m, 1), "counted parts by pieces");
+        }
+
+        [TestMethod]
+        public void AMinorLineBelowTheFloorIsRefusedAndAZeroFloorAllowsIt()
+        {
+            Assert.IsNotNull(CharacteristicRules.LineProblem("1", "x", 0.1m, 0.1m, CharClass.Minor, 0, 100, 25, "r ", 10));
+            Assert.IsNull(CharacteristicRules.LineProblem("1", "x", 0.1m, 0.1m, CharClass.Minor, 0, 100, 25, "r ", 0));
+            Assert.IsNull(CharacteristicRules.LineProblem("1", "x", 0.1m, 0.1m, CharClass.Minor, 10, 100, 25, "r ", 10));
+        }
+
+        [TestMethod]
+        public void PcaJudgesCountedPartsExactlyAndBulkWithTheBomAllowance()
+        {
+            Assert.IsNull(PcaRules.Judge(4m, 4m, 0m, 0m, false));
+            Assert.IsNotNull(PcaRules.Judge(4m, 5m, 0m, 0m, false), "one bolt too many");
+            Assert.IsNotNull(PcaRules.Judge(4m, 3m, 0m, 0m, false));
+            Assert.IsNotNull(PcaRules.Judge(4m, 0m, 0m, 0m, false), "nothing in the genealogy");
+            Assert.IsNull(PcaRules.Judge(100m, 104m, 0m, 0.05m, true), "within the scrap allowance");
+            Assert.IsNotNull(PcaRules.Judge(100m, 106m, 0m, 0.05m, true));
+            Assert.IsNotNull(PcaRules.Judge(100m, 90m, 0m, 0.05m, true), "less than the BOM is another material");
+        }
+
+        [TestMethod]
+        public void TheFingerprintChangesWithTheListAndTheProductBom()
+        {
+            string a = FaiRules.Fingerprint(new[] { 1 }, 2, 3);
+            string b = FaiRules.Fingerprint(new[] { 1 }, 2, 3, new[] { 7 }, 9);
+            string c = FaiRules.Fingerprint(new[] { 1 }, 2, 3, new[] { 8 }, 9);
+            string d = FaiRules.Fingerprint(new[] { 1 }, 2, 3, new[] { 7 }, 10);
+            Assert.AreNotEqual(a, b);
+            Assert.AreNotEqual(b, c, "a new list version means a new first article");
+            Assert.AreNotEqual(b, d, "a new product BOM means a new first article");
+        }
+
+        [TestMethod]
+        public async Task AnIncomingItemWithoutAListIsInspectedByDecisionOnlyAndWithAListByThePickerRules()
+        {
+            AppHost host = NewHost("incoming");
+            int contract = NewContract(host);
+            int bare = NewItem(host, "PN-IN0");
+            IUnitOfWork Uow(IServiceProvider p) => p.GetRequiredService<IUnitOfWork>();
+
+            PickOutcome none = await host.As(Inspector, p => CharacteristicPicker.BuildAsync(Uow(p), bare, QcRecordType.Dimensional, null, 5m, QcResult.Accept, new List<PickInput>(), default, true));
+            Assert.IsNull(none.Error, "an item with no list is accepted on certificate/visual evidence: " + none.Error);
+            PickOutcome typed = await host.As(Inspector, p => CharacteristicPicker.BuildAsync(Uow(p), bare, QcRecordType.Dimensional, null, 5m, QcResult.Accept,
+                new List<PickInput> { new PickInput { Name = "Diameter", Measured = 50m, EquipmentId = 1 } }, default, true));
+            Assert.IsNotNull(typed.Error, "no list means no typed measurement rows");
+            PickOutcome rej = await host.As(Inspector, p => CharacteristicPicker.BuildAsync(Uow(p), bare, QcRecordType.Dimensional, null, 5m, QcResult.Reject, new List<PickInput>(), default, true));
+            Assert.IsNull(rej.Error, "a reject needs no list either");
+
+            int item = NewItem(host, "PN-IN1");
+            var d = await ReleasedDrawing(host, contract, "PN-IN1");
+            CharListDto list = await ApprovedList(host, d.Revision);
+            await ReleaseRevision(host, d.Revision);
+            int dia = host.Read(u => u.Set<QcCharacteristic>().Single(c => c.ListId == list.Id && c.No == "1").Id);
+            PickOutcome partial = await host.As(Inspector, p => CharacteristicPicker.BuildAsync(Uow(p), item, QcRecordType.Dimensional, null, 1m, QcResult.Accept,
+                new List<PickInput> { new PickInput { CharacteristicId = dia, Measured = 50m, EquipmentId = 1 } }, default, true));
+            Assert.IsNotNull(partial.Error, "with a list the required characteristics must all be measured");
+        }
+
+        [TestMethod]
+        public async Task ADrawingOfAPartCannotBeReleasedWithoutAnApprovedListButAnEmptyListWithAReasonDoes()
+        {
+            AppHost host = NewHost("h2");
+            int contract = NewContract(host);
+            NewItem(host, "PN-H2");
+            var d = await ReleasedDrawing(host, contract, "PN-H2");
+            foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve") })
+                Assert.IsTrue((await host.As(step.Item1, p => p.GetRequiredService<IEdmsService>().ActionAsync(new PcRevisionActionDto { Id = d.Revision, Action = step.Item2 }, default))).Success);
+            var refused = await host.As(Pmo, p => p.GetRequiredService<IEdmsService>().ActionAsync(new PcRevisionActionDto { Id = d.Revision, Action = "release" }, default));
+            Assert.IsFalse(refused.Success, "no approved list: release refused");
+
+            var empty = new SaveCharListDto { RevisionId = d.Revision, Items = new List<SaveCharLineDto>() };
+            empty.Reason = "قطعه فقط از روی گواهی مواد پذیرفته می‌شود";
+            var saved = await Chars(host, Maker, s => s.SaveAsync(empty, default));
+            Assert.IsTrue(saved.Success, saved.Message);
+            Assert.IsTrue((await Chars(host, Maker, s => s.ActionAsync(new CharListActionDto { Id = saved.Data.Id, Action = "submit" }, default))).Success);
+            Assert.IsFalse((await Chars(host, Maker, s => s.ActionAsync(new CharListActionDto { Id = saved.Data.Id, Action = "approve" }, default))).Success, "maker-checker");
+            Assert.IsTrue((await Chars(host, Checker, s => s.ActionAsync(new CharListActionDto { Id = saved.Data.Id, Action = "approve" }, default))).Success);
+            var ok = await host.As(Pmo, p => p.GetRequiredService<IEdmsService>().ActionAsync(new PcRevisionActionDto { Id = d.Revision, Action = "release" }, default));
+            Assert.IsTrue(ok.Success, ok.Message);
+        }
+
+        [TestMethod]
+        public async Task OnlyEngineeringMakesAListAndOnlyQualityChecksIt()
+        {
+            AppHost host = NewHost("roles");
+            int contract = NewContract(host);
+            NewItem(host, "PN-RL");
+            var d = await ReleasedDrawing(host, contract, "PN-RL");
+            ClaimsPrincipal qa = AppHost.Principal(42, "qa.checker", "QA");
+            Assert.IsFalse((await Chars(host, qa, s => s.SaveAsync(TwoLines(d.Revision), default))).Success, "QA does not make lists");
+            var saved = await Chars(host, Maker, s => s.SaveAsync(TwoLines(d.Revision), default));
+            Assert.IsTrue(saved.Success, saved.Message);
+            Assert.IsTrue((await Chars(host, Maker, s => s.ActionAsync(new CharListActionDto { Id = saved.Data.Id, Action = "submit" }, default))).Success);
+            Assert.IsFalse((await Chars(host, Reviewer, s => s.ActionAsync(new CharListActionDto { Id = saved.Data.Id, Action = "approve" }, default))).Success, "an engineer does not check");
+        }
+
+        [TestMethod]
+        public void TheNewSettingsAreOnTheSafetyProfile()
+        {
+            SafetySettingSpec bulk = SafetyProfile.Find(SafetyStore.Quality, "Pkb.Incoming.BulkSamplesPerLot");
+            SafetySettingSpec extra = SafetyProfile.Find(SafetyStore.Quality, "Pkb.Pca.BulkExtraTolerancePercent");
+            Assert.IsNotNull(bulk); Assert.IsNotNull(extra);
+            Assert.AreEqual("1", bulk.Strict); Assert.AreEqual("0", extra.Strict);
+        }
     }
 }

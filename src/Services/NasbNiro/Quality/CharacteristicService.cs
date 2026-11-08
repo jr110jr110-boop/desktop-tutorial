@@ -53,8 +53,10 @@ namespace Services.NasbNiro.Quality
         private static string Clean(string s) => QualityText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => QualityText.Bad<T>(m);
 
-        private const string Makers = QualityRoles.Planners;
-        private const string Checkers = "QA,PMO,QC,ENGINEERING,ENGINEER";
+        private const string Makers = "ENGINEERING,ENGINEER"; // M4: the acceptance criteria are written by engineering only
+        private const string Checkers = "QA,QC"; // and checked by quality (never the maker)
+
+        private const int EmptyListReasonMin = 15;
 
         private static bool InForce(PcDocStatus s) => s == PcDocStatus.Released || s == PcDocStatus.AsBuilt;
 
@@ -160,7 +162,7 @@ namespace Services.NasbNiro.Quality
             if (rev.Status == PcDocStatus.Superseded || rev.Status == PcDocStatus.Obsolete) return Bad<CharListDto>("این بازنگری نقشه جایگزین یا ابطال شده است؛ فهرست مشخصه برای آن ثبت نمی‌شود.");
             PcEngineeringDeliverable doc = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().FirstAsync(d => d.Id == rev.DeliverableId, ct);
 
-            string problem = await ValidateItemsAsync(dto.Items, ct);
+            string problem = await ValidateItemsAsync(dto.Items, dto.Reason, ct);
             if (problem != null) return Bad<CharListDto>(problem);
 
             Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(_uow, ct);
@@ -225,10 +227,10 @@ namespace Services.NasbNiro.Quality
 
         private static string ClassProblems(IEnumerable<QcCharacteristic> items, Dictionary<string, decimal> st)
         {
-            int critical = (int)st[QualitySettingKeys.PkbSampleCritical], major = (int)st[QualitySettingKeys.PkbSampleMajor];
+            int critical = (int)st[QualitySettingKeys.PkbSampleCritical], major = (int)st[QualitySettingKeys.PkbSampleMajor], minor = (int)st[QualitySettingKeys.PkbSampleMinor];
             foreach (QcCharacteristic c in items)
             {
-                string p = CharacteristicRules.LineProblem(c.No, c.Name, c.TolPlus, c.TolMinus, c.Class, c.SamplePercent, critical, major, $"ردیف {c.RowNumber}: ");
+                string p = CharacteristicRules.LineProblem(c.No, c.Name, c.TolPlus, c.TolMinus, c.Class, c.SamplePercent, critical, major, $"ردیف {c.RowNumber}: ", minor);
                 if (p != null) return p;
                 if (c.OperationSeq.HasValue && c.OperationSeq.Value <= 0) return $"ردیف {c.RowNumber}: شماره گام عملیات باید بزرگ‌تر از صفر باشد.";
                 if ((c.Unit ?? string.Empty).Length > 20) return $"ردیف {c.RowNumber}: واحد بیش از ۲۰ نویسه است.";
@@ -237,9 +239,11 @@ namespace Services.NasbNiro.Quality
             return null;
         }
 
-        private Task<string> ValidateItemsAsync(List<SaveCharLineDto> items, CancellationToken ct)
+        private Task<string> ValidateItemsAsync(List<SaveCharLineDto> items, string reason, CancellationToken ct)
         {
-            if (items == null || items.Count == 0) return Task.FromResult("حداقل یک مشخصه ثبت کنید.");
+            // H2: a drawing without measurable characteristics is declared through the same workflow: an EMPTY list with a written reason (maker-checker like any list)
+            if (items == null || items.Count == 0)
+                return Task.FromResult((Clean(reason)?.Length ?? 0) >= EmptyListReasonMin ? null : $"حداقل یک مشخصه ثبت کنید؛ برای نقشه‌ای که مشخصه قابل اندازه‌گیری ندارد، فهرست خالی فقط با دلیل (دست‌کم {EmptyListReasonMin} نویسه) پذیرفته می‌شود.");
             if (items.Count > 500) return Task.FromResult("حداکثر ۵۰۰ مشخصه در هر فهرست.");
             var seen = new HashSet<string>();
             int row = 0;
@@ -270,7 +274,7 @@ namespace Services.NasbNiro.Quality
                 case "submit":
                     if (!_user.IsInRole(Makers)) return Bad<CharListDto>(QualityText.NotAllowed);
                     if (l.Status != CharListStatus.Draft) return Bad<CharListDto>("فقط پیش‌نویس ارسال می‌شود.");
-                    if (l.Items.Count == 0) return Bad<CharListDto>("فهرست بدون مشخصه ارسال نمی‌شود.");
+                    if (l.Items.Count == 0 && (Clean(l.Reason)?.Length ?? 0) < EmptyListReasonMin) return Bad<CharListDto>("فهرست بدون مشخصه فقط با دلیل «بدون مشخصه قابل اندازه‌گیری» ارسال می‌شود.");
                     string rule = ClassProblems(l.Items, st);
                     if (rule != null) return Bad<CharListDto>(rule);
                     l.Status = CharListStatus.Submitted; l.SubmittedAt = now; l.EditorUserIds = WithEditor(l.EditorUserIds, Me);
@@ -375,6 +379,9 @@ namespace Services.NasbNiro.Quality
             {
                 List<string> names = XlsxReader.SheetNames(file);
                 Office.XlsxSheet sheet = XlsxReader.Read(file, names.FirstOrDefault(), 502);
+                XlsxRow head = sheet.Rows.FirstOrDefault(x => x.RowNumber == 1);
+                for (int c = 0; c < 3; c++)
+                    if (head == null || CharacteristicRules.Key(head.Cell(c)?.AsText()) != CharacteristicRules.Key(Header[c])) return Bad<CharExcelResultDto>("سطر عنوان فایل با قالب فهرست مشخصه‌ها یکی نیست؛ قالب را از سامانه بگیرید.");
                 foreach (XlsxRow r in sheet.Rows.Where(x => x.RowNumber > 1).OrderBy(x => x.RowNumber))
                 {
                     var arr = new string[Header.Length];
@@ -423,7 +430,7 @@ namespace Services.NasbNiro.Quality
             decimal plus = 0m, minus = 0m;
             if (Clean(a[3]) != null && !TryNumber(a[3], out plus)) return "تلرانس + عدد نیست.";
             if (Clean(a[4]) != null && !TryNumber(a[4], out minus)) return "تلرانس − عدد نیست.";
-            plus = Math.Abs(plus); minus = Math.Abs(minus);
+            if (plus < 0 || minus < 0) return "تلرانس‌ها را مقدار مثبت (+ و −) وارد کنید.";
             CharClass cls;
             string c = CharacteristicRules.Key(a[6]);
             if (c == CharacteristicRules.Key("بحرانی") || c == "CRITICAL" || c == "A") cls = CharClass.Critical;
@@ -444,7 +451,7 @@ namespace Services.NasbNiro.Quality
             int? op = null;
             if (Clean(a[10]) != null) { if (!TryNumber(a[10], out decimal os) || os != Math.Floor(os) || os <= 0) return "گام عملیات عدد صحیح مثبت نیست."; op = (int)os; }
             int effective = sample ?? (int)(cls == CharClass.Critical ? st[QualitySettingKeys.PkbSampleCritical] : cls == CharClass.Major ? st[QualitySettingKeys.PkbSampleMajor] : st[QualitySettingKeys.PkbSampleMinor]);
-            string problem = CharacteristicRules.LineProblem(no, name, plus, minus, cls, effective, critical, major, string.Empty);
+            string problem = CharacteristicRules.LineProblem(no, name, plus, minus, cls, effective, critical, major, string.Empty, (int)st[QualitySettingKeys.PkbSampleMinor]);
             if (problem != null) return problem;
             line = new SaveCharLineDto { No = no, Name = name, Nominal = nominal, TolPlus = plus, TolMinus = minus, Unit = Clean(a[5]), Class = cls, InstrumentClass = instrument, Method = Clean(a[8]), SamplePercent = sample, OperationSeq = op, StageCode2 = Clean(a[11]) };
             return null;
@@ -459,7 +466,8 @@ namespace Services.NasbNiro.Quality
             {
                 if (ch >= '۰' && ch <= '۹') sb.Append((char)('0' + (ch - '۰')));
                 else if (ch >= '٠' && ch <= '٩') sb.Append((char)('0' + (ch - '٠')));
-                else if (ch == '٫' || ch == '،') sb.Append('.');
+                else if (ch == '٫') sb.Append('.');
+                else if (ch == '،') return false; // an Arabic comma may be a thousands or a decimal separator: not guessed
                 else if (ch == '−' || ch == '–') sb.Append('-');
                 else sb.Append(ch);
             }
@@ -493,6 +501,27 @@ namespace Services.NasbNiro.Quality
             QcCharacteristicList approved = await uow.Set<QcCharacteristicList>().Include(x => x.Items)
                 .Where(x => !x.Deleted && x.RevisionId == revisionId && x.Status == CharListStatus.Approved).OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
             if (approved != null) await ReleaseAsync(uow, approved, now, ct);
+        }
+
+        /// <summary>
+        /// H2: null when the drawing revision may be released. A revision of a drawing that is linked to a part needs an Approved list (possibly the empty list «بدون مشخصه قابل اندازه‌گیری»); a list whose content
+        /// no longer matches its approval hash is never skipped silently: the release is refused with the reason.
+        /// </summary>
+        public static async Task<string> ReleaseProblemAsync(IUnitOfWork uow, int deliverableId, int revisionId, CancellationToken ct)
+        {
+            QcCharacteristicList approved = await uow.Set<QcCharacteristicList>().Include(x => x.Items)
+                .Where(x => !x.Deleted && x.RevisionId == revisionId && x.Status == CharListStatus.Approved).OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
+            if (approved == null)
+            {
+                bool partLinked = await uow.Set<Entities.Model.NasbNiro.ProjectControl.PcDocumentLink>().AnyAsync(l => !l.Deleted && l.UnlinkReason == null && l.DeliverableId == deliverableId
+                    && (l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.Item || l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.PartNumber || l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.BomLine), ct);
+                return partLinked
+                    ? "انتشار نقشه ممکن نیست: این نقشه به یک قطعه وصل است و برای این بازنگری فهرست مشخصه‌های تاییدشده وجود ندارد. مهندسی فهرست مشخصه‌ها را تهیه کند و کنترل‌کننده تایید کند (برای نقشه بدون مشخصه قابل اندازه‌گیری: فهرست خالی با دلیل)."
+                    : null;
+            }
+            string hash = CharacteristicRules.Hash(approved.Items.OrderBy(i => i.RowNumber).Select(CharacteristicResolver.ToLine));
+            return string.Equals(hash, approved.ContentHash, StringComparison.Ordinal) ? null
+                : "انتشار نقشه ممکن نیست: محتوای فهرست مشخصه‌های تاییدشده با مهر تایید آن (SHA-256) نمی‌خواند؛ فهرست دستکاری شده است. نسخه جدید فهرست را تهیه و تایید کنید.";
         }
 
         public static async Task ReleaseAsync(IUnitOfWork uow, QcCharacteristicList list, DateTimeOffset now, CancellationToken ct)

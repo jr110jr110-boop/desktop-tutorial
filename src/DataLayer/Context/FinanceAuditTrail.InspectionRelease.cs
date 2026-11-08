@@ -17,7 +17,7 @@ namespace DataLayer.Context
             AuditPd(typeof(Q.QcCharacteristic), new[] { "ListId", "RowNumber", "No", "Name", "Nominal", "TolPlus", "TolMinus", "Unit", "Class", "InstrumentClass", "Method", "SamplePercent", "OperationSeq", "StageCode2" }, "مشخصه بازرسی نقشه");
             AuditPd(typeof(Q.NoDrawingFlag), new[] { "ItemId", "PartNumber", "Reason", "Status", "DecidedByUserId", "DecidedAt", "DecisionNote", "VoidedByUserId", "VoidedAt", "VoidReason", "Deleted" }, "پرچم «بدون نقشه»");
             AuditPd(typeof(Q.QcFirstArticle), new[] { "Number", "ItemId", "PartNumber", "WorkOrderId", "ProductionOrderId", "Fingerprint", "CharacteristicListId", "RoutingRevisionId", "Trigger", "Status", "QcRecordId", "MeasuredByUserId", "MeasuredAt", "QcAcceptedByUserId", "QcAcceptedAt", "QcAcceptNote", "QaApprovedByUserId", "QaApprovedAt", "QaApproveNote", "RejectedByUserId", "RejectedAt", "RejectReason", "VoidReason", "Note", "Deleted" }, "بازرسی نمونه اول");
-            AuditPd(typeof(Q.AsBuiltRecord), new[] { "WorkOrderId", "ReleaseNoteId", "ItemId", "SerialUnitId", "SerialNumber", "Version", "Status", "Reason", "ProductCode", "BomText", "Sha256", "SupersededByVersion", "Deleted" }, "پیکربندی ساخته‌شده (As-Built)");
+            AuditPd(typeof(Q.AsBuiltRecord), new[] { "WorkOrderId", "ReleaseNoteId", "ItemId", "SerialUnitId", "SerialNumber", "Version", "Status", "Reason", "ProductCode", "BomText", "Sha256", "SnapshotJson", "SupersededByVersion", "Deleted" }, "پیکربندی ساخته‌شده (As-Built)");
 
             // the existing inspection rows now also say where their measurements came from
             ExtendInspection(typeof(Q.QcRecord), "DrawingRevisionId", "CharacteristicListId");

@@ -580,7 +580,7 @@ namespace Services.NasbNiro.Production
             Loaded l = await LoadAsync(dto.OperationId, true, ct);
             if (l.Error != null) return Bad<TerminalOperationDto>(l.Error);
             if (l.Op.Status != MfOperationStatus.InProgress && l.Op.Status != MfOperationStatus.Paused) return Bad<TerminalOperationDto>("فقط عملیاتی که شروع شده پایان می‌یابد.");
-            string faiFinish = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct);
+            string faiFinish = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct, dto.GoodQty + dto.ScrapQty);
             if (faiFinish != null) return Bad<TerminalOperationDto>(faiFinish);
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید.");

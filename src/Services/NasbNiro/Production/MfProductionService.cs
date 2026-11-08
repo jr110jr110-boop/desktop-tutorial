@@ -466,6 +466,11 @@ namespace Services.NasbNiro.Production
             {
                 return Bad<OrderDto>(MfText.Concurrency);
             }
+            catch (DbUpdateException)
+            {
+                // M5: two orders of the same configuration released at the same moment: the second finds the live first article of the first (unique index)
+                return Bad<OrderDto>("صدور ممکن نیست: هم‌زمان دستور دیگری از همین قطعه و پیکربندی صادر شد و نمونه اول آن هنوز تایید نشده است؛ پس از تایید QA دوباره صادر کنید.");
+            }
             notes.AddRange(await _flow.AfterSaveAsync(ct));
             await MfGates.OrderAsync(_notify, order, ct);
             ResponseDto<OrderDto> ok = ResponseDtoHelper.Ok(await OrderDtoAsync(order, false, ct), notes.Count == 0 ? null : Join(notes));
@@ -797,12 +802,16 @@ namespace Services.NasbNiro.Production
                     return Bad<OperationDto>($"نقطه ITP «{activity.Activity}» هنوز آزاد نشده است؛ ابتدا در ماژول کیفیت ثبت و آزاد شود.");
             }
 
-            // PB8: an acceptance must cover the mandatory points of the ITP and stay inside the baseline tolerance (a missing characteristic or an out-of-tolerance value needs a rejection or an approved exception)
-            // Package B: when a released characteristic list governs the part, the list is the one gate (one message, from the quality service); the PB8 rule would only repeat it with other words
-            bool listGoverns = (await CharacteristicResolver.ForItemAsync(_uow, order.ItemId.Value, null, ct)).HasList;
-            if (_opsEvaluator != null && _opsGate != null && activity != null && !listGoverns)
+            // Package B (M1): one gate, one message. The pick of the quality service (released list, instrument class, tolerances from the list) runs first and its refusal is the only text the inspector sees; the PB8 rule
+            // (mandatory points of the ITP) then reads the picked values, so it works the same with and without a list
+            decimal quantity = op.GoodQty > 0 ? op.GoodQty : MfQuantityRules.Expected(loaded.All, op, order.Quantity);
+            global::Services.NasbNiro.Quality.PickOutcome earlyPick = await CharacteristicPicker.BuildAsync(_uow, order.ItemId, QcRecordType.InProcess, op.Sequence, quantity, dto.Result,
+                measurements.Select(m => new PickInput { CharacteristicId = m.CharacteristicId, Name = m.Characteristic, Measured = m.Measured, EquipmentId = m.EquipmentId }).ToList(), ct);
+            if (earlyPick.Error != null) return Bad<OperationDto>(earlyPick.Error);
+            if (_opsEvaluator != null && _opsGate != null && activity != null)
             {
-                var opsMeasures = measurements.Select(m => new global::Services.NasbNiro.OpsData.OpsQcMeasure { Characteristic = m.Characteristic, Measured = m.Measured }).ToList();
+                var opsMeasures = (earlyPick.Governed ? earlyPick.Measurements.Select(m => new global::Services.NasbNiro.OpsData.OpsQcMeasure { Characteristic = m.Characteristic, Measured = m.Measured })
+                    : measurements.Select(m => new global::Services.NasbNiro.OpsData.OpsQcMeasure { Characteristic = m.Characteristic, Measured = m.Measured })).ToList();
                 global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateQcDecisionAsync(op.Id, dto.Result, activity.Id, opsMeasures, ct);
                 if (opsEv != null)
                 {
@@ -812,7 +821,6 @@ namespace Services.NasbNiro.Production
             }
 
             DateTimeOffset now = DateTimeOffset.Now;
-            decimal quantity = op.GoodQty > 0 ? op.GoodQty : MfQuantityRules.Expected(loaded.All, op, order.Quantity);
             // R1p D42: the record (and its NCR) carries the lot or the serial numbers of the pieces
             (int? lotId, List<string> serials) = await MfTrace.OfOrderAsync(_uow, order, ct);
 

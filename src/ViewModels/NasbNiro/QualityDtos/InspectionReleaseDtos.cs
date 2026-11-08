@@ -377,6 +377,15 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Reason { get; set; }
     }
 
+    /// <summary>The decision of PMO or the CEO on a re-issue that QA asked for (a second person; never the one who asked, never an AI seat).</summary>
+    public class DecideAsBuiltDto
+    {
+        /// <summary>The pending (not yet current) version.</summary>
+        public int Id { get; set; }
+        public bool Approve { get; set; }
+        public string Note { get; set; }
+    }
+
     public class AsBuiltSnapshotDto
     {
         public int SchemaVersion { get; set; } = 1;

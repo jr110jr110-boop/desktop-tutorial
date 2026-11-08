@@ -141,6 +141,12 @@ namespace Services.NasbNiro.Quality
         /// <summary>The shortest reason (characters) of a «بدون نقشه» flag.</summary>
         public const string PkbNoDrawingReasonMin = "Pkb.NoDrawing.ReasonMinChars";
 
+        /// <summary>Incoming inspection of a bulk lot (kg, m, l): the number of samples per lot or heat (a bulk lot is never sampled per kilogram).</summary>
+        public const string PkbIncomingBulkSamples = "Pkb.Incoming.BulkSamplesPerLot";
+
+        /// <summary>Percent added to the BOM scrap allowance of a bulk line in the physical configuration audit (0 = exactly the BOM allowance).</summary>
+        public const string PkbPcaBulkExtra = "Pkb.Pca.BulkExtraTolerancePercent";
+
         /// <summary>
         /// Not a setting of the company: a marker the nightly CAPA job writes after its first run (review M11). Until it exists the job records the escalation level of the CAPAs
         /// that were already late without telling anybody, so that the first night after the upgrade does not flood QA and the CEO with the whole backlog.
@@ -182,6 +188,8 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = PkbPcaEnabled, Value = 1, Title = "ممیزی پیکربندی فیزیکی پیش از ترخیص محصول", Source = "★ تصمیم مدیرعامل (ISO 10007)" };
             yield return new QualitySetting { Key = PkbPcaTolerance, Value = 0, Title = "رواداری مقدار ردیف BOM پروژه در ممیزی پیکربندی (درصد)", Source = "★ عدم تحمل انحراف" };
             yield return new QualitySetting { Key = PkbNoDrawingReasonMin, Value = 15, Title = "حداقل نویسه دلیل پرچم «بدون نقشه»", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = PkbIncomingBulkSamples, Value = 1, Title = "ورودی انبوه (کیلوگرم، متر، لیتر): تعداد نمونه برای هر بچ یا ذوب", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = PkbPcaBulkExtra, Value = 0, Title = "رواداری افزوده بر ضریب ضایعات BOM برای مواد انبوه در ممیزی پیکربندی (درصد)", Source = "★ ضریب ضایعات BOM" };
             // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
             foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
         }

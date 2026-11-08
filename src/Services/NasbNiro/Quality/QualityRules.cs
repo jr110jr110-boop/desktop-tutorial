@@ -139,6 +139,8 @@ namespace Services.NasbNiro.Quality
             { QualitySettingKeys.PkbPcaEnabled, new KeyValuePair<int, int>(0, 1) },
             { QualitySettingKeys.PkbPcaTolerance, new KeyValuePair<int, int>(0, 50) },
             { QualitySettingKeys.PkbNoDrawingReasonMin, new KeyValuePair<int, int>(5, 200) },
+            { QualitySettingKeys.PkbIncomingBulkSamples, new KeyValuePair<int, int>(1, 50) },
+            { QualitySettingKeys.PkbPcaBulkExtra, new KeyValuePair<int, int>(0, 50) },
         };
 
         public static bool TryGetBounds(string key, out int min, out int max)

@@ -61,6 +61,18 @@ namespace Services.NasbNiro.Quality
 
         public static int RequiredCount(CharLine line, decimal quantity) => RequiredCount(line.Class, line.SamplePercent, quantity);
 
+        private static readonly HashSet<string> BulkUnits = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "kg", "g", "gr", "ton", "t", "mt", "lb", "m", "mm", "cm", "km", "m2", "m3", "l", "lit", "ltr", "liter", "litre", "ml",
+            "کیلوگرم", "کیلو", "گرم", "تن", "متر", "سانتی‌متر", "میلی‌متر", "لیتر", "مترمربع", "متر مربع", "مترمکعب", "متر مکعب",
+        };
+
+        /// <summary>True for a bulk unit of measure (weight, length, volume): such a lot is sampled per lot, never per kilogram or metre.</summary>
+        public static bool IsBulkUnit(string unit) => !string.IsNullOrWhiteSpace(unit) && BulkUnits.Contains(unit.Trim());
+
+        /// <summary>The number of inspection units of a receipt: the pieces for a countable unit, the configured number of samples per lot (heat) for a bulk unit.</summary>
+        public static decimal InspectionUnits(string unit, decimal quantity, int samplesPerLot) => IsBulkUnit(unit) ? Math.Max(1, samplesPerLot) : quantity;
+
         public static string ClassText(CharClass c) => c == CharClass.Critical ? "بحرانی" : c == CharClass.Major ? "عمده" : "جزئی";
 
         public static string InstrumentText(EquipmentType t)
@@ -108,8 +120,9 @@ namespace Services.NasbNiro.Quality
             if (id.HasValue && id.Value > 0) return lines.FirstOrDefault(l => l.Id == id.Value);
             string k = Key(text);
             if (k.Length == 0) return null;
-            CharLine byNo = lines.FirstOrDefault(l => Key(l.No) == k);
-            if (byNo != null) return byNo;
+            List<CharLine> byNo = lines.Where(l => Key(l.No) == k).ToList();
+            if (byNo.Count == 1) return byNo[0];
+            if (byNo.Count > 1) return null; // the same balloon number on two drawings of the part: the inspector must pick by id
             List<CharLine> byName = lines.Where(l => Key(l.Name) == k).ToList();
             return byName.Count == 1 ? byName[0] : null;
         }
@@ -156,7 +169,7 @@ namespace Services.NasbNiro.Quality
         }
 
         /// <summary>The checks on one line of a list being written. Null when it is acceptable, otherwise the Persian reason. The minimum sampling of a critical / major characteristic is the company setting.</summary>
-        public static string LineProblem(string no, string name, decimal tolPlus, decimal tolMinus, CharClass cls, int samplePercent, int criticalMin, int majorMin, string rowText)
+        public static string LineProblem(string no, string name, decimal tolPlus, decimal tolMinus, CharClass cls, int samplePercent, int criticalMin, int majorMin, string rowText, int minorMin = 0)
         {
             if (string.IsNullOrWhiteSpace(no)) return rowText + "شماره مشخصه (بالن نقشه) را وارد کنید.";
             if (no.Trim().Length > 30) return rowText + "شماره مشخصه بیش از ۳۰ نویسه است.";
@@ -167,6 +180,7 @@ namespace Services.NasbNiro.Quality
             if (samplePercent < 0 || samplePercent > 100) return rowText + "درصد نمونه‌برداری باید بین ۰ و ۱۰۰ باشد.";
             if (cls == CharClass.Critical && samplePercent < criticalMin) return rowText + $"مشخصه بحرانی با کمتر از {criticalMin} درصد اندازه‌گیری نمی‌شود.";
             if (cls == CharClass.Major && samplePercent < majorMin) return rowText + $"مشخصه عمده با کمتر از {majorMin} درصد اندازه‌گیری نمی‌شود.";
+            if (cls == CharClass.Minor && samplePercent < minorMin) return rowText + $"مشخصه جزئی با کمتر از {minorMin} درصد (حداقل نمونه‌برداری تنظیم‌شده) ثبت نمی‌شود؛ کاهش آن فقط با تغییر دو نفره تنظیمات ممکن است.";
             return null;
         }
 
@@ -197,10 +211,12 @@ namespace Services.NasbNiro.Quality
         /// The configuration a first article covers: the in-force drawing revisions of the part (ids, sorted), the approved routing revision of the order and the BOM header of the project baseline.
         /// Any new released revision changes the text and so needs a new first article.
         /// </summary>
-        public static string Fingerprint(IEnumerable<int> drawingRevisionIds, int? routingRevisionId, int? bomHeaderId)
+        public static string Fingerprint(IEnumerable<int> drawingRevisionIds, int? routingRevisionId, int? bomHeaderId, IEnumerable<int> listIds = null, int? productBomId = null)
         {
             string d = string.Join(",", (drawingRevisionIds ?? Enumerable.Empty<int>()).Distinct().OrderBy(x => x));
-            return $"d:{d}|r:{routingRevisionId?.ToString(CultureInfo.InvariantCulture) ?? "-"}|b:{bomHeaderId?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+            string text = $"d:{d}|r:{routingRevisionId?.ToString(CultureInfo.InvariantCulture) ?? "-"}|b:{bomHeaderId?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+            if (listIds != null) text += "|l:" + string.Join(",", listIds.Distinct().OrderBy(x => x)) + "|p:" + (productBomId?.ToString(CultureInfo.InvariantCulture) ?? "-");
+            return text;
         }
 
         /// <summary>The persons: the one who measured, the QC person who accepts and the QA person who approves must be three different people. Null when allowed.</summary>

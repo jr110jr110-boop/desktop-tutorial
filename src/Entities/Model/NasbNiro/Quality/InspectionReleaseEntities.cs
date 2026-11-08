@@ -17,7 +17,8 @@ namespace Entities.Model.NasbNiro.Quality
 
     public enum FaiStatus { Open = 0, Measured = 1, QcAccepted = 2, Approved = 3, Rejected = 4, Voided = 5 }
 
-    public enum AsBuiltStatus { Current = 0, Superseded = 1 }
+    /// <summary>Pending: a re-issue asked by QA that waits for the approval of PMO or the CEO; Rejected: that request was refused (kept).</summary>
+    public enum AsBuiltStatus { Current = 0, Superseded = 1, Pending = 2, Rejected = 3 }
 
     /// <summary>
     /// The list of inspection characteristics of ONE drawing revision (EDMS revision). Prepared by engineering, checked and approved by a second person (maker-checker), released together with the

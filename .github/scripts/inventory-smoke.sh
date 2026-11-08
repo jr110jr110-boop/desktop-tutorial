@@ -1290,6 +1290,8 @@ pkb_nodraw_order() {
 # the line shape of a characteristic of a list: pkb_line NO NAME NOMINAL TOLPLUS TOLMINUS UNIT. All lines of the smoke are minor and not sampled, so an acceptance does not demand them (a first article demands every line).
 pkb_line() { jq -nc --arg no "$1" --arg name "$2" --argjson n "$3" --argjson p "$4" --argjson m "$5" --arg u "$6" '{no:$no,name:$name,nominal:$n,tolPlus:$p,tolMinus:$m,unit:$u,class:3,instrumentClass:99,samplePercent:0}'; }
 
+# the lists of the smoke are minor characteristics that an acceptance does not demand: a minor line below the company minimum sampling (10 percent) is refused, so the minimum is lowered for this run by the two-person route (the strict default 10 is registered on the safety profile)
+safety_set Quality Pkb.Char.SamplePercent.Minor 0; check "package b: the minimum sampling of a minor characteristic is lowered to 0 for the smoke run (second person approves)" '.success and .data.status == "Approved"'
 # the bolt (used by the quality section below) gets a released drawing with its characteristic list: the bore and the thread that the records below measure (minor, not sampled: an acceptance does not demand them)
 pkb_drawing "$BOLT" "PKB-DWG-BOLT" "$( { pkb_line 1 Bore 100 0.05 0.05 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )"; PKBBOLTLIST=$PKBLIST; PKBBOLTREV=$PKBREV
 # --- B. calibration and measuring equipment
@@ -11706,7 +11708,7 @@ as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBBOLTLIST"; check "pkb: ver
 as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the part answers with its drawing and the released lines of version 2 (the bore tolerance is 0.06)" '.success and .data.hasDrawing == true and .data.hasReleasedList == true and (.data.lines|length) == 2 and ([.data.lines[]|select(.name == "Bore")][0].tolPlus) == 0.06'
 # the pick: the inspector chooses a characteristic of the list and types the measured value; the nominal and the tolerances are the list's, pass is computed on the server
 as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristic\":\"Hole\",\"nominal\":5,\"tolPlus\":1,\"tolMinus\":1,\"measured\":5,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; nomsg "pkb: a characteristic that is not on the drawing list is refused" "در فهرست مشخصه‌های نقشه این قطعه نیست"
-as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; PKBBORE=$(val '[.data.lines[]|select(.name == "Bore")][0].id')
+as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the released lines of the bolt are read again for the id of the bore" '.success and (.data.lines|length) == 2'; PKBBORE=$(val '[.data.lines[]|select(.name == "Bore")][0].id')
 as "$QC_TOKEN" POST quality/records "{\"type\":3,\"workOrderId\":$WO2,\"itemId\":$BOLT,\"quantity\":1,\"result\":1,\"measurements\":[{\"characteristicId\":$PKBBORE,\"characteristic\":\"Bore\",\"nominal\":100,\"tolPlus\":9,\"tolMinus\":9,\"measured\":100.2,\"unit\":\"mm\",\"equipmentId\":$G4}]}"; nomsg "pkb: the tolerance typed by the client is ignored: 100.2 is out of the 0.06 of the list, so it cannot be accepted" "خارج از تلرانس"
 # a part with a critical and a major characteristic: an acceptance needs both, the instrument class of the list is checked
 item PKBP '{"code":"66.10.00.001.1","title":"قطعه آزمون بسته ب","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkb: the part with a critical and a major characteristic"
@@ -11743,9 +11745,14 @@ as "$QC_TOKEN" GET "quality/first-articles?ItemId=$MFPA"; check "pkb: one first 
 as "$QC_TOKEN" GET "quality/as-built?WorkOrderId=$WO1"; check "pkb: the release of work order 1 issued one as-built record (the lot line of the 5 bolts), version 1, current" '.success and .data.totalItems == 1 and .data.data[0].itemId == '"$BOLT"' and .data.data[0].version == 1 and .data.data[0].status == 0 and (.data.data[0].sha256|length) == 64'
 PKBAB=$(val '.data.data[0].id')
 as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: the stored snapshot hashes to the recorded SHA-256" '.success and .data.hashOk == true and .data.recomputedSha256 == .data.sha256'
-as "$QC_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; no "pkb: only the QA manager re-issues an as-built record"
+as "$QC_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; no "pkb: only the QA manager asks for a re-issue of an as-built record"
 as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"x\"}"; no "pkb: a re-issue needs a real reason"
-as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; check "pkb: the QA manager re-issues it: version 2 is current" '.success and .data.version == 2 and .data.status == 0 and .data.hashOk == true'
+as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"اصلاح پیکربندی پس از بازبینی\"}"; check "pkb: the QA manager asks for a re-issue: version 2 waits (Pending) and version 1 stays in force" '.success and .data.version == 2 and .data.status == 2 and .data.hashOk == true'
+PKBAB2=$(val .data.id)
+as "$QA_TOKEN" POST quality/as-built/reissue "{\"id\":$PKBAB,\"reason\":\"درخواست دوم برای همین واحد\"}"; nomsg "pkb: one re-issue request per unit at a time" "در انتظار تایید"
+as "$QA_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":true}"; no "pkb: the QA manager who asked cannot approve his own request (and QA is not an approver)"
+as "$ADMIN_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":false}"; nomsg "pkb: a refusal of the re-issue needs a note" "دلیل رد"
+as "$ADMIN_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approve\":true,\"note\":\"تایید\"}"; check "pkb: the PMO approves the re-issue: version 2 is current" '.success and .data.version == 2 and .data.status == 0 and .data.hashOk == true'
 as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: version 1 is Superseded and untouched (its hash still matches)" '.success and .data.status == 1 and .data.hashOk == true and (.data.versions|length) == 2'
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "pkb: the physical configuration audit is a release check and passes for a work order without a project BOM baseline" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")|.passed][0]) == true'
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/data-book"; check "pkb: the data book has section 12 with the current as-built record (the re-issued version)" '.success and ([.data.sections[]|select(.no == 12)|.entries|length][0]) == 1'

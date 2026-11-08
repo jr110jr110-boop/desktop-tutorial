@@ -34,27 +34,50 @@ namespace Services.NasbNiro.Quality
     /// </summary>
     public static class PhysicalConfigurationAudit
     {
-        public static async Task<PcaResult> RunAsync(IUnitOfWork uow, int workOrderId, CancellationToken ct)
+        public static async Task<PcaResult> RunAsync(IUnitOfWork uow, int workOrderId, CancellationToken ct, int? releaseNoteId = null)
         {
             var result = new PcaResult();
             Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(uow, ct);
             if (st[QualitySettingKeys.PkbPcaEnabled] < 1) { result.NotApplicableReason = "ممیزی پیکربندی فیزیکی در تنظیمات غیرفعال است."; return result; }
+            bool isProject = await uow.Set<Entities.Model.NasbNiro.ProjectControl.PcWorkOrderInfo>().AsNoTracking().AnyAsync(i => i.WorkOrderId == workOrderId && !i.Deleted, ct);
             PbProjectBaseline baseline = await uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => b.WorkOrderId == workOrderId && b.IsCurrent && !b.Deleted).OrderByDescending(b => b.Id).FirstOrDefaultAsync(ct);
-            if (baseline == null) { result.NotApplicableReason = "برای این دستور کار BOM پروژه (baseline) ساخته نشده است."; return result; }
+            if (baseline == null)
+            {
+                if (!isProject)
+                {
+                    result.NotApplicableReason = "اعمال نمی‌شود: این دستور کار پروژه‌ای نیست (ساخت برای موجودی انبار) و BOM پروژه ندارد.";
+                    return result;
+                }
+                // H3: a project work order without its BOM baseline cannot be audited, so it cannot be released
+                result.Applicable = true;
+                result.Lines.Add(new PcaLineDto { PartNumber = "-", PartName = "BOM پروژه", Problem = "برای این دستور کار پروژه‌ای BOM پروژه (baseline) ساخته نشده است؛ ممیزی پیکربندی فیزیکی ممکن نیست و ترخیص مسدود است." });
+                return result;
+            }
             result.Applicable = true;
             decimal tolerance = st[QualitySettingKeys.PkbPcaTolerance] / 100m;
+            decimal bulkExtra = st[QualitySettingKeys.PkbPcaBulkExtra] / 100m;
 
             List<PbProjectBomLine> all = await uow.Set<PbProjectBomLine>().AsNoTracking().Where(l => l.BaselineId == baseline.Id && !l.Deleted && !l.IsRemoved && !l.IsHeading).ToListAsync(ct);
-            var parents = new HashSet<int>(all.Where(l => l.ParentLineId.HasValue).Select(l => l.ParentLineId.Value));
-            List<PbProjectBomLine> leaves = all.Where(l => !parents.Contains(l.Id) && l.TotalQty > 0).ToList();
-            if (leaves.Count == 0) return result;
+            var byId = all.ToDictionary(l => l.Id);
+            List<PbProjectBomLine> lines = all.Where(l => l.TotalQty > 0).ToList();
+            if (lines.Count == 0) return result;
+
+            // the units of the product released so far (this note included): the audit is done per released unit, cumulative over the partial deliveries of the work order
+            int? productItemId = await uow.Set<PbBomHeader>().AsNoTracking().Where(h => h.Id == baseline.BomHeaderId).Select(h => h.ProductItemId).FirstOrDefaultAsync(ct);
+            decimal unitsFactor = 1m;
+            if (productItemId.HasValue && baseline.Count > 0)
+            {
+                decimal units = await uow.Set<ReleaseNoteLine>().AsNoTracking().Where(l => l.ItemId == productItemId.Value && l.ReleaseNote.WorkOrderId == workOrderId && !l.ReleaseNote.Deleted
+                    && (l.ReleaseNote.Status == ReleaseNoteStatus.Released || (releaseNoteId.HasValue && l.ReleaseNoteId == releaseNoteId.Value))).SumAsync(l => (decimal?)l.Quantity, ct) ?? 0m;
+                if (units > 0m) unitsFactor = Math.Min(units, baseline.Count) / baseline.Count;
+            }
 
             // the items of the lines: by id, else by part number (the part number of the item or its code)
-            List<string> partNumbers = leaves.Where(l => !l.ItemId.HasValue && l.PartNumber != null).Select(l => l.PartNumber.Trim()).Distinct().ToList();
-            var byPart = (await uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && (partNumbers.Contains(i.PartNumber) || partNumbers.Contains(i.Code))).Select(i => new { i.Id, i.PartNumber, i.Code }).ToListAsync(ct))
-                .ToList();
+            List<string> partNumbers = all.Where(l => !l.ItemId.HasValue && l.PartNumber != null).Select(l => l.PartNumber.Trim()).Distinct().ToList();
+            var byPart = (await uow.Set<InventoryItem>().AsNoTracking().Where(i => !i.Deleted && (partNumbers.Contains(i.PartNumber) || partNumbers.Contains(i.Code))).Select(i => new { i.Id, i.PartNumber, i.Code }).ToListAsync(ct)).ToList();
             int? ItemOf(PbProjectBomLine l)
             {
+                if (l == null) return null;
                 if (l.ItemId.HasValue) return l.ItemId;
                 string p = l.PartNumber?.Trim();
                 if (p == null) return null;
@@ -62,18 +85,33 @@ namespace Services.NasbNiro.Quality
                 return hit?.Id;
             }
 
-            Dictionary<int, decimal> actual = await InstalledQuantitiesAsync(uow, workOrderId, ct);
+            // what really happened, level by level: the genealogy of the production orders (input -> output) and the installed assembly links (child serial or lot -> parent serial)
+            List<int> orderIds = await uow.Set<MfProductionOrder>().AsNoTracking().Where(o => o.WorkOrderId == workOrderId && !o.Deleted && o.Status != MfOrderStatus.Cancelled).Select(o => o.Id).ToListAsync(ct);
+            var genealogy = orderIds.Count == 0 ? new List<(int Output, int Input, decimal Qty)>()
+                : (await uow.Set<GenealogyLink>().AsNoTracking().Where(g => !g.Deleted && orderIds.Contains(g.ProductionOrderId)).Select(g => new { g.OutputItemId, g.InputItemId, g.Quantity }).ToListAsync(ct))
+                    .Select(g => (Output: g.OutputItemId, Input: g.InputItemId, Qty: g.Quantity)).ToList();
+            var installed = (await uow.Set<AssemblyLink>().AsNoTracking().Where(a => !a.Deleted && a.WorkOrderId == workOrderId && a.RemovedAt == null)
+                .Select(a => new { Parent = (int?)a.ParentSerialUnit.ItemId, Child = a.ChildSerialUnit != null ? (int?)a.ChildSerialUnit.ItemId : (a.ChildLot != null ? (int?)a.ChildLot.ItemId : null), a.Quantity }).ToListAsync(ct))
+                .Where(a => a.Child.HasValue).Select(a => (Parent: a.Parent ?? 0, Child: a.Child.Value, Qty: a.Quantity > 0 ? a.Quantity : 1m)).ToList();
 
-            // approved substitutes (a stand-in item counts for the original at its ratio)
-            List<int> itemIds = leaves.Select(ItemOf).Where(i => i.HasValue).Select(i => i.Value).Distinct().ToList();
+            List<int> itemIds = lines.Select(ItemOf).Where(i => i.HasValue).Select(i => i.Value).Distinct().ToList();
             List<ItemSubstitute> subs = await uow.Set<ItemSubstitute>().AsNoTracking().Where(s => !s.Deleted && s.Status == SubstituteStatus.Approved && itemIds.Contains(s.ItemId)
                 && (s.Scope == SubstituteScope.Global || s.WorkOrderId == workOrderId)).ToListAsync(ct);
+            var stockUnits = await uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id)).Select(i => new { i.Id, i.Unit }).ToDictionaryAsync(i => i.Id, i => i.Unit, ct);
+            List<ItemUnitConversion> conversions = await uow.Set<ItemUnitConversion>().AsNoTracking().Where(c => !c.Deleted && c.IsActive && (c.ItemId == null || itemIds.Contains(c.ItemId.Value))).ToListAsync(ct);
+            List<int> srcIds = lines.Where(l => l.SourceLineId.HasValue).Select(l => l.SourceLineId.Value).Distinct().ToList();
+            var scrap = srcIds.Count == 0 ? new Dictionary<int, decimal>()
+                : (await uow.Set<PbBomLine>().AsNoTracking().Where(l => srcIds.Contains(l.Id)).Select(l => new { l.Id, l.ScrapFactor, l.NetWeight, l.GrossWeight }).ToListAsync(ct))
+                    .ToDictionary(l => l.Id, l => l.ScrapFactor ?? (l.NetWeight.HasValue && l.NetWeight.Value > 0 && l.GrossWeight.HasValue ? Math.Max(0m, l.GrossWeight.Value / l.NetWeight.Value - 1m) : 0m));
 
-            foreach (var group in leaves.GroupBy(l => ItemOf(l)?.ToString(CultureInfo.InvariantCulture) ?? "p:" + (l.PartNumber ?? "").Trim().ToUpperInvariant()))
+            foreach (var group in lines.GroupBy(l => (ItemOf(l)?.ToString(CultureInfo.InvariantCulture) ?? "p:" + (l.PartNumber ?? "").Trim().ToUpperInvariant()) + "|" + (l.ParentLineId.HasValue ? ItemOf(byId.TryGetValue(l.ParentLineId.Value, out PbProjectBomLine pl) ? pl : null)?.ToString(CultureInfo.InvariantCulture) ?? "?" : "top")))
             {
                 PbProjectBomLine first = group.First();
                 int? itemId = ItemOf(first);
-                decimal required = group.Sum(l => l.TotalQty);
+                PbProjectBomLine parentLine = first.ParentLineId.HasValue && byId.TryGetValue(first.ParentLineId.Value, out PbProjectBomLine pp) ? pp : null;
+                int? parentItem = parentLine != null ? ItemOf(parentLine) : productItemId;
+                decimal required = group.Sum(l => l.TotalQty) * unitsFactor;
+                bool bulk = CharacteristicRules.IsBulkUnit(first.Unit);
                 var line = new PcaLineDto { PartNumber = first.PartNumber ?? "-", PartName = first.PartName, Required = required };
                 if (!itemId.HasValue)
                 {
@@ -81,17 +119,46 @@ namespace Services.NasbNiro.Quality
                     result.Lines.Add(line);
                     continue;
                 }
-                decimal found = actual.TryGetValue(itemId.Value, out decimal own) ? own : 0m;
-                foreach (ItemSubstitute s in subs.Where(x => x.ItemId == itemId.Value))
-                    if (actual.TryGetValue(s.SubstituteItemId, out decimal viaSub) && s.Ratio > 0) found += viaSub / s.Ratio;
+                IEnumerable<int> alternatives = new[] { itemId.Value }.Concat(subs.Where(x => x.ItemId == itemId.Value).Select(x => x.SubstituteItemId));
+                decimal found = 0m;
+                foreach (int alt in alternatives)
+                {
+                    decimal ratio = alt == itemId.Value ? 1m : subs.First(x => x.ItemId == itemId.Value && x.SubstituteItemId == alt).Ratio;
+                    if (ratio <= 0m) continue;
+                    decimal g = genealogy.Where(x => x.Input == alt && (!parentItem.HasValue || x.Output == parentItem.Value)).Sum(x => x.Qty);
+                    if (!parentItem.HasValue || g == 0m) g = genealogy.Where(x => x.Input == alt && !parentItem.HasValue).Sum(x => x.Qty);
+                    decimal a = installed.Where(x => x.Child == alt && (!parentItem.HasValue || x.Parent == parentItem.Value)).Sum(x => x.Qty);
+                    decimal one = bulk ? g : Math.Max(g, a); // the genealogy and the assembly link record the same event for a counted part
+                    if (bulk && alt == itemId.Value && stockUnits.TryGetValue(alt, out string su) && !SameUnit(su, first.Unit))
+                    {
+                        decimal? factor = ConversionFactor(conversions, alt, su, first.Unit);
+                        if (!factor.HasValue) { line.Problem = $"تبدیل واحد {su} به {first.Unit} برای این ماده تعریف نشده است؛ مقایسه با BOM ممکن نیست."; break; }
+                        one *= factor.Value;
+                    }
+                    found += one / ratio;
+                }
+                if (line.Problem != null) { result.Lines.Add(line); continue; }
                 line.Found = found;
-                decimal low = required * (1m - tolerance), high = required * (1m + tolerance);
-                if (found <= 0m) line.Problem = $"هیچ بچ یا سریالی از این قطعه در شجره‌نامه ساخت ثبت نشده است (لازم: {CharacteristicRules.Num(required)}).";
-                else if (found < low) line.Problem = $"مقدار نصب/مصرف‌شده کمتر از BOM است (لازم: {CharacteristicRules.Num(required)}، یافت‌شده: {CharacteristicRules.Num(found)}).";
-                else if (found > high) line.Problem = $"مقدار نصب/مصرف‌شده بیشتر از BOM است (لازم: {CharacteristicRules.Num(required)}، یافت‌شده: {CharacteristicRules.Num(found)}).";
+                decimal allowance = bulk ? (first.SourceLineId.HasValue && scrap.TryGetValue(first.SourceLineId.Value, out decimal sc) ? sc : 0m) + bulkExtra : tolerance;
+                line.Problem = PcaRules.Judge(required, found, tolerance, allowance, bulk);
                 result.Lines.Add(line);
             }
             return result;
+        }
+
+        private static bool SameUnit(string a, string b) => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>The factor that turns a quantity in <paramref name="from"/> into <paramref name="to"/> (item-specific conversions first, then the general ones; the reverse conversion is used inverted). Null when none is defined.</summary>
+        private static decimal? ConversionFactor(List<ItemUnitConversion> all, int itemId, string from, string to)
+        {
+            foreach (var scope in new[] { all.Where(c => c.ItemId == itemId), all.Where(c => c.ItemId == null) })
+            {
+                ItemUnitConversion direct = scope.FirstOrDefault(c => SameUnit(c.FromUnit, from) && SameUnit(c.ToUnit, to) && c.Factor > 0);
+                if (direct != null) return direct.Factor;
+                ItemUnitConversion reverse = scope.FirstOrDefault(c => SameUnit(c.FromUnit, to) && SameUnit(c.ToUnit, from) && c.Factor > 0);
+                if (reverse != null) return 1m / reverse.Factor;
+            }
+            return null;
         }
 
         /// <summary>The quantity of every item that went into the work order: the genealogy links of its production orders, or the installed assembly links, whichever is larger (the two record the same event).</summary>
@@ -116,6 +183,25 @@ namespace Services.NasbNiro.Quality
         }
     }
 
+    /// <summary>The pure judgement of one line of the physical configuration audit.</summary>
+    public static class PcaRules
+    {
+        /// <summary>
+        /// A counted part: the quantity found must equal the BOM within <paramref name="countTolerance"/> (zero by default). A bulk material (kg, m, l...): never less than the BOM quantity (less than the BOM allowance means
+        /// the piece was made of something else) and at most the BOM quantity plus <paramref name="bulkAllowance"/> (the scrap allowance of the BOM line).
+        /// </summary>
+        public static string Judge(decimal required, decimal found, decimal countTolerance, decimal bulkAllowance, bool bulk)
+        {
+            string R(decimal v) => CharacteristicRules.Num(Math.Round(v, 4));
+            if (found <= 0m) return $"هیچ بچ یا سریالی از این قطعه در شجره‌نامه ساخت ثبت نشده است (لازم: {R(required)}).";
+            decimal low = required * (1m - countTolerance);
+            decimal high = bulk ? required * (1m + bulkAllowance) : required * (1m + countTolerance);
+            if (found < low) return $"مقدار نصب/مصرف‌شده کمتر از BOM است (لازم: {R(required)}، یافت‌شده: {R(found)}).";
+            if (found > high) return $"مقدار نصب/مصرف‌شده بیشتر از BOM{(bulk ? " و ضایعات مجاز آن" : string.Empty)} است (لازم: {R(required)}، یافت‌شده: {R(found)}).";
+            return null;
+        }
+    }
+
     /// <summary>Builds the as-built snapshot of a released unit (JSON + SHA-256). The record is immutable; a correction is a new version.</summary>
     public static class AsBuiltBuilder
     {
@@ -129,12 +215,12 @@ namespace Services.NasbNiro.Quality
         /// Issues the as-built records of a released note: one per serial number, one per lot line. An earlier current record of the same unit becomes Superseded (version + 1, with the reason).
         /// Everything is added to the unit of work; the caller saves.
         /// </summary>
-        public static async Task<List<AsBuiltRecord>> IssueAsync(IUnitOfWork uow, ReleaseNote note, WorkOrder wo, string reason, DateTimeOffset now, int userId, CancellationToken ct, int? onlyItemId = null, string onlySerial = null)
+        public static async Task<List<AsBuiltRecord>> IssueAsync(IUnitOfWork uow, ReleaseNote note, WorkOrder wo, string reason, DateTimeOffset now, int userId, CancellationToken ct, int? onlyItemId = null, string onlySerial = null, bool pending = false)
         {
             var created = new List<AsBuiltRecord>();
             List<ReleaseNoteLine> lines = await uow.Set<ReleaseNoteLine>().AsNoTracking().Include(l => l.Item).Where(l => l.ReleaseNoteId == note.Id).OrderBy(l => l.RowNumber).ToListAsync(ct);
             PbProjectBaseline baseline = await uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => b.WorkOrderId == wo.Id && b.IsCurrent && !b.Deleted).OrderByDescending(b => b.Id).FirstOrDefaultAsync(ct);
-            PcaResult pca = await PhysicalConfigurationAudit.RunAsync(uow, wo.Id, ct);
+            PcaResult pca = await PhysicalConfigurationAudit.RunAsync(uow, wo.Id, ct, note.Id);
             List<AsBuiltDeviationDto> deviations = await DeviationsAsync(uow, wo.Id, baseline, ct);
             List<AsBuiltNcrDto> ncrs = (await uow.Set<NonConformance>().AsNoTracking().Where(n => n.WorkOrderId == wo.Id && !n.Deleted && n.Status != NcrStatus.Cancelled).OrderBy(n => n.Id).ToListAsync(ct))
                 .Select(n => new AsBuiltNcrDto { Number = n.Number, Status = n.Status.ToString(), Disposition = n.Disposition.ToString(), ConcessionApproved = ConcessionRules.IsValid(n, false) }).ToList();
@@ -197,10 +283,10 @@ namespace Services.NasbNiro.Quality
                     string json = Serialize(snap);
                     AsBuiltRecord current = await uow.Set<AsBuiltRecord>().FirstOrDefaultAsync(r => !r.Deleted && r.WorkOrderId == wo.Id && r.ItemId == line.ItemId && r.SerialNumber == serial && r.Status == AsBuiltStatus.Current, ct);
                     int version = (await uow.Set<AsBuiltRecord>().Where(r => r.WorkOrderId == wo.Id && r.ItemId == line.ItemId && r.SerialNumber == serial).Select(r => (int?)r.Version).MaxAsync(ct) ?? 0) + 1;
-                    if (current != null) { current.Status = AsBuiltStatus.Superseded; current.SupersededByVersion = version; }
+                    if (current != null && !pending) { current.Status = AsBuiltStatus.Superseded; current.SupersededByVersion = version; }
                     var record = new AsBuiltRecord
                     {
-                        WorkOrderId = wo.Id, ReleaseNoteId = note.Id, ItemId = line.ItemId, SerialNumber = serial, Version = version, Status = AsBuiltStatus.Current,
+                        WorkOrderId = wo.Id, ReleaseNoteId = note.Id, ItemId = line.ItemId, SerialNumber = serial, Version = version, Status = pending ? AsBuiltStatus.Pending : AsBuiltStatus.Current,
                         Reason = version == 1 ? null : reason, ProductCode = line.Item.Code, BomText = baseline == null ? null : $"{baseline.SourceBomCode} بازنگری {baseline.SourceBomRevision}",
                         SnapshotJson = json, Sha256 = CharacteristicRules.Sha256Hex(json), CreateDate = now, ModifyDate = now, CreatorUserId = userId, ModifierUserId = userId,
                     };

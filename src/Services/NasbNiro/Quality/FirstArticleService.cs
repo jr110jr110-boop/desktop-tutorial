@@ -54,7 +54,8 @@ namespace Services.NasbNiro.Quality
                 .Where(s => !s.Deleted && s.FirstArticleRequired && templateIds.Contains(s.OperationTemplateId)).Select(s => s.OperationTemplateId).ToListAsync(ct);
             MfOperation flaggedOp = chain.FirstOrDefault(o => o.OperationTemplateId.HasValue && flaggedTemplates.Contains(o.OperationTemplateId.Value));
             ResolvedCharacteristics resolved = await CharacteristicResolver.ForItemAsync(uow, order.ItemId.Value, null, ct);
-            bool onNewRevision = st[QualitySettingKeys.PkbFaiOnNewRevision] >= 1 && resolved.HasList;
+            // H2: a part with a drawing in force always gets its first article after a new revision; a missing list is a refusal (below), never a way out
+            bool onNewRevision = st[QualitySettingKeys.PkbFaiOnNewRevision] >= 1 && resolved.HasDrawing;
             if (flaggedOp == null && !onNewRevision) return req;
 
             var item = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == order.ItemId.Value).Select(i => new { i.Id, i.Code, i.PartNumber }).FirstAsync(ct);
@@ -62,16 +63,20 @@ namespace Services.NasbNiro.Quality
             if (!resolved.HasList)
             {
                 req.Required = true;
-                req.Problem = $"مرحله «{flaggedOp.Title}» نمونه اول لازم دارد اما برای نقشه این قطعه فهرست مشخصه‌های منتشرشده وجود ندارد؛ مهندسی باید فهرست را منتشر کند.";
+                req.Problem = (flaggedOp != null ? $"مرحله «{flaggedOp.Title}» نمونه اول لازم دارد" : "این قطعه نقشه منتشرشده دارد و نمونه اول لازم است") + " اما برای نقشه آن فهرست مشخصه‌های منتشرشده وجود ندارد؛ مهندسی باید فهرست مشخصه‌ها (یا فهرست خالی با دلیل) را تهیه و منتشر کند.";
                 req.Trigger = "گام نمونه اول";
                 return req;
             }
             PbProjectBaseline baseline = await uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => b.WorkOrderId == order.WorkOrderId && b.IsCurrent && !b.Deleted).OrderByDescending(b => b.Id).FirstOrDefaultAsync(ct);
             int? routingRevision = order.RoutingRevisionId == null ? null : await uow.Set<MfRoutingRevision>().AsNoTracking().Where(r => r.Id == order.RoutingRevisionId).Select(r => (int?)r.Revision).FirstOrDefaultAsync(ct);
-            req.Fingerprint = FaiRules.Fingerprint(resolved.Drawings.Select(d => d.RevisionId), order.RoutingRevisionId, baseline?.BomHeaderId);
+            // M3: the list versions are part of the configuration (a version 2 of a list on the same drawing revision needs a new first article), and so is the product BOM of an order without a project baseline
+            int? productBomId = baseline != null ? (int?)null : await uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductItemId == order.ItemId && (h.Status == PbBomStatus.Released || h.Status == PbBomStatus.Approved))
+                .OrderByDescending(h => h.Id).Select(h => (int?)h.Id).FirstOrDefaultAsync(ct);
+            req.Fingerprint = FaiRules.Fingerprint(resolved.Drawings.Select(d => d.RevisionId), order.RoutingRevisionId, baseline?.BomHeaderId, resolved.Lists.Select(l => l.Id), productBomId);
             req.FingerprintText = "نقشه: " + string.Join("، ", resolved.Drawings.Select(d => $"{d.Number} بازنگری {d.RevisionCode}"))
                 + " | مسیر ساخت: " + (routingRevision.HasValue ? "بازنگری " + routingRevision : "—")
-                + " | BOM: " + (baseline == null ? "—" : $"{baseline.SourceBomCode} بازنگری {baseline.SourceBomRevision}");
+                + " | BOM: " + (baseline == null ? (productBomId.HasValue ? "BOM محصول " + productBomId : "—") : $"{baseline.SourceBomCode} بازنگری {baseline.SourceBomRevision}")
+                + " | فهرست مشخصه‌ها: " + (resolved.Lists.Count == 0 ? "—" : string.Join("، ", resolved.Lists.Select(l => $"نسخه {l.Version}")));
             req.ListId = resolved.ListId;
             req.Trigger = flaggedOp != null ? $"مرحله «{flaggedOp.Title}» نمونه اول لازم دارد" : "اولین دستور پس از بازنگری تازه نقشه، BOM یا مسیر ساخت";
             req.Satisfying = await uow.Set<QcFirstArticle>().AsNoTracking().FirstOrDefaultAsync(f => !f.Deleted && f.ItemId == item.Id && f.Fingerprint == req.Fingerprint && f.Status == FaiStatus.Approved, ct);
@@ -113,12 +118,19 @@ namespace Services.NasbNiro.Quality
         /// <summary>
         /// Null when the operation may start or finish. Operations after the first article point (and the last operation when it is the point itself) wait for the approved first article.
         /// </summary>
-        public static async Task<string> OperationProblemAsync(IUnitOfWork uow, MfProductionOrder order, MfOperation op, CancellationToken ct)
+        public static async Task<string> OperationProblemAsync(IUnitOfWork uow, MfProductionOrder order, MfOperation op, CancellationToken ct, decimal reportedQuantity = 0m)
         {
             if (order == null || op == null || op.IsRework) return null;
             List<MfOperation> ops = await uow.Set<MfOperation>().AsNoTracking().Where(o => o.OrderId == order.Id && !o.Deleted).ToListAsync(ct);
             FaiRequirement req = await EvaluateAsync(uow, order, ops, ct);
-            if (!req.Required || !req.PointSequence.HasValue) return null;
+            if (!req.Required) return null;
+            // M5: until the first article is approved only the first article quantity (one piece) moves on any step of the order
+            if (reportedQuantity > 1m)
+            {
+                QcFirstArticle pending = await uow.Set<QcFirstArticle>().AsNoTracking().Where(f => !f.Deleted && f.ProductionOrderId == order.Id && f.Status != FaiStatus.Voided && f.Status != FaiStatus.Rejected).OrderByDescending(f => f.Id).FirstOrDefaultAsync(ct);
+                return $"تا تایید نمونه اول{(pending == null ? string.Empty : " " + pending.Number)} فقط یک قطعه (مقدار نمونه اول) گزارش می‌شود؛ مقدار بیشتر پس از تایید QA ثبت می‌شود.";
+            }
+            if (!req.PointSequence.HasValue) return null;
             List<MfOperation> chain = MfFlow.Chain(ops).Where(o => !o.IsRework).ToList();
             bool last = chain.Count > 0 && chain[chain.Count - 1].Id == op.Id;
             if (op.Sequence > req.PointSequence.Value || (last && op.Sequence == req.PointSequence.Value))
@@ -291,7 +303,7 @@ namespace Services.NasbNiro.Quality
             };
             // a first article needs every characteristic of the list measured at least once; a value outside its tolerance is a reject (and a non-conformance), not an acceptance
             ResolvedCharacteristics resolved = await CharacteristicResolver.ForItemAsync(_uow, f.ItemId, null, ct);
-            if (!resolved.HasList) return Bad<FaiDto>("فهرست مشخصه‌های منتشرشده این قطعه موجود نیست.");
+            if (!resolved.HasLines) return Bad<FaiDto>("فهرست مشخصه‌های منتشرشده این قطعه موجود نیست یا مشخصه‌ای ندارد.");
             bool anyFail = dto.Measurements.Any(m =>
             {
                 CharLine l = resolved.Lines.FirstOrDefault(x => x.Id == m.CharacteristicId);

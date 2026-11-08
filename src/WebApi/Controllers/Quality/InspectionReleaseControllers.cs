@@ -156,5 +156,8 @@ namespace WebApi.Controllers
 
         [HttpPost("reissue")]
         public async Task<IActionResult> ReissueAsync([FromBody] ReissueAsBuiltDto dto, CancellationToken ct) => Ok(await _service.ReissueAsync(dto, ct));
+
+        [HttpPost("reissue/decide")]
+        public async Task<IActionResult> DecideReissueAsync([FromBody] DecideAsBuiltDto dto, CancellationToken ct) => Ok(await _service.DecideReissueAsync(dto, ct));
     }
 }

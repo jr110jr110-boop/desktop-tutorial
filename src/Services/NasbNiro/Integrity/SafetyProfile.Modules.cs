@@ -60,6 +60,8 @@ namespace Services.NasbNiro.Integrity
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbSampleMajor, Kind = SafetyKind.NumberAtLeast, Strict = "100", Min = 1, Max = 100, Title = "حداقل نمونه‌برداری مشخصه عمده (درصد)" });
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbSampleMinor, Kind = SafetyKind.NumberAtLeast, Strict = "10", Min = 0, Max = 100, Title = "حداقل نمونه‌برداری مشخصه جزئی (درصد)" });
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbNoDrawingReasonMin, Kind = SafetyKind.NumberAtLeast, Strict = "15", Min = 5, Max = 200, Title = "حداقل نویسه دلیل پرچم «بدون نقشه»" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbIncomingBulkSamples, Kind = SafetyKind.NumberAtLeast, Strict = "1", Min = 1, Max = 50, Title = "حداقل نمونه بازرسی ورودی هر بچ انبوه" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbPcaBulkExtra, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 50, Title = "رواداری افزوده بر ضایعات BOM در ممیزی پیکربندی (درصد)" });
 
             // PB8: the gates of the operational data control and of the engineering readiness (the lists are the module's own catalogs, so a new rule is covered at once)
             list.AddRange(OpsSpecs());
