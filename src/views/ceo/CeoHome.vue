@@ -19,6 +19,7 @@ import CeoAssistantDrawer from "@/components/ceo/CeoAssistantDrawer.vue";
 import CeoCatalogue from "@/components/ceo/CeoCatalogue.vue";
 import CeoDrillPanel from "@/components/ceo/CeoDrillPanel.vue";
 import CeoIcon from "@/components/ceo/CeoIcon.vue";
+import IntegrityLight from "@/components/integrity/IntegrityLight.vue";
 import CeoKpiCluster from "@/components/ceo/CeoKpiCluster.vue";
 import CeoPulse from "@/components/ceo/CeoPulse.vue";
 import CeoSectionPanel from "@/components/ceo/CeoSection.vue";
@@ -492,6 +493,7 @@ onBeforeUnmount(() => {
         <button aria-label="چاپ" class="ceo-icon-btn" title="چاپ (A4)" type="button" @click="printPage"><CeoIcon name="print" /></button>
       </div>
     </header>
+    <IntegrityLight />
 
     <!-- the morning line and the daily brief -->
     <section id="ceo-morning" :class="{ 'no-brief': !canBrief }" aria-label="خلاصه‌ی امروز" class="ceo-morning">

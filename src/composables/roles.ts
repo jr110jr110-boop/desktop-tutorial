@@ -526,3 +526,12 @@ export const TraceRoles = {
 export const DashboardRoles = {
   any: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,AUDITOR,WAREHOUSE,WHSUPERVISOR,QC,QA,ENGINEERING,ENGINEER,CONSTRUCTION,ASSEMBLER,PRODUCTIONMANAGER,SHOPSUPERVISOR,HR,HRMANAGER"),
 };
+
+/** Package D «سلامت سوابق» (IntegrityRoles in the API): the history of the chain checks, the restore test and the strict production profile. */
+export const IntegrityRoles = {
+  readers: list("PMO,CEO,QA,AUDITOR,FINANCEMANAGER"),
+  /** the profile page is also read by the heads of planning and procurement (their own settings are in it) */
+  profile: list("PMO,CEO,QA,AUDITOR,FINANCEMANAGER,PLANNING,PROCUREMENT"),
+  /** the second person who approves a change of a security-relevant setting */
+  approvers: list("PMO,CEO"),
+};

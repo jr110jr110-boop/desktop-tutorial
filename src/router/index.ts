@@ -5,7 +5,7 @@ import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
-import { AccountRoles, AiRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, currentRole, DashboardRoles, FinanceRoles, IntegrityRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -21,6 +21,9 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import("@/views/Login.vue"),
   },
   // CEO executive dashboard (release D1): the whole company in one place, the detail tables and the AI analysis; the CEO lands here after login (see beforeEach)
+  // Package D: «سلامت سوابق» (chain checks, restore test) and «پروفایل سخت‌گیرانه تولید» (security-relevant settings, two-person change)
+  { path: "/integrity", name: "Integrity", component: () => import("@/views/integrity/Integrity.vue"), meta: { roles: IntegrityRoles.readers } },
+  { path: "/integrity/safety", name: "SafetyProfile", component: () => import("@/views/integrity/SafetyProfile.vue"), meta: { roles: IntegrityRoles.profile } },
   { path: "/ceo", name: "CeoHome", component: () => import("@/views/ceo/CeoHome.vue"), meta: { roles: FinanceRoles.ceo } },
 
   // Cardboard
