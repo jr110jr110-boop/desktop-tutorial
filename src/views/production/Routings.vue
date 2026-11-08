@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import ChecklistTab from "@/components/production/master/ChecklistTab.vue";
 import RevisionsTab from "@/components/production/master/RevisionsTab.vue";
 import StandardsTab from "@/components/production/master/StandardsTab.vue";
 
 // Operation standards per item and routing revisions (MfRoutings). /production/routings/:id opens that revision on the revisions tab.
 const route = useRoute();
 const openId = computed(() => (route.params.id ? Number(route.params.id) : null));
-const tab = ref<"standards" | "revisions">(openId.value ? "revisions" : "standards");
+const tab = ref<"standards" | "revisions" | "checklists">(openId.value ? "revisions" : "standards");
 watch(openId, (id) => id && (tab.value = "revisions"));
 </script>
 
@@ -18,9 +19,11 @@ watch(openId, (id) => id && (tab.value = "revisions"));
       <ul class="nav nav-tabs mb-3">
         <li class="nav-item"><a :class="{ active: tab === 'standards' }" class="nav-link" href="#" @click.prevent="tab = 'standards'">استانداردهای عملیات</a></li>
         <li class="nav-item"><a :class="{ active: tab === 'revisions' }" class="nav-link" href="#" @click.prevent="tab = 'revisions'">نسخه‌های مسیر ساخت</a></li>
+        <li class="nav-item"><a :class="{ active: tab === 'checklists' }" class="nav-link" href="#" @click.prevent="tab = 'checklists'">چک‌لیست‌های حین تولید</a></li>
       </ul>
       <StandardsTab v-if="tab === 'standards'" />
-      <RevisionsTab v-else :open-id="openId" />
+      <RevisionsTab v-else-if="tab === 'revisions'" :open-id="openId" />
+      <ChecklistTab v-else />
     </div>
   </div>
 </template>

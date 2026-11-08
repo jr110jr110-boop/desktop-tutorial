@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ShopDocuments from "@/components/pc/edms/ShopDocuments.vue";
 import DncTerminalPanel from "@/components/production/dnc/DncTerminalPanel.vue";
+import ChecklistPanel from "@/components/production/floor/ChecklistPanel.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -276,6 +277,8 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </template>
+
+        <ChecklistPanel v-if="(dialog.type === 'finish' || dialog.type === 'qty') && dialog.op" :operation-id="dialog.op.id" />
 
         <template v-if="dialog.type === 'down'">
           <div class="tm-label">ماشین<span v-if="dialog.op?.machineRequired"> (الزامی)</span></div>

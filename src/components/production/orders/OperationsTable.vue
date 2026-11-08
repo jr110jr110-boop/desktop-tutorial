@@ -4,6 +4,7 @@ import CompleteOutsideDialog from "./CompleteOutsideDialog.vue";
 import QcDecisionDialog from "./QcDecisionDialog.vue";
 import ReasonDialog from "./ReasonDialog.vue";
 import ReworkDialog from "./ReworkDialog.vue";
+import ChecklistPanel from "@/components/production/floor/ChecklistPanel.vue";
 import { operationAction } from "@/api/ProductionAPIs";
 import { fail, ok } from "@/composables/inventory";
 import { badgeOfOperation, hoursText, inspectionRequirements, operationStatuses, persianOf, qtyText } from "@/composables/production";
@@ -19,6 +20,7 @@ const ncrFor = ref<{ op: any; action: "accept-by-concession" | "scrap-by-ncr" } 
 const isManager = hasRole(ProductionRoles.managers);
 const reworking = ref<any>(null);
 const busy = ref(false);
+const checking = ref<any>(null);
 const running = computed(() => props.order.status === 1 || props.order.status === 2);
 const isSupervisor = hasRole(ProductionRoles.supervisor);
 const isSupervisors = hasRole(ProductionRoles.supervisors);
@@ -86,6 +88,7 @@ function done() {
             </td>
             <td class="text-nowrap">
               <button class="btn btn-sm btn-outline-secondary me-1 mb-1" @click="emit('print', o)">برگه کار</button>
+              <button class="btn btn-sm btn-outline-secondary me-1 mb-1" @click="checking = o">چک‌لیست</button>
               <template v-if="running">
                 <button v-if="isSupervisor && (o.status === 0 || o.status === 1)" class="btn btn-sm btn-outline-danger me-1 mb-1" @click="skipping = o">رد کردن</button>
                 <button v-if="isSupervisors && o.isOutside && (o.status === 1 || o.status === 2)" class="btn btn-sm btn-outline-primary me-1 mb-1" @click="outside = o">پایان کار بیرونی</button>
@@ -105,6 +108,14 @@ function done() {
     <ReasonDialog v-if="ncrFor" :busy="busy" :title="ncrFor.action === 'scrap-by-ncr' ? 'ضایعات با گزارش عدم انطباق' : 'پذیرش ارفاقی با گزارش عدم انطباق'" :hint="`گزارش ${ncrFor.op.ncrNumber || ''} باید با تصمیم متناسب توسط کیفیت، مهندسی و تولید تأیید شده باشد؛ در غیر این صورت سرویس رد می‌کند.`" label="دلیل" confirm-text="ثبت" @close="ncrFor = null" @confirm="byNcr" />
     <CompleteOutsideDialog v-if="outside" :operation="outside" :work-order-id="order.workOrderId" @close="outside = null" @done="done" />
     <QcDecisionDialog v-if="deciding" :operation="deciding" :quantity="order.quantity" :work-order-id="order.workOrderId" :item-id="order.itemId" @close="deciding = null" @done="done" />
+    <div v-if="checking" class="inv-modal-backdrop" @click.self="checking = null">
+      <div class="inv-modal" style="max-width: 720px">
+        <h3 class="inv-title mb-2">چک‌لیست مرحله {{ checking.sequence }} - {{ checking.title }}</h3>
+        <ChecklistPanel :operation-id="checking.id" @changed="emit('changed')" />
+        <p class="inv-muted small mt-2">اگر برای این مرحله چک‌لیستی تعریف نشده باشد، چیزی نمایش داده نمی‌شود.</p>
+        <div class="d-flex justify-content-end mt-2"><button class="btn btn-sm btn-outline-secondary" @click="checking = null">بستن</button></div>
+      </div>
+    </div>
     <ReworkDialog v-if="reworking" :operation="reworking" :work-order-code="order.workOrderCode" :item-id="order.itemId" @close="reworking = null" @done="done" />
   </div>
 </template>

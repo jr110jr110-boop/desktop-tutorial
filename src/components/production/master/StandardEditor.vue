@@ -15,7 +15,7 @@ const f = ref<any>({
   operationTemplateId: r.operationTemplateId, workCenterId: r.workCenterId ?? null, setupHours: r.setupHours ?? 0, runHoursPerUnit: r.runHoursPerUnit ?? 0, moveDays: r.moveDays ?? 0, queueDays: r.queueDays ?? 0,
   isOutside: !!r.isOutside, defaultSupplierId: r.defaultSupplierId ?? null, outsideLeadDays: r.outsideLeadDays ?? 0, workInstructionDocumentId: r.workInstructionDocumentId ?? null,
   drawingReferenceRule: r.drawingReferenceRule || "", requiredQualificationKind: r.requiredQualificationKind || "", requiredQualificationProcess: r.requiredQualificationProcess || "",
-  inspectionRequirement: r.inspectionRequirement ?? 0, itpTestType: r.itpTestType ?? null, firstArticleRequired: !!r.firstArticleRequired,
+  inspectionRequirement: r.inspectionRequirement ?? 0, itpTestType: r.itpTestType ?? null, firstArticleRequired: !!r.firstArticleRequired, setupCount: r.setupCount ?? null,
   isWelding: !!r.isWelding, wpsId: r.wpsId ?? null,
 });
 const wpsRows = ref<any[]>([]);
@@ -35,7 +35,7 @@ async function save() {
   if (x.inspectionRequirement === 3 && !x.itpTestType) return fail("برای بازرسی از نوع نقطه ITP، نوع آزمون را انتخاب کنید.");
   busy.value = true;
   const [, error] = await saveOperationStandard({
-    ...x, workCenterId: x.workCenterId || null, defaultSupplierId: x.isOutside ? x.defaultSupplierId || null : null, outsideLeadDays: x.isOutside ? Number(x.outsideLeadDays) || 0 : 0,
+    ...x, setupCount: x.setupCount === "" || x.setupCount === null || x.setupCount === undefined ? null : Number(x.setupCount), workCenterId: x.workCenterId || null, defaultSupplierId: x.isOutside ? x.defaultSupplierId || null : null, outsideLeadDays: x.isOutside ? Number(x.outsideLeadDays) || 0 : 0,
     workInstructionDocumentId: x.workInstructionDocumentId ? Number(x.workInstructionDocumentId) : null, drawingReferenceRule: blankToNull(x.drawingReferenceRule),
     requiredQualificationKind: blankToNull(x.requiredQualificationKind), requiredQualificationProcess: blankToNull(x.requiredQualificationProcess),
     itpTestType: x.inspectionRequirement === 3 ? x.itpTestType : null, isWelding: !!x.isWelding, wpsId: x.isWelding ? x.wpsId : null,
@@ -69,6 +69,7 @@ async function save() {
         <div class="col-md-4"><label class="form-label small mb-0">الزام بازرسی</label><select v-model="f.inspectionRequirement" class="form-select form-select-sm"><option v-for="(t, k) in inspectionRequirements" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div v-if="f.inspectionRequirement === 3" class="col-md-4"><label class="form-label small mb-0">نوع آزمون ITP</label><select v-model="f.itpTestType" class="form-select form-select-sm"><option :value="null">-</option><option v-for="(t, k) in testTypes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div class="col-md-4 d-flex align-items-end"><label class="form-check"><input v-model="f.firstArticleRequired" class="form-check-input" type="checkbox" /> <span class="form-check-label">بازرسی نمونه اول</span></label></div>
+        <div class="col-md-4"><label class="form-label small mb-0">تعداد چیدمان (بستن مجدد قطعه)</label><input v-model.number="f.setupCount" class="form-control form-control-sm" min="1" max="100" type="number" /></div>
         <div class="col-md-4 d-flex align-items-end"><label class="form-check"><input v-model="f.isWelding" class="form-check-input" type="checkbox" /> <span class="form-check-label">مرحله‌ی جوشکاری</span></label></div>
         <div v-if="f.isWelding" class="col-md-8"><label class="form-label small mb-0">WPS تاییدشده (الزامی)</label>
           <select v-model="f.wpsId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="w in wpsRows" :key="w.id" :value="w.id">{{ w.number }}<template v-if="w.revision"> / {{ w.revision }}</template><template v-if="w.process"> - {{ w.process }}</template></option></select>

@@ -644,6 +644,8 @@ const productionLinks = computed<Links[]>(() => [
   { title: "مراکز کار و ماشین‌ها", routeName: "MfWorkCenters", disabled: !hasRole(ProductionRoles.workCenterReaders) },
   { title: "مسیرهای ساخت و استانداردها", routeName: "MfRoutings", disabled: !hasRole(ProductionRoles.readers) },
   { title: "برنامه‌های CNC (DNC)", routeName: "MfDnc", disabled: !hasRole(DncRoles.readers) },
+  { title: "پایش زنده ماشین‌ها و دوربین‌ها", routeName: "MfMonitor", disabled: !hasRole(ProductionRoles.readers) },
+  { title: "رویدادهای عملکرد کارکنان", routeName: "MfStaffEvents" },
   { title: "نگهداری و تعمیرات", routeName: "MfMaintenance", disabled: !hasRole(ProductionRoles.masterReaders) },
   { title: "اثربخشی تجهیزات (OEE)", routeName: "MfOee", disabled: !hasRole(ProductionRoles.readers) },
   { title: "هزینه‌یابی تولید", routeName: "MfCost", disabled: !hasRole(ProductionRoles.costReaders) },
