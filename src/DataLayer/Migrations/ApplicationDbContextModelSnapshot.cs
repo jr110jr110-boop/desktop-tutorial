@@ -29059,6 +29059,88 @@ namespace DataLayer.Migrations
                     b.ToTable("ProviderContacts", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.AsBuiltRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BomText")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ProductCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ReleaseNoteId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("SerialUnitId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SupersededByVersion")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<int>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkOrderId", "ReleaseNoteId");
+
+                    b.HasIndex("ItemId", "SerialNumber", "Version");
+
+                    b.HasIndex("WorkOrderId", "ItemId", "SerialNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_QaAsBuiltRecords_CurrentPerUnit")
+                        .HasFilter("[Deleted] = 0 AND [Status] = 0");
+
+                    b.ToTable("QaAsBuiltRecords", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.Audit", b =>
                 {
                     b.Property<int>("Id")
@@ -30585,6 +30667,79 @@ namespace DataLayer.Migrations
                     b.ToTable("QaEquipment", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.NoDrawingFlag", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PartNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("VoidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("VoidedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_QaNoDrawingFlags_LivePerItem")
+                        .HasFilter("[Deleted] = 0 AND [Status] IN (0, 1)");
+
+                    b.ToTable("QaNoDrawingFlags", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.OutOfToleranceCase", b =>
                 {
                     b.Property<int>("Id")
@@ -30770,6 +30925,301 @@ namespace DataLayer.Migrations
                     b.ToTable("QaPqrs", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcCharacteristic", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Class")
+                        .HasColumnType("int");
+
+                    b.Property<int>("InstrumentClass")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ListId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Method")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("No")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<decimal>("Nominal")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int?>("OperationSeq")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SamplePercent")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StageCode2")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<decimal>("TolMinus")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("TolPlus")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ListId", "No")
+                        .IsUnique();
+
+                    b.ToTable("QaCharacteristics", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcCharacteristicList", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("DeliverableId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DocumentNumber")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ReturnNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RevisionCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("RevisionId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SupersedesListId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeliverableId", "Status");
+
+                    b.HasIndex("RevisionId", "Version")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("QaCharacteristicLists", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcFirstArticle", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CharacteristicListId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("FingerprintText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("MeasuredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("MeasuredByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("PartNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("ProductionOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("QaApproveNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("QaApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("QaApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("QcAcceptNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("QcAcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("QcAcceptedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("QcRecordId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RoutingRevisionId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Trigger")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ProductionOrderId");
+
+                    b.HasIndex("ItemId", "Fingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("UX_QaFirstArticles_LivePerConfiguration")
+                        .HasFilter("[Deleted] = 0 AND [Status] IN (0, 1, 2, 3)");
+
+                    b.HasIndex("ItemId", "Fingerprint", "Status");
+
+                    b.ToTable("QaFirstArticles", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcMeasurement", b =>
                 {
                     b.Property<int>("Id")
@@ -30782,6 +31232,13 @@ namespace DataLayer.Migrations
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<int?>("CharacteristicId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CharacteristicNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int?>("EquipmentId")
                         .HasColumnType("int");
@@ -30814,6 +31271,8 @@ namespace DataLayer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CharacteristicId");
+
                     b.HasIndex("EquipmentId");
 
                     b.HasIndex("RecordId");
@@ -30832,6 +31291,9 @@ namespace DataLayer.Migrations
                     b.Property<Guid?>("AttachmentDocumentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("CharacteristicListId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("CreateDate")
                         .HasColumnType("datetimeoffset");
 
@@ -30848,6 +31310,9 @@ namespace DataLayer.Migrations
                     b.Property<string>("DrawingRevision")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("DrawingRevisionId")
+                        .HasColumnType("int");
 
                     b.Property<int>("InspectorUserId")
                         .HasColumnType("int");
@@ -30907,6 +31372,8 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CharacteristicListId");
 
                     b.HasIndex("ItemId");
 
@@ -39648,6 +40115,17 @@ namespace DataLayer.Migrations
                     b.Navigation("Case");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcCharacteristic", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Quality.QcCharacteristicList", "List")
+                        .WithMany("Items")
+                        .HasForeignKey("ListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("List");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcMeasurement", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Quality.MeasuringEquipment", "Equipment")
@@ -41064,6 +41542,11 @@ namespace DataLayer.Migrations
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Quality.OutOfToleranceCase", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Quality.QcCharacteristicList", b =>
                 {
                     b.Navigation("Items");
                 });
