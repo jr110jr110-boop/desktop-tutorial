@@ -31,7 +31,7 @@ const canEng = hasRole(QualityRoles.engineering);
 const editing = ref(false);
 
 const blankWps = () => ({
-  id: null, number: "", revision: "0", process: "", basePNo: "", fillerFNo: "", fillerANo: "", thicknessMin: null, thicknessMax: null, positions: "",
+  id: null, number: "", revision: "0", process: "", basePNo: "", baseGroupNo: "", diameterMin: null, diameterMax: null, fillerFNo: "", fillerANo: "", thicknessMin: null, thicknessMax: null, positions: "",
   preheatMinC: null, interpassMaxC: null, pwht: "", shieldingGas: "", note: "", pqrIds: [] as number[], status: 0,
 });
 const nn = (v: any) => (v === "" || v === undefined ? null : v);
@@ -54,7 +54,7 @@ async function save() {
   busy.value = true;
   const [data, error] = await saveWps({
     ...w,
-    thicknessMin: nn(w.thicknessMin), thicknessMax: nn(w.thicknessMax), preheatMinC: nn(w.preheatMinC), interpassMaxC: nn(w.interpassMaxC),
+    thicknessMin: nn(w.thicknessMin), thicknessMax: nn(w.thicknessMax), diameterMin: nn(w.diameterMin), diameterMax: nn(w.diameterMax), preheatMinC: nn(w.preheatMinC), interpassMaxC: nn(w.interpassMaxC),
   });
   busy.value = false;
   if (error) return fail(error);
@@ -155,6 +155,9 @@ onMounted(() => {
             <div class="col-md-1"><label class="form-label small mb-0">بازنگری</label><input v-model="wps.revision" :disabled="!editing" class="form-control form-control-sm inv-ltr" /></div>
             <div class="col-md-2"><label class="form-label small mb-0">فرایند *</label><input v-model="wps.process" :disabled="!editing" class="form-control form-control-sm inv-ltr" placeholder="GTAW" /></div>
             <div class="col-md-2"><label class="form-label small mb-0">P-No پایه</label><input v-model="wps.basePNo" :disabled="!editing" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">گروه فلز پایه</label><input v-model="wps.baseGroupNo" :disabled="!editing" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">قطر از (mm)</label><input v-model="wps.diameterMin" :disabled="!editing" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">قطر تا (mm)</label><input v-model="wps.diameterMax" :disabled="!editing" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
             <div class="col-md-2"><label class="form-label small mb-0">F-No فیلر</label><input v-model="wps.fillerFNo" :disabled="!editing" class="form-control form-control-sm inv-ltr" /></div>
             <div class="col-md-2"><label class="form-label small mb-0">A-No فیلر</label><input v-model="wps.fillerANo" :disabled="!editing" class="form-control form-control-sm inv-ltr" /></div>
             <div class="col-md-2"><label class="form-label small mb-0">ضخامت از (mm)</label><input v-model="wps.thicknessMin" :disabled="!editing" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>

@@ -205,3 +205,46 @@ export const getAsBuiltBySerial = (serial: string, itemId?: number) => call("get
 export const reissueAsBuilt = (id: number, reason: string) => call("post", base + "as-built/reissue", { id, reason });
 /** PMO/CEO decide a pending re-issue: { id (the pending version), approve, note (required on reject) }. */
 export const decideAsBuiltReissue = (id: number, approve: boolean, note?: string) => call("post", base + "as-built/reissue/decide", { id, approve, note: note || null });
+
+// Package C (special processes and material verification): api/v1/quality/special-processes/* and api/v1/quality/material-specs/*
+const sp = base + "special-processes/";
+const ms = base + "material-specs";
+/** The editable list of special process types (seeded: heat treatment, nitriding, coating, brazing, plating, NDT). Answers a plain array. */
+export const getSpTypes = (includeInactive = false) => call("get", sp + "types", undefined, clean({ IncludeInactive: includeInactive }));
+/** dto { id?, code, title, description?, requiresMachine, requiresSurvey, requiredInstrumentClass?, procedureDeliverableId?, existingControl, isActive, parameters: [{ name, unit, min, max, required }], rowVersion? } */
+export const saveSpType = (dto: any) => call("post", sp + "types", dto);
+export const getSpQualifications = (params: any) => call("get", sp + "qualifications", undefined, clean(params));
+export const getSpQualification = (id: number) => call("get", sp + "qualifications/" + id);
+/** dto { id?, typeId, title, procedureDeliverableId, procedureRevisionId, validFrom, validTo, note?, supersedesId?, limits: [{ name, unit, min, max, required }], equipments: [{ kind (1 machine, 2 instrument), machineId?, equipmentId?, surveyKind, surveyDate?, surveyDueDate?, surveyDocumentId? }], operatorPersonIds: [], rowVersion? } */
+export const saveSpQualification = (dto: any) => call("post", sp + "qualifications", dto);
+/** action: submit, approve (QA, not the author), reject (note), void (note) */
+export const spQualificationAction = (id: number, action: string, note?: string, rowVersion?: string) => call("post", sp + "qualifications/action", { id, action, note: note || null, rowVersion: rowVersion || null });
+export const getSpRuns = (params: any) => call("get", sp + "runs", undefined, clean(params));
+export const getSpRun = (id: number) => call("get", sp + "runs/" + id);
+/** dto { operationId | partOperationId, qualificationId, isSubcontract, supplierId?, receiptDocumentId?, lotId?, serialNumbers?, quantity, operatorPersonId, machineId, startedAt, endedAt, chartDocumentId, chartFileName, certificateDocumentId?, certificateNumber?, instrumentIds: [], values: [{ name, value }], note? }. The server judges the values. */
+export const saveSpRun = (dto: any) => call("post", sp + "runs", dto);
+/** action: review (QA/QC, not the recorder or the operator), reject-review (note), void (note) */
+export const spRunAction = (id: number, action: string, note?: string, rowVersion?: string) => call("post", sp + "runs/action", { id, action, note: note || null, rowVersion: rowVersion || null });
+export const getSpGate = (operationId?: number, partOperationId?: number) => call("get", sp + "gate", undefined, clean({ operationId, partOperationId }));
+export const getSpSupplierApprovals = (params: any) => call("get", sp + "supplier-approvals", undefined, clean(params));
+export const saveSpSupplierApproval = (dto: any) => call("post", sp + "supplier-approvals", dto);
+/** action: approve (QA, not the author), reject (note), void (note) */
+export const spSupplierAction = (id: number, action: string, note?: string, rowVersion?: string) => call("post", sp + "supplier-approvals/action", { id, action, note: note || null, rowVersion: rowVersion || null });
+
+export const getMaterialSpecs = (params: any) => call("get", ms, undefined, clean(params));
+export const getMaterialSpec = (id: number) => call("get", ms + "/" + id);
+/** dto { id? | newVersionOfId?, grade, standard, title?, requiredCertificateType (1 = 2.2, 2 = 3.1, 3 = 3.2), reason?, limits: [{ kind (1 chemistry, 2 mechanical), name, unit, min, max, required }], itemIds: [], rowVersion? } */
+export const saveMaterialSpec = (dto: any) => call("post", ms, dto);
+/** action: submit, approve (QA/QC, not the editor), return (note), void (note) */
+export const materialSpecAction = (id: number, action: string, note?: string, rowVersion?: string) => call("post", ms + "/action", { id, action, note: note || null, rowVersion: rowVersion || null });
+export const getRequiredCertificate = (itemId: number) => call("get", ms + "/required/" + itemId);
+export const getCertificateSheet = (certificateId: number) => call("get", ms + "/certificate-sheet/" + certificateId);
+export const downloadCertificateTemplate = () => download(ms + "/certificate-template", "certificate-values-template.xlsx");
+/** preview = true reads the file and shows the verdict without writing; preview = false writes the values of the pending certificate (the server judges them). */
+export const importCertificateValues = (certificateId: number, preview: boolean, file: File) => {
+  const form = new FormData();
+  form.append("CertificateId", String(certificateId));
+  form.append("Preview", String(preview));
+  form.append("file", file);
+  return call("post", ms + "/certificate-import", form);
+};

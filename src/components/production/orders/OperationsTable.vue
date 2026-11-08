@@ -66,7 +66,7 @@ function done() {
           <tr v-for="o in order.operations" :key="o.id">
             <td>{{ o.sequence }}</td>
             <td>{{ o.title }}
-              <span v-if="o.isRework" class="inv-badge warn ms-1">دوباره‌کاری</span><span v-if="o.isWelding" class="inv-badge info ms-1">جوشکاری</span><span v-if="o.acceptedByConcession" class="inv-badge ok ms-1">پذیرش ارفاقی</span><span v-if="o.acceptanceStale" class="inv-badge warn ms-1" title="مقادیر گزارش‌شده پس از پذیرش تغییر کرده است">پذیرش بازرسی باید دوباره انجام شود</span><span v-if="o.isOutside" class="inv-badge info ms-1">بیرونی</span>
+              <span v-if="o.isRework" class="inv-badge warn ms-1">دوباره‌کاری</span><span v-if="o.isWelding" class="inv-badge info ms-1">جوشکاری</span><span v-if="o.isSpecialProcess" class="inv-badge info ms-1">فرایند ویژه</span><span v-if="o.acceptedByConcession" class="inv-badge ok ms-1">پذیرش ارفاقی</span><span v-if="o.acceptanceStale" class="inv-badge warn ms-1" title="مقادیر گزارش‌شده پس از پذیرش تغییر کرده است">پذیرش بازرسی باید دوباره انجام شود</span><span v-if="o.isOutside" class="inv-badge info ms-1">بیرونی</span>
               <div v-if="o.skipReason" class="inv-muted">دلیل رد: {{ o.skipReason }}</div>
             </td>
             <td class="inv-ltr">{{ o.workCenterCode || "-" }}</td>
@@ -75,6 +75,7 @@ function done() {
             <td><span :class="badgeOfOperation(o.status)" class="inv-badge">{{ operationStatuses[o.status] }}</span></td>
             <td>{{ qtyText(o.goodQty) }}</td><td>{{ qtyText(o.scrapQty) }}</td><td>{{ qtyText(o.reworkQty) }}</td><td>{{ hoursText(o.hoursBooked) }}</td>
             <td class="small">
+              <div v-if="o.isSpecialProcess"><router-link :to="{ name: 'QualitySpRuns', query: { operationId: o.id } }">اجرای فرایند ویژه و گیت پایان</router-link></div>
               <div v-if="o.isWelding">WPS: <span class="inv-ltr">{{ o.wpsNumber || "-" }}</span></div>
               <div v-if="o.weldLogId">گزارش جوش: <router-link :to="{ name: 'QualityWeldLogs', query: { workOrderId: order.workOrderId } }">مشاهده (پیش‌نویس سیستم)</router-link></div>
               <div v-if="o.expectedQty">تعداد مورد انتظار: {{ qtyText(o.expectedQty) }}</div>
