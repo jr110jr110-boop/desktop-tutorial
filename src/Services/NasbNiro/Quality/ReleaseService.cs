@@ -279,6 +279,11 @@ namespace Services.NasbNiro.Quality
                     Missing = d.Required && d.IssueState != Entities.Model.NasbNiro.ProjectControl.PcIssueState.Approved, ClientRelevant = d.ClientSubmittal,
                 });
             if (s11.Entries.Count > 0) book.Sections.Add(s11);
+            // 12: the as-built record of every released unit (Package B); issued by the release, so it is not a mandatory entry
+            var s12 = new DataBookSectionDto { No = 12, Name = "پیکربندی ساخته‌شده (As-Built) هر واحد" };
+            foreach (AsBuiltRecord ab in await _uow.Set<AsBuiltRecord>().Where(a => a.WorkOrderId == wo.Id && !a.Deleted && a.Status == AsBuiltStatus.Current).OrderBy(a => a.ItemId).ThenBy(a => a.SerialNumber).ToListAsync(cancellationToken))
+                s12.Entries.Add(new DataBookEntryDto { SourceKind = "AsBuilt", SourceId = ab.Id, Number = (ab.SerialNumber ?? ab.ProductCode) + " v" + ab.Version, Title = $"{ab.ProductCode}{(ab.SerialNumber == null ? string.Empty : " — " + ab.SerialNumber)} — SHA-256 {ab.Sha256.Substring(0, 12)}", Status = "Current", Mandatory = false, Missing = false, ClientRelevant = true });
+            if (s12.Entries.Count > 0) book.Sections.Add(s12);
             // client relevance: until the MDL table exists, an entry is for the client when its ITP activity has a client point
             var clientActivities = new HashSet<int>(itp == null ? new List<int>() : itp.Activities.Where(x => x.PointClient != ItpPoint.None).Select(x => x.Id));
             var reportActivity = reports.Where(r => r.ItpActivityId.HasValue).ToDictionary(r => r.Id, r => r.ItpActivityId.Value);
@@ -388,11 +393,19 @@ namespace Services.NasbNiro.Quality
                 Detail = lastFinal == null ? "بازرسی نهایی ثبت نشده است." : lastFinal == QcResult.Accept ? "-" : "نتیجه آخرین بازرسی نهایی: " + ResultText(lastFinal.Value),
             });
             DataBookDto book = await BuildBookAsync(wo, cancellationToken);
-            var missing = book.Sections.Where(s => s.No != 10 && s.No != 11).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
+            var missing = book.Sections.Where(s => s.No != 10).SelectMany(s => s.Entries.Where(e => e.Mandatory && e.Missing).Select(e => s.No + ": " + (e.Number ?? e.Title))).ToList();
             checks.Add(new ReleaseCheckDto
             {
                 Code = "DATABOOK_COMPLETE", Title = "فهرست کتاب نهایی (Final Data Book) مورد الزامی ناقص ندارد", Passed = missing.Count == 0,
                 Detail = missing.Count == 0 ? "-" : $"{missing.Count} مورد ناقص: " + string.Join("، ", missing.Take(8)) + (missing.Count > 8 ? "…" : string.Empty),
+            });
+            // Package B (ISO 10007): the physical configuration audit; a work order without a project BOM baseline passes as "not applicable"
+            PcaResult pca = await PhysicalConfigurationAudit.RunAsync(_uow, wo.Id, cancellationToken);
+            List<string> pcaProblems = pca.Problems;
+            checks.Add(new ReleaseCheckDto
+            {
+                Code = "PCA_MATCH", Title = "ممیزی پیکربندی فیزیکی: هر ردیف BOM پروژه بچ یا سریال نصب‌شده با مقدار برابر دارد", Passed = pca.Passed,
+                Detail = !pca.Applicable ? "-" : pcaProblems.Count == 0 ? "-" : $"{pcaProblems.Count} ردیف ناهمخوان: " + string.Join(" | ", pcaProblems.Take(8)) + (pcaProblems.Count > 8 ? "…" : string.Empty),
             });
             return checks;
         }
@@ -622,6 +635,8 @@ namespace Services.NasbNiro.Quality
                     r.Status = ReleaseNoteStatus.Released; r.ReleasedAt = now; r.ReleasedByUserId = Me;
                     r.CertificateOfConformityNumber = "CoC-" + r.Number;
                     r.ChecksSnapshot = JsonSerializer.Serialize(checks);
+                    // Package B (H10): the as-built record of every released unit, issued in the same transaction as the release (immutable; a correction is a new version)
+                    await AsBuiltBuilder.IssueAsync(_uow, r, wo, "ترخیص " + r.Number, now, Me, cancellationToken);
                     break;
                 case "cancel":
                     string cancelProblem = ReleaseNoteRules.CancelProblem(r, _user.IsInRole);

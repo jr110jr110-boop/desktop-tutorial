@@ -34,6 +34,10 @@ namespace Entities.Model.NasbNiro.Quality
         public string DrawingNumber { get; set; }
         public string DrawingRevision { get; set; }
 
+        /// <summary>Package B: the drawing revision (EDMS) and the released characteristic list the measurements were picked from; empty on records made before the lists existed.</summary>
+        public int? DrawingRevisionId { get; set; }
+        public int? CharacteristicListId { get; set; }
+
         public int InspectorUserId { get; set; }
 
         /// <summary>The operator checked his own work (allowed only for activities that are not on the ITP).</summary>
@@ -77,6 +81,10 @@ namespace Entities.Model.NasbNiro.Quality
 
         /// <summary>Computed by the server: nominal - TolMinus &lt;= measured &lt;= nominal + TolPlus.</summary>
         public bool Pass { get; set; }
+
+        /// <summary>Package B: the characteristic of the released list this value was picked from (nominal and tolerances come from it); empty on legacy records.</summary>
+        public int? CharacteristicId { get; set; }
+        public string CharacteristicNo { get; set; }
     }
 
     public class TestReport : BaseEntity

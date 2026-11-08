@@ -412,6 +412,7 @@ namespace DataLayer.Context
         static FinanceAuditTrail()
         {
             AddRecordsIntegrity();   // package D: the quality, manufacturing and warehouse evidence (FinanceAuditTrail.RecordsIntegrity.cs)
+            AddInspectionRelease();   // package B: characteristic lists, no-drawing flags, first articles, as-built records (FinanceAuditTrail.InspectionRelease.cs)
             var more = new Dictionary<Type, string[]>
             {
                 { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },

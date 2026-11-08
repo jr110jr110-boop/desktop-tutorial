@@ -265,6 +265,20 @@ namespace MsTests
             return (item, order, wo);
         }
 
+        /// <summary>Package B: with no released drawing a make part passes the drawings check only with an active «بدون نقشه» flag.</summary>
+        private static void ActiveNoDrawing(AppHost host, int itemId)
+        {
+            host.Write(u =>
+            {
+                u.Set<Entities.Model.NasbNiro.Quality.NoDrawingFlag>().Add(new Entities.Model.NasbNiro.Quality.NoDrawingFlag
+                {
+                    ItemId = itemId, PartNumber = "PN", Reason = "no drawing for this test part", Status = Entities.Model.NasbNiro.Quality.NoDrawingStatus.Active,
+                    CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now, CreatorUserId = 1, ModifierUserId = 2, DecidedByUserId = 2, DecidedAt = DateTimeOffset.Now,
+                });
+                u.SaveChanges();
+            }, Seeder);
+        }
+
         [TestMethod]
         public async Task TheShopFloorSeesOnlyTheLatestReleasedRevisionOfTheLinkedDocuments()
         {
@@ -712,6 +726,7 @@ namespace MsTests
             PcRevisionDto r0 = await ReleasedRevision(host, doc);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
             Assert.IsTrue((await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = r0.Id, Action = "obsolete", Note = "replaced by the client" }, default))).Success);
+            ActiveNoDrawing(host, o.ItemId);
             Assert.AreEqual(0, host.Read(u => u.Set<PcDocumentLink>().Count(l => l.DeliverableId == doc && !l.Deleted)));
             Assert.AreEqual(0, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a retired document does not hold the order");
@@ -750,6 +765,7 @@ namespace MsTests
             await Link(host, foreignDraft, "PN-SC");
             await Link(host, foreignReleased, "PN-SC");
             await Draft(host, foreignDraft);
+            ActiveNoDrawing(host, o.ItemId);
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed, "a draft of another project is not this order's concern");
             await ReleasedRevision(host, foreignReleased);
             Assert.AreEqual(1, (await Edms(host, Operator, s => s.GetShopDocumentsAsync(o.OrderId, null, default))).Data.Count, "a released part drawing is company-wide");

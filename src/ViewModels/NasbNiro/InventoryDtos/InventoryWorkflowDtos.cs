@@ -224,6 +224,9 @@ namespace ViewModels.NasbNiro.InventoryDtos
 
     public class InspectionMeasurementDto
     {
+        /// <summary>Package B: the characteristic of the released list of the part's drawing revision (nominal and tolerances then come from the list, whatever is typed). CharacteristicNo is the number on the drawing.</summary>
+        public int? CharacteristicId { get; set; }
+        public string CharacteristicNo { get; set; }
         public string Characteristic { get; set; }
         public decimal Nominal { get; set; }
 

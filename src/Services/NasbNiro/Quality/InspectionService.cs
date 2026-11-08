@@ -101,11 +101,12 @@ namespace Services.NasbNiro.Quality
                 ItemId = r.ItemId, ItemCode = r.Item?.Code, ItemTitle = r.Item?.Title, LotId = r.LotId, SerialNumber = r.SerialNumber, Quantity = r.Quantity,
                 RecordDate = r.RecordDate, Result = r.Result, SelfInspection = r.SelfInspection, InspectorName = names.Name(r.InspectorUserId),
                 NcrId = r.NcrId, NcrNumber = r.Ncr?.Number, Operation = r.Operation, DrawingNumber = r.DrawingNumber, DrawingRevision = r.DrawingRevision,
+                DrawingRevisionId = r.DrawingRevisionId, CharacteristicListId = r.CharacteristicListId,
                 AttachmentDocumentId = r.AttachmentDocumentId, Note = r.Note,
                 Measurements = r.Measurements.OrderBy(m => m.Id).Select(m => new QcMeasurementDto
                 {
                     Id = m.Id, Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured,
-                    Unit = m.Unit, EquipmentId = m.EquipmentId, EquipmentCode = m.Equipment?.Code, Pass = m.Pass,
+                    Unit = m.Unit, EquipmentId = m.EquipmentId, EquipmentCode = m.Equipment?.Code, Pass = m.Pass, CharacteristicId = m.CharacteristicId, CharacteristicNo = m.CharacteristicNo,
                 }).ToList(),
             });
         }
@@ -148,28 +149,19 @@ namespace Services.NasbNiro.Quality
             List<SaveQcMeasurementDto> input = dto.Measurements ?? new List<SaveQcMeasurementDto>();
             if ((dto.Type == QcRecordType.Dimensional || dto.Type == QcRecordType.FirstArticle) && input.Count == 0)
                 return Bad<QcRecordDto>("برای بازرسی ابعادی، حداقل یک اندازه‌گیری ثبت کنید.");
-            var measurements = new List<QcMeasurement>();
-            foreach (SaveQcMeasurementDto m in input)
-            {
-                if (Clean(m.Characteristic) == null) return Bad<QcRecordDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
-                if (m.TolPlus < 0 || m.TolMinus < 0) return Bad<QcRecordDto>("تلرانس‌ها را به صورت مقدار مثبت وارد کنید (+ و −).");
-                // R1q D16: a measured value without the instrument that measured it cannot be traced to a calibration (ISO 9001 7.1.5.2)
-                if (!m.EquipmentId.HasValue) return Bad<QcRecordDto>($"برای اندازه‌گیری «{Clean(m.Characteristic)}» تجهیز اندازه‌گیری (ابزار) را انتخاب کنید؛ مقدار بدون ابزار قابل پذیرش نیست.");
-                measurements.Add(new QcMeasurement
-                {
-                    Characteristic = Clean(m.Characteristic), Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured,
-                    Unit = Clean(m.Unit), EquipmentId = m.EquipmentId,
-                    Pass = m.Measured >= m.Nominal - m.TolMinus && m.Measured <= m.Nominal + m.TolPlus,
-                });
-            }
-            string equipmentProblem = await CheckEquipmentAsync(measurements.Where(m => m.EquipmentId.HasValue).Select(m => m.EquipmentId.Value), date, cancellationToken);
-            if (equipmentProblem != null) return Bad<QcRecordDto>(equipmentProblem);
-            if (dto.Result == QcResult.Accept && measurements.Any(m => !m.Pass))
-                return Bad<QcRecordDto>("اندازه‌گیری خارج از تلرانس ثبت شده است؛ نتیجه «قبول» مجاز نیست.");
-            // a reject and a rework both open a non-conformance report (the rework is decided on it)
+            // a reject and a rework both open a non-conformance report (the rework is decided on it), so they name the part before anything else is looked at
             bool opensNcr = dto.Result == QcResult.Reject || dto.Result == QcResult.Rework;
             if (opensNcr && !dto.ItemId.HasValue)
                 return Bad<QcRecordDto>("برای نتیجه «رد» یا «دوباره‌کاری»، کالا یا قطعه را مشخص کنید تا گزارش عدم انطباق ساخته شود.");
+            // Package B (H5): the measurements are picked from the released characteristic list of the part's drawing revision; nominal, tolerances and unit come from the list,
+            // pass or fail is computed here, the instrument class is checked and an acceptance needs every required characteristic (one gate for every kind of inspection record)
+            decimal recordQuantity = dto.Quantity > 0 ? dto.Quantity : 1;
+            PickOutcome pick = await CharacteristicPicker.BuildAsync(_uow, dto.ItemId, dto.Type, dto.OperationSequence, recordQuantity, dto.Result,
+                input.Select(m => new PickInput { CharacteristicId = m.CharacteristicId, Name = Clean(m.Characteristic), Measured = m.Measured, EquipmentId = m.EquipmentId }).ToList(), cancellationToken);
+            if (pick.Error != null) return Bad<QcRecordDto>(pick.Error);
+            List<QcMeasurement> measurements = pick.Measurements;
+            string equipmentProblem = await CheckEquipmentAsync(measurements.Where(m => m.EquipmentId.HasValue).Select(m => m.EquipmentId.Value), date, cancellationToken);
+            if (equipmentProblem != null) return Bad<QcRecordDto>(equipmentProblem);
             if (opensNcr && Clean(dto.Note) == null && measurements.All(m => m.Pass))
                 return Bad<QcRecordDto>("دلیل رد یا دوباره‌کاری را در توضیحات بنویسید.");
 
@@ -180,8 +172,11 @@ namespace Services.NasbNiro.Quality
             {
                 Number = await InventoryNumbers.NextNumberAsync(_uow, QualityNumbers.Record, "QIR", date, cancellationToken),
                 Type = dto.Type, WorkOrderId = dto.WorkOrderId, ItpActivityId = dto.ItpActivityId, ItemId = dto.ItemId, LotId = dto.LotId,
-                SerialNumber = Clean(dto.SerialNumber), Quantity = dto.Quantity > 0 ? dto.Quantity : 1, Operation = Clean(dto.Operation),
-                DrawingNumber = Clean(dto.DrawingNumber), DrawingRevision = Clean(dto.DrawingRevision), InspectorUserId = Me,
+                SerialNumber = Clean(dto.SerialNumber), Quantity = recordQuantity, Operation = Clean(dto.Operation),
+                // Package B: the drawing number and revision come from the EDMS resolver; typed text is kept only for a part that has no drawing (legacy)
+                DrawingNumber = pick.Resolved != null && pick.Resolved.HasDrawing ? pick.Resolved.DrawingNumber : Clean(dto.DrawingNumber),
+                DrawingRevision = pick.Resolved != null && pick.Resolved.HasDrawing ? pick.Resolved.DrawingRevision : Clean(dto.DrawingRevision),
+                DrawingRevisionId = pick.Resolved?.DrawingRevisionId, CharacteristicListId = pick.Governed ? pick.Resolved.ListId : null, InspectorUserId = Me,
                 SelfInspection = !_user.IsInRole(QualityRoles.Inspectors), RecordDate = date, Result = dto.Result,
                 AttachmentDocumentId = dto.AttachmentDocumentId, Note = Clean(dto.Note), Measurements = measurements,
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
@@ -193,7 +188,7 @@ namespace Services.NasbNiro.Quality
                 string failed = string.Join("، ", measurements.Where(m => !m.Pass).Select(m => $"{m.Characteristic}: {m.Measured}"));
                 NonConformance ncr = await QualityNcrFactory.DraftAsync(_uow, Me, dto.Type == QcRecordType.Final ? NcrSource.Final : NcrSource.InProcess,
                     dto.ItemId.Value, dto.LotId, record.Quantity, dto.SerialNumber, dto.WorkOrderId,
-                    dto.DrawingNumber == null ? null : $"نقشه {dto.DrawingNumber}" + (dto.DrawingRevision == null ? string.Empty : $" بازنگری {dto.DrawingRevision}"),
+                    record.DrawingNumber == null ? null : $"نقشه {record.DrawingNumber}" + (record.DrawingRevision == null ? string.Empty : $" بازنگری {record.DrawingRevision}"),
                     $"{(dto.Result == QcResult.Rework ? "دوباره‌کاری" : "رد")} در بازرسی {record.Number}: {Clean(dto.Note) ?? failed}" + (failed.Length > 0 && Clean(dto.Note) != null ? $" ({failed})" : string.Empty),
                     record.Number, measurements.FirstOrDefault(m => !m.Pass && m.EquipmentId.HasValue)?.EquipmentId, cancellationToken);
                 record.Ncr = ncr;

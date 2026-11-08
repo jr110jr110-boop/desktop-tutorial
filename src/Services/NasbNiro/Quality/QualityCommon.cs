@@ -64,6 +64,7 @@ namespace Services.NasbNiro.Quality
         public const int Audit = 407;
         public const int Itp = 408;
         public const int Oot = 409;
+        public const int FirstArticle = 410;
     }
 
     /// <summary>Numbers the company can change. Defaults come from the procedures and the architect's provisional decisions (★).</summary>
@@ -119,6 +120,27 @@ namespace Services.NasbNiro.Quality
         /// <summary>The shortest witness notice (days) an ITP may be given (D9, review H6): a notice of 0 days would let the client's witness be waived at once.</summary>
         public const string MinNoticeDays = "MinNoticeDays";
 
+        // ---- Package B (inspection and release integrity); every default is a strict ★ the company confirms and every key is security-relevant (two-person change, see SafetyProfile)
+        /// <summary>Percentage of the pieces measured for a critical / major / minor characteristic when the list does not say otherwise (a critical characteristic is never measured on less than this).</summary>
+        public const string PkbSampleCritical = "Pkb.Char.SamplePercent.Critical";
+        public const string PkbSampleMajor = "Pkb.Char.SamplePercent.Major";
+        public const string PkbSampleMinor = "Pkb.Char.SamplePercent.Minor";
+
+        /// <summary>1: the first article inspection is enforced (flagged routing steps and the first order after a new revision).</summary>
+        public const string PkbFaiEnforce = "Pkb.Fai.Enforce";
+
+        /// <summary>1: the first production order of a part after a new released drawing / BOM / routing revision needs a first article inspection.</summary>
+        public const string PkbFaiOnNewRevision = "Pkb.Fai.OnNewRevision";
+
+        /// <summary>1: the physical configuration audit runs before a product is released.</summary>
+        public const string PkbPcaEnabled = "Pkb.Pca.Enabled";
+
+        /// <summary>The quantity of a project BOM line in the genealogy may differ from the BOM by this percent (0 = exact; zero tolerance).</summary>
+        public const string PkbPcaTolerance = "Pkb.Pca.QtyTolerancePercent";
+
+        /// <summary>The shortest reason (characters) of a «بدون نقشه» flag.</summary>
+        public const string PkbNoDrawingReasonMin = "Pkb.NoDrawing.ReasonMinChars";
+
         /// <summary>
         /// Not a setting of the company: a marker the nightly CAPA job writes after its first run (review M11). Until it exists the job records the escalation level of the CAPAs
         /// that were already late without telling anybody, so that the first night after the upgrade does not flood QA and the CEO with the whole backlog.
@@ -152,6 +174,14 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = StagnantDays, Value = 90, Title = "کالای راکد: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
             yield return new QualitySetting { Key = StagnantDeadDays, Value = 180, Title = "کالای راکد مرده: بدون گردش از (روز)", Source = "★ جدول پاسخ‌های شرکت" };
             yield return new QualitySetting { Key = ReorderUseDays, Value = 90, Title = "بازه محاسبه مصرف روزانه برای نقطه سفارش (روز)", Source = "★ پیشنهاد PMIS" };
+            yield return new QualitySetting { Key = PkbSampleCritical, Value = 100, Title = "نمونه‌برداری مشخصه بحرانی: درصد قطعات اندازه‌گیری‌شده", Source = "★ تصمیم مدیرعامل (۱۰۰٪ برای بحرانی)" };
+            yield return new QualitySetting { Key = PkbSampleMajor, Value = 100, Title = "نمونه‌برداری مشخصه عمده: درصد قطعات اندازه‌گیری‌شده", Source = "★ تصمیم موقت (عدم تحمل انحراف)" };
+            yield return new QualitySetting { Key = PkbSampleMinor, Value = 10, Title = "نمونه‌برداری مشخصه جزئی: درصد قطعات اندازه‌گیری‌شده", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = PkbFaiEnforce, Value = 1, Title = "بازرسی نمونه اول اجباری باشد", Source = "★ تصمیم مدیرعامل" };
+            yield return new QualitySetting { Key = PkbFaiOnNewRevision, Value = 1, Title = "نمونه اول برای اولین دستور پس از بازنگری تازه نقشه، BOM یا مسیر ساخت", Source = "★ تصمیم مدیرعامل" };
+            yield return new QualitySetting { Key = PkbPcaEnabled, Value = 1, Title = "ممیزی پیکربندی فیزیکی پیش از ترخیص محصول", Source = "★ تصمیم مدیرعامل (ISO 10007)" };
+            yield return new QualitySetting { Key = PkbPcaTolerance, Value = 0, Title = "رواداری مقدار ردیف BOM پروژه در ممیزی پیکربندی (درصد)", Source = "★ عدم تحمل انحراف" };
+            yield return new QualitySetting { Key = PkbNoDrawingReasonMin, Value = 15, Title = "حداقل نویسه دلیل پرچم «بدون نقشه»", Source = "★ تصمیم موقت" };
             // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
             foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
         }

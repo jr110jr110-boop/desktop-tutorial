@@ -307,12 +307,21 @@ namespace Services.NasbNiro.Production
                 if (!ok) missing.Add(word);
             }
             List<string> unreleased = found.Where(f => !InForce(f) && f.ViaText != "دستور کار" && f.LatestStatus != PcDocStatus.Obsolete).Select(f => f.Number).Distinct().ToList();
+            // Package B (H6): a make part needs at least one Released drawing of its own, unless engineering flagged it «بدون نقشه» (reason, second person, audited). There is no pass-through for "nothing linked".
+            bool partDrawing = false, noDrawingFlag = false;
+            if (order.ItemId.HasValue)
+            {
+                partDrawing = await EdmsResolver.HasReleasedDrawingAsync(_uow, order.ItemId.Value, ct);
+                noDrawingFlag = !partDrawing && await _uow.Set<NoDrawingFlag>().AsNoTracking().AnyAsync(f => !f.Deleted && f.ItemId == order.ItemId.Value && f.Status == NoDrawingStatus.Active, ct);
+            }
+            bool noPartDrawing = !partDrawing && !noDrawingFlag;
             result.Checks.Add(new ReleaseCheckDto
             {
-                Code = "drawings", Title = "نقشه‌های منتشرشده", Passed = missing.Count == 0 && unreleased.Count == 0,
+                Code = "drawings", Title = "نقشه‌های منتشرشده", Passed = missing.Count == 0 && unreleased.Count == 0 && !noPartDrawing,
                 Message = missing.Count > 0 ? "نقشه منتشرشده (Released) برای قطعه پیدا نشد: " + Join(missing)
                     : unreleased.Count > 0 ? "سند وصل‌شده به قطعه هنوز نسخه‌ی منتشرشده ندارد: " + Join(unreleased)
-                    : rules.Count == 0 && found.Count == 0 ? "مسیر ساخت نقشه‌ای لازم ندارد." : "نقشه‌های لازم منتشر شده‌اند.",
+                    : noPartDrawing ? "برای این قطعه نقشه منتشرشده (Released) وجود ندارد؛ نقشه را منتشر کنید یا مهندسی پرچم «بدون نقشه» را با دلیل ثبت و نفر دوم فعال کند."
+                    : noDrawingFlag ? "قطعه با پرچم فعال «بدون نقشه» مجاز شده است." : "نقشه‌های لازم منتشر شده‌اند.",
             });
 
             // 4. the work order has an ITP and it is approved (R1p D19: no ITP at all is a refusal, not a pass; the ITP is drafted from the quality template when the order is drafted)
@@ -417,6 +426,10 @@ namespace Services.NasbNiro.Production
                 if (!_user.IsInRole(ProductionRoles.Manager)) return Bad<OrderDto>("کمبود موجودی وجود دارد؛ صدور با کمبود فقط با مدیر تولید و ذکر دلیل ممکن است. " + checks.Checks.First(c => c.Code == "materials").Message);
                 if (reason == null) return Bad<OrderDto>("برای صدور با کمبود موجودی، دلیل را بنویسید. " + checks.Checks.First(c => c.Code == "materials").Message);
             }
+
+            // Package B (FAI): the first order of a part after a new released drawing / BOM / routing revision (or with a flagged step) waits for its first article inspection; it is opened here
+            string faiProblem = await FirstArticleGate.EnsureAtReleaseAsync(_uow, order, ops, Me, DateTimeOffset.Now, ct);
+            if (faiProblem != null) return Bad<OrderDto>("صدور ممکن نیست: " + faiProblem);
 
             DateTimeOffset now = DateTimeOffset.Now;
             order.Status = MfOrderStatus.Released;
@@ -615,6 +628,12 @@ namespace Services.NasbNiro.Production
             List<string> notes;
             var actionNotes = new List<string>();
             var writeOffs = new List<MfWriteOff>();
+            if (action == "skip" || action == "complete-outside")
+            {
+                // Package B (FAI): nothing after the first article point moves on before the first article is approved
+                string faiProblem = await FirstArticleGate.OperationProblemAsync(_uow, order, op, ct);
+                if (faiProblem != null) return Bad<OperationDto>(faiProblem);
+            }
 
             if (action == "skip")
             {
@@ -754,10 +773,10 @@ namespace Services.NasbNiro.Production
             var measurements = new List<SaveQcMeasurementDto>();
             foreach (QcMeasurementInputDto m in dto.Measurements ?? new List<QcMeasurementInputDto>())
             {
-                if (Clean(m.Characteristic) == null) return Bad<OperationDto>("نام مشخصه اندازه‌گیری‌شده را وارد کنید.");
+                if (Clean(m.Characteristic) == null && !m.CharacteristicId.HasValue) return Bad<OperationDto>("مشخصه اندازه‌گیری‌شده را از فهرست مشخصه‌های نقشه انتخاب کنید.");
                 if (!m.InstrumentId.HasValue)
-                    return Bad<OperationDto>($"برای مقدار اندازه‌گیری‌شده «{Clean(m.Characteristic)}» ابزار اندازه‌گیری را انتخاب کنید؛ مقداری که به ابزار کالیبره ردیابی نشود پذیرفته نمی‌شود.");
-                measurements.Add(new SaveQcMeasurementDto { Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = m.Unit, EquipmentId = m.InstrumentId });
+                    return Bad<OperationDto>($"برای مقدار اندازه‌گیری‌شده «{Clean(m.Characteristic) ?? m.CharacteristicId.ToString()}» ابزار اندازه‌گیری را انتخاب کنید؛ مقداری که به ابزار کالیبره ردیابی نشود پذیرفته نمی‌شود.");
+                measurements.Add(new SaveQcMeasurementDto { CharacteristicId = m.CharacteristicId, Characteristic = m.Characteristic, Nominal = m.Nominal, TolPlus = m.TolPlus, TolMinus = m.TolMinus, Measured = m.Measured, Unit = m.Unit, EquipmentId = m.InstrumentId });
             }
 
             // the inspector never inspects his own work: nobody who booked time on the operation is the signed-in inspector
@@ -779,7 +798,9 @@ namespace Services.NasbNiro.Production
             }
 
             // PB8: an acceptance must cover the mandatory points of the ITP and stay inside the baseline tolerance (a missing characteristic or an out-of-tolerance value needs a rejection or an approved exception)
-            if (_opsEvaluator != null && _opsGate != null && activity != null)
+            // Package B: when a released characteristic list governs the part, the list is the one gate (one message, from the quality service); the PB8 rule would only repeat it with other words
+            bool listGoverns = (await CharacteristicResolver.ForItemAsync(_uow, order.ItemId.Value, null, ct)).HasList;
+            if (_opsEvaluator != null && _opsGate != null && activity != null && !listGoverns)
             {
                 var opsMeasures = measurements.Select(m => new global::Services.NasbNiro.OpsData.OpsQcMeasure { Characteristic = m.Characteristic, Measured = m.Measured }).ToList();
                 global::Services.NasbNiro.OpsData.OpsEvaluation opsEv = await _opsEvaluator.EvaluateQcDecisionAsync(op.Id, dto.Result, activity.Id, opsMeasures, ct);
@@ -799,7 +820,7 @@ namespace Services.NasbNiro.Production
             ResponseDto<QcRecordDto> saved = await _inspections.SaveRecordAsync(new SaveQcRecordDto
             {
                 Type = QcRecordType.InProcess, WorkOrderId = order.WorkOrderId, ItpActivityId = activity?.Id, ItemId = order.ItemId, Quantity = quantity,
-                Operation = JobCard(order.Number, op), RecordDate = DateTime.Today, Result = dto.Result, Note = note,
+                Operation = JobCard(order.Number, op), OperationSequence = op.Sequence, RecordDate = DateTime.Today, Result = dto.Result, Note = note,
                 LotId = lotId, SerialNumber = MfSerialRules.Joined(serials, 200), Measurements = measurements,
             }, ct);
             if (saved == null || !saved.Success || saved.Data == null) return Bad<OperationDto>(saved?.Message ?? MfText.InvalidData);
