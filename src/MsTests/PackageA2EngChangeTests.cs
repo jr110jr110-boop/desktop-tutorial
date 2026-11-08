@@ -70,6 +70,7 @@ namespace MsTests
                 var s = await Run(host, who, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = step }, Ct));
                 Assert.IsTrue(s.Success, step + ": " + s.Message);
             }
+            await DesignTestData.VerifyBomAsync(host, id);   // merged with A1: every BOM release needs a closed, accepted design verification (the ECO gate is what these tests are about)
             var rel = await Run(host, Rel, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = id }, Ct));
             if (expectRelease) Assert.IsTrue(rel.Success, rel.Message);
             return rel.Data;

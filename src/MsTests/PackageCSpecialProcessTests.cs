@@ -1198,11 +1198,11 @@ namespace MsTests
         {
             AppHost host = NewHost("history");
             Plant p0 = await NewPlant(host, true);
-            // the instrument was calibrated on the day of the run (3 days ago) and fell overdue yesterday
+            // the instrument was calibrated on the day of the run (3 days ago) and fell overdue two days ago (a run of "today" starts 3 hours ago: just after midnight that is still yesterday)
             host.Write(u =>
             {
                 var tc = u.Set<MeasuringEquipment>().Single(e => e.Id == p0.InstrumentId); tc.RequiresCalibration = true;
-                AppHost.Add(u, new CalibrationEvent { EquipmentId = tc.Id, EventDate = DateTime.Today.AddDays(-30), NextDue = DateTime.Today.AddDays(-1), AsLeftPass = true, AsFoundPass = true, IntervalMonths = 1, LabName = "Lab" });
+                AppHost.Add(u, new CalibrationEvent { EquipmentId = tc.Id, EventDate = DateTime.Today.AddDays(-30), NextDue = DateTime.Today.AddDays(-2), AsLeftPass = true, AsFoundPass = true, IntervalMonths = 1, LabName = "Lab" });
                 u.SaveChanges();
             }, Seeder);
             var run = await Sp(host, Qc, s => s.SaveRunAsync(DatedRun(p0, 3), default));
