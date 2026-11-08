@@ -36,6 +36,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddOfficeConfigurations();
             builder.AddTaskConfigurations();
             builder.AddProductionConfigurations();
+            builder.AddDncConfigurations();   // production P2 part A (DNC)
             builder.AddSalesConfigurations();
             builder.AddAfterSalesConfigurations();
             builder.AddAiConfigurations();

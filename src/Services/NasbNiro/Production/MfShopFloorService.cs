@@ -320,6 +320,9 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, l.Op, l.Employee, dto.Kind, DateTime.Today, ct);
                 if (weld.Error != null) return Bad<TerminalOperationDto>(weld.Error);
             }
+            // P2 (DNC): on a machine that requires it, a run or setup starts only after the current approved program revision was sent to the machine and confirmed on the control
+            var nc = await global::Services.NasbNiro.Production.Dnc.MfDncGate.CheckStartAsync(_uow, l.Op, dto.MachineId, dto.Kind, ct);
+            if (nc.Error != null) return Bad<TerminalOperationDto>(nc.Error);
             MfTimeBooking running = await RunningOfAsync(l.Employee.Id, ct);
             DateTime now = Now();
             if (running != null)
@@ -349,6 +352,12 @@ namespace Services.NasbNiro.Production
                 OperationId = l.Op.Id, EmployeeId = l.Employee.Id, MachineId = dto.MachineId, Kind = dto.Kind, StartAt = now, Source = MfBookingSource.Terminal, Note = Clean(dto.Note),
                 CreateDate = stamp, ModifyDate = stamp, CreatorUserId = Me, ModifierUserId = Me,
             });
+            if (nc.Run != null)
+            {
+                // P2 (DNC): the record of the revision this start runs by, stored with the booking
+                nc.Run.EmployeeId = l.Employee.Id; nc.Run.StartedAt = now; nc.Run.RecordedByUserId = Me;
+                _uow.Set<MfNcRun>().Add(nc.Run);
+            }
             l.Op.Status = MfOperationStatus.InProgress;
             l.Op.StartedAt ??= stamp;
             l.Op.ModifyDate = stamp;
