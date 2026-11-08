@@ -11496,8 +11496,8 @@ item PB8I "{\"code\":\"77.10.05.053.1\",\"title\":\"کالای آزمون کنت
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":100,\"unitPrice\":100000,\"weighedWeightKg\":1200}]}"; check "pb8 gate: the receipt with 1200 kg weighed for 100 pieces of 10 kg shows exactly one finding, the weight warning, in the form" '.success and (.data.opsFindings|length) == 1 and .data.opsFindings[0].ruleCode == "R-RCV-WEIGHT" and .data.opsFindings[0].severity == 1'
 PB8R1=$(val .data.id)
 call POST "inventory/documents/$PB8R1/confirm"; check "pb8 gate: a warning does not stop the confirmation" '.success and .data.status == 1'
-call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 gate: the warning is stored with the document: one open finding R-RCV-WEIGHT, source gate" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-RCV-WEIGHT" and .data.data[0].severity == 1 and .data.data[0].source == 1 and .data.data[0].status == 1'
-PB8F1=$(jq -r '.data.data[0].id' "$B")
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 gate: the warning is stored with the document: one open finding R-RCV-WEIGHT, source gate" '.success and (.data|length) == 1 and .data[0].ruleCode == "R-RCV-WEIGHT" and .data[0].severity == 1 and .data[0].source == 1 and .data[0].status == 1'
+PB8F1=$(jq -r '.data[0].id' "$B")
 # receipt 2: the same price again (the second receipt of the history), the weight matches: no finding at all
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":10,\"unitPrice\":100000,\"weighedWeightKg\":100}]}"; check "pb8 gate: a plausible receipt shows no finding" '.success and (.data.opsFindings|length) == 0'
 PB8R2=$(val .data.id)
@@ -11506,8 +11506,8 @@ call POST "inventory/documents/$PB8R2/confirm"; check "pb8 gate: the plausible r
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"lines\":[{\"itemId\":$PB8I,\"quantity\":10,\"unitPrice\":1000000,\"weighedWeightKg\":100}]}"; check "pb8 gate: the receipt with a price 10 times the history is saved as a draft" '.success and .data.status == 0'
 PB8R3=$(val .data.id)
 call POST "inventory/documents/$PB8R3/confirm"; nomsg "pb8 gate: the confirmation of the 10x price is refused and the message names the rule" "R-RCV-PRICE"
-call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R3&State=open&PageSize=0"; check "pb8 gate: the refusal stored exactly one blocking finding R-RCV-PRICE with deviation 900 %" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-RCV-PRICE" and .data.data[0].severity == 2 and .data.data[0].deviationPercent == 900 and .data.data[0].exceptionId == null'
-PB8F3=$(jq -r '.data.data[0].id' "$B")
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R3&State=open&PageSize=0"; check "pb8 gate: the refusal stored exactly one blocking finding R-RCV-PRICE with deviation 900 %" '.success and (.data|length) == 1 and .data[0].ruleCode == "R-RCV-PRICE" and .data[0].severity == 2 and .data[0].deviationPercent == 900 and .data[0].exceptionId == null'
+PB8F3=$(jq -r '.data[0].id' "$B")
 call POST $OPS/exceptions "{\"findingId\":$PB8F3,\"justification\":\"\"}"; no "pb8 gate: an exception needs a justification text"
 call POST $OPS/exceptions "{\"findingId\":$PB8F3,\"justification\":\"آزمون: قیمت واقعاً ده برابر است (فاکتور ارزی)\"}"; check "pb8 gate: the creator of the document asks for the exception: it waits for a supervisor" '.success and .data.status == 0'
 PB8X3=$(val .data.id)
@@ -11517,12 +11517,12 @@ as "$WH_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X3,\"approve\":true,\"re
 as "$PMO2_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X3,\"approve\":true,\"reason\":\"آزمون: فاکتور ارزی دیده شد\"}"; check "pb8 gate: the supervisor (another person) approves the exception" '.success and .data.status == 1'
 call POST "inventory/documents/$PB8R3/confirm"; check "pb8 gate: with the approved exception the confirmation passes" '.success and .data.status == 1'
 # data-quality list: exact counts for the three documents (1 warning on receipt 1, 1 block on receipt 3, nothing on receipt 2)
-call GET "$OPS/findings?DocumentType=InventoryDocument&State=all&PageSize=0"; check "pb8 quality: exactly two findings belong to the three receipts: the weight warning and the price block" "(.success) and ([.data.data[]|select(.documentId == $PB8R1 or .documentId == $PB8R2 or .documentId == $PB8R3)]|length) == 2 and ([.data.data[]|select(.documentId == $PB8R1 and .ruleCode == \"R-RCV-WEIGHT\")]|length) == 1 and ([.data.data[]|select(.documentId == $PB8R3 and .ruleCode == \"R-RCV-PRICE\" and .severity == 2)]|length) == 1"
+call GET "$OPS/findings?DocumentType=InventoryDocument&State=all&PageSize=0"; check "pb8 quality: exactly two findings belong to the three receipts: the weight warning and the price block" "(.success) and ([.data[]|select(.documentId == $PB8R1 or .documentId == $PB8R2 or .documentId == $PB8R3)]|length) == 2 and ([.data[]|select(.documentId == $PB8R1 and .ruleCode == \"R-RCV-WEIGHT\")]|length) == 1 and ([.data[]|select(.documentId == $PB8R3 and .ruleCode == \"R-RCV-PRICE\" and .severity == 2)]|length) == 1"
 call POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"آزمون: ترازو دقیق است\"}"; no "pb8 quality: the creator of the document cannot verify the data of his own document"
 as "$PMO2_TOKEN" POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"\"}"; no "pb8 quality: verifying the data needs a reason"
 as "$PMO2_TOKEN" POST $OPS/findings/resolve "{\"id\":$PB8F1,\"resolution\":\"verified\",\"reason\":\"آزمون: ترازو دقیق است\"}"; check "pb8 quality: a supervisor who is not the creator verifies the data" '.success'
-call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 quality: the verified finding is no longer open" '.success and (.data.data|length) == 0'
-call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=resolved&PageSize=0"; check "pb8 quality: it is listed as resolved, exactly once" '.success and (.data.data|length) == 1'
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=open&PageSize=0"; check "pb8 quality: the verified finding is no longer open" '.success and (.data|length) == 0'
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8R1&State=resolved&PageSize=0"; check "pb8 quality: it is listed as resolved, exactly once" '.success and (.data|length) == 1'
 
 # baseline conformance: the project PBWO has a BOM baseline (pb1); the item PB8I is not in it
 # the baseline of a project is its latest PB2 material-balance run (raw materials, scrap, conversions, substitutes included), not the raw BOM lines: PBWO must have a run, and the run does not contain PB8I
@@ -11537,8 +11537,8 @@ as "$PROD_TOKEN" POST inventory/material-requests/action "{\"id\":$PB8MR,\"actio
 call POST inventory/documents "{\"type\":4,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$W1,\"materialRequestId\":$PB8MR,\"workOrderId\":$PBWO,\"lines\":[{\"itemId\":$PB8I,\"quantity\":5}]}"; check "pb8 baseline: the issue draft shows the baseline block R-BL-BOM-ITEM in the form" '.success and ([.data.opsFindings[]|select(.ruleCode == "R-BL-BOM-ITEM" and .severity == 2)]|length) == 1'
 PB8I1=$(val .data.id)
 call POST "inventory/documents/$PB8I1/confirm"; nomsg "pb8 baseline: the issue of an item that is not in the project BOM is refused" "R-BL-BOM-ITEM"
-call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8I1&State=open&PageSize=0"; check "pb8 baseline: exactly one open blocking finding R-BL-BOM-ITEM is stored" '.success and (.data.data|length) == 1 and .data.data[0].ruleCode == "R-BL-BOM-ITEM" and .data.data[0].severity == 2'
-PB8F4=$(jq -r '.data.data[0].id' "$B")
+call GET "$OPS/findings?DocumentType=InventoryDocument&DocumentId=$PB8I1&State=open&PageSize=0"; check "pb8 baseline: exactly one open blocking finding R-BL-BOM-ITEM is stored" '.success and (.data|length) == 1 and .data[0].ruleCode == "R-BL-BOM-ITEM" and .data[0].severity == 2'
+PB8F4=$(jq -r '.data[0].id' "$B")
 call POST $OPS/exceptions "{\"findingId\":$PB8F4,\"justification\":\"آزمون: کالای کمکی خارج از BOM به‌تأیید مهندسی\"}"; check "pb8 baseline: the exception is asked" '.success and .data.status == 0'
 PB8X4=$(val .data.id)
 as "$PMO2_TOKEN" POST $OPS/exceptions/decide "{\"id\":$PB8X4,\"approve\":true,\"reason\":\"آزمون: دیده شد\"}"; check "pb8 baseline: the supervisor approves the exception" '.success and .data.status == 1'
