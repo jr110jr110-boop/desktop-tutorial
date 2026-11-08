@@ -89,6 +89,14 @@ namespace Services.NasbNiro.OpsData
             f.BomReleased = head != null;
             f.WbsApproved = await _uow.Set<PbWbsTemplate>().AnyAsync(t => !t.Deleted && t.ProductId == productId && t.IsApproved, ct);
 
+            // Package A1: design control of the released BOM
+            f.DesignRequired = await global::Services.NasbNiro.ProductBank.DesignGate.VerificationRequiredAsync(_uow, ct);
+            if (f.DesignRequired && head != null)
+            {
+                global::Services.NasbNiro.ProductBank.DesignReadinessResult dr = await global::Services.NasbNiro.ProductBank.DesignGate.ReadinessAsync(_uow, head, ct);
+                f.DesignProblems = dr.Problems; f.DesignLegacy = dr.Legacy;
+            }
+
             // the lines of the released BOM at every level (alternatives are options, not requirements)
             var lines = new List<PbBomLine>();
             if (head != null)

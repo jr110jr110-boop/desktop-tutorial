@@ -492,6 +492,8 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ReleaseRoles)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (h.PreparedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUser);
             if (HashOf(h.Lines) != h.ContentHash) return ResponseDtoHelper.BadRequest<PbBomDto>("محتوای BOM بعد از ارسال تغییر کرده است.");
+            string designProblem = await DesignGate.CheckReleaseAsync(Uow, h, null, null, ct);   // Package A1: closed and accepted design verification
+            if (designProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(designProblem);
             string childProblem = await ChildProblemAsync(h.Lines, ct);
             if (childProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(childProblem);
             if (await DistinctReviewersAsync(ct) && (h.CheckedByUserId == User.UserId || h.QcCheckedByUserId == User.UserId || h.ManufacturingCheckedByUserId == User.UserId || h.ApprovedByUserId == User.UserId)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUserReviewers);

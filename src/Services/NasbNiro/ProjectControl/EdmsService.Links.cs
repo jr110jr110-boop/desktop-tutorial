@@ -175,11 +175,25 @@ namespace Services.NasbNiro.ProjectControl
         public async Task<ResponseDto<bool>> VoidLinkAsync(PcDocLinkVoidDto dto, CancellationToken ct)
         {
             if (dto == null) return Bad<bool>(PcText.InvalidData);
-            if (!_user.IsInRole(EdmsRoles.Preparers)) return Bad<bool>(PcText.NotAllowed);
             PcDocumentLink l = await _uow.Set<PcDocumentLink>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
             if (l == null) return PcText.NotFound<bool>("پیوند پیدا نشد.");
             string reason = Clean(dto.Reason);
-            if (reason == null || reason.Length < 3) return Bad<bool>("علت حذف پیوند الزامی است (حداقل ۳ حرف).");
+            // Package A1 (fix round 1, H2): the link of a drawing to a part is what makes it a design output. Removing it needs a second person (ENGINEERING or QA, not the person who made the link) with a real reason,
+            // and it does not clear the design-output status of the drawing (that stays, from the history of its links).
+            bool designLink = l.DeliverableId.HasValue && (l.Kind == PcDocLinkKind.Item || l.Kind == PcDocLinkKind.BomLine || l.Kind == PcDocLinkKind.PartNumber);
+            if (designLink)
+            {
+                if (!_user.IsInRole("ENGINEERING,QA")) return Bad<bool>(PcText.NotAllowed);
+                if (l.CreatorUserId == Me) return Bad<bool>("تفکیک وظایف: پیوند نقشه به قطعه را نفر دوم (مهندسی یا QA)، غیر از ثبت‌کننده پیوند، حذف می‌کند.");
+                int minChars = (int)(await global::Services.NasbNiro.Quality.QualitySettingKeys.LoadAsync(_uow, ct))[global::Services.NasbNiro.ProductBank.DesignSettingKeys.ReasonMinChars];
+                if (reason == null || reason.Length < minChars) return Bad<bool>($"علت حذف پیوند نقشه از قطعه دست‌کم {minChars} نویسه باشد؛ نقشه همچنان «خروجی طراحی» می‌ماند.");
+            }
+            else
+            {
+                if (!_user.IsInRole(EdmsRoles.Preparers)) return Bad<bool>(PcText.NotAllowed);
+                if (reason == null || reason.Length < 3) return Bad<bool>("علت حذف پیوند الزامی است (حداقل ۳ حرف).");
+            }
+            if (reason != null && reason.Length > 1000) return Bad<bool>("علت حذف پیوند بیش از ۱۰۰۰ نویسه است.");
             if (l.DeliverableId.HasValue)
             {
                 var holder = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => x.Id == l.DeliverableId.Value).Select(x => x.CheckedOutByUserId).FirstOrDefaultAsync(ct);

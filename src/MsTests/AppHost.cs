@@ -142,6 +142,37 @@ namespace MsTests
             Http = Provider.GetRequiredService<IHttpContextAccessor>();
         }
 
+        /// <summary>
+        /// Package A1: the design verification gates (BOM and drawing release, readiness item, FCA) are ON by default (the strict production default). The legacy tests release BOMs and drawings without a design plan,
+        /// so they switch the gates off with this call (the same way WithoutReadinessGate switches the readiness gate off); the gates themselves are tested in PackageA1DesignControlTests.
+        /// </summary>
+        public AppHost WithoutDesignControl()
+        {
+            SetDesignControl(false);
+            return this;
+        }
+
+        /// <summary>Package A1: writes the two design control settings at their strict value (they are on by default; this call is only needed after WithoutDesignControl).</summary>
+        public AppHost WithDesignControl()
+        {
+            SetDesignControl(true);
+            return this;
+        }
+
+        private void SetDesignControl(bool on)
+        {
+            Write(uow =>
+            {
+                foreach (string key in new[] { Services.NasbNiro.ProductBank.DesignSettingKeys.VerificationRequired, Services.NasbNiro.ProductBank.DesignSettingKeys.ValidationRequired })
+                {
+                    Entities.Model.NasbNiro.Quality.QualitySetting row = uow.Set<Entities.Model.NasbNiro.Quality.QualitySetting>().FirstOrDefault(x => x.Key == key);
+                    if (row == null) Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = key, Value = on ? 1 : 0, Title = "design control (test)", Source = "test" });
+                    else row.Value = on ? 1 : 0;
+                }
+                uow.SaveChanges();
+            });
+        }
+
         /// <summary>The EF model of the application database (which entity types and scalar properties exist).</summary>
         public IModel Model
         {
@@ -195,7 +226,7 @@ namespace MsTests
                 Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = Services.NasbNiro.OpsData.OpsReadinessCatalog.MasterSwitch, Value = 0, Title = "readiness gate off (test)", Source = "test" });
                 uow.SaveChanges();
             });
-            return this;
+            return this;   // fix round 1 (M4): the design control stays ON; a test that releases a BOM gives it design data (DesignTestData)
         }
 
         /// <summary>Reads with a new scope and no user.</summary>

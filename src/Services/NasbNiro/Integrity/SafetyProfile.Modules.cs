@@ -72,6 +72,7 @@ namespace Services.NasbNiro.Integrity
 
             // PB8: the gates of the operational data control and of the engineering readiness (the lists are the module's own catalogs, so a new rule is covered at once)
             list.AddRange(OpsSpecs());
+            list.AddRange(DesignSpecs());   // Package A1
             return list;
         }
 

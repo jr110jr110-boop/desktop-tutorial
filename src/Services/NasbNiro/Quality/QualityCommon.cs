@@ -215,6 +215,7 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = PkcCertEnforce, Value = 1, Title = "سنجش مقادیر گواهی 3.1/3.2 با مشخصات ماده و جلوگیری از پذیرش رسید", Source = "★ تصمیم مدیرعامل (EN 10204)" };
             // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
             foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
+            foreach (QualitySetting dd in global::Services.NasbNiro.ProductBank.DesignSettingKeys.Defaults()) yield return dd;   // Package A1
         }
 
         /// <summary>

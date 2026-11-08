@@ -212,6 +212,10 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.ICapaService, Services.NasbNiro.Quality.CapaService>();
             services.AddScoped<Services.NasbNiro.Quality.IReleaseService, Services.NasbNiro.Quality.ReleaseService>();
             services.AddScoped<Services.NasbNiro.Quality.ICharacteristicService, Services.NasbNiro.Quality.CharacteristicService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignPlanService, Services.NasbNiro.ProductBank.DesignPlanService>();   // Package A1
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignInputService, Services.NasbNiro.ProductBank.DesignInputService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignReviewService, Services.NasbNiro.ProductBank.DesignReviewService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignAdoptionService, Services.NasbNiro.ProductBank.DesignAdoptionService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
             services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();
