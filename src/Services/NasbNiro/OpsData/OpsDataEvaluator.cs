@@ -253,7 +253,12 @@ namespace Services.NasbNiro.OpsData
         private static (decimal? Price, string Text) ReferencePrice(Dictionary<int, List<decimal>> history, int itemId, int minHistory)
         {
             if (history.TryGetValue(itemId, out List<decimal> prices) && prices.Count >= Math.Max(1, minHistory))
-                return (Math.Round(prices.Average(), 2), $"میانگین {prices.Count} رسید آخر");
+            {
+                // the MEDIAN of the last receipts: one odd price in the history (a capital purchase, a typo already confirmed) must not make every later normal price look wrong
+                List<decimal> sorted = prices.OrderBy(x => x).ToList();
+                decimal median = sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]) / 2m;
+                return (Math.Round(median, 2), $"میانه‌ی {prices.Count} رسید آخر");
+            }
             return (null, null);
         }
 

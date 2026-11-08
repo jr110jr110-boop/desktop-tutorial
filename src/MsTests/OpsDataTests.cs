@@ -466,6 +466,24 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task Gate_Price_Reference_Is_The_Median_So_One_Confirmed_Outlier_Does_Not_Block_Normal_Prices()
+        {
+            AppHost host = NewHost("median");
+            Wh w = Seed(host);
+            await Prime(host, w);                                   // 100, 100
+            var odd = await DraftReceipt(host, w, 10m, 9000m, null);   // a capital purchase: blocked, then excepted by another supervisor
+            Assert.IsFalse((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(odd.Data.Id, Ct))).Success);
+            OpsFinding f = host.Read(u => u.Set<OpsFinding>().Single(x => x.DocumentId == odd.Data.Id && x.RuleCode == OpsRuleCodes.RcvPrice));
+            var req = await host.As(Maker, p => p.GetRequiredService<IOpsExceptionService>().RequestAsync(new RequestOpsExceptionDto { FindingId = f.Id, Justification = "خرید سرمایه‌ای با فاکتور جداگانه" }, Ct));
+            Assert.IsTrue((await host.As(Supervisor, p => p.GetRequiredService<IOpsExceptionService>().DecideAsync(new DecideOpsExceptionDto { Id = req.Data.Id, Approve = true }, Ct))).Success);
+            Assert.IsTrue((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(odd.Data.Id, Ct))).Success);
+            // history is now 9000, 100, 100: the average (3066) would block a normal price of 100; the median (100) does not
+            var normal = await DraftReceipt(host, w, 10m, 100m, null);
+            Assert.AreEqual(0, normal.Data.OpsFindings.Count(x => x.RuleCode == OpsRuleCodes.RcvPrice));
+            Assert.IsTrue((await host.As(Maker, p => p.GetRequiredService<IInventoryDocumentService>().ConfirmAsync(normal.Data.Id, Ct))).Success);
+        }
+
+        [TestMethod]
         public async Task Gate_Real_Ui_Flow_Save_Confirm_Refused_Request_Approve_Save_Again_Confirm_Passes()
         {
             AppHost host = NewHost("uiflow");
