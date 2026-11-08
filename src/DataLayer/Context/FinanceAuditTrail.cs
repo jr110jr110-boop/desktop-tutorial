@@ -543,6 +543,7 @@ namespace DataLayer.Context
                 var before = new Dictionary<string, object>();
                 var after = new Dictionary<string, object>();
                 bool confidentialLine = IsConfidential(entry);
+                List<string> tempColumns = null;
                 foreach (PropertyEntry p in entry.Properties)
                 {
                     string name = p.Metadata.Name;
@@ -550,7 +551,13 @@ namespace DataLayer.Context
                     if (only != null && !only.Contains(name)) continue;
                     // a key (or a foreign key that points at one) the database has not generated yet is a temporary number, not a fact: it stays out of the row
                     // (an imported punch is saved together with its batch, so its ImportBatchId is such a number on a real database)
-                    if (entry.State == EntityState.Added && p.IsTemporary) continue;
+                    // Package D (CI fix): such a column is filled in right after the save, with the number the database gave (the record check compares it with the row)
+                    if (p.IsTemporary && (entry.State == EntityState.Added || (entry.State == EntityState.Modified && p.IsModified)))
+                    {
+                        (tempColumns ??= new List<string>()).Add(name);
+                        if (entry.State == EntityState.Modified) before[name] = Shape(name, p.OriginalValue, confidentialLine);
+                        continue;
+                    }
                     if (SpecialProperties.TryGetValue((type, name), out Special special))
                     {
                         WriteSpecial(entry, p, special, before, after);
@@ -575,8 +582,8 @@ namespace DataLayer.Context
                         if (Masked.Contains(name)) { AddHash(before, name, p.OriginalValue); AddHash(after, name, p.CurrentValue); }
                     }
                 }
-                if (entry.State == EntityState.Modified && after.Count == 0) continue;
-                if (only != null && before.Count == 0 && after.Count == 0) continue;
+                if (entry.State == EntityState.Modified && after.Count == 0 && tempColumns == null) continue;
+                if (only != null && before.Count == 0 && after.Count == 0 && tempColumns == null) continue;
 
                 int? entityId = null;
                 bool lateKey = false;   // Package D (H1): a new record gets its key from the database; the entry is added with the real key right after the save
@@ -600,7 +607,7 @@ namespace DataLayer.Context
                     Ip = ip,
                 };
                 context.Set<FnAuditLog>().Add(logRow);
-                if (lateKey) LateRows(context).Add(new LateAudit { Row = logRow, Entry = entry });
+                if (lateKey || tempColumns != null) LateRows(context).Add(new LateAudit { Row = logRow, Entry = entry, TempColumns = tempColumns, Confidential = confidentialLine });
             }
 
             // R1a2 (L9): the lines of a cost baseline are written in bulk (hundreds at once). One summary row per baseline says how many lines were added, changed and removed

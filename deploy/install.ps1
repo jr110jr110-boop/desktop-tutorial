@@ -1187,10 +1187,18 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     $restoreArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -SqlServer "{1}" -DatabaseName "{2}" -BackupFolder "{3}" -ResultDirectory "{4}" -ScratchName "IRNNCO_RESTORETEST"' -f `
                    (Join-Path $ToolsDir 'restore-test.ps1'), $script:SqlInstance, $DatabaseName, $BackupFolder, $restoreTestDir
     $restoreAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $restoreArgs
-    $monthlyClass = Get-CimClass -ClassName MSFT_TaskMonthlyTrigger -Namespace 'Root/Microsoft/Windows/TaskScheduler'
-    $restoreTrigger = New-CimInstance -CimClass $monthlyClass -ClientOnly -Property @{ DaysOfMonth = [uint32]1; MonthsOfYear = [uint16]4095; StartBoundary = ((Get-Date).Date.AddHours(3).ToString('yyyy-MM-ddTHH:mm:ss')); Enabled = $true }
+    # The monthly trigger (day 1 of every month) has no cmdlet; the task is registered with a daily trigger and its trigger is then replaced in the task XML.
+    $restoreStart = (Get-Date).Date.AddHours(3)
+    $restoreTrigger = New-ScheduledTaskTrigger -Daily -At $restoreStart
     $restoreSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 6)
     Register-ScheduledTask -TaskName $restoreTaskName -Action $restoreAction -Trigger $restoreTrigger -Principal $taskPrincipal -Settings $restoreSettings -Force | Out-Null
+    $months = (@('January','February','March','April','May','June','July','August','September','October','November','December') | ForEach-Object { "<$_ />" }) -join ''
+    $monthlyXml = '<Triggers><CalendarTrigger><StartBoundary>' + $restoreStart.ToString('yyyy-MM-ddTHH:mm:ss') + '</StartBoundary><Enabled>true</Enabled><ScheduleByMonth><DaysOfMonth><Day>1</Day></DaysOfMonth><Months>' + $months + '</Months></ScheduleByMonth></CalendarTrigger></Triggers>'
+    $taskXml = Export-ScheduledTask -TaskName $restoreTaskName
+    $taskXml = [regex]::Replace($taskXml, '(?s)<Triggers>.*?</Triggers>', $monthlyXml)
+    Register-ScheduledTask -TaskName $restoreTaskName -Xml $taskXml -Force | Out-Null
+    $registered = Get-ScheduledTask -TaskName $restoreTaskName
+    if ($registered.Triggers.Count -ne 1 -or $registered.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskMonthlyTrigger') { throw "The task '$restoreTaskName' did not get its monthly trigger." }
     Set-ProgramSetting $settingsPath 'RestoreTest' 'ResultDirectory' $restoreTestDir
     Write-Ok "Task '$restoreTaskName': on day 1 of every month at 03:00 the newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped. Result files: $restoreTestDir"
 

@@ -36,6 +36,9 @@ namespace DataLayer.Context
         {
             public FnAuditLog Row { get; set; }
             public Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Entry { get; set; }
+            /// <summary>Columns (keys or foreign keys) that held a temporary number at capture: written with the database's number after the save.</summary>
+            public List<string> TempColumns { get; set; }
+            public bool Confidential { get; set; }
         }
 
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DbContext, List<LateAudit>> LateTable = new System.Runtime.CompilerServices.ConditionalWeakTable<DbContext, List<LateAudit>>();
@@ -59,6 +62,13 @@ namespace DataLayer.Context
                 object id = item.Entry.Properties.FirstOrDefault(p => p.Metadata.Name == "Id")?.CurrentValue;
                 if (id is int i && i > 0) item.Row.EntityId = i;
                 else if (id is long l && l > 0 && l <= int.MaxValue) item.Row.EntityId = (int)l;
+                if (item.TempColumns == null) continue;
+                var after = item.Row.AfterJson == null
+                    ? new Dictionary<string, object>()
+                    : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(item.Row.AfterJson).ToDictionary(k => k.Key, k => (object)k.Value);
+                foreach (string name in item.TempColumns)
+                    after[name] = Shape(name, item.Entry.Properties.First(p => p.Metadata.Name == name).CurrentValue, item.Confidential);
+                item.Row.AfterJson = after.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(after);
             }
             return late.Select(l => l.Row).ToList();
         }
