@@ -588,6 +588,9 @@ namespace Services.NasbNiro.Inventory
                 case "finish":
                     if (operation.Status == PartOperationStatus.Done) return ResponseDtoHelper.BadRequest<PartOperationDto>("این مرحله قبلاً تمام شده است.");
                     if (operation.Status == PartOperationStatus.Rejected) return ResponseDtoHelper.BadRequest<PartOperationDto>("این مرحله رد شده است؛ اول آن را دوباره باز کنید.");
+                    // Package C (H7): a special process stage finishes only with a passed, QA-reviewed run (the same gate as the production terminal)
+                    string spFinish = await global::Services.NasbNiro.Quality.SpecialProcessGate.PartOperationProblemAsync(_uow, operation, cancellationToken);
+                    if (spFinish != null) return ResponseDtoHelper.BadRequest<PartOperationDto>(spFinish);
                     operation.Status = PartOperationStatus.Done;
                     operation.StartedAt ??= now;
                     operation.FinishedAt = now;

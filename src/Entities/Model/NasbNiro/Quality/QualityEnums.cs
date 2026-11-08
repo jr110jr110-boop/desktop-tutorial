@@ -174,6 +174,9 @@ namespace Entities.Model.NasbNiro.Quality
         WeldingOperator = 2,
         NdtPersonnel = 3,
         Inspector = 4,
+
+        /// <summary>Package C: the competence record of an operator of a special process (heat treatment, nitriding, coating ...). Method = the code of the process type.</summary>
+        SpecialProcessOperator = 5,
     }
 
     public enum NdtLevel

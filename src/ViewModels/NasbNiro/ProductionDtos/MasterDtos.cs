@@ -154,6 +154,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public int? WpsId { get; set; }
         public string WpsNumber { get; set; }
+
+        /// <summary>Package C: a special process step; it is finished only with a passed, QA-reviewed run under a valid qualification.</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        public int? SpecialProcessTypeId { get; set; }
+        public string SpecialProcessTypeTitle { get; set; }
     }
 
     public class SaveOperationStandardDto
@@ -179,6 +185,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public bool IsWelding { get; set; }
 
         public int? WpsId { get; set; }
+
+        /// <summary>Package C: a special process step; then <see cref="SpecialProcessTypeId"/> is mandatory.</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        public int? SpecialProcessTypeId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ routing revisions

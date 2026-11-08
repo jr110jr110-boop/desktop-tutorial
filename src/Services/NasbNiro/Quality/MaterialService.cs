@@ -19,6 +19,7 @@ namespace Services.NasbNiro.Quality
         Task<ResponseDto<PagedList<MaterialCertificateDto>>> GetCertificatesAsync(MaterialCertificateQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<MaterialCertificateDto>> SaveCertificateAsync(SaveMaterialCertificateDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<MaterialCertificateDto>> VerifyCertificateAsync(VerifyCertificateDto dto, CancellationToken cancellationToken);
+        Task<ResponseDto<MaterialCertificateDto>> GetCertificateAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<TraceabilityDto>> TraceAsync(TraceabilityQuery query, CancellationToken cancellationToken);
 
         /// <summary>Null when the lot may be accepted at incoming inspection, otherwise the Persian reason (EN 10204 type 2.2 &lt; 3.1 &lt; 3.2).</summary>
@@ -45,13 +46,19 @@ namespace Services.NasbNiro.Quality
 
         private async Task<List<MaterialCertificateDto>> LoadAsync(IQueryable<MaterialCertificate> rows, CancellationToken cancellationToken)
         {
-            List<MaterialCertificate> list = await rows.Include(c => c.Lot).ThenInclude(l => l.Item).ToListAsync(cancellationToken);
+            List<MaterialCertificate> list = await rows.Include(c => c.Lot).ThenInclude(l => l.Item).Include(c => c.Values).ToListAsync(cancellationToken);
+            List<int> specIds = list.Where(c => c.SpecId.HasValue).Select(c => c.SpecId.Value).Distinct().ToList();
+            Dictionary<int, int> specVersions = await _uow.Set<MaterialSpec>().AsNoTracking().Where(x => specIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Version, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, list.SelectMany(c => new int?[] { c.CreatorUserId, c.VerifiedByUserId }), cancellationToken);
             return list.Select(c => new MaterialCertificateDto
             {
                 Id = c.Id, LotId = c.LotId, LotNumber = c.Lot?.LotNumber, HeatNumber = c.Lot?.HeatNumber, ItemId = c.Lot?.ItemId ?? 0, ItemCode = c.Lot?.Item?.Code,
                 ItemTitle = c.Lot?.Item?.Title, Type = c.Type, Number = c.Number, Issuer = c.Issuer, DocumentId = c.DocumentId, Summary = c.Summary, Result = c.Result,
                 CreatorName = names.Name(c.CreatorUserId), VerifiedByName = names.Name(c.VerifiedByUserId), VerifiedAt = c.VerifiedAt, VerificationNote = c.VerificationNote,
+                CertHeatNumber = c.HeatNumber, Grade = c.Grade, Standard = c.Standard, SpecId = c.SpecId, SpecVersion = c.SpecId.HasValue && specVersions.TryGetValue(c.SpecId.Value, out int sv) ? sv : (int?)null,
+                InspectorOrganisation = c.InspectorOrganisation, InspectorName = c.InspectorName, InspectorStampNo = c.InspectorStampNo, ManufacturerSignatory = c.ManufacturerSignatory,
+                Evaluation = c.Evaluation, EvaluationText = c.EvaluationText, EvaluatedAt = c.EvaluatedAt,
+                Values = c.Values.OrderBy(v => v.SortOrder).Select(v => new CertificateValueDto { Kind = v.Kind, Name = v.Name, Unit = v.Unit, Value = v.Value, Min = v.Min, Max = v.Max, Status = v.Status }).ToList(),
             }).ToList();
         }
 
@@ -74,6 +81,12 @@ namespace Services.NasbNiro.Quality
             return ResponseDtoHelper.Ok(page);
         }
 
+        public async Task<ResponseDto<MaterialCertificateDto>> GetCertificateAsync(int id, CancellationToken cancellationToken)
+        {
+            List<MaterialCertificateDto> list = await LoadAsync(_uow.Set<MaterialCertificate>().AsNoTracking().Where(c => c.Id == id && !c.Deleted), cancellationToken);
+            return list.Count == 0 ? QualityText.NotFound<MaterialCertificateDto>("گواهی پیدا نشد.") : ResponseDtoHelper.Ok(list[0]);
+        }
+
         public async Task<ResponseDto<MaterialCertificateDto>> SaveCertificateAsync(SaveMaterialCertificateDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || !Enum.IsDefined(typeof(CertificateType), dto.Type) || Clean(dto.Number) == null) return Bad<MaterialCertificateDto>("نوع و شماره گواهی را وارد کنید.");
@@ -84,7 +97,7 @@ namespace Services.NasbNiro.Quality
             MaterialCertificate cert;
             if (dto.Id.HasValue)
             {
-                cert = await _uow.Set<MaterialCertificate>().FirstOrDefaultAsync(c => c.Id == dto.Id.Value && !c.Deleted, cancellationToken);
+                cert = await _uow.Set<MaterialCertificate>().Include(c => c.Values).FirstOrDefaultAsync(c => c.Id == dto.Id.Value && !c.Deleted, cancellationToken);
                 if (cert == null) return QualityText.NotFound<MaterialCertificateDto>("گواهی پیدا نشد.");
                 if (cert.Result != CertificateResult.Pending) return Bad<MaterialCertificateDto>("گواهی بررسی‌شده ویرایش نمی‌شود؛ گواهی جدید ثبت کنید.");
             }
@@ -97,6 +110,22 @@ namespace Services.NasbNiro.Quality
             if (await _uow.Set<MaterialCertificate>().AnyAsync(c => c.LotId == lot.Id && c.Number == number && c.Id != cert.Id && !c.Deleted, cancellationToken))
                 return Bad<MaterialCertificateDto>("این شماره گواهی برای این بچ قبلاً ثبت شده است.");
             cert.LotId = lot.Id; cert.Type = dto.Type; cert.Number = number; cert.Issuer = Clean(dto.Issuer); cert.DocumentId = dto.DocumentId; cert.Summary = Clean(dto.Summary);
+            cert.HeatNumber = Clean(dto.CertHeatNumber); cert.Grade = Clean(dto.Grade); cert.Standard = Clean(dto.Standard);
+            cert.InspectorOrganisation = Clean(dto.InspectorOrganisation); cert.InspectorName = Clean(dto.InspectorName); cert.InspectorStampNo = Clean(dto.InspectorStampNo); cert.ManufacturerSignatory = Clean(dto.ManufacturerSignatory);
+            var rows = dto.Values ?? new List<SaveCertificateValueDto>();
+            if (rows.Count > 200) return Bad<MaterialCertificateDto>("حداکثر ۲۰۰ ردیف مقدار.");
+            var keys = new HashSet<string>();
+            foreach (SaveCertificateValueDto r in rows)
+            {
+                string rn = Clean(r.Name);
+                if (!Enum.IsDefined(typeof(CertValueKind), r.Kind) || rn == null || rn.Length > 60 || !r.Value.HasValue) return Bad<MaterialCertificateDto>("هر ردیف مقدار باید نوع، نام (حداکثر ۶۰ نویسه) و عدد داشته باشد.");
+                if (!keys.Add((int)r.Kind + "|" + CharacteristicRules.Key(rn))) return Bad<MaterialCertificateDto>($"ردیف «{rn}» تکراری است.");
+            }
+            if (cert.Id != 0 || cert.Values.Count > 0) _uow.Set<CertificateValue>().RemoveRange(cert.Values.ToList());
+            cert.Values.Clear();
+            int vorder = 0;
+            foreach (SaveCertificateValueDto r in rows) cert.Values.Add(new CertificateValue { SortOrder = vorder++, Kind = r.Kind, Name = Clean(r.Name), Unit = Clean(r.Unit), Value = r.Value.Value });
+            await CertificateEngine.EvaluateAsync(_uow, cert, lot, cancellationToken);
             cert.ModifyDate = now; cert.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok((await LoadAsync(_uow.Set<MaterialCertificate>().Where(c => c.Id == cert.Id), cancellationToken))[0]);
@@ -106,10 +135,21 @@ namespace Services.NasbNiro.Quality
         {
             if (dto == null) return Bad<MaterialCertificateDto>(QualityText.InvalidData);
             if (!_user.IsInRole(QualityRoles.Inspectors)) return Bad<MaterialCertificateDto>(QualityText.NotAllowed + " (گواهی را فقط QC تایید می‌کند)");
-            MaterialCertificate cert = await _uow.Set<MaterialCertificate>().Include(c => c.Lot).FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, cancellationToken);
+            MaterialCertificate cert = await _uow.Set<MaterialCertificate>().Include(c => c.Lot).Include(c => c.Values).FirstOrDefaultAsync(c => c.Id == dto.Id && !c.Deleted, cancellationToken);
             if (cert == null) return QualityText.NotFound<MaterialCertificateDto>("گواهی پیدا نشد.");
             if (cert.Result != CertificateResult.Pending) return Bad<MaterialCertificateDto>("این گواهی قبلاً بررسی شده است.");
             if (cert.CreatorUserId == Me) return Bad<MaterialCertificateDto>(QualityText.SameUser);
+            if (dto.Accept && CertificateRules.NeedsValues(cert.Type))
+            {
+                // the verdict is recomputed on the verification day: the specification may have changed since the certificate was entered
+                Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+                CertificateEvaluation ev = await CertificateEngine.EvaluateAsync(_uow, cert, cert.Lot, cancellationToken);
+                if (SpecialProcessGate.On(st, QualitySettingKeys.PkcCertEnforce) && ev.Status != CertRowStatus.Pass)
+                {
+                    await _uow.SaveChangesAsync(cancellationToken);
+                    return Bad<MaterialCertificateDto>("گواهی " + TypeText(cert.Type) + " پذیرفته نمی‌شود: " + ev.Text);
+                }
+            }
             if (dto.Accept && cert.DocumentId == null) return Bad<MaterialCertificateDto>("برای تایید، تصویر یا فایل گواهی را پیوست کنید.");
             if (!dto.Accept && Clean(dto.Note) == null) return Bad<MaterialCertificateDto>("دلیل رد گواهی را بنویسید.");
             DateTimeOffset now = DateTimeOffset.Now;
@@ -133,12 +173,21 @@ namespace Services.NasbNiro.Quality
 
         public async Task<string> CheckRequiredCertificateAsync(int itemId, int? lotId, CancellationToken cancellationToken)
         {
-            CertificateType? required = await _uow.Set<InventoryItem>().Where(i => i.Id == itemId).Select(i => i.RequiredCertificateType).FirstOrDefaultAsync(cancellationToken);
+            RequiredCertificate derived = await CertificateEngine.RequiredAsync(_uow, itemId, cancellationToken);
+            CertificateType? required = derived.Type;
             if (!required.HasValue) return null;
             string need = TypeText(required.Value);
-            if (!lotId.HasValue) return $"این کالا گواهی EN 10204 نوع {need} (یا بالاتر) می‌خواهد؛ بچ مشخص نیست.";
-            bool ok = await _uow.Set<MaterialCertificate>().AnyAsync(c => c.LotId == lotId.Value && !c.Deleted && c.Result == CertificateResult.Accepted && c.Type >= required.Value, cancellationToken);
-            return ok ? null : $"این کالا گواهی EN 10204 نوع {need} (یا بالاتر) می‌خواهد و برای این بچ گواهی تاییدشده توسط QC ثبت نشده است.";
+            string from = derived.Sources.Count > 0 ? " (" + string.Join("، ", derived.Sources) + ")" : string.Empty;
+            if (!lotId.HasValue) return $"این کالا گواهی EN 10204 نوع {need} (یا بالاتر) می‌خواهد{from}؛ بچ مشخص نیست.";
+            List<MaterialCertificate> candidates = await _uow.Set<MaterialCertificate>().AsNoTracking()
+                .Where(c => c.LotId == lotId.Value && !c.Deleted && c.Result == CertificateResult.Accepted && c.Type >= required.Value).ToListAsync(cancellationToken);
+            if (candidates.Count == 0) return $"این کالا گواهی EN 10204 نوع {need} (یا بالاتر) می‌خواهد{from} و برای این بچ گواهی تاییدشده توسط QC ثبت نشده است.";
+            Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            if (!SpecialProcessGate.On(st, QualitySettingKeys.PkcCertEnforce)) return null;
+            if (candidates.Any(c => !CertificateRules.NeedsValues(c.Type) || c.Evaluation == CertRowStatus.Pass)) return null;
+            MaterialCertificate worst = candidates.OrderByDescending(c => c.Type).First();
+            string why = worst.Evaluation == CertRowStatus.NotJudged ? "مقادیر گواهی با مشخصات ماده سنجیده نشده است (مقادیر شیمیایی و مکانیکی را وارد کنید)." : worst.EvaluationText;
+            return $"گواهی {TypeText(worst.Type)} شماره {worst.Number} برای پذیرش رسید کافی نیست: {why}";
         }
 
         // -------------------------------------------------------------------------------- traceability

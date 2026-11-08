@@ -320,6 +320,9 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, l.Op, l.Employee, dto.Kind, DateTime.Today, ct);
                 if (weld.Error != null) return Bad<TerminalOperationDto>(weld.Error);
             }
+            // Package C: a special process step is worked only by a person with a valid operator competence record for the process
+            string spStart = await global::Services.NasbNiro.Quality.SpecialProcessGate.StartProblemAsync(_uow, l.Op, l.Employee, dto.Kind, DateTime.Today, ct);
+            if (spStart != null) return Bad<TerminalOperationDto>(spStart);
             MfTimeBooking running = await RunningOfAsync(l.Employee.Id, ct);
             DateTime now = Now();
             if (running != null)
@@ -593,6 +596,9 @@ namespace Services.NasbNiro.Production
             decimal expected = ExpectedQuantity(l);
             decimal reported = l.Op.GoodQty + l.Op.ScrapQty;
             if (reported != expected) return Bad<TerminalOperationDto>($"مجموع سالم و ضایعات ({MfFlow.Num(reported)}) با تعداد این عملیات ({MfFlow.Num(expected)}) برابر نیست؛ تعداد را کامل گزارش کنید.");
+            // Package C (H7): a special process step finishes only with a passed, QA-reviewed run under a valid qualification (one gate, one message)
+            string spFinish = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, l.Order, l.Op, expected, l.Op.ScrapQty, ct);
+            if (spFinish != null) return Bad<TerminalOperationDto>(spFinish);
             if (await _uow.Set<MfTimeBooking>().AnyAsync(b => !b.Deleted && b.OperationId == l.Op.Id && b.EndAt == null && b.EmployeeId != l.Employee.Id, ct))
                 return Bad<TerminalOperationDto>("هنوز شخص دیگری روی این عملیات در حال کار است؛ او باید ابتدا کار خود را متوقف کند.");
 
@@ -834,6 +840,8 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, l.Op, worker, dto.Kind, start.Date, ct);
                 if (weld.Error != null) return Bad<BookingDto>(weld.Error);
             }
+            string spStartBooking = await global::Services.NasbNiro.Quality.SpecialProcessGate.StartProblemAsync(_uow, l.Op, worker, dto.Kind, start.Date, ct);
+            if (spStartBooking != null) return Bad<BookingDto>(spStartBooking);
             if (dto.MachineId.HasValue)
             {
                 string machineProblem = await CheckMachineAsync(dto.MachineId.Value, l.Op, false, ct);
@@ -963,6 +971,12 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, op, welder, kind, start.Date, ct);
                 if (weld.Error != null) return Bad<BookingDto>(weld.Error);
             }
+            if (op.IsSpecialProcess && (kind != b.Kind || start.Date != b.StartAt.Date))
+            {
+                FnEmployee spWorker = await _uow.Set<FnEmployee>().AsNoTracking().FirstOrDefaultAsync(e => e.Id == b.EmployeeId, ct);
+                string spEdit = await global::Services.NasbNiro.Quality.SpecialProcessGate.StartProblemAsync(_uow, op, spWorker, kind, start.Date, ct);
+                if (spEdit != null) return Bad<BookingDto>(spEdit);
+            }
             {
                 // PB8 fix M4: a supervisor's edit is gated like the booking it changes (hours: new minus old, scrap: the increase)
                 decimal newHours = MfText.HoursOf(MinutesBetween(start, end));
@@ -1068,6 +1082,8 @@ namespace Services.NasbNiro.Production
                 var weld = await MfWelding.CheckStartAsync(_uow, op, worker, dto.Kind, start.Date, ct);
                 if (weld.Error != null) return Bad<BookingDto>(weld.Error);
             }
+            string spCorrection = await global::Services.NasbNiro.Quality.SpecialProcessGate.StartProblemAsync(_uow, op, worker, dto.Kind, start.Date, ct);
+            if (spCorrection != null) return Bad<BookingDto>(spCorrection);
             string correctionRefusal = await OpsGateAsync(op.Id, dto.Kind, MfText.HoursOf(minutes), 0m, 0m, ct);   // PB8 fix M4: the hours of a correction are gated when it is written (its approval adds no new figure)
             if (correctionRefusal != null) return Bad<BookingDto>(correctionRefusal);
             DateTimeOffset stamp = DateTimeOffset.Now;

@@ -1621,7 +1621,7 @@ addmonths() { # addmonths YYYY-MM-DD N: the same day N months later, the last da
   printf '%04d-%02d-%02d' $y $m $((10#$d))
 }
 wqual() { # wqual PERSON NUMBER METHOD ISSUED-DAYS-AGO
-  as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$1,\"kind\":1,\"method\":\"$3\",\"scheme\":1,\"scope\":\"P-1 plate\",\"certificateNumber\":\"$2\",\"issuedDate\":\"$(dd -$4)\",\"certificateDocumentId\":\"$DOCID\"}"; val .data.id; }
+  as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$1,\"kind\":1,\"method\":\"$3\",\"scheme\":1,\"scope\":\"P-1 plate\",\"rangePNos\":\"P-1\",\"certificateNumber\":\"$2\",\"issuedDate\":\"$(dd -$4)\",\"certificateDocumentId\":\"$DOCID\"}"; val .data.id; }
 WP1=$(wperson "Welder One" W-001 W11); QW1=$(wqual $WP1 WQ-1 GTAW 30)
 WP2=$(wperson "Welder Two" W-002 W12); QW2=$(wqual $WP2 WQ-2 GTAW 300)
 WP3=$(wperson "Welder Three" W-003 W13); QW3=$(wqual $WP3 WQ-3 GTAW 300)
@@ -1648,7 +1648,7 @@ call GET "quality/qualifications?PersonId=$WP7"; LAPSE7=$(val '.data.data[0].lap
 check "r1q D15: the continuity of welder seven ended on the day of his certificate (issued 187 days ago) plus six months, which is in the last 3 to 6 days" ".success and .data.data[0].state == 3 and (.data.data[0].lapsesOn[0:10]) == \"$(addmonths "$(dd -187)" 6)\" and (.data.data[0].lapsesOn[0:10]) >= \"$(dd -6)\" and (.data.data[0].lapsesOn[0:10]) <= \"$(dd -3)\""
 weld "$LAPSE7" J-17 $QW7; nomsg "r1q D15: a weld log dated on the last valid day is refused today, because the certificate is also checked on the day of entry" "امروز قابل استفاده نیست"
 weld "$(dd -2)" J-18 $QW1; check "r1q D15: a weld log dated two days back by a welder who is valid on that day and today is accepted" ".success and (.data.weldDate[0:10]) == \"$(dd -2)\""
-as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WP2,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"certificateNumber\":\"WQ-2R\",\"issuedDate\":\"$(dd -5)\",\"renewsQualificationId\":$QW2}"; check "re-test registered as renewal" '.success and .data.renewsQualificationId != null'
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WP2,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"rangePNos\":\"P-1\",\"certificateNumber\":\"WQ-2R\",\"issuedDate\":\"$(dd -5)\",\"renewsQualificationId\":$QW2}"; check "re-test registered as renewal" '.success and .data.renewsQualificationId != null'
 QW2N=$(val .data.id)
 weld "$D0" J-14 $QW2N; check "renewed qualification can weld" '.success'
 weld "$D0" J-15 $QW2; check "old certificate is superseded and cannot be used" '.success == false'
@@ -1667,7 +1667,15 @@ call GET "quality/qualifications/continuity?Days=30"; check "r1q L19: ... so he 
 call GET "quality/weld-logs?WorkOrderId=$WO2"; check "weld logs of work order 2: 4 accepted (J-1, J-14, J-18 and J-20 of welder eight; r1q D15 replaced the three old chain welds by one dated two days back)" '(.data.data|length) == 4'
 
 # --- G. material certificates (EN 10204) and traceability
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$LOT,\"type\":2,\"number\":\"MTC-3.1-9\",\"issuer\":\"Mill A\",\"documentId\":\"$DOCID\",\"summary\":\"26NiCrMoV14-5 chemistry and mechanicals OK\"}"; check "warehouse registers the certificate of the lot (pending)" '.success and .data.result == 0 and .data.heatNumber == "H-7781"'
+# Package C: a 3.1 certificate is judged against an approved material specification (heat number = the lot, chemistry and mechanical rows inside the limits, the manufacturer signatory named).
+# Engineering writes the specification of S355J2 / EN 10025-2, QA (not the author) approves it; certx HEAT is the structured part of a good 3.1 certificate of that grade.
+as "$ENG_TOKEN" POST quality/material-specs '{"grade":"S355J2","standard":"EN 10025-2","title":"S355J2 structural plate","requiredCertificateType":2,"limits":[{"kind":1,"name":"C","unit":"%","max":0.2,"required":true},{"kind":1,"name":"Mn","unit":"%","max":1.6,"required":true},{"kind":2,"name":"Yield","unit":"MPa","min":355,"required":true},{"kind":2,"name":"Tensile","unit":"MPa","min":470,"max":630,"required":true}]}'; check "package c: engineering drafts the S355J2 material specification" '.success and .data.status == 0 and .data.version == 1'
+MSPEC0=$(val .data.id)
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"submit\"}"; check "package c: the specification is submitted" '.success and .data.status == 1'
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"approve\"}"; no "package c: the author of a specification cannot approve it"
+as "$QA_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"approve\"}"; check "package c: QA approves the specification (maker-checker)" '.success and .data.status == 2'
+certx() { printf '"certHeatNumber":"%s","grade":"S355J2","standard":"EN 10025-2","manufacturerSignatory":"Mill authorised signatory","values":[{"kind":1,"name":"C","unit":"%%","value":0.18},{"kind":1,"name":"Mn","unit":"%%","value":1.4},{"kind":2,"name":"Yield","unit":"MPa","value":380},{"kind":2,"name":"Tensile","unit":"MPa","value":510}]' "$1"; }
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$LOT,\"type\":2,\"number\":\"MTC-3.1-9\",\"issuer\":\"Mill A\",$(certx H-7781),\"documentId\":\"$DOCID\",\"summary\":\"26NiCrMoV14-5 chemistry and mechanicals OK\"}"; check "warehouse registers the certificate of the lot (pending)" '.success and .data.result == 0 and .data.heatNumber == "H-7781"'
 CERT1=$(val .data.id)
 as "$WH_TOKEN" POST quality/certificates/verify "{\"id\":$CERT1,\"accept\":true}"; no "warehouse cannot verify a certificate (QC only)"
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$CERT1,\"accept\":false}"; no "rejection needs a reason"
@@ -1690,7 +1698,7 @@ as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuant
 as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":1,\"number\":\"MTC-2.2-77\",\"documentId\":\"$DOCID\"}"; C22=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C22,\"accept\":true}"
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0}"; check "a 2.2 certificate does not satisfy a 3.1 requirement" '.success == false'
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":2,\"number\":\"MTC-3.1-77\",\"documentId\":\"$DOCID\"}"; C31=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":2,\"number\":\"MTC-3.1-77\",$(certx HT-3100),\"documentId\":\"$DOCID\"}"; C31=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31,\"accept\":true}"
 # R1q D16 and review M12: an incoming inspection that rests on measured values names the instrument of every value (calibrated today); whether it is "measured" follows from those values, never from
 # a flag of the client; and a QC inspector records it only with a valid inspector qualification once the company keeps that register
@@ -1704,7 +1712,7 @@ call POST inventory/documents "{\"type\":1,\"documentDate\":\"$D0\",\"warehouseI
 call POST "inventory/documents/$PRC2/confirm"; check "receipt of the second lot of the 3.1 plate into quarantine" '.success'
 call GET "inventory/quality/inspections?Status=0"; QI31B=$(jq -r ".data.data[]|select(.itemId==$PL31)|.id" "$B")
 call GET "inventory/stock/lots?ItemId=$PL31"; PL31LOTB=$(jq -r '.data.data[]|select(.heatNumber=="HT-3101")|.id' "$B")
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-3.1-78\",\"documentId\":\"$DOCID\"}"; C31B=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-3.1-78\",$(certx HT-3101),\"documentId\":\"$DOCID\"}"; C31B=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31B,\"accept\":true}"; check "the 3.1 certificate of the second lot is verified" '.success and .data.result == 1'
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31B,\"acceptedQuantity\":10,\"rejectedQuantity\":0,\"measured\":true}"; check "r1q M12: the old \"measured\" flag alone proves nothing and demands nothing: no measurement lines, no instrument, recorded as it is" ".success and .data.status == 1 and ((.data.equipmentIds // [])|length) == 0 and ((.data.measurements // [])|length) == 0"
 
@@ -11756,6 +11764,117 @@ as "$ADMIN_TOKEN" POST quality/as-built/reissue/decide "{\"id\":$PKBAB2,\"approv
 as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: version 1 is Superseded and untouched (its hash still matches)" '.success and .data.status == 1 and .data.hashOk == true and (.data.versions|length) == 2'
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "pkb: the physical configuration audit is a release check and passes for a work order without a project BOM baseline" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")|.passed][0]) == true'
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/data-book"; check "pkb: the data book has section 12 with the current as-built record (the re-issued version)" '.success and ([.data.sections[]|select(.no == 12)|.entries|length][0]) == 1'
+
+# --- PKC (Package C: special processes and material verification). Exact checks; every request is checked, no check sits between a request and the reads of its answer. The settings stay at their strict defaults
+# (nothing here weakens a gate): a flagged step cannot finish without a qualified, reviewed run, a welder works only inside the range of the WPS, a 3.1 certificate is accepted only when the server judged it Pass.
+# The EDMS procedure of the process: a released revision of a document of its own.
+pkc_procedure() { # pkc_procedure NUMBER : sets PKCDOC (deliverable) and PKCREV (released revision)
+  local fid
+  as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$1\",\"title\":\"روش اجرایی $1\",\"discipline\":\"Mechanical\",\"documentType\":\"Procedure\"}"; check "pkc: the document controller registers the procedure $1" '.success and .data.id > 0'; PKCDOC=$(val .data.id)
+  as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKCDOC}"; check "pkc: the first revision of $1 is a draft" '.success and .data.code == "00" and .data.status == 1'; PKCREV=$(val .data.id)
+  upload_as "$ADMIN_TOKEN" "pkc-$1"; fid=$UPLOADED
+  as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PKCREV,\"documentId\":\"$fid\",\"fileName\":\"$1-00.pdf\",\"title\":\"$1\"}"; check "pkc: the file is added to the revision of $1" '.success'
+  as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"submit\"}"; check "pkc: the revision of $1 goes under review" '.success and .data.status == 2'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"review\",\"note\":\"checked\"}"; check "pkc: the PMO reviews $1" '.success'
+  as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"approve\"}"; check "pkc: the engineering manager approves $1" '.success and .data.status == 3'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"release\"}"; check "pkc: the PMO releases $1" '.success and .data.status == 4'
+}
+# the master list: six seeded types, editable; the heat treatment gets its limits from engineering (the system invents none)
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc: the six seeded special process types are listed (heat treatment, nitriding, coating, brazing, plating, NDT)" '.success and (.data|length) == 6 and ([.data[]|.code]|sort) == ["BRZ","COAT","HT","NDT","NIT","PLT"] and ([.data[]|select(.code == "NDT")][0].existingControl == true)'
+PKCHTJ=$(jq -c '.data[]|select(.code == "HT")' "$B"); PKCHT=$(jq -r '.id' <<< "$PKCHTJ")
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc: the seeded heat treatment carries no invented limits (no minimum or maximum on any parameter)" '.success and ([.data[]|select(.code == "HT")][0].parameters|all(.min == null and .max == null))'
+as "$WH_TOKEN" POST quality/special-processes/types "$PKCHTJ"; no "pkc: the storekeeper cannot edit the list of special processes"
+pkc_procedure "PKC-PRC-HT"
+PKCTYPE=$(jq -c --argjson p "$PKCDOC" '{id:.id,code:.code,title:.title,description:.description,requiresMachine:.requiresMachine,requiresSurvey:.requiresSurvey,requiredInstrumentClass:.requiredInstrumentClass,procedureDeliverableId:$p,existingControl:.existingControl,isActive:true,rowVersion:.rowVersion,parameters:(.parameters|map({id:.id,sortOrder:.sortOrder,name:.name,unit:.unit,min:(if .name == "دمای نگهداری" then 800 elif .name == "زمان نگهداری" then 60 else null end),max:(if .name == "دمای نگهداری" then 900 elif .name == "زمان نگهداری" then 240 else null end),required:(.name == "دمای نگهداری" or .name == "زمان نگهداری")}))}' <<< "$PKCHTJ")
+as "$QA_TOKEN" POST quality/special-processes/types "$PKCTYPE"; check "pkc: QA gives the heat treatment its limits (800 to 900 C, 60 to 240 min) and its procedure document" ".success and .data.procedureDeliverableId == $PKCDOC and ([.data.parameters[]|select(.name == \"دمای نگهداری\")][0] | .min == 800 and .max == 900 and .required == true)"
+# the people and the equipment of the process
+PKCP=$(wperson "PKC Operator" P-901 PKC1)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$PKCP,\"kind\":5,\"method\":\"HT\",\"scope\":\"heat treatment\",\"certificateNumber\":\"OP-HT-1\",\"issuedDate\":\"$(dd -60)\",\"expiryDate\":\"$(dd 300)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: the furnace operator holds a special process operator qualification for HT" '.success and .data.kind == 5 and .data.method == "HT"'
+as "$QC_TOKEN" POST quality/equipment '{"name":"Thermocouple PKC","type":4,"serialNumber":"TC-PKC-1"}'; check "pkc: a temperature instrument is registered" '.success and .data.id > 0'; PKCTC=$(val .data.id)
+as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$PKCTC,\"eventDate\":\"$(dd -30)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-PKC-1\",\"certificateDocumentId\":\"$DOCID\",\"traceabilityStatement\":\"Traceable to national standard\",\"asFoundPass\":true,\"asLeftPass\":true}"; check "pkc: the temperature instrument is calibrated" '.success'
+call POST Machine '{"title":"کوره آزمون PKC"}'; PKCM=$(val .data)
+# the qualification of the process: written by QC, approved by QA (not by the author)
+PKCQJ="{\"typeId\":$PKCHT,\"title\":\"عملیات حرارتی قطعه PKC\",\"procedureDeliverableId\":$PKCDOC,\"procedureRevisionId\":$PKCREV,\"validFrom\":\"$(dd -30)\",\"validTo\":\"$(dd 300)\",\"limits\":[{\"name\":\"دمای نگهداری\",\"unit\":\"C\",\"min\":820,\"max\":880,\"required\":true},{\"name\":\"زمان نگهداری\",\"unit\":\"min\",\"min\":90,\"max\":180,\"required\":true}],\"equipments\":[{\"kind\":1,\"machineId\":$PKCM,\"surveyKind\":1,\"surveyDate\":\"$(dd -20)\",\"surveyDueDate\":\"$(dd 160)\"},{\"kind\":2,\"equipmentId\":$PKCTC}],\"operatorPersonIds\":[$PKCP]}"
+as "$QC_TOKEN" POST quality/special-processes/qualifications "$(jq -c '.limits[0].max = 950' <<< "$PKCQJ")"; nomsg "pkc: a qualification limit wider than the master list (950 above 900 C) is refused" "بیشتر"
+as "$QC_TOKEN" POST quality/special-processes/qualifications "$PKCQJ"; check "pkc: QC drafts the qualification of the heat treatment (limits copied inside the master, furnace with a temperature survey, thermocouple, operator)" '.success and .data.status == 0 and .data.number != null and (.data.limits|length) == 2 and (.data.equipments|length) == 2 and (.data.operators|length) == 1 and .data.procedureInForce == true'
+PKCQ=$(val .data.id)
+as "$QC_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"submit\"}"; check "pkc: the qualification is submitted" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"approve\"}"; no "pkc: QC (the author) cannot approve the qualification; only QA approves"
+as "$QA_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"approve\"}"; check "pkc: QA approves the qualification (maker-checker)" '.success and .data.status == 2 and .data.approvedByName != null'
+as "$QA_TOKEN" GET "quality/special-processes/qualifications?ExpiringInDays=400"; check "pkc: the qualification is on the expiry list of the next 400 days and not on the 30 day alert list" ".success and (.data.data|map(.id)|index($PKCQ)) != null"
+as "$QA_TOKEN" GET "quality/special-processes/qualifications?ExpiringInDays=30"; check "pkc: ... the 30 day alert list does not hold it (it ends in 300 days)" ".success and ((.data.data|map(.id)|index($PKCQ)) == null)"
+# the step: a standard flagged as a special process (the heat treatment) on the manual station, an order, the terminal
+item PKCPART "{\"code\":\"77.10.00.031.1\",\"title\":\"قطعه عملیات حرارتی PKC\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pkc: the part that goes through heat treatment"
+call POST inventory/trace/templates "{\"itemId\":$PKCPART,\"sequence\":10,\"title\":\"عملیات حرارتی PKC\"}"; PKCTPL=$(val .data.id)
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isSpecialProcess\":true}"; nomsg "pkc: the special process flag without a type is refused" "فرایند ویژه"
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isWelding\":true,\"wpsId\":$R1WPS,\"isSpecialProcess\":true,\"specialProcessTypeId\":$PKCHT}"; nomsg "pkc: a step is either a welding step or a special process step, never both" "فرایند ویژه"
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isSpecialProcess\":true,\"specialProcessTypeId\":$PKCHT}"; check "pkc: the standard of the heat treatment step is saved flagged with its type" ".success and .data.isSpecialProcess == true and .data.specialProcessTypeId == $PKCHT and .data.specialProcessTypeTitle != null"
+mfroute "$PKCPART" "pkc part"
+r1draft 7 2 "77.10.00.031.1" "قطعه عملیات حرارتی PKC"; PKCO=$R1O; PKCN=$R1N
+call GET "$MF/orders/$PKCO"; check "pkc: the drafted order carries the flag and the type on its step" ".success and (.data.operations|length) == 1 and (.data.operations[0] | .isSpecialProcess == true and .specialProcessTypeId == $PKCHT)"
+PKCOP=$(val '.data.operations[0].id')
+pkb_nodraw_order "$PKCO"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PKCO}"; check "pkc: the order is released: the heat treatment step is ready" '.success and .data.status == 1 and ([.data.operations[].status]) == [1]'
+welderlink "$PKCP"; check "pkc: the personnel file of the terminal user is tied to the qualification record of the furnace operator" ".success and .data.qualifiedPersonId == $PKCP"
+as "$MWD_TOKEN" POST $MF/terminal/start "{\"operationId\":$PKCOP,\"kind\":2}"; check "pkc: the operator starts the step" '.success and .data.status == 2 and .data.myRunning == true'
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish without a run record of the process (the gate names the step)" '.success == false and (.message|contains("بدون ثبت اجرای فرایند"))'
+as "$QA_TOKEN" GET "quality/special-processes/gate?operationId=$PKCOP"; check "pkc: the gate endpoint says the same: it applies and is not ready" '.success and .data.applies == true and .data.ready == false and .data.problem != null and (.data.runs|length) == 0'
+RUNJ="{\"operationId\":$PKCOP,\"qualificationId\":$PKCQ,\"quantity\":2,\"operatorPersonId\":$PKCP,\"machineId\":$PKCM,\"startedAt\":\"$(dd -1)T08:00:00\",\"endedAt\":\"$(dd -1)T11:00:00\",\"chartDocumentId\":\"$DOCID\",\"chartFileName\":\"chart.pdf\",\"instrumentIds\":[$PKCTC],\"values\":[{\"name\":\"دمای نگهداری\",\"value\":850},{\"name\":\"زمان نگهداری\",\"value\":120}]}"
+as "$WH_TOKEN" POST quality/special-processes/runs "$RUNJ"; no "pkc: the storekeeper cannot record a run"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c 'del(.values[1])' <<< "$RUNJ")"; nomsg "pkc: a run with a missing required parameter (hold time) is refused" "مقدار پارامتر الزامی ثبت نشده"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c 'del(.instrumentIds)' <<< "$RUNJ")"; nomsg "pkc: a run without a calibrated temperature instrument is refused" "ابزار اندازه‌گیری"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c '.operatorPersonId = '"$WP1" <<< "$RUNJ")"; nomsg "pkc: a run by an operator who is not on the qualification is refused" "جزو اپراتورهای"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c '.values[0].value = 950 | .quantity = 1' <<< "$RUNJ")"; check "pkc: a run with the temperature above the qualified limit is recorded as Fail and opens an NCR on its own" '.success and .data.result == 2 and .data.ncrId > 0 and (.data.ncrNumber|startswith("NCR-"))'
+PKCFAIL=$(val .data.id)
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish while a failed run has an open NCR" '.success == false and (.message|contains("مردود شده است"))'
+as "$QC_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCFAIL,\"action\":\"void\"}"; no "pkc: voiding a run needs a reason"
+as "$QA_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCFAIL,\"action\":\"void\",\"note\":\"ثبت اشتباه کوره؛ اجرای تازه ثبت می‌شود\"}"; check "pkc: the failed run is voided with its reason (never deleted)" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/special-processes/runs "$RUNJ"; check "pkc: the good run of both pieces is recorded as Pass, waiting for the second person" '.success and .data.result == 1 and .data.reviewStatus == 0 and .data.quantity == 2'
+PKCRUN=$(val .data.id)
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish while the run is not reviewed" '.success == false and (.message|contains("هنوز توسط QA بازبینی نشده"))'
+as "$QC_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; nomsg "pkc: the person who recorded the run cannot review it" "تفکیک وظایف"
+as "$WH_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; no "pkc: the storekeeper cannot review a run"
+as "$QC2_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; check "pkc: a second QC person reviews and approves the run" '.success and .data.reviewStatus == 1 and .data.reviewedByName != null'
+as "$QA_TOKEN" GET "quality/special-processes/gate?operationId=$PKCOP"; check "pkc: the gate is ready now: one passed and reviewed run covers the two pieces (the voided run does not count)" '.success and .data.applies == true and .data.ready == true and .data.problem == null'
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: with the reviewed run the step finishes: done with 2 good pieces" '.success and .data.status == 4 and .data.goodQty == 2'
+as "$QA_TOKEN" GET "quality/special-processes/runs/$PKCRUN"; check "pkc: the run record (printable) names the qualification, the furnace, the operator, the instrument and the values" ".success and .data.qualificationId == $PKCQ and .data.machineId == $PKCM and .data.operatorPersonId == $PKCP and (.data.instruments|length) == 1 and (.data.values|length) == 2 and ([.data.values[]|select(.name == \"دمای نگهداری\")][0].pass == true) and .data.orderNumber == \"$PKCN\""
+welderlink "$WP1"; check "pkc: the personnel file of the terminal user is tied back to its earlier qualification record" ".success and .data.qualifiedPersonId == $WP1"
+# supplier approval for a subcontracted special process: written by commercial, approved by QA
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals "{\"providerId\":$PRV,\"typeId\":$PKCHT,\"validFrom\":\"$(dd -10)\",\"validTo\":\"$(dd 355)\",\"accreditationNumber\":\"ACC-PKC-1\",\"auditDate\":\"$(dd -15)\"}"; check "pkc: commercial registers the approval of a supplier for heat treatment (pending)" '.success and .data.status == 0'
+PKCSA=$(val .data.id)
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA,\"action\":\"approve\"}"; no "pkc: the person who registered the supplier approval cannot approve it"
+as "$QA_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA,\"action\":\"approve\"}"; check "pkc: QA approves the supplier for the process" '.success and .data.status == 1 and .data.approvedByName != null'
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals "{\"providerId\":$PRV,\"typeId\":$PKCHT,\"validFrom\":\"$(dd -10)\",\"validTo\":\"$(dd 355)\",\"accreditationNumber\":\"ACC-PKC-2\"}"; check "pkc: a second live approval of the same supplier and process is refused" '.success == false'
+# the welder works only inside the range of the WPS (P-1): a welder qualified for P-3 only, and one whose range was never entered
+WPKR=$(wperson "Welder Range" W-901 W91)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WPKR,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"scope\":\"P-3 plate\",\"rangePNos\":\"P-3\",\"certificateNumber\":\"WQ-R1\",\"issuedDate\":\"$(dd -10)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: the welder is qualified for P-3 only" '.success and .data.rangePNos == "P-3"'
+PKCWQ=$(val .data.id)
+weld "$D0" J-R1 $PKCWQ; check "pkc: a weld log on a WPS of P-1 for a welder qualified for P-3 only is refused with the mismatch list" '.success == false and (.message|contains("دامنه صلاحیت")) and (.message|contains("خارج از دامنه جوشکار (P-3)"))'
+WPKN=$(wperson "Welder NoRange" W-902 W92)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WPKN,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"scope\":\"plate\",\"certificateNumber\":\"WQ-R2\",\"issuedDate\":\"$(dd -10)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: a welder whose range was never entered is registered" '.success and .data.rangePNos == null'
+PKCWQN=$(val .data.id)
+weld "$D0" J-R2 $PKCWQN; check "pkc: ... and a booking for him is refused: the WPS states a P-No that his certificate does not" '.success == false and (.message|contains("ثبت نشده است"))'
+# the material specification and the structured EN 10204 certificate (the specification S355J2 was approved in section G)
+as "$ENG_TOKEN" GET "quality/material-specs/required/$PL31"; check "pkc: the certificate type of the plate is derived from the item and its approved specification: 3.1" '.success and .data.type == 2'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-1\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-9999\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a certificate with another heat number than the lot is judged Fail by the server and says so" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("شماره ذوب گواهی (HT-9999)")) and (.data.evaluationText|contains("HT-3101"))'
+PKCC1=$(val .data.id)
+as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$PKCC1,\"accept\":true}"; nomsg "pkc: a certificate judged Fail cannot be accepted" "پذیرفته نمی‌شود"
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-2\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.35},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a chemistry value above the limit (C 0.35 above 0.20) is judged Fail and the row is named" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("خارج از حد مشخصات")) and ([.data.values[]|select(.name == "C")][0].status == 2) and ([.data.values[]|select(.name == "Mn")][0].status == 1)'
+PKCC2=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-3\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380}]}"; check "pkc: a certificate with required values missing is judged Fail and names them" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("مقدار الزامی ثبت نشده"))'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-4\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a 3.1 certificate without the manufacturer's authorised signatory is judged Fail" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("نماینده مجاز سازنده"))'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":3,\"number\":\"MTC-PKC-5\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a 3.2 certificate without the inspector's organisation and identity is judged Fail" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("سازمان بازرس"))'
+as "$QA_TOKEN" GET "quality/material-specs/certificate-sheet/$PKCC2"; check "pkc: the verification sheet data (printable) lists the problem and says the receipt is not acceptable" '.success and .data.receiptAcceptable == false and (.data.problems|length) >= 1 and .data.spec.grade == "S355J2" and .data.certificate.number == "MTC-PKC-2"'
+# the specification is versioned: a new version replaces the approved one only after the second person approves it
+as "$ENG_TOKEN" POST quality/material-specs "{\"newVersionOfId\":$MSPEC0,\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"title\":\"S355J2 structural plate\",\"requiredCertificateType\":2,\"reason\":\"tightened carbon limit\",\"limits\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"max\":0.22,\"required\":true},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"max\":1.6,\"required\":true},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"min\":355,\"required\":true},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"min\":470,\"max\":630,\"required\":true}]}"; check "pkc: engineering drafts version 2 of the specification; version 1 stays approved until it is approved" '.success and .data.version == 2 and .data.status == 0 and .data.supersedesId != null'
+MSPEC1=$(val .data.id)
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC1,\"action\":\"submit\"}"; check "pkc: version 2 is submitted" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC1,\"action\":\"approve\"}"; check "pkc: QA approves version 2" '.success and .data.status == 2'
+as "$QA_TOKEN" GET "quality/material-specs/$MSPEC0"; check "pkc: version 1 is superseded, kept with its hash (never deleted)" '.success and .data.status == 3 and .data.contentHash != null'
+# a safety switch is registered: weakening the certificate gate waits for a second person
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"Quality","key":"Pkc.Certificate.Enforce","value":"0","reason":"آزمون خودکار: درخواست سست کردن گیت گواهی"}'; check "pkc: the request to switch the certificate gate off is Pending (a registered safety switch)" '.success and .data.status == "Pending"'
+PKCSW=$(val '.data.id')
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PKCSW,\"approve\":false,\"note\":\"رد می‌شود؛ گیت باید روشن بماند\"}"; check "pkc: the second person rejects it and the gate stays on" '.success'
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

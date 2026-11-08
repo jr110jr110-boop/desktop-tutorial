@@ -93,6 +93,8 @@ namespace Services.NasbNiro.Quality
                 Scheme = q.Scheme, Scope = q.Scope, CertificateNumber = q.CertificateNumber, CertificateDocumentId = q.CertificateDocumentId,
                 IssuedDate = q.IssuedDate, ExpiryDate = q.ExpiryDate, State = state, StateText = QualificationRules.StateText(state), LastUse = last, LapsesOn = lapses,
                 Revoked = q.Revoked, RevokeReason = q.RevokeReason, Superseded = q.Superseded, RenewsQualificationId = q.RenewsQualificationId,
+                RangePNos = q.RangePNos, RangeGroupNos = q.RangeGroupNos, RangeFNos = q.RangeFNos, RangePositions = q.RangePositions,
+                RangeThicknessMin = q.RangeThicknessMin, RangeThicknessMax = q.RangeThicknessMax, RangeDiameterMin = q.RangeDiameterMin, RangeDiameterMax = q.RangeDiameterMax,
             };
         }
 
@@ -215,6 +217,10 @@ namespace Services.NasbNiro.Quality
             if (dto.IssuedDate.Date > DateTime.Today) return Bad<QualificationDto>("تاریخ صدور نمی‌تواند در آینده باشد.");
             if (dto.ExpiryDate.HasValue && dto.ExpiryDate.Value.Date <= dto.IssuedDate.Date) return Bad<QualificationDto>("تاریخ انقضا باید بعد از تاریخ صدور باشد.");
             bool ndt = dto.Kind == QualificationKind.NdtPersonnel;
+            // Package C: the structured range of a welder (and the competence record of a special process operator needs no scheme)
+            if ((dto.RangeThicknessMin.HasValue && dto.RangeThicknessMax.HasValue && dto.RangeThicknessMin.Value > dto.RangeThicknessMax.Value) || (dto.RangeDiameterMin.HasValue && dto.RangeDiameterMax.HasValue && dto.RangeDiameterMin.Value > dto.RangeDiameterMax.Value))
+                return Bad<QualificationDto>("حداقل دامنه ضخامت یا قطر از حداکثر بیشتر است.");
+            bool welderKind = dto.Kind == QualificationKind.Welder || dto.Kind == QualificationKind.WeldingOperator;
             if (ndt && (dto.Level != NdtLevel.I && dto.Level != NdtLevel.II && dto.Level != NdtLevel.III)) return Bad<QualificationDto>("سطح NDT (I، II یا III) را مشخص کنید.");
             if (ndt && dto.Scheme != QualificationScheme.AsntSntTc1A && dto.Scheme != QualificationScheme.Iso9712) return Bad<QualificationDto>("طرح گواهی NDT را مشخص کنید (ASNT SNT-TC-1A با رویه نوشتاری، یا ISO 9712).");
             if (!ndt && dto.Level != NdtLevel.None) return Bad<QualificationDto>("سطح فقط برای پرسنل NDT است.");
@@ -235,9 +241,12 @@ namespace Services.NasbNiro.Quality
             var q2 = new Qualification
             {
                 PersonId = person.Id, Kind = dto.Kind, Method = method, Level = ndt ? dto.Level : NdtLevel.None,
-                Scheme = ndt ? dto.Scheme : dto.Kind == QualificationKind.Inspector ? QualificationScheme.Other : QualificationScheme.AsmeIX,
+                Scheme = ndt ? dto.Scheme : dto.Kind == QualificationKind.Inspector || dto.Kind == QualificationKind.SpecialProcessOperator ? QualificationScheme.Other : QualificationScheme.AsmeIX,
                 Scope = Clean(dto.Scope), CertificateNumber = dto.CertificateNumber.Trim(), CertificateDocumentId = dto.CertificateDocumentId,
                 IssuedDate = dto.IssuedDate.Date, ExpiryDate = dto.ExpiryDate?.Date, RenewsQualificationId = old?.Id,
+                RangePNos = welderKind ? Clean(dto.RangePNos) : null, RangeGroupNos = welderKind ? Clean(dto.RangeGroupNos) : null, RangeFNos = welderKind ? Clean(dto.RangeFNos) : null,
+                RangePositions = welderKind ? Clean(dto.RangePositions) : null, RangeThicknessMin = welderKind ? dto.RangeThicknessMin : null, RangeThicknessMax = welderKind ? dto.RangeThicknessMax : null,
+                RangeDiameterMin = welderKind ? dto.RangeDiameterMin : null, RangeDiameterMax = welderKind ? dto.RangeDiameterMax : null,
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             if (old != null) { old.Superseded = true; old.ModifyDate = now; old.ModifierUserId = Me; }
@@ -278,6 +287,7 @@ namespace Services.NasbNiro.Quality
                 Id = w.Id, Number = w.Number, Revision = w.Revision, Process = w.Process, BasePNo = w.BasePNo, Status = w.Status, PqrCount = w.Pqrs.Count,
                 FillerFNo = w.FillerFNo, FillerANo = w.FillerANo, ThicknessMin = w.ThicknessMin, ThicknessMax = w.ThicknessMax, Positions = w.Positions,
                 PreheatMinC = w.PreheatMinC, InterpassMaxC = w.InterpassMaxC, Pwht = w.Pwht, ShieldingGas = w.ShieldingGas, Note = w.Note,
+                BaseGroupNo = w.BaseGroupNo, DiameterMin = w.DiameterMin, DiameterMax = w.DiameterMax,
                 QcApprovedAt = w.QcApprovedAt, QcApprovedByName = names.Name(w.QcApprovedByUserId),
                 EngineeringApprovedAt = w.EngineeringApprovedAt, EngineeringApprovedByName = names.Name(w.EngineeringApprovedByUserId),
                 Pqrs = w.Pqrs.Select(p => ToDto(p.Pqr, names)).ToList(),
@@ -316,6 +326,9 @@ namespace Services.NasbNiro.Quality
             if (dto == null || Clean(dto.Number) == null || Clean(dto.Revision) == null || process == null) return Bad<WpsDto>("شماره، بازنگری و فرایند WPS را وارد کنید.");
             if (!_user.IsInRole(QualityRoles.Planners)) return Bad<WpsDto>(QualityText.NotAllowed);
             if (dto.ThicknessMin.HasValue && dto.ThicknessMax.HasValue && dto.ThicknessMin.Value > dto.ThicknessMax.Value) return Bad<WpsDto>("حداقل ضخامت از حداکثر بیشتر است.");
+            if (dto.DiameterMin.HasValue && dto.DiameterMax.HasValue && dto.DiameterMin.Value > dto.DiameterMax.Value) return Bad<WpsDto>("حداقل قطر از حداکثر بیشتر است.");
+            if ((dto.ThicknessMin.HasValue && dto.ThicknessMin.Value < 0) || (dto.ThicknessMax.HasValue && dto.ThicknessMax.Value < 0) || (dto.DiameterMin.HasValue && dto.DiameterMin.Value < 0) || (dto.DiameterMax.HasValue && dto.DiameterMax.Value < 0))
+                return Bad<WpsDto>("ضخامت و قطر منفی نیست.");
             List<int> pqrIds = (dto.PqrIds ?? new List<int>()).Distinct().ToList();
             List<Pqr> pqrs = await _uow.Set<Pqr>().Where(p => pqrIds.Contains(p.Id) && !p.Deleted).ToListAsync(cancellationToken);
             if (pqrs.Count != pqrIds.Count) return Bad<WpsDto>("PQR انتخاب‌شده پیدا نشد.");
@@ -338,6 +351,7 @@ namespace Services.NasbNiro.Quality
             w.Number = number; w.Revision = revision; w.Process = process; w.BasePNo = Clean(dto.BasePNo); w.FillerFNo = Clean(dto.FillerFNo);
             w.FillerANo = Clean(dto.FillerANo); w.ThicknessMin = dto.ThicknessMin; w.ThicknessMax = dto.ThicknessMax; w.Positions = Clean(dto.Positions);
             w.PreheatMinC = dto.PreheatMinC; w.InterpassMaxC = dto.InterpassMaxC; w.Pwht = Clean(dto.Pwht); w.ShieldingGas = Clean(dto.ShieldingGas); w.Note = Clean(dto.Note);
+            w.BaseGroupNo = Clean(dto.BaseGroupNo); w.DiameterMin = dto.DiameterMin; w.DiameterMax = dto.DiameterMax;
             w.QcApprovedAt = null; w.QcApprovedByUserId = null; w.EngineeringApprovedAt = null; w.EngineeringApprovedByUserId = null;
             w.Pqrs.Clear();
             foreach (Pqr p in pqrs) w.Pqrs.Add(new WpsPqr { PqrId = p.Id });
@@ -490,6 +504,13 @@ namespace Services.NasbNiro.Quality
                 QualificationState entryState = QualificationRules.State(q, DateTime.Today, LastUse(allUses, q), months, warn);
                 if (!QualificationRules.Usable(entryState))
                     return Bad<WeldLogDto>($"گواهی جوشکار امروز قابل استفاده نیست: {QualificationRules.StateText(entryState)}؛ ثبت جوشکاری با تاریخ قبل مجاز نیست.");
+            }
+            // Package C: the welder is qualified for the range of this WPS (P-No, group, F-No, position, thickness, diameter)
+            Dictionary<string, decimal> rangeSettings = await QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+            if (rangeSettings[QualitySettingKeys.PkcWeldRange] >= 1)
+            {
+                List<string> rangeProblems = WeldRangeRules.Mismatches(q, wps);
+                if (rangeProblems.Count > 0) return Bad<WeldLogDto>(WeldRangeRules.Message(q.Person.Name, q.Method, wps, rangeProblems));
             }
             if (dto.PreheatC.HasValue && wps.PreheatMinC.HasValue && dto.PreheatC.Value < wps.PreheatMinC.Value) return Bad<WeldLogDto>($"دمای پیش‌گرم ({dto.PreheatC}) کمتر از حداقل WPS ({wps.PreheatMinC}) است.");
             if (dto.InterpassC.HasValue && wps.InterpassMaxC.HasValue && dto.InterpassC.Value > wps.InterpassMaxC.Value) return Bad<WeldLogDto>($"دمای بین‌پاسی ({dto.InterpassC}) بیشتر از حداکثر WPS ({wps.InterpassMaxC}) است.");

@@ -277,6 +277,7 @@ namespace Services.NasbNiro.Production
                     Status = MfOperationStatus.Waiting, InspectionRequirement = inspection, ItpTestType = s?.ItpTestType,
                     IsOutside = s?.IsOutside ?? false, OutsideSupplierId = s?.DefaultSupplierId, OutsideLeadDays = s?.OutsideLeadDays ?? 0,
                     IsWelding = s?.IsWelding ?? false, WpsId = s != null && s.IsWelding ? s.WpsId : null,
+                    IsSpecialProcess = s?.IsSpecialProcess ?? false, SpecialProcessTypeId = s != null && s.IsSpecialProcess ? s.SpecialProcessTypeId : null,
                     CreateDate = now, ModifyDate = now, CreatorUserId = userId, ModifierUserId = userId,
                 });
             }

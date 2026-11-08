@@ -645,6 +645,8 @@ namespace Services.NasbNiro.Production
                 if (!_user.IsInRole(ProductionRoles.Supervisor)) return Bad<OperationDto>("رد کردن یک مرحله فقط با سرپرست کارگاه است.");
                 if (reason == null) return Bad<OperationDto>("دلیل رد کردن مرحله را بنویسید.");
                 if (op.Status != MfOperationStatus.Waiting && op.Status != MfOperationStatus.Ready) return Bad<OperationDto>("فقط مرحله‌ای که کار روی آن شروع نشده رد می‌شود.");
+                string spSkip = await global::Services.NasbNiro.Quality.SpecialProcessGate.SkipProblemAsync(_uow, op, ct);
+                if (spSkip != null) return Bad<OperationDto>(spSkip);
                 op.Status = MfOperationStatus.Skipped;
                 op.SkipReason = reason;
             }
@@ -677,6 +679,9 @@ namespace Services.NasbNiro.Production
                     ? inspections.Where(q => !order.ItemId.HasValue || q.ItemId == order.ItemId.Value).Sum(q => q.AcceptedQuantity)
                     : op.PurchaseOrderLineId.HasValue ? await _uow.Set<ServiceAcceptance>().AsNoTracking().Where(a => !a.Deleted && a.PurchaseOrderLineId == op.PurchaseOrderLineId.Value).SumAsync(a => a.Quantity, ct) : 0;
                 if (accepted <= 0) return Bad<OperationDto>("پذیرش کیفیت کالای برگشتی لازم است: بازرسی ورودی سند برگشت با مقدار قبول‌شده، یا گواهی پذیرش خدمت سفارش خرید.");
+                // Package C (H7): a subcontracted special process comes back with the supplier's evidence and the supplier approved for the process
+                string spOutside = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, Math.Min(accepted, MfQuantityRules.Expected(loaded.All, op, order.Quantity)), 0m, ct);
+                if (spOutside != null) return Bad<OperationDto>(spOutside);
                 op.GoodQty = Math.Min(accepted, MfQuantityRules.Expected(loaded.All, op, order.Quantity));   // R1p D7: at most what the step before handed over
                 op.FinishedAt = now;
                 op.StartedAt ??= now;
@@ -788,6 +793,12 @@ namespace Services.NasbNiro.Production
             List<int> workers = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.OperationId == op.Id).Select(b => b.EmployeeId).Distinct().ToListAsync(ct);
             if (workers.Count > 0 && await _uow.Set<FnEmployee>().AsNoTracking().AnyAsync(e => workers.Contains(e.Id) && e.UserId == Me, ct))
                 return Bad<OperationDto>(MfText.SameUser + " (بازرس نمی‌تواند روی کار خودش تصمیم بگیرد)");
+            // Package C (H7): the acceptance of a finished special process step needs the run evidence (the same gate and message as the finish)
+            if (dto.Result == QcResult.Accept && op.FinishedAt.HasValue)
+            {
+                string spAccept = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, op.GoodQty + op.ScrapQty, op.ScrapQty, ct);
+                if (spAccept != null) return Bad<OperationDto>(spAccept);
+            }
 
             ItpActivity activity = null;
             if (op.InspectionRequirement == MfInspectionRequirement.ItpPoint)

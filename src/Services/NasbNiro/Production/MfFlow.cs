@@ -221,6 +221,8 @@ namespace Services.NasbNiro.Production
                 // issue to the contractor: a draft document of the existing inventory module
                 if (!order.ItemId.HasValue) problem = "کالای دستور تولید مشخص نیست.";
                 else if (!op.OutsideSupplierId.HasValue) problem = "پیمانکار مرحله بیرونی تعیین نشده است.";
+                // Package C (H7): material goes only to a supplier approved for the special process of the step
+                else if ((problem = await global::Services.NasbNiro.Quality.SpecialProcessGate.OutsideSupplierProblemAsync(_uow, op, ct)) != null) { }
                 else
                 {
                     Provider provider = await _uow.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == op.OutsideSupplierId.Value, ct);

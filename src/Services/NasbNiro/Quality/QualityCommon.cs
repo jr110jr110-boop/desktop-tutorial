@@ -65,6 +65,8 @@ namespace Services.NasbNiro.Quality
         public const int Itp = 408;
         public const int Oot = 409;
         public const int FirstArticle = 410;
+        public const int SpQualification = 411;
+        public const int SpRun = 412;
     }
 
     /// <summary>Numbers the company can change. Defaults come from the procedures and the architect's provisional decisions (★).</summary>
@@ -147,6 +149,22 @@ namespace Services.NasbNiro.Quality
         /// <summary>Percent added to the BOM scrap allowance of a bulk line in the physical configuration audit (0 = exactly the BOM allowance).</summary>
         public const string PkbPcaBulkExtra = "Pkb.Pca.BulkExtraTolerancePercent";
 
+        // ---- Package C (special processes and material verification); every key is security-relevant (two-person change, see SafetyProfile)
+        /// <summary>1: a special process step (flagged on the operation standard) is finished only with a passed, QA-reviewed run under a valid qualification, by a qualified operator, on calibrated equipment.</summary>
+        public const string PkcSpEnforce = "Pkc.SpecialProcess.Enforce";
+
+        /// <summary>1: a subcontracted special process step needs the run evidence (certificate and chart of the supplier) before QC accepts the receipt and before the step is completed.</summary>
+        public const string PkcSpSubcontractEvidence = "Pkc.SpecialProcess.SubcontractEvidence";
+
+        /// <summary>QA and engineering are told this many days before a special process qualification or a supplier approval expires.</summary>
+        public const string PkcQualExpiryAlertDays = "Pkc.Qualification.ExpiryAlertDays";
+
+        /// <summary>1: a welder is booked only inside the qualified range (P-No, group, thickness, diameter, position, filler F-No) of the WPS.</summary>
+        public const string PkcWeldRange = "Pkc.Weld.RangeEnforce";
+
+        /// <summary>1: the values of a type 3.1 / 3.2 certificate are judged against the material specification and the receipt is not accepted on a certificate that fails.</summary>
+        public const string PkcCertEnforce = "Pkc.Certificate.Enforce";
+
         /// <summary>
         /// Not a setting of the company: a marker the nightly CAPA job writes after its first run (review M11). Until it exists the job records the escalation level of the CAPAs
         /// that were already late without telling anybody, so that the first night after the upgrade does not flood QA and the CEO with the whole backlog.
@@ -190,6 +208,11 @@ namespace Services.NasbNiro.Quality
             yield return new QualitySetting { Key = PkbNoDrawingReasonMin, Value = 15, Title = "حداقل نویسه دلیل پرچم «بدون نقشه»", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = PkbIncomingBulkSamples, Value = 1, Title = "ورودی انبوه (کیلوگرم، متر، لیتر): تعداد نمونه برای هر بچ یا ذوب", Source = "★ تصمیم موقت" };
             yield return new QualitySetting { Key = PkbPcaBulkExtra, Value = 0, Title = "رواداری افزوده بر ضریب ضایعات BOM برای مواد انبوه در ممیزی پیکربندی (درصد)", Source = "★ ضریب ضایعات BOM" };
+            yield return new QualitySetting { Key = PkcSpEnforce, Value = 1, Title = "پایان گام فرایند ویژه فقط با اجرای قبول و بازبینی‌شده QA، تحت صلاحیت معتبر", Source = "★ تصمیم مدیرعامل (ISO 9001 بند 8.5.1 و عدم تحمل انحراف)" };
+            yield return new QualitySetting { Key = PkcSpSubcontractEvidence, Value = 1, Title = "گام فرایند ویژه برون‌سپاری: گواهی و نمودار تامین‌کننده پیش از پذیرش QC", Source = "★ تصمیم مدیرعامل" };
+            yield return new QualitySetting { Key = PkcQualExpiryAlertDays, Value = 30, Title = "اطلاع انقضای صلاحیت فرایند ویژه و تایید تامین‌کننده (روز مانده)", Source = "★ تصمیم موقت" };
+            yield return new QualitySetting { Key = PkcWeldRange, Value = 1, Title = "کنترل دامنه صلاحیت جوشکار نسبت به WPS", Source = "★ ASME IX QW-451 تا QW-461" };
+            yield return new QualitySetting { Key = PkcCertEnforce, Value = 1, Title = "سنجش مقادیر گواهی 3.1/3.2 با مشخصات ماده و جلوگیری از پذیرش رسید", Source = "★ تصمیم مدیرعامل (EN 10204)" };
             // PB8: operational data control (plausibility and baseline-conformance rules of the gates and the OPS-DATA seat)
             foreach (QualitySetting od in global::Services.NasbNiro.OpsData.OpsRuleCatalog.Defaults()) yield return od;
         }

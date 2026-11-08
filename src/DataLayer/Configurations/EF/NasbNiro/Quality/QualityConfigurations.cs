@@ -17,6 +17,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Quality
         public static void AddQualityConfigurations(this ModelBuilder builder)
         {
             builder.AddInspectionReleaseConfigurations();
+            builder.AddSpecialProcessConfigurations();   // Package C
 
             // ------------------------------------------------------------------ ITP
             builder.Entity<ItpTemplate>(b =>

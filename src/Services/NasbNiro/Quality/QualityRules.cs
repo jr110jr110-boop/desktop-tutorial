@@ -141,6 +141,11 @@ namespace Services.NasbNiro.Quality
             { QualitySettingKeys.PkbNoDrawingReasonMin, new KeyValuePair<int, int>(5, 200) },
             { QualitySettingKeys.PkbIncomingBulkSamples, new KeyValuePair<int, int>(1, 50) },
             { QualitySettingKeys.PkbPcaBulkExtra, new KeyValuePair<int, int>(0, 50) },
+            { QualitySettingKeys.PkcSpEnforce, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkcSpSubcontractEvidence, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkcQualExpiryAlertDays, new KeyValuePair<int, int>(1, 90) },
+            { QualitySettingKeys.PkcWeldRange, new KeyValuePair<int, int>(0, 1) },
+            { QualitySettingKeys.PkcCertEnforce, new KeyValuePair<int, int>(0, 1) },
         };
 
         public static bool TryGetBounds(string key, out int min, out int max)
