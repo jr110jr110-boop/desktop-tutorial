@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import KsDatePicker from "@/components/common/KsDatePicker.vue";
+import UserSelect from "@/components/quality/UserSelect.vue";
 import EcoPrint from "@/components/engChange/print/EcoPrint.vue";
 import { addChange, bulkDisposition, getOrder, newRevisionOf, orderAction, removeChange, saveDisposition, saveOrder, taskAction } from "@/api/EngChangeAPIs";
 import { fail, jalali, num, ok, printPage } from "@/composables/inventory";
@@ -61,6 +62,13 @@ const verifyTask = (t: any) => run(() => taskAction(t.id, "verify", null), "اج
 
 const editable = computed(() => !!order.value?.canEdit);
 const shown = computed(() => (order.value?.dispositions || []).filter((d: any) => !d.stale && (category.value === null || d.category === category.value)));
+// the dispositions the category allows (the API sends the allowed list on every row; a bulk choice must be allowed for every row of the category)
+const bulkAllowed = computed<number[]>(() => {
+  const rows = (order.value?.dispositions || []).filter((d: any) => !d.stale && d.category === category.value);
+  if (!rows.length) return [];
+  return (rows[0].allowed as number[]).filter((a) => rows.every((r: any) => (r.allowed as number[]).includes(a)));
+});
+watch(bulkAllowed, (list) => { if (list.length && !list.includes(bulk.value.disposition)) bulk.value.disposition = list[0]; }, { immediate: true });
 const counts = computed(() => (order.value?.impact?.counts || []) as any[]);
 load();
 </script>
@@ -131,14 +139,14 @@ load();
       </div>
       <div v-if="editable && category !== null" class="row g-2 mb-2 align-items-end">
         <div class="col-md-3"><label class="form-label small mb-0">تکلیف یکجا برای «{{ impactCategories[category] }}»</label>
-          <select v-model="bulk.disposition" class="form-select form-select-sm"><option v-for="(t, k) in dispositions" :key="k" :value="Number(k)">{{ t }}</option></select></div>
+          <select v-model="bulk.disposition" class="form-select form-select-sm"><option v-for="k in bulkAllowed" :key="k" :value="k">{{ dispositions[k] }}</option></select></div>
         <div class="col-md-3"><input v-model="bulk.note" class="form-control form-control-sm" placeholder="توضیح" /></div>
-        <div class="col-md-2"><input v-model.number="bulk.ownerUserId" class="form-control form-control-sm inv-ltr" placeholder="شناسه مسئول" /></div>
+        <div class="col-md-2"><UserSelect v-model="bulk.ownerUserId" placeholder="مسئول" /></div>
         <div class="col-md-2"><KsDatePicker v-model="bulk.dueDate" element-tag="eco-bulk-due" placeholder="مهلت" simple-placeholder /></div>
         <div class="col-md-2"><button class="btn btn-sm btn-outline-primary w-100" :disabled="busy" @click="bulk.category = category; setBulk()">ثبت برای همه</button></div>
       </div>
       <table class="table table-sm">
-        <thead><tr><th>فهرست</th><th>مورد</th><th>تعداد</th><th>تکلیف</th><th>توضیح</th><th>مسئول (شناسه)</th><th>مهلت</th><th v-if="editable"></th></tr></thead>
+        <thead><tr><th>فهرست</th><th>مورد</th><th>تعداد</th><th>تکلیف</th><th>توضیح</th><th>مسئول</th><th>مهلت</th><th v-if="editable"></th></tr></thead>
         <tbody>
           <tr v-if="!shown.length"><td colspan="8" class="text-center inv-muted">مورد اثر‌پذیری نیست.</td></tr>
           <tr v-for="d in shown" :key="d.id">
@@ -148,7 +156,7 @@ load();
               <span v-else>{{ d.dispositionTitle || "—" }}</span>
             </td>
             <td><input v-if="editable" v-model="d.note" class="form-control form-control-sm" /><span v-else>{{ d.note }}</span></td>
-            <td style="width: 110px"><input v-if="editable" v-model.number="d.ownerUserId" class="form-control form-control-sm inv-ltr" /><span v-else>{{ d.ownerName }}</span></td>
+            <td style="width: 150px"><UserSelect v-if="editable" v-model="d.ownerUserId" placeholder="مسئول" /><span v-else>{{ d.ownerName }}</span></td>
             <td style="width: 150px"><KsDatePicker v-if="editable" v-model="d.dueDate" :element-tag="'eco-due-' + d.id" placeholder="مهلت" simple-placeholder /><span v-else>{{ d.dueDate ? jalali(d.dueDate) : "" }}</span></td>
             <td v-if="editable"><button class="btn btn-sm btn-outline-primary py-0" :disabled="busy" @click="setDisposition(d)">ثبت</button></td>
           </tr>
@@ -173,6 +181,7 @@ load();
         <button v-if="order.canReject" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="act('return', 'دلیل بازگرداندن به پیش‌نویس', 'به پیش‌نویس برگشت.')">بازگرداندن</button>
         <button v-if="order.canReject" class="btn btn-sm btn-danger" :disabled="busy" @click="act('reject', 'دلیل رد', 'دستور رد شد.')">رد</button>
         <button v-if="order.canCancel" class="btn btn-sm btn-outline-danger" :disabled="busy" @click="act('cancel', 'دلیل لغو', 'دستور لغو شد.')">لغو</button>
+        <button v-if="order.canVoid" class="btn btn-sm btn-outline-danger" :disabled="busy" @click="act('void', 'دلیل ابطال تایید (دستور لغو می‌شود و بازنگری‌های نام‌برده دوباره قابل ویرایش می‌شوند)', 'تایید دستور باطل شد.')">ابطال دستور تاییدشده</button>
         <button v-if="order.canClose" class="btn btn-sm btn-primary" :disabled="busy" @click="act('close', null, 'دستور بسته شد.')">بستن دستور</button>
       </div>
 

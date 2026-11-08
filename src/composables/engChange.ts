@@ -8,7 +8,7 @@ export const statusClass: Record<number, string> = { 0: "warn", 1: "warn", 2: "o
 export const ecClasses: Record<number, string> = { 1: "کلاس I (فرم، جا، کارکرد، ایمنی، دید مشتری)", 2: "کلاس II" };
 export const ecUrgencies: Record<number, string> = { 1: "عادی", 2: "فوری", 3: "بحرانی" };
 export const targetKinds: Record<number, string> = { 1: "محصول", 2: "قطعه (شماره قطعه)", 3: "BOM", 4: "چارت OPC", 5: "نقشه (سند)", 6: "مسیر ساخت (MES)" };
-export const changeKinds: Record<number, string> = { 1: "BOM", 2: "چارت OPC", 3: "نقشه", 4: "مسیر ساخت" };
+export const changeKinds: Record<number, string> = { 1: "BOM", 2: "چارت OPC", 3: "نقشه", 4: "مسیر ساخت", 5: "فهرست مشخصه‌ها" };
 export const changeActions: Record<number, string> = { 1: "بازنگری جدید", 2: "منسوخ شود" };
 export const impactCategories: Record<number, string> = {
   1: "کاربرد در BOM محصولات", 2: "پایه پروژه‌ها", 3: "دستورهای تولید و مسیر ساخت", 4: "موجودی و کار در جریان",
