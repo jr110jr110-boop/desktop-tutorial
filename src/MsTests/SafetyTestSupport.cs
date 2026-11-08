@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading;
 using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.ProductBank;
+using Entities.Model.NasbNiro.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Finance;
 
@@ -19,6 +20,14 @@ namespace MsTests
                 FinanceSeed.EnsureAsync(uow, CancellationToken.None).GetAwaiter().GetResult();
                 FinanceSeed.EnsureSettingsAsync(uow, CancellationToken.None).GetAwaiter().GetResult();
                 uow.Set<FnSetting>().First(s => s.Key == key).Value = value;
+                uow.SaveChanges();
+            });
+
+        public static void SetProcurement(AppHost host, string key, decimal value) =>
+            host.Write(uow =>
+            {
+                Services.NasbNiro.Procurement.ProcurementSettingKeys.LoadAsync(uow, CancellationToken.None).GetAwaiter().GetResult();
+                uow.Set<ProcurementSetting>().First(x => x.Key == key).Value = value;
                 uow.SaveChanges();
             });
 

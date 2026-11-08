@@ -46,7 +46,7 @@ namespace MsTests
         private static async Task SettingAsync(AppHost host, string key, string value)
         {
             // Package D: the close-checklist rule is a security-relevant setting (a second person changes it); the scenario sets it directly
-            if (key == "CloseChecklist.Enforce") { SafetyTestSupport.SetFinance(host, key, value); return; }
+            if (key == "CloseChecklist.Enforce" || key == "PeriodClose.CloseBy") { SafetyTestSupport.SetFinance(host, key, value); return; }
             Ok(await host.As(Fm, sp => sp.GetRequiredService<IGlControlsService>().SaveSettingAsync(new SaveFinanceSettingDto { Key = key, Value = value }, CancellationToken.None)));
         }
 

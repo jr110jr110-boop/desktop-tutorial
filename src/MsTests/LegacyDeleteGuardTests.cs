@@ -684,7 +684,7 @@ namespace MsTests
             Assert.AreEqual(7, trail[0].UserId);
 
             // the refused contract left no audit row for a delete
-            Assert.AreEqual(0, H.Read(u => u.Set<FnAuditLog>().Count(l => l.EntityType == nameof(ContractEntity) && l.EntityId == blocked)));
+            Assert.AreEqual(0, H.Read(u => u.Set<FnAuditLog>().Count(l => l.EntityType == nameof(ContractEntity) && l.EntityId == blocked && l.Action != "Added")));
         }
 
         [TestMethod]

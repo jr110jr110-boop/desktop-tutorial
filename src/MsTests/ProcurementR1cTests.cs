@@ -555,8 +555,8 @@ namespace MsTests
 
             // the company tightens the rule: two quotes from 18 million (setting of the managing director or the PMO deputy)
             Assert.IsFalse((await host.As(Buyer, p => p.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = ProcurementSettingKeys.Quote2From, Value = 18_000_000m }, CancellationToken.None))).Success, "the buyer does not change the limits");
-            ResponseDto<ProcurementSettingDto> setting = await host.As(Ceo, p => p.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = ProcurementSettingKeys.Quote2From, Value = 18_000_000m }, CancellationToken.None));
-            Assert.IsTrue(setting.Success, setting.Message);
+            // Package D: the limit is a security-relevant setting (two-person change); the scenario sets it directly
+            SafetyTestSupport.SetProcurement(host, ProcurementSettingKeys.Quote2From, 18_000_000m);
 
             ResponseDto<PurchaseOrderDto> refused = await OrderAction(Pmo1, order.Data.Id, "approve");
             Assert.IsFalse(refused.Success);
@@ -564,7 +564,7 @@ namespace MsTests
             Assert.AreEqual(PurchaseOrderStatus.Draft, host.Read(u => u.Set<PurchaseOrder>().Single(o => o.Id == order.Data.Id).Status));
 
             // the setting is back: the order passes
-            Assert.IsTrue((await host.As(Pmo2, p => p.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = ProcurementSettingKeys.Quote2From, Value = 30_000_000m }, CancellationToken.None))).Success);
+            SafetyTestSupport.SetProcurement(host, ProcurementSettingKeys.Quote2From, 30_000_000m);
             ResponseDto<PurchaseOrderDto> approved = await OrderAction(Pmo1, order.Data.Id, "approve");
             Assert.IsTrue(approved.Success, approved.Message);
         }
