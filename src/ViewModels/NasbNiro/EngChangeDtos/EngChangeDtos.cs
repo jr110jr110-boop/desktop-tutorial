@@ -324,6 +324,7 @@ namespace ViewModels.NasbNiro.EngChangeDtos
         public bool CanReject { get; set; }
         public bool CanCancel { get; set; }
         public bool CanClose { get; set; }
+        public bool CanVoid { get; set; }
         public string RowVersion { get; set; }
     }
 

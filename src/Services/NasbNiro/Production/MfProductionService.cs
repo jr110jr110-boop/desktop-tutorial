@@ -234,6 +234,9 @@ namespace Services.NasbNiro.Production
             string changeProblem = await MfBaselineDrafting.ChangeProblemAsync(_uow, order, outputItem, dto.Components.GroupBy(c => c.ItemId).Select(g => (g.Key, g.Sum(c => c.Quantity))).ToList(), DateTime.Today, ct);
             if (changeProblem != null) return Bad<OrderDto>(changeProblem);
 
+            // Package A2: the planned serials of an order under an engineering change order do not move the order across the effectivity point
+            string serialProblem = await global::Services.NasbNiro.EngChange.EcGate.SerialsChangeProblemAsync(_uow, order, outputItem, Clean(dto.SerialsPlanned), DateTime.Today, ct);
+            if (serialProblem != null) return Bad<OrderDto>(serialProblem);
             List<MfOrderComponent> existing = await _uow.Set<MfOrderComponent>().Where(c => c.OrderId == order.Id).ToListAsync(ct);
             _uow.Set<MfOrderComponent>().RemoveRange(existing);
             foreach (var g in dto.Components.GroupBy(c => c.ItemId))

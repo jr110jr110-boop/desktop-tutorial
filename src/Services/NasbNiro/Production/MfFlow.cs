@@ -288,6 +288,9 @@ namespace Services.NasbNiro.Production
             if (quantity <= 0) { notes.Add("رسید ساخت ساخته نشد: تعداد سالم گزارش‌شده در آخرین عملیات صفر است."); return false; }
             InventoryItem item = await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct);
             if (item == null) { notes.Add("رسید ساخت ساخته نشد: کالا پیدا نشد."); return false; }
+            // Package A2: the unit is made on the revision its effectivity point asks for; a unit on the wrong revision gets no production receipt (no serial is received into stock)
+            global::Services.NasbNiro.EngChange.EcOrderVerdict ecVerdict = await global::Services.NasbNiro.EngChange.EcGate.OrderVerdictAsync(_uow, order, item, DateTime.Today, ct);
+            if (ecVerdict.Problem != null) { notes.Add("رسید ساخت ساخته نشد (دستور تغییر مهندسی): " + ecVerdict.Problem); return false; }
 
             ProcessType? type = order.ProcessId.HasValue
                 ? await _uow.Set<ProcessEntity>().AsNoTracking().Where(p => p.Id == order.ProcessId.Value).Select(p => (ProcessType?)p.Type).FirstOrDefaultAsync(ct)

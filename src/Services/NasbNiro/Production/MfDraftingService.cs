@@ -187,13 +187,73 @@ namespace Services.NasbNiro.Production
 
         private async Task DraftWorkOrderAsync(int workOrderId, DraftOrdersResultDto result, List<object> added, CancellationToken ct)
         {
+            // Package A2 (single BOM master): a project with a baseline is drafted from the baseline - the top assembly and every make part, the components from the baseline lines, the operations from the approved routing.
+            // The legacy make processes are drafted only for what the baseline does not cover (flagged read-only fallback), and only when the project has no baseline for the part.
+            var covered = new HashSet<int>();
+            var (targets, notes) = await MfBaselineDrafting.PlanAsync(_uow, workOrderId, ct);
+            if (targets != null)
+            {
+                foreach (string n in notes) result.Notes.Add(n);
+                int contractId = await _uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == workOrderId).Select(w => w.ContractId).FirstAsync(ct);
+                foreach (MfBaselineDrafting.DraftTarget t in targets)
+                {
+                    covered.Add(t.Item.Id);
+                    await DraftFromBaselineAsync(workOrderId, contractId, t, result, added, ct);
+                }
+            }
             List<ProcessEntity> processes = await _uow.Set<ProcessEntity>().AsNoTracking().Include(p => p.Bom).ThenInclude(b => b.Assembly)
                 .Where(p => !p.Deleted && !p.Bom.Deleted && p.Bom.Assembly.WorkOrderId == workOrderId && MakeTypes.Contains(p.Type))
                 .OrderBy(p => p.Bom.Assembly.Id).ThenBy(p => p.Sort).ThenBy(p => p.Id).ToListAsync(ct);
-            foreach (ProcessEntity p in processes) await DraftOneAsync(p, null, result, added, ct);
+            foreach (ProcessEntity p in processes) await DraftOneAsync(p, null, result, added, ct, covered);
         }
 
-        private async Task DraftOneAsync(ProcessEntity process, int? itemOverride, DraftOrdersResultDto result, List<object> added, CancellationToken ct)
+        private async Task DraftFromBaselineAsync(int workOrderId, int contractId, MfBaselineDrafting.DraftTarget target, DraftOrdersResultDto result, List<object> added, CancellationToken ct)
+        {
+            InventoryItem item = target.Item;
+            string title = string.IsNullOrWhiteSpace(target.PartName) ? target.PartNumber : target.PartName;
+            if (await _uow.Set<MfProductionOrder>().AnyAsync(o => o.WorkOrderId == workOrderId && o.ItemId == item.Id && !o.Deleted && o.Status != MfOrderStatus.Cancelled, ct)
+                || added.OfType<MfProductionOrder>().Any(o => o.WorkOrderId == workOrderId && o.ItemId == item.Id))
+            {
+                result.Skipped++;
+                result.Notes.Add($"{title}: برای این قطعه در این دستور کار قبلاً دستور تولید صادر شده است.");
+                return;
+            }
+            DateTimeOffset now = DateTimeOffset.Now;
+            decimal quantity = target.Quantity > 0 ? target.Quantity : 1;
+            var order = new MfProductionOrder
+            {
+                Number = await InventoryNumbers.NextNumberAsync(_uow, MfNumbers.ProductionOrder, "PO-MF", DateTime.Today, ct),
+                WorkOrderId = workOrderId, ContractId = contractId, ItemId = item.Id, Quantity = quantity,
+                Unit = MfText.Clean(target.Unit) ?? item.Unit, Status = MfOrderStatus.Draft, AutoDrafted = true,
+                CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
+            };
+            _uow.Set<MfProductionOrder>().Add(order);
+            added.Add(order);
+            MfBaselineDrafting.Expected expected = await MfBaselineDrafting.ExpectedAsync(_uow, workOrderId, null, item, quantity, ct);
+            order.ComponentSource = expected.Source;
+            order.ComponentNote = expected.Note;
+            foreach (MfBaselineDrafting.ComponentLine l in expected.Lines)
+            {
+                var line = new MfOrderComponent { ItemId = l.ItemId, Quantity = l.Quantity, Unit = l.Unit };
+                order.Components.Add(line);
+                added.Add(line);
+            }
+            if (expected.Warning != null) result.Notes.Add($"{title}: {expected.Warning}");
+            MfResolvedRouting routing = await MfRouting.ResolveAsync(_uow, item, ct);
+            if (routing.Revision != null)
+            {
+                order.RoutingRevisionId = routing.Revision.Id;
+                foreach (MfOperation op in OperationsFromRouting(routing, quantity, now, Me))
+                {
+                    order.Operations.Add(op);
+                    added.Add(op);
+                }
+            }
+            else result.Notes.Add($"{title}: {routing.Message} دستور بدون عملیات ساخته شد.");
+            result.Drafted++;
+        }
+
+        private async Task DraftOneAsync(ProcessEntity process, int? itemOverride, DraftOrdersResultDto result, List<object> added, CancellationToken ct, HashSet<int> covered = null)
         {
             string title = string.IsNullOrWhiteSpace(process.Title) ? "فرایند " + process.Id : process.Title;
             if (await _uow.Set<MfProductionOrder>().AnyAsync(o => o.ProcessId == process.Id && !o.Deleted && o.Status != MfOrderStatus.Cancelled, ct)
@@ -211,6 +271,17 @@ namespace Services.NasbNiro.Production
             {
                 result.Skipped++;
                 result.Notes.Add(exitCode == null ? $"{title}: کد کالای خروجی فرایند مشخص نیست." : $"{title}: کالایی با کد {exitCode} در انبار تعریف نشده است.");
+                return;
+            }
+            if (covered == null)
+            {
+                var (planned, _) = await MfBaselineDrafting.PlanAsync(_uow, process.Bom.Assembly.WorkOrderId, ct);
+                covered = planned == null ? new HashSet<int>() : planned.Select(t => t.Item.Id).ToHashSet();
+            }
+            if (covered.Contains(item.Id))
+            {
+                result.Skipped++;
+                result.Notes.Add($"{title}: این قطعه از مبنای BOM پروژه (بانک محصول) ساخته می‌شود؛ دستور آن از مبنا صادر شده است.");
                 return;
             }
             Bom bom = process.Bom;

@@ -94,6 +94,7 @@ namespace Services.NasbNiro.EngChange
                 case EcChangeKind.Bom: return await _uow.Set<PbBomHeader>().AsNoTracking().AnyAsync(h => h.Id == c.TargetId && (h.Status == PbBomStatus.Released || h.Status == PbBomStatus.Superseded || h.Status == PbBomStatus.Obsolete), ct);
                 case EcChangeKind.Opc: return await _uow.Set<PbOpcRouting>().AsNoTracking().AnyAsync(h => h.Id == c.TargetId && (h.Status == PbRoutingStatus.Approved || h.Status == PbRoutingStatus.Superseded), ct);
                 case EcChangeKind.Drawing: return await _uow.Set<PcDocumentRevision>().AsNoTracking().AnyAsync(h => h.Id == c.TargetId && (h.Status == PcDocStatus.Released || h.Status == PcDocStatus.AsBuilt || h.Status == PcDocStatus.Superseded), ct);
+                case EcChangeKind.CharList: return await _uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().AnyAsync(h => h.Id == c.TargetId && (h.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Released || h.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Superseded), ct);
                 default: return await _uow.Set<MfRoutingRevision>().AsNoTracking().AnyAsync(h => h.Id == c.TargetId && h.Status == MfRoutingStatus.Approved, ct);
             }
         }
@@ -106,6 +107,34 @@ namespace Services.NasbNiro.EngChange
             foreach (EcOrderChange c in o.Changes.OrderBy(c => c.Kind).ThenBy(c => c.TargetId).ThenBy(c => c.Action)) sb.Append("|C:").Append((int)c.Kind).Append(':').Append((int)c.Action).Append(':').Append(c.TargetId).Append(':').Append(c.Note);
             foreach (EcDispositionItem d in o.Dispositions.Where(d => !d.Stale).OrderBy(d => d.ImpactKey, StringComparer.Ordinal))
                 sb.Append("|D:").Append(d.ImpactKey).Append(':').Append(d.Disposition.HasValue ? (int)d.Disposition.Value : 0).Append(':').Append(d.Note).Append(':').Append(d.OwnerUserId).Append(':').Append(d.DueDate?.ToString("yyyy-MM-dd"));
+            return EcRules.Sha256(sb.ToString());
+        }
+
+        /// <summary>
+        /// The fingerprint the approvals are bound to: the order itself plus the CONTENT of every named BOM / OPC revision (read from its lines, so it does not depend on the review state). A named draft revision cannot be edited
+        /// while the order is in approval or approved (see EcGate.NamedInOpenOrderAsync), and an edit before the approval changes this fingerprint.
+        /// </summary>
+        private async Task<string> HashAsync(EcOrder o, CancellationToken ct)
+        {
+            var sb = new StringBuilder(Hash(o));
+            foreach (EcOrderChange c in o.Changes.OrderBy(c => c.Kind).ThenBy(c => c.TargetId).ThenBy(c => c.Action))
+            {
+                if (c.Action != EcChangeAction.NewRevision) continue;
+                string digest = null;
+                if (c.Kind == EcChangeKind.Bom)
+                {
+                    var lines = await _uow.Set<PbBomLine>().AsNoTracking().Where(l => l.BomHeaderId == c.TargetId && !l.Deleted).OrderBy(l => l.SortOrder).ThenBy(l => l.Id)
+                        .Select(l => new { l.PartNumber, l.Qty, l.Unit, l.IsHeading, l.MakeOrBuy, l.ChildBomId, l.AlternativeOfLineId, l.ScrapFactor }).ToListAsync(ct);
+                    digest = EcRules.Sha256(string.Join("\n", lines.Select(l => $"{l.PartNumber}|{l.Qty:0.####}|{l.Unit}|{(l.IsHeading ? 1 : 0)}|{(int)l.MakeOrBuy}|{l.ChildBomId}|{l.AlternativeOfLineId}|{l.ScrapFactor:0.####}")));
+                }
+                else if (c.Kind == EcChangeKind.Opc)
+                {
+                    var steps = await _uow.Set<PbOpcStep>().AsNoTracking().Where(l => l.RoutingId == c.TargetId && !l.Deleted).OrderBy(l => l.PartNumber).ThenBy(l => l.Seq).ThenBy(l => l.Id)
+                        .Select(l => new { l.PartNumber, l.Seq, l.StageCode2, l.Title, l.StandardHours, l.IsQcPoint, l.WorkCenterId }).ToListAsync(ct);
+                    digest = EcRules.Sha256(string.Join("\n", steps.Select(l => $"{l.PartNumber}|{l.Seq}|{l.StageCode2}|{l.Title}|{l.StandardHours:0.####}|{(l.IsQcPoint ? 1 : 0)}|{l.WorkCenterId}")));
+                }
+                if (digest != null) sb.Append("|R:").Append((int)c.Kind).Append(':').Append(c.TargetId).Append(':').Append(digest);
+            }
             return EcRules.Sha256(sb.ToString());
         }
 
@@ -140,6 +169,15 @@ namespace Services.NasbNiro.EngChange
             return list;
         }
 
+        /// <summary>The part numbers whose line is added, removed or changed in quantity / unit between two BOM revisions.</summary>
+        private async Task<List<string>> BomDiffPartsAsync(int oldHeaderId, int newHeaderId, CancellationToken ct)
+        {
+            async Task<Dictionary<string, string>> Lines(int id) => (await _uow.Set<PbBomLine>().AsNoTracking().Where(l => l.BomHeaderId == id && !l.Deleted && !l.IsHeading && l.AlternativeOfLineId == null && l.PartNumber != null).ToListAsync(ct))
+                .GroupBy(l => l.PartNumber.Trim().ToUpperInvariant()).ToDictionary(g => g.Key, g => g.Sum(l => l.Qty).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "|" + string.Join(",", g.Select(l => l.Unit).Distinct().OrderBy(u => u)));
+            Dictionary<string, string> a = await Lines(oldHeaderId), b = await Lines(newHeaderId);
+            return a.Keys.Union(b.Keys).Where(k => !a.TryGetValue(k, out string x) || !b.TryGetValue(k, out string y) || x != y).OrderBy(k => k, StringComparer.Ordinal).ToList();
+        }
+
         private async Task<EcImpactBuilder.Snapshot> ComputeImpactAsync(EcOrder o, CancellationToken ct)
         {
             var input = new EcImpactInput();
@@ -153,8 +191,18 @@ namespace Services.NasbNiro.EngChange
             foreach (EcOrderChange c in o.Changes)
             {
                 if (!string.IsNullOrWhiteSpace(c.PartNumber)) input.PartNumbers.Add(c.PartNumber);
-                if (c.Kind == EcChangeKind.Bom) { input.BomHeaderIds.Add(c.TargetId); if (c.OldTargetId.HasValue) input.BomHeaderIds.Add(c.OldTargetId.Value); }
+                if (c.Kind == EcChangeKind.Bom)
+                {
+                    input.BomHeaderIds.Add(c.TargetId); if (c.OldTargetId.HasValue) input.BomHeaderIds.Add(c.OldTargetId.Value);
+                    // the components the new revision adds, removes or changes against the revision in force are impacted too (stock, orders, purchases of THOSE parts)
+                    if (c.OldTargetId.HasValue && c.Action == EcChangeAction.NewRevision) input.PartNumbers.AddRange(await BomDiffPartsAsync(c.OldTargetId.Value, c.TargetId, ct));
+                }
                 if (c.Kind == EcChangeKind.Opc) { input.OpcRoutingIds.Add(c.TargetId); if (c.OldTargetId.HasValue) input.OpcRoutingIds.Add(c.OldTargetId.Value); }
+                if (c.Kind == EcChangeKind.CharList)
+                {
+                    int? lid = await _uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().Where(r => r.Id == c.TargetId).Select(r => (int?)r.DeliverableId).FirstOrDefaultAsync(ct);
+                    if (lid.HasValue) input.DeliverableIds.Add(lid.Value);
+                }
                 if (c.Kind == EcChangeKind.Drawing)
                 {
                     int? did = await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => r.Id == c.TargetId).Select(r => (int?)r.DeliverableId).FirstOrDefaultAsync(ct);
@@ -219,6 +267,7 @@ namespace Services.NasbNiro.EngChange
             dto.CanReject = human && inApproval && (InRole(EcRules.RoleEngineering) || InRole(EcRules.RoleQa)) && ApproveProblem(o, Me, null) == null;
             dto.CanCancel = human && (draft || inApproval) && (o.CreatorUserId == Me || InRole(EcRules.RoleEngineering));
             dto.CanClose = human && o.Status == EcoStatus.Approved && (InRole(EcRules.RoleEngineering) || InRole(EcRules.RoleQa));
+            dto.CanVoid = dto.CanClose;
             return dto;
         }
 
@@ -341,11 +390,26 @@ namespace Services.NasbNiro.EngChange
                     PcEngineeringDeliverable d = await _uow.Set<PcEngineeringDeliverable>().AsNoTracking().FirstAsync(x => x.Id == r.DeliverableId, ct);
                     c.Code = d.DocumentNumber; c.NewRevision = r.Sequence; c.Reference = $"{d.DocumentNumber} بازنگری {r.Code}";
                     if (r.Status == PcDocStatus.Released || r.Status == PcDocStatus.AsBuilt || r.Status == PcDocStatus.Superseded || r.Status == PcDocStatus.Obsolete) return "بازنگری جدید باید هنوز منتشر نشده باشد.";
-                    PcDocumentRevision old = await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(x => !x.Deleted && x.DeliverableId == d.Id && x.Sequence < r.Sequence && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt || x.Status == PcDocStatus.Superseded)).OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+                    // the drawing is a revision of something that was ever in force when ANY document linked (now or earlier) to its parts has a released, superseded or obsolete revision
+                    PcDocumentRevision old = await EcGate.EarlierDrawingRevisionAsync(_uow, d, r, ct);
+                    var (parts, _) = await EcGate.DrawingPartsAsync(_uow, d.Id, true, ct);
+                    if (parts.Count == 0) return "این نقشه به هیچ قطعه‌ای وصل نیست؛ دستور تغییر فقط برای نقشه قطعه‌ها لازم است.";
                     if (old == null) return "برای بازنگری اول نقشه دستور تغییر لازم نیست.";
                     c.OldTargetId = old.Id; c.OldRevision = old.Sequence;
-                    // the part numbers the drawing is linked to
-                    List<string> parts = await _uow.Set<PcDocumentLink>().AsNoTracking().Where(l => !l.Deleted && l.UnlinkReason == null && l.DeliverableId == d.Id && l.PartNumber != null).Select(l => l.PartNumber).Distinct().ToListAsync(ct);
+                    c.PartNumber = parts[0];   // every linked part goes into the affected parts of the order (RecomputePartsAsync)
+                    return null;
+                }
+                case EcChangeKind.CharList:
+                {
+                    var l = await _uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == c.TargetId && !x.Deleted, ct);
+                    if (l == null) return "فهرست مشخصه‌ها پیدا نشد.";
+                    c.Code = l.DocumentNumber; c.NewRevision = l.Version; c.Reference = $"فهرست مشخصه‌های {l.DocumentNumber} بازنگری {l.RevisionCode} نسخه {l.Version}";
+                    if (l.Status != Entities.Model.NasbNiro.Quality.CharListStatus.Draft && l.Status != Entities.Model.NasbNiro.Quality.CharListStatus.Submitted) return "نسخه جدید فهرست باید هنوز تایید نشده باشد (پیش‌نویس یا ارسال‌شده).";
+                    var oldList = await _uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().Where(x => !x.Deleted && x.RevisionId == l.RevisionId && x.Version < l.Version
+                        && (x.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Released || x.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Superseded)).OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
+                    if (oldList == null) return "برای نسخه اول فهرست مشخصه‌های یک بازنگری دستور تغییر لازم نیست.";
+                    c.OldTargetId = oldList.Id; c.OldRevision = oldList.Version;
+                    var (parts, _) = await EcGate.DrawingPartsAsync(_uow, l.DeliverableId, true, ct);
                     c.PartNumber = parts.Count == 0 ? null : parts[0];
                     return null;
                 }
@@ -354,9 +418,12 @@ namespace Services.NasbNiro.EngChange
                     MfRoutingRevision r = await _uow.Set<MfRoutingRevision>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == c.TargetId && !x.Deleted, ct);
                     if (r == null) return "بازنگری مسیر ساخت پیدا نشد.";
                     InventoryItem item = r.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == r.ItemId.Value, ct) : null;
-                    c.Code = item?.Code; c.PartNumber = item?.PartNumber; c.NewRevision = r.Revision; c.Reference = $"مسیر ساخت {item?.Code} بازنگری {r.Revision}";
+                    string groupTitle = r.ItemGroupId.HasValue && !r.ItemId.HasValue ? await _uow.Set<ItemGroup>().AsNoTracking().Where(g => g.Id == r.ItemGroupId.Value).Select(g => g.Title).FirstOrDefaultAsync(ct) : null;
+                    c.Code = item?.Code ?? ("گروه " + groupTitle); c.PartNumber = item?.PartNumber; c.NewRevision = r.Revision; c.Reference = $"مسیر ساخت {item?.Code ?? ("گروه " + groupTitle)} بازنگری {r.Revision}";
                     if (r.Status == MfRoutingStatus.Approved) return "بازنگری جدید باید هنوز تایید نشده باشد.";
-                    MfRoutingRevision old = await _uow.Set<MfRoutingRevision>().AsNoTracking().Where(x => !x.Deleted && x.ItemId == r.ItemId && x.Revision < r.Revision && x.Status == MfRoutingStatus.Approved).OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
+                    IQueryable<MfRoutingRevision> sameKey = _uow.Set<MfRoutingRevision>().AsNoTracking().Where(x => !x.Deleted && x.Revision < r.Revision && x.Status == MfRoutingStatus.Approved);
+                    sameKey = r.ItemId.HasValue ? sameKey.Where(x => x.ItemId == r.ItemId) : sameKey.Where(x => x.ItemGroupId == r.ItemGroupId && x.ItemId == null);
+                    MfRoutingRevision old = await sameKey.OrderByDescending(x => x.Revision).FirstOrDefaultAsync(ct);
                     if (old == null) return "برای بازنگری اول مسیر ساخت دستور تغییر لازم نیست.";
                     c.OldTargetId = old.Id; c.OldRevision = old.Revision;
                     return null;
@@ -364,13 +431,36 @@ namespace Services.NasbNiro.EngChange
             }
         }
 
-        private Task RecomputePartsAsync(EcOrder o, CancellationToken ct)
+        /// <summary>
+        /// The parts the order changes: the parts of the request, of the named revisions (every part a drawing is linked to) and every assembly that contains one of them at any level (the where-used chain), so that the
+        /// production orders of a parent product are judged against the effectivity too.
+        /// </summary>
+        private async Task RecomputePartsAsync(EcOrder o, CancellationToken ct)
         {
             var parts = new List<string>();
             parts.AddRange(o.Request.Targets.Where(t => !string.IsNullOrWhiteSpace(t.PartNumber)).Select(t => t.PartNumber));
             parts.AddRange(o.Changes.Where(c => !string.IsNullOrWhiteSpace(c.PartNumber)).Select(c => c.PartNumber));
-            o.AffectedParts = EcRules.PartsKey(parts);
-            return Task.CompletedTask;
+            foreach (EcOrderChange c in o.Changes.Where(c => c.Kind == EcChangeKind.Drawing || c.Kind == EcChangeKind.CharList))
+            {
+                int? did = c.Kind == EcChangeKind.Drawing
+                    ? await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => r.Id == c.TargetId).Select(r => (int?)r.DeliverableId).FirstOrDefaultAsync(ct)
+                    : await _uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().Where(r => r.Id == c.TargetId).Select(r => (int?)r.DeliverableId).FirstOrDefaultAsync(ct);
+                if (did.HasValue) parts.AddRange((await EcGate.DrawingPartsAsync(_uow, did.Value, true, ct)).Parts);
+            }
+            var seen = new HashSet<string>(parts.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim().ToUpperInvariant()), StringComparer.OrdinalIgnoreCase);
+            List<string> frontier = seen.ToList();
+            for (int level = 1; level <= 8 && frontier.Count > 0 && seen.Count < 80; level++)
+            {
+                List<string> current = frontier;
+                List<string> up = await (from l in _uow.Set<PbBomLine>().AsNoTracking()
+                                         join h in _uow.Set<PbBomHeader>().AsNoTracking() on l.BomHeaderId equals h.Id
+                                         where !l.Deleted && !h.Deleted && !l.IsHeading && h.Status == PbBomStatus.Released && l.PartNumber != null && current.Contains(l.PartNumber) && h.AssemblyPartNumber != null
+                                         select h.AssemblyPartNumber).Distinct().ToListAsync(ct);
+                frontier = new List<string>();
+                foreach (string p in up.Select(p => p.Trim().ToUpperInvariant()).OrderBy(p => p, StringComparer.Ordinal))
+                    if (seen.Count < 80 && seen.Add(p)) frontier.Add(p);
+            }
+            o.AffectedParts = EcRules.PartsKey(seen);
         }
 
         public async Task<ResponseDto<EcOrderDto>> RemoveChangeAsync(EcOrderChangeRemoveDto dto, CancellationToken ct)
@@ -512,7 +602,7 @@ namespace Services.NasbNiro.EngChange
                     if (e != null) return Bad<EcOrderDto>(e);
                     List<string> blockers = await BlockersAsync(o, true, ct);
                     if (blockers.Count > 0) return Bad<EcOrderDto>("دستور تغییر هنوز آماده ارسال نیست: " + string.Join(" ", blockers));
-                    o.Status = EcoStatus.InApproval; o.SubmittedAt = now; o.ContentSha256 = Hash(o);
+                    o.Status = EcoStatus.InApproval; o.SubmittedAt = now; o.ContentSha256 = await HashAsync(o, ct);
                     Touch(o);
                     break;
                 }
@@ -525,7 +615,7 @@ namespace Services.NasbNiro.EngChange
                     if ((eng ? o.EngineeringApprovedByUserId : o.QaApprovedByUserId).HasValue) return Bad<EcOrderDto>("این تایید قبلاً داده شده است.");
                     string who = ApproveProblem(o, Me, eng ? o.QaApprovedByUserId : o.EngineeringApprovedByUserId);
                     if (who != null) return Bad<EcOrderDto>(who);
-                    if (Hash(o) != o.ContentSha256) return Bad<EcOrderDto>("محتوای دستور پس از ارسال تغییر کرده است؛ آن را بازگردانید و دوباره بفرستید.");
+                    if (await HashAsync(o, ct) != o.ContentSha256) return Bad<EcOrderDto>("محتوای دستور پس از ارسال تغییر کرده است؛ آن را بازگردانید و دوباره بفرستید.");
                     List<string> blockers = await BlockersAsync(o, true, ct);
                     if (blockers.Count > 0) return Bad<EcOrderDto>("دستور تغییر را نمی‌توان تایید کرد: " + string.Join(" ", blockers));
                     if (eng) { o.EngineeringApprovedByUserId = Me; o.EngineeringApprovedAt = now; o.EngineeringNote = note; }
@@ -574,6 +664,16 @@ namespace Services.NasbNiro.EngChange
                     Stamp(o, false, Me);
                     break;
                 }
+                case "void":
+                {
+                    // a wrong approval has a way out: ENGINEERING or QA voids an approved order (with a reason) before it is closed; the named draft revisions are free again and the order no longer gates anything
+                    if (o.Status != EcoStatus.Approved) return Bad<EcOrderDto>("فقط دستور تاییدشده باطل می‌شود.");
+                    if (!InRole(EcRules.RoleEngineering) && !InRole(EcRules.RoleQa)) return Bad<EcOrderDto>(NotAllowed);
+                    if (note == null) return Bad<EcOrderDto>("دلیل ابطال را بنویسید.");
+                    o.Status = EcoStatus.Cancelled; o.CancelReason = "ابطال پس از تایید: " + note;
+                    Stamp(o, false, Me);
+                    break;
+                }
                 case "close":
                 {
                     if (o.Status != EcoStatus.Approved) return Bad<EcOrderDto>("فقط دستور تاییدشده بسته می‌شود.");
@@ -614,8 +714,8 @@ namespace Services.NasbNiro.EngChange
                 await Tell($"ec:eco:info:{o.Id}", $"دستور تغییر مهندسی {o.Number} تایید و ابلاغ شد ({EcRules.EffectivityText(o)})", "EcOrder", o.Id, link, EcRules.Informed, users, false, ct);
                 return;
             }
-            if (action == "return" || action == "reject" || action == "cancel" || action == "close") await CloseTell(tellKey, "پایان", ct);
-            if (action == "reject" || action == "cancel") await CloseTell($"ec:eco:info:{o.Id}", "پایان", ct);
+            if (action == "return" || action == "reject" || action == "cancel" || action == "void" || action == "close") await CloseTell(tellKey, "پایان", ct);
+            if (action == "reject" || action == "cancel" || action == "void") await CloseTell($"ec:eco:info:{o.Id}", "پایان", ct);
         }
 
         /// <summary>The project managers of the projects the order touches (the project baselines and the production orders of the impact).</summary>
@@ -669,7 +769,7 @@ namespace Services.NasbNiro.EngChange
         public async Task<ResponseDto<List<EcTaskDto>>> GetMyTasksAsync(CancellationToken ct)
         {
             if (!InRole(EcRules.Readers)) return Bad<List<EcTaskDto>>(NotAllowed);
-            List<EcTask> rows = await _uow.Set<EcTask>().AsNoTracking().Where(t => !t.Deleted && t.OwnerUserId == Me && t.Status != EcTaskStatus.Verified).OrderBy(t => t.DueDate).Take(300).ToListAsync(ct);
+            List<EcTask> rows = await _uow.Set<EcTask>().AsNoTracking().Where(t => !t.Deleted && t.OwnerUserId == Me && t.Status != EcTaskStatus.Verified && t.Order.Status == EcoStatus.Approved).OrderBy(t => t.DueDate).Take(300).ToListAsync(ct);
             return ResponseDtoHelper.Ok(rows.Select(t => new EcTaskDto
             {
                 Id = t.Id, DispositionItemId = t.DispositionItemId, Title = t.Title, Disposition = t.Disposition, DispositionTitle = EcRules.Title(t.Disposition), OwnerUserId = t.OwnerUserId, DueDate = t.DueDate, Status = t.Status,

@@ -6044,15 +6044,27 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MFCT,\"currencyCode\":\"IRR\",
 pcreview $MFCT # R1c (H8): the review of the contract is accepted before its WBS and purchase requests
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MFWO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "mes: equipment project code is built from the type, size and option" '.success and (.data.equipmentProjectCode|startswith("PU15026"))'
 call POST Assemblies "{\"title\":\"Pump casing\",\"code\":\"MF-ASM-1\",\"workOrderId\":$MFWO,\"assemblerDuration\":1}"; MFASM=$(val .data.id)
-# Package A2 (single BOM master): the legacy Bom / EquipmentBom are read only. The older chains below (mes, sales, the genealogy chain of pb4) still build legacy BOMs and edit legacy-sourced components of their orders, so the transition switch is turned off here
-# (a safety-profile setting: request + second person) and turned back on right after the pb4 chain; the PKA2 block checks the freeze.
-safety_set ProductBank EngChange.LegacyBomFrozen false; check "pka2 setup: the legacy BOM freeze is lifted for the older chains (two-person change)" '.success and .data.status == "Approved"'
+# Package A2 (single BOM master): the legacy Bom / EquipmentBom are read only. The older chains below (mes, sales, the genealogy chain of pb4) still build a few legacy BOM rows or edit a legacy-sourced component of
+# their orders, so the transition switch (a safety-profile setting: request + second person) is lifted ONLY around those calls (legacy_open ... legacy_close) and is on for everything else; the PKA2 block checks the freeze.
+# The two helpers keep the last response body, so a check that follows the calls still reads its own response.
+legacy_open() {
+  cp "$B" "$B.keep"
+  safety_set ProductBank EngChange.LegacyBomFrozen false; check "pka2 setup: the legacy BOM freeze is lifted for one older chain step (two-person change)" '.success and .data.status == "Approved"'
+  cp "$B.keep" "$B"
+}
+legacy_close() {
+  cp "$B" "$B.keep"
+  safety_set ProductBank EngChange.LegacyBomFrozen true; check "pka2 setup: the legacy BOM freeze is back on right after that step (two-person change)" '.success and .data.status == "Approved"'
+  cp "$B.keep" "$B"
+}
 mfbom() { # mfbom POSITION COUNT TITLE : echoes nothing, sets MFBOM
+  legacy_open
   call POST Boms "{\"positionNumber\":$1,\"title\":\"$3\",\"count\":$2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$MFASM}"
   MFBOM=$(val .data.id)
 }
 mfproc() { # mfproc BOMID EXITCODE ENTERCODE TITLE
   call POST Processes "{\"exitCommodityCode\":\"$2\",\"enterCommodityCode\":\"$3\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"$4\",\"bomId\":$1}"
+  legacy_close
 }
 mfbom 1 5 "قطعه الف"; mfproc "$MFBOM" "77.10.00.001.1" "MF-NO-STOCK-CODE" "ساخت قطعه الف"; check "mes: make process of item A (5 units)" '.success and .data.id > 0'
 MFPRA=$(val .data.id); MFPRABOM=$(val .data.bomId)
@@ -6102,7 +6114,9 @@ call POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: the PMO cannot rele
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDB}"; nomsg "mes: order B cannot be released without its approved drawing" "صدور ممکن نیست"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage is not released by the shop supervisor" "فقط با مدیر تولید"
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage needs a written reason even for the production manager" "دلیل را بنویسید"
+legacy_open
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the production manager edits the components of order C" '.success and (.data.components|length) == 1'
+legacy_close
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; nomsg "mes: whoever edited the components cannot release the order (maker-checker)" "تفکیک وظایف"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"x\"}"; nomsg "mes: the shop supervisor still cannot release with a shortage" "فقط با مدیر تولید"
 
@@ -6138,7 +6152,9 @@ as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDA&PageSize=
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: an order is released once" "صادر می‌شود"
 
 # --- release of C by the manager with a shortage: kit is a draft material request
+legacy_open
 as "$MSV_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the supervisor edits the components (same list) of order C" '.success'
+legacy_close
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; check "mes: the production manager releases C with the shortage and a reason: override recorded, kit drafted, operation waits for the kit" '.success and .data.status == 1 and .data.releaseOverride == true and .data.releaseOverrideReason == "ماده مصرفی در مسیر تأمین است" and (.data.shortageText|length) > 0 and .data.kitRequestId > 0 and (.data.kitNumber|startswith("MR")) and .data.kitIssued == false and ([.data.operations[].status]) == [0]'
 as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\"}"; nomsg "mes: starting without the complete kit needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\",\"reason\":\"شروع با تأیید سرپرست\"}"; check "mes: the supervisor lets C start without the issued kit (reason kept), the operation is ready" '.success and .data.kitOverrideReason == "شروع با تأیید سرپرست" and ([.data.operations[].status]) == [1]'
@@ -6931,12 +6947,14 @@ call POST Equipments '{"code":"SL-EQ-PUMP","title":"Process Pump (sales template
 SLEQ=$(val .data.id)
 call POST EquipmentAssemblies "{\"equipmentId\":$SLEQ,\"assemblerDuration\":1,\"code\":\"SL-ASM-1\",\"title\":\"مجموعه پمپ\"}"; check "sales: setup: assembly of the template" '.success and .data.id > 0'
 SLASM=$(val .data.id)
+legacy_open
 call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":1,\"title\":\"پروانه\",\"count\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":1}"; check "sales: setup: BOM line 1 (2 impellers per pump)" '.success and .data.id > 0'
 SLBOM1=$(val .data.id)
 call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":2,\"title\":\"مکانیکال سیل\",\"count\":4,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":2}"; check "sales: setup: BOM line 2 (4 seals per pump)" '.success and .data.id > 0'
 SLBOM2=$(val .data.id)
 call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.001.1\",\"enterCommodityCode\":\"77.30.00.001.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید پروانه\",\"equipmentBomId\":$SLBOM1}"; check "sales: setup: purchase process of BOM line 1 (exit code = impeller)" '.success and .data.id > 0'
 call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.002.1\",\"enterCommodityCode\":\"77.30.00.002.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید مکانیکال سیل\",\"equipmentBomId\":$SLBOM2}"; check "sales: setup: purchase process of BOM line 2 (exit code = seal)" '.success and .data.id > 0'
+legacy_close
 
 # --- inquiries: validation, then inquiry I1 (two pumps for customer A), received on a fixed day so that the Persian date is exact
 as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"\",\"quantity\":1}"; nomsg "sales: an inquiry needs a title" "عنوان استعلام"
@@ -11367,8 +11385,10 @@ PB4WO=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PB4WO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "pb4 chain: its project code is built" '.success'
 call POST Assemblies "{\"title\":\"Genealogy casing\",\"code\":\"PB4-ASM-1\",\"workOrderId\":$PB4WO,\"assemblerDuration\":1}"; PB4ASM=$(val .data.id)
 item PB4PART "{\"code\":\"77.10.00.040.1\",\"title\":\"قطعه آزمون شجره\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "pb4 chain: finished lot item"
+legacy_open
 call POST Boms "{\"positionNumber\":1,\"title\":\"قطعه آزمون شجره\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$PB4ASM}"; PB4BOM=$(val .data.id)
 call POST Processes "{\"exitCommodityCode\":\"77.10.00.040.1\",\"enterCommodityCode\":\"$C_RAW\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"ساخت قطعه آزمون شجره\",\"bomId\":$PB4BOM}"; check "pb4 chain: the make process consumes the raw material and makes the part" '.success and .data.id > 0'
+legacy_close
 call POST inventory/trace/templates "{\"itemId\":$PB4PART,\"sequence\":10,\"title\":\"تراشکاری شجره\"}"; PB4T=$(val .data.id)
 call POST $MF/operation-standards "{\"operationTemplateId\":$PB4T,\"workCenterId\":$MFWC1,\"setupHours\":0.5,\"runHoursPerUnit\":0.25}"; check "pb4 chain: the standard of the step" '.success'
 mfroute "$PB4PART" "pb4 part"
@@ -11380,8 +11400,9 @@ as "$QC_TOKEN" GET "quality/itps/by-work-order/$PB4WO"; check "pb4 chain: the wo
 PB4ITP=$(val .data.id)
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"submit\"}"; check "pb4 chain: QC submits the ITP to the client" '.success and .data.status == 1'
 as "$QA_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"client-approve\",\"reference\":\"CL-PB4-1\"}"; check "pb4 chain: the QA manager records the client approval of the ITP" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-PB4-1"'
+legacy_open
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$PB4ORD,\"components\":[{\"itemId\":$RAW,\"quantity\":2}]}"; check "pb4 chain: the components of the order are 2 of the raw material" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2'
-safety_set ProductBank EngChange.LegacyBomFrozen true; check "pka2 setup: the legacy BOM freeze is back on after the last older chain that builds a legacy BOM or edits a legacy-sourced component (two-person change)" '.success and .data.status == "Approved"'
+legacy_close
 pkb_nodraw_order "$PB4ORD"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PB4ORD}"; check "pb4 chain: the order is released with a kit (a draft material request)" '.success and .data.status == 1 and .data.kitRequestId > 0'
 PB4KIT=$(val .data.kitRequestId)
@@ -11945,7 +11966,7 @@ as "$QA_TOKEN" GET quality/settings; check "pkc safety: the alert days read 30 a
 
 # =====================================================================================================================================================================
 # --- PKA2 (Package A2: engineering change request and order, computed impact, dispositions, effectivity, gates on release and obsolete, single BOM master). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
-# Own users (ENGINEERING x2, QA x2) and own part numbers (76.21...); the BOM signers are the existing QC, construction and PMO users. The settings stay at their strict defaults.
+# Own users (ENGINEERING x2, QA x2) and own part numbers (77.10.05.080.1 to 77.10.05.083.1); the BOM signers are the existing QC, construction and PMO users. The settings stay at their strict defaults.
 ECP=eng-change
 user2 pka2.eng1.ci 4 'Ci#Pka2Eng1-User-2026' 09120005201 0012345721
 user2 pka2.eng2.ci 4 'Ci#Pka2Eng2-User-2026' 09120005202 0012345722
@@ -11969,11 +11990,14 @@ pka2_sign() { # pka2_sign BOMID LABEL : submit and the four signatures (always f
 as "$PKA2E1" POST $PB/boms "{\"assemblyPartNumber\":\"$PKA2PA\",\"title\":\"BOM A2 مجموعه الف\",\"lines\":$(pka2_lines 2)}"; check "pka2: BOM of the assembly A, revision 00, is saved as a draft" '.success and .data.revision == 0 and .data.status == 0'
 PKA2A0=$(val .data.id)
 pka2_sign "$PKA2A0" "BOM A revision 00"
-as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA2A0}"; check "pka2: the first revision is released without an engineering change order" '.success and .data.status == 3'
+# pka2_release_bom BOMID : the one place where the PKA2 block releases a BOM (as the PMO). After the merge with A1 (design control, DesignGate.BomReleaseProblemAsync needs a closed accepted design verification
+# for every BOM release) the setup of that gate (pka1_design / pka1_verify for the product and revision) is added HERE only; the calls and checks of the PKA2 block stay as they are.
+pka2_release_bom() { as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$1}"; }
+pka2_release_bom $PKA2A0; check "pka2: the first revision is released without an engineering change order" '.success and .data.status == 3'
 as "$PKA2E1" POST $PB/boms "{\"assemblyPartNumber\":\"$PKA2PB\",\"title\":\"BOM A2 مجموعه ب\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"$PKA2PA\",\"partName\":\"Assembly A\",\"qty\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":9,\"grossWeight\":10}]}"; check "pka2: BOM of the assembly B (uses A twice) is saved" '.success and .data.status == 0'
 PKA2B0=$(val .data.id)
 pka2_sign "$PKA2B0" "BOM B revision 00"
-as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA2B0}"; check "pka2: BOM B revision 00 is released" '.success and .data.status == 3'
+pka2_release_bom $PKA2B0; check "pka2: BOM B revision 00 is released" '.success and .data.status == 3'
 
 # --- the change request: raised by engineering, decided by an engineering manager who is not the originator
 as "$PKA2E1" POST $ECP/requests "{\"title\":\"افزایش تعداد غلاف\",\"reason\":\"کوتاه\",\"classification\":1,\"urgency\":2,\"targets\":[{\"kind\":2,\"partNumber\":\"$PKA2PA\"}]}"; nomsg "pka2: a request needs a real reason (at least ten characters)" "دلیل"
@@ -11994,7 +12018,7 @@ PKA2A1=$(val '.data.changes[0].targetId')
 as "$PKA2E1" POST $PB/boms "{\"id\":$PKA2A1,\"assemblyPartNumber\":\"$PKA2PA\",\"changeReason\":\"افزایش تعداد غلاف\",\"lines\":$(pka2_lines 3)}"; check "pka2: revision 01 is edited (the sleeve goes from 2 to 3)" '.success and .data.revision == 1 and .data.status == 0'
 # the gate: the revision is signed by four people but cannot be released while no APPROVED order names it
 pka2_sign "$PKA2A1" "BOM A revision 01"
-as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA2A1}"; nomsg "pka2: gate - revision 01 of a released BOM is not released without an approved engineering change order" "دستور تغییر مهندسی تاییدشده"
+pka2_release_bom $PKA2A1; nomsg "pka2: gate - revision 01 of a released BOM is not released without an approved engineering change order" "دستور تغییر مهندسی تاییدشده"
 as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check says an order is required and there is none" '.success and .data.required == true and .data.ok == false'
 
 # --- the computed impact: never typed, one list per category, a fingerprint
@@ -12023,7 +12047,7 @@ ibx "$CEO_TOKEN" "ec:eco:info:$PKA2O"; check "pka2: the CEO is told" '.success a
 
 # --- the gate opens only for the approved order; the revision is released
 as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check now finds the approved order" '.success and .data.ok == true and .data.orderNumber != null'
-as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA2A1}"; check "pka2: revision 01 is released because an approved order names it" '.success and .data.status == 3'
+pka2_release_bom $PKA2A1; check "pka2: revision 01 is released because an approved order names it" '.success and .data.status == 3'
 
 # --- tasks and closing: done by the owner, verified by QA (not the doer), closed only when all are verified
 as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"close\"}"; nomsg "pka2: the order does not close while a task is open" "تکلیف"

@@ -126,6 +126,9 @@ namespace Entities.Model.NasbNiro.Production
         public MfRoutingStatus Status { get; set; }
         public string Note { get; set; }
 
+        /// <summary>Package A2: the OPC chart revision this routing revision was written from (set by the OPC publication only, never by a user). Such a revision is covered by the engineering change gate of the chart itself.</summary>
+        public int? SourceOpcRoutingId { get; set; }
+
         /// <summary>Hash of the steps and their standards at the last approval step.</summary>
         public string ContentHash { get; set; }
 

@@ -249,6 +249,9 @@ namespace MsTests
             Assert.IsFalse(wrong.Success);
             var again = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "refresh-impact" }, Ct));
             Assert.AreEqual(imp.Data.Impact.Items.Count, again.Data.Impact.Items.Count);
+            Assert.AreEqual(imp.Data.Impact.Sha256, again.Data.Impact.Sha256, "the fingerprint depends on the data only (not on the time of the computation)");
+            var third = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "refresh-impact" }, Ct));
+            Assert.AreEqual(imp.Data.Impact.Sha256, third.Data.Impact.Sha256);
         }
 
         [TestMethod]
@@ -294,6 +297,15 @@ namespace MsTests
             var eco = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().SaveOrderAsync(new SaveEcOrderDto { RequestId = ecr.Data.Id, EffectiveFromOrderNumber = "PO-MF-000500" }, Ct));
             int id = eco.Data.Id;
             await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().AddChangeAsync(new EcOrderChangeSaveDto { OrderId = id, Kind = EcChangeKind.Bom, TargetId = a1.Id }, Ct));
+            // a project whose baseline stands on the old revision: its project manager (project control terms) is told as well
+            host.Write(u =>
+            {
+                var wo = AppHost.Add(u, new Entities.Model.NasbNiro.Contracts.WorkOrder { Code = "W-A2-NOTIFY", Title = "wo", ContractId = 5 });
+                u.SaveChanges();
+                AppHost.Add(u, new PbProjectBaseline { WorkOrderId = wo.Id, ProductId = 1, BomHeaderId = a0.Id, SourceBomCode = a0.Code, SourceBomRevision = 0, IsCurrent = true, Count = 1, CopiedAt = DateTimeOffset.Now });
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProjectControl.PcContractTerms { ContractId = 5, ProjectManagerUserId = 74 });
+                u.SaveChanges();
+            });
             var imp = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "refresh-impact" }, Ct));
             foreach (var d in imp.Data.Dispositions)
                 Assert.IsTrue((await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().SaveDispositionAsync(new EcDispositionSaveDto
@@ -304,6 +316,7 @@ namespace MsTests
             var fin = await Run(host, Qa, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "approve-qa" }, Ct));
             Assert.IsTrue(fin.Success, fin.Message);
             Assert.IsTrue(host.Read(u => u.Set<OfInboxItem>().Count(i => i.SourceKey == $"ec:eco:info:{id}" && (i.RecipientRole == "PMO" || i.RecipientRole == "CEO"))) == 2, "PMO and CEO are told, they do not approve");
+            Assert.IsTrue(host.Read(u => u.Set<OfInboxItem>().Any(i => i.SourceKey == $"ec:eco:info:{id}" && i.RecipientUserId == 74)), "the project manager of the affected project is told");
             Assert.IsTrue(fin.Data.Tasks.Count >= 1 && fin.Data.Tasks.All(t => t.OwnerUserId == 66));
 
             var close = await Run(host, EngMgr2, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "close" }, Ct));
@@ -375,6 +388,12 @@ namespace MsTests
             SafetyTestSupport.SetProductBank(host, PbSettingKeys.LegacyBomFrozen, "false");
             var open = await Run(host, Appr, p => p.GetRequiredService<Services.NasbNiro.Contracts.IBomService>().AddBomAsync(new ViewModels.NasbNiro.BomDtos.AddBomDto { AssemblyId = 1 }, Ct).AsTask());
             Assert.IsFalse(open.Message?.Contains("بانک محصول") == true, "no longer the freeze message");
+            // the delete paths are frozen too (before the switch is turned off)
+            SafetyTestSupport.SetProductBank(host, PbSettingKeys.LegacyBomFrozen, "true");
+            var del = await Run(host, Appr, p => p.GetRequiredService<Services.NasbNiro.Contracts.IBomService>().DeleteBomAsync(1, Ct).AsTask());
+            Assert.IsFalse(del.Success); StringAssert.Contains(del.Message, "بانک محصول");
+            var delMany = await Run(host, Appr, p => p.GetRequiredService<Services.NasbNiro.Contracts.IBomService>().DeleteBomCollectionAsync(new List<int> { 1 }, Ct).AsTask());
+            Assert.IsFalse(delMany.Success); StringAssert.Contains(delMany.Message, "بانک محصول");
             Assert.IsTrue(Services.NasbNiro.Integrity.SafetyProfile.Refusal(Entities.Model.NasbNiro.Integrity.SafetyStore.ProductBank, PbSettingKeys.LegacyBomFrozen) != null, "a safety-profile setting: two-person change");
             Assert.IsTrue(Services.NasbNiro.Integrity.SafetyProfile.Refusal(Entities.Model.NasbNiro.Integrity.SafetyStore.ProductBank, PbSettingKeys.DistinctReviewers) != null, "the four BOM signatures setting stays registered");
         }
@@ -410,6 +429,218 @@ namespace MsTests
             var changed = host.Read(u => MfBaselineDrafting.ChangeProblemAsync(u, order, output, new List<(int, decimal)> { (other.Id, 1m) }, DateTime.Today, Ct).GetAwaiter().GetResult());
             Assert.IsNotNull(changed, "a planner cannot replace the components");
             StringAssert.Contains(changed, "انحراف");
+        }
+
+        // ------------------------------------------------------------------------------------------ fix round 1
+
+        [TestMethod]
+        public async Task Guard_IsOpenedOnlyForTheListedOrder_AndOnlyToTheExactComponentsOfTheNamedRevision()
+        {
+            AppHost host = NewHost("guardx");
+            InventoryItem output = null, c1 = null, c2 = null, c3 = null;
+            host.Write(u =>
+            {
+                output = AppHost.Add(u, new InventoryItem { Code = PartA, Title = "A", Unit = "عدد", PartNumber = PartA, IsActive = true });
+                c1 = AppHost.Add(u, new InventoryItem { Code = Comp1, Title = "C1", Unit = "عدد", PartNumber = Comp1, IsActive = true });
+                c2 = AppHost.Add(u, new InventoryItem { Code = Comp2, Title = "C2", Unit = "عدد", PartNumber = Comp2, IsActive = true });
+                c3 = AppHost.Add(u, new InventoryItem { Code = "99.11.01.003.2", Title = "C3", Unit = "عدد", PartNumber = "99.11.01.003.2", IsActive = true });
+                u.SaveChanges();
+            });
+            PbBomDto r0 = await ReleaseFirstAsync(host, PartA, Line(1, Comp1, 1));
+            PbBomDto r1 = await DraftRevisionAsync(host, r0.Id);
+            var edit = await Run(host, Prep, p => p.GetRequiredService<IPbBomService>().SaveAsync(new SavePbBomDto { Id = r1.Id, AssemblyPartNumber = PartA, ChangeReason = "تغییر آزمون", Title = "BOM", Lines = new List<SavePbBomLineDto> { Line(1, Comp2, 4) } }, Ct));
+            Assert.IsTrue(edit.Success, edit.Message);
+            await SignAndReleaseAsync(host, r1.Id, false);
+            EcOrderDto eco = await ApprovedEcoAsync(host, r1.Id);
+            host.Write(u =>
+            {
+                var b = AppHost.Add(u, new PbProjectBaseline { WorkOrderId = 810, ProductId = 1, BomHeaderId = r0.Id, SourceBomCode = "BOM-A", SourceBomRevision = 0, IsCurrent = true, Count = 1, CopiedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, AssemblyPartNumber = PartA, PartNumber = Comp1, ItemId = c1.Id, PartName = "c", Qty = 1, TotalQty = 1, Unit = "عدد" });
+                u.SaveChanges();
+            });
+            var order = new MfProductionOrder { Id = 91, Number = "PO-MF-91", WorkOrderId = 810, ProcessId = 5, AutoDrafted = true, Quantity = 2, ComponentSource = MfBaselineDrafting.SourceBaseline };
+            string Problem(MfProductionOrder o, params (int, decimal)[] want) =>
+                host.Read(u => MfBaselineDrafting.ChangeProblemAsync(u, o, output, want.ToList(), DateTime.Today, Ct).GetAwaiter().GetResult());
+            Assert.IsNotNull(Problem(order, (c2.Id, 8m)), "an approved order exists, but it does not list this production order: still refused");
+            host.Write(u =>
+            {
+                AppHost.Add(u, new EcDispositionItem { OrderId = eco.Id, Category = EcImpactCategory.Order, ImpactKey = EcRules.Key("ORDER", 91), Text = "x", Disposition = EcDisposition.ChangeToNewRevision, Note = "به بازنگری جدید" });
+                u.SaveChanges();
+            });
+            Assert.IsNull(Problem(order, (c2.Id, 8m)), "listed with «change to the new revision»: exactly the components of the named revision (4 x 2 units)");
+            Assert.IsNotNull(Problem(order, (c3.Id, 8m)), "another item is refused");
+            Assert.IsNotNull(Problem(order, (c2.Id, 7m)), "another quantity is refused");
+            Assert.IsNotNull(Problem(order, (c2.Id, 8m), (c3.Id, 1m)), "an extra item is refused");
+            Assert.IsNotNull(Problem(new MfProductionOrder { Id = 92, Number = "PO-MF-92", WorkOrderId = 810, ProcessId = 5, AutoDrafted = true, Quantity = 2, ComponentSource = MfBaselineDrafting.SourceBaseline }, (c2.Id, 8m)), "another order is not unlocked by this one");
+        }
+
+        [TestMethod]
+        public async Task AnEcoWithoutAnEffectivityPoint_CannotBeSent()
+        {
+            AppHost host = NewHost("noeff");
+            PbBomDto r0 = await ReleaseFirstAsync(host, PartA, Line(1, Comp1, 1));
+            PbBomDto r1 = await DraftRevisionAsync(host, r0.Id);
+            var ecr = await Run(host, Raiser, p => p.GetRequiredService<IEngChangeService>().SaveRequestAsync(new SaveEcRequestDto
+            {
+                Title = "t", Reason = "دلیل تغییر برای آزمون خودکار", Targets = new List<EcTargetDto> { new EcTargetDto { Kind = EcTargetKind.Part, PartNumber = PartA } },
+            }, Ct));
+            await Run(host, Raiser, p => p.GetRequiredService<IEngChangeService>().RequestActionAsync(new EcRequestActionDto { Id = ecr.Data.Id, Action = "submit" }, Ct));
+            Assert.IsTrue((await Run(host, EngMgr, p => p.GetRequiredService<IEngChangeService>().RequestActionAsync(new EcRequestActionDto { Id = ecr.Data.Id, Action = "approve" }, Ct))).Success);
+            var eco = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().SaveOrderAsync(new SaveEcOrderDto { RequestId = ecr.Data.Id }, Ct));
+            int id = eco.Data.Id;
+            Assert.IsTrue((await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().AddChangeAsync(new EcOrderChangeSaveDto { OrderId = id, Kind = EcChangeKind.Bom, TargetId = r1.Id }, Ct))).Success);
+            var imp = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "refresh-impact" }, Ct));
+            foreach (EcDispositionDto d in imp.Data.Dispositions.Where(d => !d.Stale))
+                Assert.IsTrue((await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().SaveDispositionAsync(new EcDispositionSaveDto { OrderId = id, ImpactKey = d.ImpactKey, Disposition = EcDisposition.UseAsIs, Note = "بدون اثر بر کارکرد", OwnerUserId = 66, DueDate = DateTime.Today.AddDays(3) }, Ct))).Success);
+            var sub = await Run(host, Maker, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = id, Action = "submit" }, Ct));
+            Assert.IsFalse(sub.Success);
+            StringAssert.Contains(sub.Message, "نقطه اثر");
+        }
+
+        [TestMethod]
+        public async Task ApprovedEco_CanBeVoided_AndThenNoLongerOpensTheGate()
+        {
+            AppHost host = NewHost("void");
+            PbBomDto r0 = await ReleaseFirstAsync(host, PartA, Line(1, Comp1, 1));
+            PbBomDto r1 = await DraftRevisionAsync(host, r0.Id);
+            await SignAndReleaseAsync(host, r1.Id, false);
+            EcOrderDto eco = await ApprovedEcoAsync(host, r1.Id);
+            var byRaiser = await Run(host, Raiser, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = eco.Id, Action = "void", Note = "x" }, Ct));
+            Assert.IsFalse(byRaiser.Success, "only ENGINEERING or QA");
+            var noReason = await Run(host, EngMgr, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = eco.Id, Action = "void" }, Ct));
+            Assert.IsFalse(noReason.Success, "a reason is needed");
+            var voided = await Run(host, EngMgr, p => p.GetRequiredService<IEngChangeService>().OrderActionAsync(new EcOrderActionDto { Id = eco.Id, Action = "void", Note = "تایید اشتباه بود" }, Ct));
+            Assert.IsTrue(voided.Success, voided.Message);
+            Assert.AreEqual(EcoStatus.Cancelled, voided.Data.Status);
+            var gate = await Run(host, EngMgr, p => p.GetRequiredService<IEngChangeService>().CheckAsync(EcChangeKind.Bom, r1.Id, EcChangeAction.NewRevision, Ct));
+            Assert.IsFalse(gate.Data.Ok, "a voided order opens nothing");
+        }
+
+        [TestMethod]
+        public async Task Deviation_LinesWithoutAnAssemblyPartNumber_StillReachTheDraftedOrders()
+        {
+            AppHost host = NewHost("deviation");
+            PbBomDto top = await ReleaseFirstAsync(host, PartA, Line(1, PartB, 1));
+            InventoryItem outA = null, outB = null, c1 = null, c2 = null;
+            host.Write(u =>
+            {
+                outA = AppHost.Add(u, new InventoryItem { Code = PartA, Title = "A", Unit = "عدد", PartNumber = PartA, IsActive = true });
+                outB = AppHost.Add(u, new InventoryItem { Code = PartB, Title = "B", Unit = "عدد", PartNumber = PartB, IsActive = true });
+                c1 = AppHost.Add(u, new InventoryItem { Code = Comp1, Title = "C1", Unit = "عدد", PartNumber = Comp1, IsActive = true });
+                c2 = AppHost.Add(u, new InventoryItem { Code = Comp2, Title = "C2", Unit = "عدد", PartNumber = Comp2, IsActive = true });
+                u.SaveChanges();
+                var b = AppHost.Add(u, new PbProjectBaseline { WorkOrderId = 820, ProductId = 1, BomHeaderId = top.Id, SourceBomCode = "BOM-A", SourceBomRevision = 0, IsCurrent = true, Count = 1, CopiedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                var sub = AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, AssemblyPartNumber = PartA, PartNumber = PartB, ItemId = outB.Id, PartName = "b", Qty = 1, TotalQty = 1, Unit = "عدد" });
+                u.SaveChanges();
+                // lines a deviation added: no AssemblyPartNumber (older rows), one under the sub-assembly occurrence, one directly under the top
+                AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, ParentLineId = sub.Id, AssemblyPartNumber = null, PartNumber = Comp2, ItemId = c2.Id, PartName = "c2", Qty = 2, TotalQty = 2, Unit = "عدد" });
+                AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, AssemblyPartNumber = null, PartNumber = Comp1, ItemId = c1.Id, PartName = "c1", Qty = 3, TotalQty = 3, Unit = "عدد" });
+                u.SaveChanges();
+            });
+            var forB = host.Read(u => MfBaselineDrafting.ExpectedAsync(u, 820, null, outB, 5, Ct).GetAwaiter().GetResult());
+            Assert.IsTrue(forB.Lines.Any(l => l.ItemId == c2.Id && l.Quantity == 10m), "the line added under the sub-assembly belongs to it (2 x 5)");
+            Assert.IsFalse(forB.Lines.Any(l => l.ItemId == c1.Id), "the top-level line does not leak into the sub-assembly");
+            var forA = host.Read(u => MfBaselineDrafting.ExpectedAsync(u, 820, null, outA, 2, Ct).GetAwaiter().GetResult());
+            Assert.IsTrue(forA.Lines.Any(l => l.ItemId == c1.Id && l.Quantity == 6m), "the line added under the top assembly belongs to it (3 x 2)");
+            Assert.IsFalse(forA.Lines.Any(l => l.ItemId == c2.Id), "the sub-assembly's line is not consumed twice by the top assembly");
+        }
+
+        [TestMethod]
+        public void OpcAndRoutingRevisions_AreRefusedWithoutAnApprovedEco_FirstOnesAreNot_AndANoteIsNotAnExemption()
+        {
+            AppHost host = NewHost("opcgate");
+            InventoryItem item = null;
+            host.Write(u =>
+            {
+                item = AppHost.Add(u, new InventoryItem { Code = PartA, Title = "A", Unit = "عدد", PartNumber = PartA, IsActive = true });
+                AppHost.Add(u, new PbOpcRouting { PartNumber = PartA, Title = "OPC", Revision = 0, Status = PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                AppHost.Add(u, new PbOpcRouting { PartNumber = PartA, Title = "OPC", Revision = 1, Status = PbRoutingStatus.Draft, PreparedByUserId = 1 });
+                AppHost.Add(u, new MfRoutingRevision { ItemId = item.Id, Revision = 1, Status = MfRoutingStatus.Approved });
+                // the note a user can type does not exempt a revision any more
+                AppHost.Add(u, new MfRoutingRevision { ItemId = item.Id, Revision = 2, Status = MfRoutingStatus.Draft, Note = "از چارت OPC 16.13.02.000.2" });
+                u.SaveChanges();
+            });
+            var opcs = host.Read(u => u.Set<PbOpcRouting>().OrderBy(x => x.Revision).ToList());
+            string first = host.Read(u => EcGate.OpcApproveProblemAsync(u, opcs[0], Ct).GetAwaiter().GetResult());
+            Assert.IsNull(first, "the first approved chart needs no order");
+            string second = host.Read(u => EcGate.OpcApproveProblemAsync(u, opcs[1], Ct).GetAwaiter().GetResult());
+            Assert.IsNotNull(second, "the second revision of an approved chart needs an order");
+            StringAssert.Contains(second, "دستور تغییر مهندسی");
+            var routings = host.Read(u => u.Set<MfRoutingRevision>().OrderBy(x => x.Revision).ToList());
+            Assert.IsNull(host.Read(u => EcGate.RoutingRevisionProblemAsync(u, routings[0], Ct).GetAwaiter().GetResult()), "the first approved routing of the item is exempt by fact");
+            string r2 = host.Read(u => EcGate.RoutingRevisionProblemAsync(u, routings[1], Ct).GetAwaiter().GetResult());
+            Assert.IsNotNull(r2, "revision 2 with a typed note is still refused");
+            // an approved order that names the revision opens the gate
+            host.Write(u =>
+            {
+                var req = AppHost.Add(u, new EcRequest { Number = "ECR-T-OPC", Title = "t", Reason = "test change", Status = EcrStatus.Approved, RequestedByUserId = 1 });
+                u.SaveChanges();
+                var eco = AppHost.Add(u, new EcOrder { Number = "ECO-T-OPC", RequestId = req.Id, Title = "t", Status = EcoStatus.Approved, EffectiveFromDate = DateTime.Today });
+                u.SaveChanges();
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Opc, Action = EcChangeAction.NewRevision, TargetId = opcs[1].Id });
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Routing, Action = EcChangeAction.NewRevision, TargetId = routings[1].Id });
+                u.SaveChanges();
+            });
+            Assert.IsNull(host.Read(u => EcGate.OpcApproveProblemAsync(u, opcs[1], Ct).GetAwaiter().GetResult()));
+            Assert.IsNull(host.Read(u => EcGate.RoutingRevisionProblemAsync(u, routings[1], Ct).GetAwaiter().GetResult()));
+        }
+
+        [TestMethod]
+        public void PlannedSerials_CannotBeRewrittenAcrossTheEffectivityPoint()
+        {
+            AppHost host = NewHost("serials");
+            InventoryItem item = null;
+            host.Write(u =>
+            {
+                item = AppHost.Add(u, new InventoryItem { Code = PartA, Title = "A", Unit = "عدد", PartNumber = PartA, IsActive = true });
+                var eco = AppHost.Add(u, new EcOrder { Number = "EC-ECO-S1", RequestId = 1, Status = EcoStatus.Approved, AffectedParts = "," + PartA + ",", EffectiveFromSerial = "SN-0100", Title = "t" });
+                u.SaveChanges();
+                AppHost.Add(u, new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Bom, Action = EcChangeAction.NewRevision, TargetId = 5, Code = "BOM-A", NewRevision = 1 });
+                u.SaveChanges();
+            });
+            var order = new MfProductionOrder { Id = 50, Number = "PO-MF-50", WorkOrderId = 777, SerialsPlanned = "SN-0010\nSN-0011" };
+            string P(string planned) => host.Read(u => EcGate.SerialsChangeProblemAsync(u, order, item, planned, DateTime.Today, Ct).GetAwaiter().GetResult());
+            Assert.IsNull(P("SN-0011\nSN-0010"), "the same serials");
+            Assert.IsNull(P("SN-0010\nSN-0012"), "still before the point");
+            Assert.IsNotNull(P("SN-0100\nSN-0101"), "moved across the point without the order");
+            Assert.IsNotNull(P("SN-0099\nSN-0100"), "straddles the point");
+        }
+
+        [TestMethod]
+        public async Task Drafting_PlansFromTheBaseline_StageItemsDoNotConsumeTwice_AndTheUnitIsConverted()
+        {
+            AppHost host = NewHost("plan");
+            PbBomDto top = await ReleaseFirstAsync(host, PartA, Line(1, PartB, 1));
+            InventoryItem outA = null, plainB = null, stageB = null, c1 = null;
+            host.Write(u =>
+            {
+                outA = AppHost.Add(u, new InventoryItem { Code = PartA, Title = "A", Unit = "عدد", PartNumber = PartA, IsActive = true });
+                plainB = AppHost.Add(u, new InventoryItem { Code = PartB, Title = "B", Unit = "عدد", PartNumber = PartB, IsActive = true });
+                stageB = AppHost.Add(u, new InventoryItem { Code = PartB + "-S1", Title = "B stage", Unit = "عدد", PartNumber = PartB, StageCode2 = "S1", IsActive = true });
+                c1 = AppHost.Add(u, new InventoryItem { Code = Comp1, Title = "C1", Unit = "g", PartNumber = Comp1, IsActive = true });
+                u.SaveChanges();
+                AppHost.Add(u, new ItemUnitConversion { ItemId = null, FromUnit = "kg", ToUnit = "g", Factor = 1000m, IsActive = true });
+                var b = AppHost.Add(u, new PbProjectBaseline { WorkOrderId = 830, ProductId = 1, BomHeaderId = top.Id, SourceBomCode = top.Code, SourceBomRevision = 0, IsCurrent = true, Count = 3, CopiedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                var sub = AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, AssemblyPartNumber = PartA, PartNumber = PartB, ItemId = plainB.Id, PartName = "b", Qty = 1, TotalQty = 3, Unit = "عدد", MakeOrBuy = PbMakeOrBuy.Make });
+                u.SaveChanges();
+                AppHost.Add(u, new PbProjectBomLine { BaselineId = b.Id, ParentLineId = sub.Id, AssemblyPartNumber = PartB, PartNumber = Comp1, ItemId = c1.Id, PartName = "c", Qty = 2, TotalQty = 6, Unit = "kg", MakeOrBuy = PbMakeOrBuy.Purchase });
+                u.SaveChanges();
+            });
+            var (targets, notes) = host.Read(u => MfBaselineDrafting.PlanAsync(u, 830, Ct).GetAwaiter().GetResult());
+            Assert.IsNotNull(targets, "a baseline exists: drafting is from the baseline (no legacy Process or Bom is needed)");
+            Assert.AreEqual(2, targets.Count, string.Join("|", notes));
+            Assert.AreEqual(3m, targets.Single(t => t.PartNumber == PartA).Quantity, "the top assembly: the number of products");
+            Assert.AreEqual(3m, targets.Single(t => t.PartNumber == PartB).Quantity, "the make part: total of the work order");
+            Assert.IsNull(host.Read(u => MfBaselineDrafting.PlanAsync(u, 831, Ct).GetAwaiter().GetResult()).Targets, "no baseline: the flagged legacy path decides");
+
+            var forPlain = host.Read(u => MfBaselineDrafting.ExpectedAsync(u, 830, null, plainB, 3, Ct).GetAwaiter().GetResult());
+            Assert.AreEqual(MfBaselineDrafting.SourceBaseline, forPlain.Source);
+            Assert.AreEqual(6000m, forPlain.Lines.Single(l => l.ItemId == c1.Id).Quantity, "6 kg become 6000 g of the item");
+            var forStage = host.Read(u => MfBaselineDrafting.ExpectedAsync(u, 830, null, stageB, 3, Ct).GetAwaiter().GetResult());
+            Assert.IsFalse(forStage.Lines.Any(l => l.ItemId == c1.Id), "the stage item of the same part does not consume the components again");
         }
     }
 }

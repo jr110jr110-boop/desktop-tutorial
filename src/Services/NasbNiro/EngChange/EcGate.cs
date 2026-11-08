@@ -36,6 +36,17 @@ namespace Services.NasbNiro.EngChange
     {
         public static bool IsFinal(EcoStatus s) => s == EcoStatus.Approved || s == EcoStatus.Closed;
 
+        /// <summary>The Persian refusal when an order that is in approval or approved names this revision (a named draft revision is frozen with the approval; cancel / void the order to edit it), else null.</summary>
+        public static async Task<string> FrozenByOrderAsync(IUnitOfWork uow, EcChangeKind kind, int targetId, CancellationToken ct)
+        {
+            string number = await (from c in uow.Set<EcOrderChange>().AsNoTracking()
+                                   join o in uow.Set<EcOrder>().AsNoTracking() on c.OrderId equals o.Id
+                                   where !o.Deleted && (o.Status == EcoStatus.InApproval || o.Status == EcoStatus.Approved) && c.Kind == kind && c.TargetId == targetId && c.Action == EcChangeAction.NewRevision
+                                   orderby o.Id descending
+                                   select o.Number).FirstOrDefaultAsync(ct);
+            return number == null ? null : $"این بازنگری در دستور تغییر مهندسی {number} نام برده شده و با تایید یا ارسال آن قفل است؛ برای ویرایش، دستور را برگردانید یا باطل کنید.";
+        }
+
         /// <summary>The approved (or closed) order that names this revision with this action, or null.</summary>
         public static async Task<EcOrder> ApprovedOrderForAsync(IUnitOfWork uow, EcChangeKind kind, int targetId, EcChangeAction action, CancellationToken ct)
         {
@@ -87,31 +98,78 @@ namespace Services.NasbNiro.EngChange
             return await ApprovedOrderForAsync(uow, EcChangeKind.Opc, r.Id, EcChangeAction.NewRevision, ct) != null ? null : Needed($"تایید چارت OPC {r.PartNumber} بازنگری {r.Revision:00}", "");
         }
 
-        public const string OpcNoteTag = "از چارت OPC";
-
-        /// <summary>A MES routing revision of a part that already has an approved one. A revision published from an OPC chart is covered by the gate of the chart itself.</summary>
+        /// <summary>
+        /// A MES routing revision of an item (or item group) that already has an approved one. The exemption is a structural fact, never a note: the first approved routing of the item / group needs no order, and a
+        /// revision the server wrote from an approved OPC chart (SourceOpcRoutingId, set only by the OPC publication) is covered by the gate of the chart itself.
+        /// </summary>
         public static async Task<string> RoutingRevisionProblemAsync(IUnitOfWork uow, MfRoutingRevision r, CancellationToken ct)
         {
-            if (!r.ItemId.HasValue || (r.Note ?? "").StartsWith(OpcNoteTag, StringComparison.Ordinal)) return null;
-            string pn = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == r.ItemId.Value).Select(i => i.PartNumber).FirstOrDefaultAsync(ct);
-            if (string.IsNullOrWhiteSpace(pn)) return null;
-            bool earlier = await uow.Set<MfRoutingRevision>().AsNoTracking().AnyAsync(x => !x.Deleted && x.ItemId == r.ItemId && x.Id != r.Id && x.Revision < r.Revision && x.Status == MfRoutingStatus.Approved, ct);
-            if (!earlier) return null;
-            return await ApprovedOrderForAsync(uow, EcChangeKind.Routing, r.Id, EcChangeAction.NewRevision, ct) != null ? null : Needed($"تایید مسیر ساخت کالای {pn} بازنگری {r.Revision}", "");
+            if (!r.ItemId.HasValue && !r.ItemGroupId.HasValue) return null;
+            if (r.SourceOpcRoutingId.HasValue && await uow.Set<PbOpcRouting>().AsNoTracking().AnyAsync(o => o.Id == r.SourceOpcRoutingId.Value && !o.Deleted && (o.Status == PbRoutingStatus.Approved || o.Status == PbRoutingStatus.Superseded), ct)) return null;
+            IQueryable<MfRoutingRevision> same = uow.Set<MfRoutingRevision>().AsNoTracking().Where(x => !x.Deleted && x.Id != r.Id && x.Revision < r.Revision && x.Status == MfRoutingStatus.Approved);
+            same = r.ItemId.HasValue ? same.Where(x => x.ItemId == r.ItemId) : same.Where(x => x.ItemGroupId == r.ItemGroupId && x.ItemId == null);
+            if (!await same.AnyAsync(ct)) return null;
+            string what;
+            if (r.ItemId.HasValue)
+            {
+                string pn = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == r.ItemId.Value).Select(i => i.Code).FirstOrDefaultAsync(ct);
+                what = $"تایید مسیر ساخت کالای {pn} بازنگری {r.Revision}";
+            }
+            else
+            {
+                string group = await uow.Set<ItemGroup>().AsNoTracking().Where(g => g.Id == r.ItemGroupId.Value).Select(g => g.Title).FirstOrDefaultAsync(ct);
+                what = $"تایید مسیر ساخت گروه کالای {group} بازنگری {r.Revision}";
+            }
+            return await ApprovedOrderForAsync(uow, EcChangeKind.Routing, r.Id, EcChangeAction.NewRevision, ct) != null ? null : Needed(what, "");
         }
 
         // ------------------------------------------------------------------------------------------ drawings
 
-        /// <summary>A drawing (a document linked to a part) that already has a released revision.</summary>
+        private static readonly PcDocStatus[] EverReleased = { PcDocStatus.Released, PcDocStatus.AsBuilt, PcDocStatus.Superseded, PcDocStatus.Obsolete };
+
+        /// <summary>The parts a drawing is (or ever was) linked to; the link history counts, so unlinking and relinking does not reset the gate.</summary>
+        public static async Task<(List<string> Parts, List<int> ItemIds)> DrawingPartsAsync(IUnitOfWork uow, int deliverableId, bool history, CancellationToken ct)
+        {
+            var q = uow.Set<PcDocumentLink>().AsNoTracking().Where(l => l.DeliverableId == deliverableId && (l.Kind == PcDocLinkKind.Item || l.Kind == PcDocLinkKind.BomLine || l.Kind == PcDocLinkKind.PartNumber));
+            if (!history) q = q.Where(l => !l.Deleted && l.UnlinkReason == null);
+            var rows = await q.Select(l => new { l.PartNumber, l.ItemId }).ToListAsync(ct);
+            List<int> itemIds = rows.Where(r => r.ItemId.HasValue).Select(r => r.ItemId.Value).Distinct().ToList();
+            List<string> parts = rows.Where(r => !string.IsNullOrWhiteSpace(r.PartNumber)).Select(r => r.PartNumber.Trim()).ToList();
+            if (itemIds.Count > 0) parts.AddRange(await uow.Set<InventoryItem>().AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.PartNumber != null).Select(i => i.PartNumber).ToListAsync(ct));
+            return (parts.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), itemIds);
+        }
+
+        /// <summary>The latest earlier revision, of ANY status that was ever in force (released, as-built, superseded, obsolete), of this drawing or of any other document ever linked to the same parts; null = this is the first.</summary>
+        public static async Task<PcDocumentRevision> EarlierDrawingRevisionAsync(IUnitOfWork uow, PcEngineeringDeliverable d, PcDocumentRevision r, CancellationToken ct)
+        {
+            var (parts, itemIds) = await DrawingPartsAsync(uow, d.Id, true, ct);
+            if (parts.Count == 0 && itemIds.Count == 0) return null;
+            List<int> sameParts = await uow.Set<PcDocumentLink>().AsNoTracking()
+                .Where(l => l.DeliverableId != null && (l.Kind == PcDocLinkKind.Item || l.Kind == PcDocLinkKind.BomLine || l.Kind == PcDocLinkKind.PartNumber)
+                    && ((l.ItemId != null && itemIds.Contains(l.ItemId.Value)) || (l.PartNumber != null && parts.Contains(l.PartNumber)))).Select(l => l.DeliverableId.Value).Distinct().ToListAsync(ct);
+            sameParts.Add(d.Id);
+            return await uow.Set<PcDocumentRevision>().AsNoTracking()
+                .Where(x => !x.Deleted && sameParts.Contains(x.DeliverableId) && x.Id != r.Id && EverReleased.Contains(x.Status) && (x.DeliverableId != d.Id || x.Sequence < r.Sequence))
+                .OrderByDescending(x => x.DeliverableId == d.Id).ThenByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+        }
+
+        /// <summary>A drawing (a document linked, now or ever, to a part) that already has a revision that was ever in force: the new revision needs an approved order that names it. A revision received from the client is judged the same way.</summary>
         public static async Task<string> DrawingReleaseProblemAsync(IUnitOfWork uow, PcEngineeringDeliverable d, PcDocumentRevision r, CancellationToken ct)
         {
-            bool earlier = await uow.Set<PcDocumentRevision>().AsNoTracking().AnyAsync(x => !x.Deleted && x.DeliverableId == d.Id && x.Id != r.Id && x.Sequence < r.Sequence
-                && (x.Status == PcDocStatus.Released || x.Status == PcDocStatus.AsBuilt || x.Status == PcDocStatus.Superseded), ct);
-            if (!earlier) return null;
-            bool ofPart = await uow.Set<PcDocumentLink>().AsNoTracking().AnyAsync(l => !l.Deleted && l.UnlinkReason == null && l.DeliverableId == d.Id
-                && (l.Kind == PcDocLinkKind.Item || l.Kind == PcDocLinkKind.BomLine || l.Kind == PcDocLinkKind.PartNumber), ct);
-            if (!ofPart) return null;
+            if (await EarlierDrawingRevisionAsync(uow, d, r, ct) == null) return null;
             return await ApprovedOrderForAsync(uow, EcChangeKind.Drawing, r.Id, EcChangeAction.NewRevision, ct) != null ? null : Needed($"انتشار نقشه {d.DocumentNumber} بازنگری {r.Code}", "");
+        }
+
+        /// <summary>
+        /// A new version of the characteristic list of a drawing revision that is already in force is released at its approval: that needs an approved order that names the list. The first version of a revision needs none.
+        /// </summary>
+        public static async Task<string> CharListVersionProblemAsync(IUnitOfWork uow, int listId, int revisionId, int version, CancellationToken ct)
+        {
+            if (version <= 1) return null;
+            var q = await uow.Set<Entities.Model.NasbNiro.Quality.QcCharacteristicList>().AsNoTracking().Where(x => !x.Deleted && x.RevisionId == revisionId && x.Id != listId && x.Version < version
+                && (x.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Released || x.Status == Entities.Model.NasbNiro.Quality.CharListStatus.Superseded)).AnyAsync(ct);
+            if (!q) return null;
+            return await ApprovedOrderForAsync(uow, EcChangeKind.CharList, listId, EcChangeAction.NewRevision, ct) != null ? null : Needed($"تایید نسخه {version} فهرست مشخصه‌های نقشه‌ای که منتشر شده", "");
         }
 
         // ------------------------------------------------------------------------------------------ effectivity of a production order
@@ -119,7 +177,7 @@ namespace Services.NasbNiro.EngChange
         private static List<string> Serials(string planned) =>
             (planned ?? "").Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
 
-        /// <summary>The approved orders that change the part of an item and state an effectivity.</summary>
+        /// <summary>The approved orders that change the part of an item (or a part it contains) and state an effectivity.</summary>
         public static async Task<List<EcOrder>> OrdersChangingPartAsync(IUnitOfWork uow, string partNumber, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(partNumber)) return new List<EcOrder>();
@@ -127,9 +185,37 @@ namespace Services.NasbNiro.EngChange
             return await uow.Set<EcOrder>().AsNoTracking().Where(o => !o.Deleted && (o.Status == EcoStatus.Approved || o.Status == EcoStatus.Closed) && o.AffectedParts != null && o.AffectedParts.Contains(needle)).OrderBy(o => o.Id).ToListAsync(ct);
         }
 
+        /// <summary>The approved orders that list this production order with «change to the new revision» or «rework» and name a new BOM revision of the part: (order id, BOM header id of the new revision).</summary>
+        public static async Task<List<(int OrderId, int BomHeaderId)>> ApprovedBomChangesForOrderAsync(IUnitOfWork uow, int productionOrderId, string impactKey, string partNumber, CancellationToken ct)
+        {
+            var rows = await (from d in uow.Set<EcDispositionItem>().AsNoTracking()
+                              join o in uow.Set<EcOrder>().AsNoTracking() on d.OrderId equals o.Id
+                              join c in uow.Set<EcOrderChange>().AsNoTracking() on o.Id equals c.OrderId
+                              where !o.Deleted && o.Status == EcoStatus.Approved && !d.Stale && d.ImpactKey == impactKey
+                                  && (d.Disposition == EcDisposition.ChangeToNewRevision || d.Disposition == EcDisposition.Rework)
+                                  && c.Kind == EcChangeKind.Bom && c.Action == EcChangeAction.NewRevision && c.PartNumber == partNumber
+                              orderby o.Id
+                              select new { o.Id, c.TargetId }).ToListAsync(ct);
+            return rows.Select(r => (r.Id, r.TargetId)).ToList();
+        }
+
+        /// <summary>The revision of the BOM with this code that the project baseline stands on: the top BOM, or the BOM of a sub-assembly the baseline lines were copied from; null when the baseline has no line from it.</summary>
+        private static async Task<int?> BaselineRevisionOfBomAsync(IUnitOfWork uow, PbProjectBaseline baseline, string code, CancellationToken ct)
+        {
+            if (baseline == null || string.IsNullOrWhiteSpace(code)) return null;
+            if (baseline.SourceBomCode == code) return baseline.SourceBomRevision;
+            int? rev = await (from l in uow.Set<PbProjectBomLine>().AsNoTracking()
+                              join s in uow.Set<PbBomLine>().AsNoTracking() on l.SourceLineId equals s.Id
+                              join h in uow.Set<PbBomHeader>().AsNoTracking() on s.BomHeaderId equals h.Id
+                              where l.BaselineId == baseline.Id && !l.Deleted && !l.IsRemoved && h.Code == code
+                              select (int?)h.Revision).MinAsync(ct);
+            return rev;
+        }
+
         /// <summary>
-        /// Judges a production order against the effectivity of every approved order that changes its part: before the point the order keeps the old revision (the routing it was drafted from stays);
-        /// at or after it the order must stand on the new BOM revision (its project baseline) and the new routing, unless the order says «complete on old revision» for the order or for its project baseline.
+        /// Judges a production order against the effectivity of every approved order that changes its part (or a part below it): before the point the order keeps the old revision (the routing it was drafted from stays);
+        /// at or after it the order must stand on the new BOM revision (its project baseline, sub-assemblies included) and the new routing, unless the order says «complete on old revision» for the order or for its project baseline.
+        /// An order whose position cannot be told (a serial-only point and no planned serials) is refused: the serials must be planned first.
         /// </summary>
         public static async Task<EcOrderVerdict> OrderVerdictAsync(IUnitOfWork uow, MfProductionOrder order, InventoryItem item, DateTime today, CancellationToken ct)
         {
@@ -138,7 +224,7 @@ namespace Services.NasbNiro.EngChange
             List<EcOrder> ecos = await OrdersChangingPartAsync(uow, item.PartNumber, ct);
             if (ecos.Count == 0) return verdict;
             List<int> ids = ecos.Select(e => e.Id).ToList();
-            List<EcOrderChange> changes = await uow.Set<EcOrderChange>().AsNoTracking().Where(c => ids.Contains(c.OrderId) && c.Action == EcChangeAction.NewRevision && c.Kind != EcChangeKind.Drawing).ToListAsync(ct);
+            List<EcOrderChange> changes = await uow.Set<EcOrderChange>().AsNoTracking().Where(c => ids.Contains(c.OrderId) && c.Action == EcChangeAction.NewRevision && c.Kind != EcChangeKind.Drawing && c.Kind != EcChangeKind.CharList).ToListAsync(ct);
             List<EcDispositionItem> dispositions = await uow.Set<EcDispositionItem>().AsNoTracking().Where(d => ids.Contains(d.OrderId) && !d.Stale && d.Disposition != null).ToListAsync(ct);
             PbProjectBaseline baseline = await uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => !b.Deleted && b.IsCurrent && b.WorkOrderId == order.WorkOrderId).OrderByDescending(b => b.Id).FirstOrDefaultAsync(ct);
             List<string> serials = Serials(order.SerialsPlanned);
@@ -147,9 +233,32 @@ namespace Services.NasbNiro.EngChange
             {
                 List<EcOrderChange> mine = changes.Where(c => c.OrderId == eco.Id).ToList();
                 if (mine.Count == 0) continue;
+                // which of the changes concern this order at all
+                var bomRelevant = new List<(EcOrderChange C, int OldRevision)>();
+                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Bom))
+                {
+                    int? has = await BaselineRevisionOfBomAsync(uow, baseline, c.Code, ct);
+                    if (has.HasValue && c.NewRevision.HasValue && has.Value < c.NewRevision.Value) bomRelevant.Add((c, has.Value));
+                }
+                var opcRelevant = new List<EcOrderChange>();
+                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Opc))
+                    if (await uow.Set<PbOpcStep>().AsNoTracking().AnyAsync(s => !s.Deleted && s.RoutingId == c.TargetId && s.PartNumber == item.PartNumber, ct)) opcRelevant.Add(c);
+                var routingRelevant = new List<(EcOrderChange C, MfRoutingRevision Target)>();
+                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Routing))
+                {
+                    MfRoutingRevision target = await uow.Set<MfRoutingRevision>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == c.TargetId, ct);
+                    if (target != null && target.ItemId == item.Id) routingRelevant.Add((c, target));
+                }
+                if (bomRelevant.Count == 0 && opcRelevant.Count == 0 && routingRelevant.Count == 0) continue;
+
                 EcPosition pos = EcRules.Position(eco, order.Number, serials, today);
-                if (pos == EcPosition.NotStated) continue;
                 if (pos == EcPosition.Before) { verdict.StaleRoutingAllowed = true; continue; }
+                if (pos == EcPosition.NotStated)
+                {
+                    problems.Add($"نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) با این دستور سنجیده نمی‌شود (دستور سریال برنامه‌ریزی‌شده یا شماره هم‌ردیف ندارد)؛ سریال‌های دستور را برنامه‌ریزی کنید");
+                    verdict.Orders.Add(eco.Number);
+                    continue;
+                }
                 if (pos == EcPosition.Straddle)
                 {
                     problems.Add($"سریال‌های برنامه‌ریزی‌شده این دستور در دو سوی نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) قرار دارند؛ دستور را به دو دستور تقسیم کنید");
@@ -159,29 +268,23 @@ namespace Services.NasbNiro.EngChange
                 // at or after the point
                 bool Decided(string key, EcDisposition d) => dispositions.Any(x => x.OrderId == eco.Id && x.ImpactKey == key && x.Disposition == d);
                 if (Decided(EcRules.Key("ORDER", order.Id), EcDisposition.CompleteOnOldRevision)) continue;
-                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Bom))
+                foreach (var b in bomRelevant)
                 {
-                    if (baseline == null || baseline.SourceBomCode != c.Code || !c.NewRevision.HasValue || baseline.SourceBomRevision >= c.NewRevision.Value) continue;
-                    if (Decided(EcRules.Key("BASELINE", baseline.Id), EcDisposition.CompleteOnOldRevision)) continue;
-                    problems.Add($"پایه پروژه این دستور روی BOM {c.Code} بازنگری {baseline.SourceBomRevision:00} است و از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) بازنگری {c.NewRevision.Value:00} لازم است؛ پایه پروژه را به بازنگری جدید ببرید یا در ECO برای این دستور تصمیم «تکمیل با بازنگری قدیم» ثبت شود");
+                    if (baseline != null && Decided(EcRules.Key("BASELINE", baseline.Id), EcDisposition.CompleteOnOldRevision)) continue;
+                    problems.Add($"پایه پروژه این دستور روی BOM {b.C.Code} بازنگری {b.OldRevision:00} است و از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) بازنگری {b.C.NewRevision.Value:00} لازم است؛ پایه پروژه را به بازنگری جدید ببرید (یا دستور را «تکمیل با بازنگری قدیم» کنید)");
                     verdict.Orders.Add(eco.Number);
                 }
-                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Opc))
+                foreach (EcOrderChange c in opcRelevant)
                 {
-                    bool columnOfPart = await uow.Set<PbOpcStep>().AsNoTracking().AnyAsync(s => !s.Deleted && s.RoutingId == c.TargetId && s.PartNumber == item.PartNumber, ct);
-                    if (!columnOfPart) continue;
-                    string tag = $"{OpcNoteTag} {c.Code} نسخه {(c.NewRevision ?? 0):00}";
-                    MfRoutingRevision published = (await uow.Set<MfRoutingRevision>().AsNoTracking().Where(r => !r.Deleted && r.ItemId == item.Id && r.Note != null && r.Note.Contains(tag)).OrderByDescending(r => r.Id).ToListAsync(ct)).FirstOrDefault();
+                    MfRoutingRevision published = await uow.Set<MfRoutingRevision>().AsNoTracking().Where(r => !r.Deleted && r.ItemId == item.Id && r.SourceOpcRoutingId == c.TargetId).OrderByDescending(r => r.Id).FirstOrDefaultAsync(ct);
                     if (published != null && published.Status == MfRoutingStatus.Approved && order.RoutingRevisionId == published.Id) continue;
-                    problems.Add($"از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) دستور باید با مسیر ساخت چارت OPC {c.Code} بازنگری {(c.NewRevision ?? 0):00} ساخته شود" + (published == null ? " و این چارت هنوز به مسیر ساخت (MES) منتقل نشده است" : published.Status != MfRoutingStatus.Approved ? " و مسیر ساخت آن هنوز دو تایید MES را نگرفته است" : "؛ «به‌روزرسانی مسیر» را بزنید"));
+                    problems.Add($"از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) دستور باید با مسیر ساخت چارت OPC {c.Code} بازنگری {(c.NewRevision ?? 0):00} ساخته شود" + (published == null ? " و این چارت هنوز به مسیر ساخت (MES) منتقل نشده است" : published.Status != MfRoutingStatus.Approved ? " که مسیر ساخت آن هنوز تایید نشده است" : "؛ «به‌روزرسانی مسیر ساخت» دستور را بزنید"));
                     verdict.Orders.Add(eco.Number);
                 }
-                foreach (EcOrderChange c in mine.Where(c => c.Kind == EcChangeKind.Routing))
+                foreach (var rr in routingRelevant)
                 {
-                    MfRoutingRevision target = await uow.Set<MfRoutingRevision>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == c.TargetId, ct);
-                    if (target == null || target.ItemId != item.Id) continue;
-                    if (target.Status == MfRoutingStatus.Approved && order.RoutingRevisionId == target.Id) continue;
-                    problems.Add($"از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) دستور باید با مسیر ساخت بازنگری {target.Revision} ساخته شود" + (target.Status != MfRoutingStatus.Approved ? " که هنوز تایید نشده است" : "؛ «به‌روزرسانی مسیر» را بزنید"));
+                    if (rr.Target.Status == MfRoutingStatus.Approved && order.RoutingRevisionId == rr.Target.Id) continue;
+                    problems.Add($"از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) دستور باید با مسیر ساخت بازنگری {rr.Target.Revision} ساخته شود" + (rr.Target.Status != MfRoutingStatus.Approved ? " که هنوز تایید نشده است" : "؛ «به‌روزرسانی مسیر ساخت» دستور را بزنید"));
                     verdict.Orders.Add(eco.Number);
                 }
             }
@@ -204,13 +307,22 @@ namespace Services.NasbNiro.EngChange
             return null;
         }
 
-        // ------------------------------------------------------------------------------------------ change coverage of components
-
-        /// <summary>True when an approved order that changes the part of the item exists (a change of a component of a draft order may follow an approved order).</summary>
-        public static async Task<EcOrder> OrderCoveringItemAsync(IUnitOfWork uow, InventoryItem item, CancellationToken ct)
+        /// <summary>
+        /// The planned serials of an order whose part is changed by an approved order with a serial point cannot be rewritten so that the order moves across the point (or straddles it): the order would silently take
+        /// the other revision. Setting serials on an order that had none is allowed.
+        /// </summary>
+        public static async Task<string> SerialsChangeProblemAsync(IUnitOfWork uow, MfProductionOrder order, InventoryItem item, string newPlanned, DateTime today, CancellationToken ct)
         {
             if (item == null || string.IsNullOrWhiteSpace(item.PartNumber)) return null;
-            return (await OrdersChangingPartAsync(uow, item.PartNumber, ct)).FirstOrDefault();
+            List<string> oldSerials = Serials(order.SerialsPlanned), newSerials = Serials(newPlanned);
+            if (oldSerials.OrderBy(x => x).SequenceEqual(newSerials.OrderBy(x => x))) return null;
+            foreach (EcOrder eco in (await OrdersChangingPartAsync(uow, item.PartNumber, ct)).Where(e => !string.IsNullOrWhiteSpace(e.EffectiveFromSerial)))
+            {
+                EcPosition was = EcRules.Position(eco, order.Number, oldSerials, today), now = EcRules.Position(eco, order.Number, newSerials, today);
+                if (now == EcPosition.Straddle || (was != EcPosition.NotStated && was != now))
+                    return $"سریال‌های برنامه‌ریزی‌شده دستور را نمی‌توان طوری عوض کرد که دستور از نقطه اجرای {eco.Number} ({EcRules.EffectivityText(eco)}) جابه‌جا شود یا دو سوی آن بیفتد؛ برای تقسیم یا انتقال سریال‌ها دستور تغییر مهندسی لازم است.";
+            }
+            return null;
         }
     }
 }

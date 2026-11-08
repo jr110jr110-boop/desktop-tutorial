@@ -216,6 +216,8 @@ namespace Services.NasbNiro
         #region DeleteBomAsync
         public async BomResult DeleteBomAsync(int bomId, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ResponseBomDto>(frozen);
 
             Bom bom = await _boms
                 .Include(x => x.Processes)
@@ -267,6 +269,8 @@ namespace Services.NasbNiro
         #region DeleteBomCollectionAsync
         public async ValueTask<ResponseDto<IEnumerable<DeleteBomResultDto>>> DeleteBomCollectionAsync(IEnumerable<int> bomIds, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<IEnumerable<DeleteBomResultDto>>(frozen);
             if (bomIds is null)
             {
                 return ResponseDtoHelper.BadRequest<IEnumerable<DeleteBomResultDto>>(NasbNiroMessages.InvalidData);

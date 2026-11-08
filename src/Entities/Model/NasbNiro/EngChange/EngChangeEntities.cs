@@ -21,7 +21,7 @@ namespace Entities.Model.NasbNiro.EngChange
     public enum EcTargetKind { Product = 1, Part = 2, Bom = 3, Opc = 4, Drawing = 5, Routing = 6 }
 
     /// <summary>The kind of revision a change of the order names.</summary>
-    public enum EcChangeKind { Bom = 1, Opc = 2, Drawing = 3, Routing = 4 }
+    public enum EcChangeKind { Bom = 1, Opc = 2, Drawing = 3, Routing = 4, CharList = 5 }
 
     public enum EcChangeAction { NewRevision = 1, Obsolete = 2 }
 

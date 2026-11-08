@@ -44,13 +44,29 @@ namespace Services.NasbNiro.EngChange
 
         public sealed class Snapshot
         {
+            /// <summary>When it was computed. NOT part of the JSON and the hash (the same data must give the same fingerprint); the order keeps it in ImpactAt.</summary>
+            [System.Text.Json.Serialization.JsonIgnore]
             public DateTimeOffset ComputedAt { get; set; }
             public List<string> Parts { get; set; } = new List<string>();
             public List<EcImpactItemDto> Items { get; set; } = new List<EcImpactItemDto>();
             public List<int> Truncated { get; set; } = new List<int>();
         }
 
-        public static string Serialize(Snapshot s) => JsonSerializer.Serialize(s, Json);
+        /// <summary>Canonical form: lists sorted, quantities rounded to 4 decimals without trailing zeros, no volatile field. The same data always gives the same text and the same SHA-256.</summary>
+        public static string Serialize(Snapshot s)
+        {
+            var canon = new Snapshot
+            {
+                Parts = s.Parts.OrderBy(p => p, StringComparer.Ordinal).ToList(),
+                Truncated = s.Truncated.OrderBy(x => x).ToList(),
+                Items = s.Items.OrderBy(i => (int)i.Category).ThenBy(i => i.Key, StringComparer.Ordinal).Select(i => new EcImpactItemDto
+                {
+                    Key = i.Key, Category = i.Category, Text = i.Text, PartNumber = i.PartNumber, RefId = i.RefId,
+                    Quantity = i.Quantity.HasValue ? decimal.Round(i.Quantity.Value, 4) / 1.0000000000000000000000000000m : (decimal?)null,
+                }).ToList(),
+            };
+            return JsonSerializer.Serialize(canon, Json);
+        }
 
         public static Snapshot Parse(string json)
         {
@@ -109,7 +125,8 @@ namespace Services.NasbNiro.EngChange
             var seenAssemblies = new HashSet<string>(parts, StringComparer.OrdinalIgnoreCase);
             var seenHeaders = new HashSet<int>();
             List<string> frontier = parts.ToList();
-            for (int level = 1; level <= 8 && frontier.Count > 0; level++)
+            int level = 1;
+            for (; level <= 8 && frontier.Count > 0; level++)
             {
                 List<string> current = frontier;
                 var rows = await (from l in uow.Set<PbBomLine>().AsNoTracking()
@@ -128,6 +145,8 @@ namespace Services.NasbNiro.EngChange
                 }
                 frontier = next;
             }
+            // the walk stops at 8 levels: a deeper chain is flagged (the list is then incomplete and the order cannot be approved until the scope is narrowed)
+            if (frontier.Count > 0 && !snap.Truncated.Contains((int)EcImpactCategory.WhereUsed)) snap.Truncated.Add((int)EcImpactCategory.WhereUsed);
         }
 
         public static string StatusText(PbBomStatus s)
@@ -204,15 +223,25 @@ namespace Services.NasbNiro.EngChange
             if (itemIds.Count == 0) return;
             var rows = await (from b in uow.Set<StockBalance>().AsNoTracking()
                               join w in uow.Set<Warehouse>().AsNoTracking() on b.WarehouseId equals w.Id
+                              join l in uow.Set<InventoryLot>().AsNoTracking() on b.LotId equals l.Id into lots
+                              from l in lots.DefaultIfEmpty()
                               where itemIds.Contains(b.ItemId) && b.Quantity > 0
-                              select new { b.ItemId, b.WarehouseId, WarehouseTitle = w.Title, w.Kind, b.LotId, b.Quantity }).ToListAsync(ct);
-            foreach (var g in rows.GroupBy(r => new { r.WarehouseId, r.ItemId }).OrderBy(g => g.Key.WarehouseId).ThenBy(g => g.Key.ItemId))
+                              select new { b.ItemId, b.WarehouseId, WarehouseTitle = w.Title, w.Kind, b.LotId, LotNumber = l.LotNumber, b.Quantity }).ToListAsync(ct);
+            // one row per warehouse, item and lot: the heat / lot of the stock decides whether the piece can be used, reworked or scrapped
+            foreach (var g in rows.GroupBy(r => new { r.WarehouseId, r.ItemId, LotId = r.LotId ?? 0 }).OrderBy(g => g.Key.WarehouseId).ThenBy(g => g.Key.ItemId).ThenBy(g => g.Key.LotId))
             {
                 var first = g.First();
-                int lots = g.Where(x => x.LotId.HasValue).Select(x => x.LotId.Value).Distinct().Count();
                 string kind = first.Kind == WarehouseKind.WorkInProgress ? " (کار در جریان)" : "";
-                Add(snap, EcImpactCategory.Stock, EcRules.Key("STOCK", g.Key.WarehouseId, g.Key.ItemId), $"انبار {first.WarehouseTitle}{kind} — کالا {itemText(g.Key.ItemId)}، موجودی {Num(g.Sum(x => x.Quantity))}" + (lots > 0 ? $"، {lots} لات" : ""), partOf(g.Key.ItemId), g.Sum(x => x.Quantity), g.Key.ItemId);
+                string lot = g.Key.LotId == 0 ? "" : $"، لات {first.LotNumber}";
+                Add(snap, EcImpactCategory.Stock, EcRules.Key("STOCK", g.Key.WarehouseId, g.Key.ItemId, g.Key.LotId), $"انبار {first.WarehouseTitle}{kind} — کالا {itemText(g.Key.ItemId)}{lot}، موجودی {Num(g.Sum(x => x.Quantity))}", partOf(g.Key.ItemId), g.Sum(x => x.Quantity), g.Key.WarehouseId);
             }
+            // serial pieces in stock or in production (work in progress), one row per serial
+            var serials = await (from u in uow.Set<SerialUnit>().AsNoTracking()
+                                 where !u.Deleted && itemIds.Contains(u.ItemId) && (u.Status == SerialUnitStatus.InStock || u.Status == SerialUnitStatus.InProduction)
+                                 orderby u.Id
+                                 select new { u.Id, u.ItemId, u.SerialNumber, u.Status }).ToListAsync(ct);
+            foreach (var u in serials)
+                Add(snap, EcImpactCategory.Stock, EcRules.Key("STOCKSN", u.Id), $"قطعه سریال {u.SerialNumber} — کالا {itemText(u.ItemId)} ({(u.Status == SerialUnitStatus.InProduction ? "کار در جریان" : "در انبار")})", partOf(u.ItemId), 1, u.Id);
         }
 
         // ------------------------------------------------------------------------------------------ 5. open PRs and POs
@@ -299,6 +328,21 @@ namespace Services.NasbNiro.EngChange
             Dictionary<int, string> wo = woIds.Count == 0 ? new Dictionary<int, string>() : (await uow.Set<WorkOrder>().AsNoTracking().Where(w => woIds.Contains(w.Id)).Select(w => new { w.Id, w.Code }).ToListAsync(ct)).ToDictionary(w => w.Id, w => w.Code);
             foreach (var s in serials)
                 Add(snap, EcImpactCategory.Delivered, EcRules.Key("SERIAL", s.Id), $"واحد تحویل‌شده سریال {s.SerialNumber} — کالا {itemText(s.ItemId)}" + (s.WorkOrderId.HasValue && wo.TryGetValue(s.WorkOrderId.Value, out string code) ? "، دستور کار " + code : ""), partOf(s.ItemId), 1m, s.Id);
+            // delivered units that CONTAIN the part: pieces installed in a delivered assembly, and the outputs of production orders that consumed the part (as-built genealogy)
+            var parents = await (from u in uow.Set<SerialUnit>().AsNoTracking()
+                                 join p in uow.Set<SerialUnit>().AsNoTracking() on u.ParentSerialUnitId equals p.Id
+                                 where !u.Deleted && !p.Deleted && itemIds.Contains(u.ItemId) && p.Status == SerialUnitStatus.Delivered
+                                 orderby p.Id
+                                 select new { p.Id, p.ItemId, p.SerialNumber, Inner = u.SerialNumber }).ToListAsync(ct);
+            foreach (var p in parents)
+                Add(snap, EcImpactCategory.Delivered, EcRules.Key("SERIAL", p.Id), $"واحد تحویل‌شده سریال {p.SerialNumber} — کالا {itemText(p.ItemId)} (شامل قطعه سریال {p.Inner})", partOf(p.ItemId), null, p.Id);
+            var viaGenealogy = await (from g in uow.Set<GenealogyLink>().AsNoTracking()
+                                      join p in uow.Set<SerialUnit>().AsNoTracking() on g.OutputSerialUnitId equals p.Id
+                                      where !g.Deleted && !p.Deleted && itemIds.Contains(g.InputItemId) && p.Status == SerialUnitStatus.Delivered
+                                      orderby p.Id
+                                      select new { p.Id, p.ItemId, p.SerialNumber, g.InputItemId }).ToListAsync(ct);
+            foreach (var p in viaGenealogy)
+                Add(snap, EcImpactCategory.Delivered, EcRules.Key("SERIAL", p.Id), $"واحد تحویل‌شده سریال {p.SerialNumber} — کالا {itemText(p.ItemId)} (از ردیابی ساخت: قطعه {itemText(p.InputItemId)} مصرف شده)", partOf(p.ItemId), null, p.Id);
             var lots = await uow.Set<AsBuiltRecord>().AsNoTracking().Where(a => !a.Deleted && a.Status == AsBuiltStatus.Current && a.SerialUnitId == null && itemIds.Contains(a.ItemId)).OrderBy(a => a.Id).Select(a => new { a.Id, a.ItemId, a.WorkOrderId }).ToListAsync(ct);
             foreach (var a in lots)
                 Add(snap, EcImpactCategory.Delivered, EcRules.Key("ASBUILT", a.Id), $"سابقه ساخت تحویل‌شده (بچ) — کالا {itemText(a.ItemId)}", partOf(a.ItemId), null, a.Id);

@@ -234,6 +234,8 @@ namespace Services.NasbNiro.ProductBank
                 h = await LoadAsync(dto.Id.Value, true, ct);
                 if (h == null) return ResponseDtoHelper.NotFound<PbBomDto>(PbMessages.NotFound);
                 if (h.Status != PbBomStatus.Draft) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.OnlyDraft);
+                string frozenBy = await global::Services.NasbNiro.EngChange.EcGate.FrozenByOrderAsync(Uow, Entities.Model.NasbNiro.EngChange.EcChangeKind.Bom, h.Id, ct);   // Package A2: a revision named in an order in approval / approved is not edited
+                if (frozenBy != null) return ResponseDtoHelper.BadRequest<PbBomDto>(frozenBy);
                 if (h.PreparedByUserId != User.UserId) return ResponseDtoHelper.BadRequest<PbBomDto>("پیش‌نویس را فقط تهیه‌کننده آن ویرایش می‌کند.");
                 if (assembly != h.AssemblyPartNumber) return ResponseDtoHelper.BadRequest<PbBomDto>("شماره مجموعه یک نسخه تغییر نمی‌کند.");
                 Uow.Set<PbBomLine>().RemoveRange(h.Lines);

@@ -665,6 +665,57 @@ namespace MsTests
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
         }
 
+        /// <summary>Releases a revision WITHOUT any engineering change order (the Release helper adds one on purpose); returns the answer of the release step.</summary>
+        private static async Task<ResponseDto<PcRevisionDto>> TryReleaseWithoutEco(AppHost host, int revisionId)
+        {
+            await EnsureEmptyList(host, revisionId);
+            foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve") })
+            {
+                var r = await Edms(host, step.Item1, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = step.Item2 }, default));
+                Assert.IsTrue(r.Success, step.Item2 + ": " + r.Message);
+            }
+            return await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = "release" }, default));
+        }
+
+        [TestMethod]
+        public async Task ASecondRevisionOfAPartDrawingNeedsAnApprovedEco_TheFirstDoesNot_AndUnlinkingDoesNotResetTheGate()
+        {
+            AppHost host = NewHost("a2_draw");
+            int contract = NewContract(host), doc = NewDeliverable(host, contract);
+            await Link(host, doc, "99.77.00.001.2");
+            PcRevisionDto first = await Draft(host, doc);
+            var firstRelease = await TryReleaseWithoutEco(host, first.Id);
+            Assert.IsTrue(firstRelease.Success, "the first revision of a part drawing needs no order: " + firstRelease.Message);
+
+            PcRevisionDto second = await Draft(host, doc);
+            var refused = await TryReleaseWithoutEco(host, second.Id);
+            Assert.IsFalse(refused.Success, "the second revision is not released without an approved engineering change order");
+            StringAssert.Contains(refused.Message, "دستور تغییر مهندسی");
+
+            // unlink the drawing from the part (history stays) and try again: still refused
+            host.Write(u =>
+            {
+                foreach (var l in u.Set<PcDocumentLink>().Where(x => x.DeliverableId == doc).ToList()) { l.Delete(); l.UnlinkReason = "برداشتن پیوند آزمون"; }
+                u.SaveChanges();
+            }, Seeder);
+            var again = await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = second.Id, Action = "release" }, default));
+            Assert.IsFalse(again.Success, "unlinking does not reset the gate");
+            StringAssert.Contains(again.Message, "دستور تغییر مهندسی");
+
+            // an approved order that names the revision opens it
+            host.Write(u =>
+            {
+                var req = AppHost.Add(u, new EcRequest { Number = "ECR-T-DRAW", Title = "t", Reason = "test change", Status = EcrStatus.Approved, RequestedByUserId = 1 });
+                u.SaveChanges();
+                var eco = AppHost.Add(u, new EcOrder { Number = "ECO-T-DRAW", RequestId = req.Id, Title = "t", Status = EcoStatus.Approved, EffectiveFromDate = DateTime.Today });
+                u.SaveChanges();
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Drawing, Action = EcChangeAction.NewRevision, TargetId = second.Id, Reference = "test" });
+                u.SaveChanges();
+            }, Seeder);
+            var ok = await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = second.Id, Action = "release" }, default));
+            Assert.IsTrue(ok.Success, ok.Message);
+        }
+
         [TestMethod]
         public async Task ASecondReceiptReplacesTheCopyNobodyAcceptedAndPointsToIt()
         {
