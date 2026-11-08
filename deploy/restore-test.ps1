@@ -63,6 +63,7 @@ function Invoke-Sql {
 }
 
 $runId = 'rt-{0:yyyyMMddHHmmss}' -f (Get-Date)
+$workRoot = Join-Path $BackupFolder 'restore-work'   # set before the result record, which names it
 $started = Get-Date
 $checks = New-Object System.Collections.Generic.List[object]
 $counts = [ordered]@{}
@@ -76,8 +77,7 @@ function Add-Check([string]$Name, [bool]$Passed, [string]$Detail) {
 }
 
 # Fix round (M1): the decrypted copy of the backup holds all the data of the company. It is NOT put in the result folder (which the program may read) but in <BackupFolder>\restore-work, which only
-# Administrators, SYSTEM and the SQL Server service account can open; whatever a killed earlier run left there is removed first.
-$workRoot = Join-Path $BackupFolder 'restore-work'
+# Administrators, SYSTEM and the SQL Server service account can open; whatever a killed earlier run left there is removed first. ($workRoot is set at the top.)
 function Initialize-WorkRoot {
     New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
     $args2 = @($workRoot, '/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
