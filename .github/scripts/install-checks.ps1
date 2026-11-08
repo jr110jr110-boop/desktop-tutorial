@@ -16,6 +16,8 @@ $results = New-Object System.Collections.Generic.List[string]
 $base = 'http://127.0.0.1'   # R1a2 (M6): plain HTTP is bound to the loopback address of the server itself
 $hostName = $env:COMPUTERNAME.ToLowerInvariant()
 $state = Join-Path $out 'state.json'
+# the rule that says which backup file is a regular backup is the one the restore test uses (fix round M2)
+. (Join-Path $PSScriptRoot '..\..\deploy\backup-crypto.ps1')
 
 # The certificate of the install test is self-signed: the HTTPS checks accept any certificate (they check what is served, not who signed it).
 Add-Type -TypeDefinition @'
@@ -199,7 +201,7 @@ Check 'the backup log says the full and the log backup were made' {
     'both kinds of backup are in backup-log.txt'
 }
 Check 'database backups are encrypted: by SQL Server where the edition can, else at file level (no plain .bak or .trn stays)' {
-    $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' -and $_.Name -notlike '*before-restore*' -and $_.Name -notlike '*pre-update*' } | Sort-Object LastWriteTime | Select-Object -Last 1
+    $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { Test-RegularBackupName $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($encryptionAsked) {
         $header = Invoke-CheckSql 'RESTORE HEADERONLY FROM DISK = @f' @{ '@f' = $newest.FullName }
         $algorithm = [string]$header.Rows[0]['KeyAlgorithm']
@@ -304,6 +306,15 @@ Check 'the program does not change the database structure itself (Database:Migra
     if ($null -eq $value -or $value -ne $false) { throw "Database:MigrateAtStart is '$value'" }
     'Database:MigrateAtStart = false; the installer applied the updates (WebApi.dll --migrate-only)'
 }
+Check 'the backup and restore-test account NT AUTHORITY\SYSTEM is NOT a sysadmin, but may create databases (dbcreator) and read the restore-test tables' {
+    $sys = [int](Get-CheckScalar "SELECT IS_SRVROLEMEMBER('sysadmin', N'NT AUTHORITY\SYSTEM')")
+    if ($sys -ne 0) { throw "SYSTEM is a member of sysadmin (IS_SRVROLEMEMBER=$sys)" }
+    $dbc = [int](Get-CheckScalar "SELECT IS_SRVROLEMEMBER('dbcreator', N'NT AUTHORITY\SYSTEM')")
+    if ($dbc -ne 1) { throw "SYSTEM is not a member of dbcreator (IS_SRVROLEMEMBER=$dbc)" }
+    $read = [int](Get-CheckScalar "SELECT COUNT(*) FROM sys.database_permissions p JOIN sys.database_principals g ON g.principal_id = p.grantee_principal_id WHERE g.name = N'NT AUTHORITY\SYSTEM' AND p.permission_name = N'SELECT' AND p.state = 'G' AND p.class = 1 AND p.major_id IN (OBJECT_ID(N'dbo.FnAuditLogs'), OBJECT_ID(N'dbo.__EFMigrationsHistory'))")
+    if ($read -ne 2) { throw "expected SELECT on dbo.FnAuditLogs and dbo.__EFMigrationsHistory for SYSTEM, found $read" }
+    "sysadmin=0 dbcreator=1 SELECT on the compared tables"
+}
 if ($Phase -eq '2-update') {
     Check 'the update made a checked safety backup of the database before it changed anything' {
         $f = @(Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match 'pre-update.*\.bak(\.enc)?$' })
@@ -361,10 +372,30 @@ if ($Phase -eq '5-restore-test') {
     }
     Check 'the backup used was the newest one and its encrypted form was opened when it is .enc' {
         if (-not $script:restoreResult) { throw 'no result' }
-        $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { $_.Name -match '\.bak(\.enc)?$' -and $_.Name -notmatch 'before-restore|pre-update' } | Sort-Object LastWriteTime | Select-Object -Last 1
+        $newest = Get-ChildItem "$BackupFolder\database" -File | Where-Object { (Test-RegularBackupName $_.Name) } | Sort-Object LastWriteTime | Select-Object -Last 1
         if ($newest.Name -ne $script:restoreResult.backupFile) { throw "newest=$($newest.Name) used=$($script:restoreResult.backupFile)" }
         if ($newest.Name -like '*.enc' -and -not (@($script:restoreResult.checks | Where-Object { $_.name -eq 'decrypt' -and $_.passed }).Count)) { throw 'no decrypt check' }
         $newest.Name
+    }
+    Check 'the decrypted work folder is restricted (Administrators, SYSTEM, the SQL service only; not the program account) and empty after the run' {
+        if (-not $script:restoreResult) { throw 'no result' }
+        $wf = [string]$script:restoreResult.workFolder
+        if ($wf -ne (Join-Path $BackupFolder 'restore-work')) { throw "workFolder='$wf'" }
+        if ($wf -like "$restoreDir*") { throw 'the work folder is inside the result folder the program can read' }
+        $acl = Get-Acl $wf
+        if (-not $acl.AreAccessRulesProtected) { throw 'the work folder inherits permissions' }
+        $names = @($acl.Access | ForEach-Object { $_.IdentityReference.Value })
+        $bad = @($names | Where-Object { $_ -match 'Users$|Everyone|Authenticated Users|IIS APPPOOL' })
+        if ($bad.Count -gt 0) { throw "too open: $($bad -join ', ')" }
+        $left = @(Get-ChildItem $wf -Force -ErrorAction SilentlyContinue)
+        if ($left.Count -gt 0) { throw "$($left.Count) item(s) left in the work folder" }
+        "acl=" + ($names -join '; ')
+    }
+    Check 'the restore test ran as SYSTEM without sysadmin (the task result above is the proof: restore, read of the live tables and drop all worked with dbcreator + SELECT only)' {
+        $sys = [int](Get-CheckScalar "SELECT IS_SRVROLEMEMBER('sysadmin', N'NT AUTHORITY\SYSTEM')")
+        if ($sys -ne 0) { throw 'SYSTEM is a sysadmin' }
+        if (-not $script:restoreResult.success) { throw 'the test did not pass' }
+        'sysadmin=0, success=true'
     }
     Check 'the scratch database IRNNCO_RESTORETEST is gone' {
         $c = New-Object System.Data.SqlClient.SqlConnection 'Data Source=.\SQLEXPRESS;Initial Catalog=master;Integrated Security=True;Connect Timeout=30'

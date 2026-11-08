@@ -413,8 +413,15 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $started = Get-Date
           Start-ScheduledTask -TaskName 'INNCO monthly restore test'
+          # M3: a deadline of 45 minutes; a task that is still running then is stopped and the step fails (the checks below report it)
+          $deadline = $started.AddMinutes(45)
           do { Start-Sleep -Seconds 5; $info = Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test' }
-          while ((Get-ScheduledTask -TaskName 'INNCO monthly restore test').State -eq 'Running' -or $info.LastRunTime -lt $started.AddSeconds(-5))
+          while (((Get-ScheduledTask -TaskName 'INNCO monthly restore test').State -eq 'Running' -or $info.LastRunTime -lt $started.AddSeconds(-5)) -and (Get-Date) -lt $deadline)
+          if ((Get-ScheduledTask -TaskName 'INNCO monthly restore test').State -eq 'Running') {
+            Stop-ScheduledTask -TaskName 'INNCO monthly restore test'
+            "restore test task did not finish within 45 minutes and was stopped" | Tee-Object -Append -FilePath install-output\5-restore-test-run.txt
+            $info = Get-ScheduledTaskInfo -TaskName 'INNCO monthly restore test'
+          }
           "restore test task result=$($info.LastTaskResult)" | Tee-Object -FilePath install-output\5-restore-test-run.txt
           Get-Content D:\INNCO\Backup\restore-test\restore-test-log.txt -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath install-output\5-restore-test-run.txt
           powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\install-checks.ps1 -Phase 5-restore-test

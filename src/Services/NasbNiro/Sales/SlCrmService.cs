@@ -508,6 +508,7 @@ namespace Services.NasbNiro.Sales
                 row = new SlSetting { Key = dto.Key, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<SlSetting>().Add(row);
             }
+            if (row.Id != 0 && row.Value != dto.Value && Integrity.SafetyProfile.Refusal(Entities.Model.NasbNiro.Integrity.SafetyStore.Sales, dto.Key) != null) { _uow.Entry(row).State = Microsoft.EntityFrameworkCore.EntityState.Unchanged; return Bad<SlSettingDto>(Integrity.SafetyProfile.RefusalText); }   // PD: two-person change (the first value is set freely)
             row.Title = known.Title;
             row.Value = dto.Value;
             row.ModifyDate = now;

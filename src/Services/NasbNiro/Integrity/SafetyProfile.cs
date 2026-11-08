@@ -24,6 +24,14 @@ namespace Services.NasbNiro.Integrity
 
         /// <summary>A number that must not be lowered below the strict value (minimum counts and days).</summary>
         NumberAtLeast = 5,
+
+        /// <summary>
+        /// A threshold where 0 means "never" (a block threshold): weaker when it is 0 although the strict value is above 0, or when it is above the strict value. A strict value of 0 (the rule only warns) has nothing weaker.
+        /// </summary>
+        ThresholdZeroOff = 6,
+
+        /// <summary>A text that must equal the strict text (for example the role of the second step of a period close); the allowed texts are listed in <see cref="SafetySettingSpec.Allowed"/>.</summary>
+        TextMustEqual = 7,
     }
 
     /// <summary>One security-relevant setting (or, with a * in the key, a family of them). A change of it needs a second person.</summary>
@@ -44,6 +52,12 @@ namespace Services.NasbNiro.Integrity
         public decimal Max { get; set; } = 1_000_000_000m;
         public bool Whole { get; set; } = true;
 
+        /// <summary>For a text kind: the values a change may name.</summary>
+        public string[] Allowed { get; set; }
+
+        /// <summary>The key family a setting belongs to, for the checks of its own module (for example "ops-rule").</summary>
+        public string Family { get; set; }
+
         /// <summary>A Persian note shown beside the deviation, for example the transition period.</summary>
         public string Note { get; set; }
     }
@@ -53,7 +67,7 @@ namespace Services.NasbNiro.Integrity
     /// (<see cref="Register"/>; a family of keys uses * in the key). A setting listed here is changed only by a request with a reason that a second person (PMO or CEO, not the requester, never an AI seat) approves;
     /// the save endpoints of the modules call <see cref="Refusal"/> and refuse a direct change. Defaults are not changed by the profile: it only shows the strict value and the deviation.
     /// </summary>
-    public static class SafetyProfile
+    public static partial class SafetyProfile
     {
         private static readonly object Gate = new object();
         private static readonly List<SafetySettingSpec> Specs = new List<SafetySettingSpec>();
@@ -78,6 +92,7 @@ namespace Services.NasbNiro.Integrity
                 new SafetySettingSpec { Store = Fn, Key = "CloseChecklist.Enforce", Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "الزام فهرست کنترل بستن دوره مالی" },
                 new SafetySettingSpec { Store = SafetyStore.AiSeat, Key = "*", Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "صندلی هوش مصنوعی فعال بماند", Note = "روشن یا خاموش کردن هر صندلی تصمیم است" },
             });
+            Register(ModuleSpecs());
         }
 
         /// <summary>Adds the specs of a module (once; a spec with the same store and key replaces the earlier one). Package 8 adds its gate keys with one call.</summary>
@@ -132,6 +147,8 @@ namespace Services.NasbNiro.Integrity
                 case SafetyKind.FlagMustBeOff: return TryNumber(value, out decimal off) && TryNumber(spec.Strict, out decimal sOff) && off > sOff;
                 case SafetyKind.NumberAtMost: return TryNumber(value, out decimal hi) && TryNumber(spec.Strict, out decimal sHi) && hi > sHi;
                 case SafetyKind.NumberAtLeast: return TryNumber(value, out decimal lo) && TryNumber(spec.Strict, out decimal sLo) && lo < sLo;
+                case SafetyKind.ThresholdZeroOff: return TryNumber(value, out decimal th) && TryNumber(spec.Strict, out decimal sTh) && sTh > 0 && (th == 0 || th > sTh);
+                case SafetyKind.TextMustEqual: return spec.Strict != null && !string.Equals((value ?? "").Trim(), spec.Strict, StringComparison.OrdinalIgnoreCase);
                 default: return false;
             }
         }
@@ -141,6 +158,12 @@ namespace Services.NasbNiro.Integrity
         {
             error = null;
             string v = (value ?? "").Trim();
+            if (spec.Kind == SafetyKind.TextMustEqual)
+            {
+                string t = v.ToUpperInvariant();
+                if (spec.Allowed == null || !spec.Allowed.Contains(t, StringComparer.OrdinalIgnoreCase)) { error = "مقدار باید یکی از این‌ها باشد: " + string.Join("، ", spec.Allowed ?? new string[0]); return null; }
+                return t;
+            }
             if (spec.Kind == SafetyKind.BoolText)
             {
                 v = v.ToLowerInvariant();

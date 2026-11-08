@@ -186,6 +186,7 @@ namespace IocConfig
             // package D: scheduled verification of the audit chain (02:30, Integrity:Jobs=false switches the job off), the restore test results, «سلامت سوابق»
             services.AddScoped<Services.NasbNiro.Integrity.IRestoreTestService, Services.NasbNiro.Integrity.RestoreTestService>();
             services.AddScoped<Services.NasbNiro.Integrity.IAuditIntegrityService, Services.NasbNiro.Integrity.AuditIntegrityService>();
+            services.AddScoped<Services.NasbNiro.Integrity.IChainBreakAcceptanceService, Services.NasbNiro.Integrity.ChainBreakAcceptanceService>();
             services.AddHostedService<Services.NasbNiro.Integrity.IntegrityHostedService>();
             services.AddScoped<Services.NasbNiro.Integrity.ISafetySettingsService, Services.NasbNiro.Integrity.SafetySettingsService>();
             services.AddHostedService<Services.NasbNiro.Finance.FinanceF2HostedService>();

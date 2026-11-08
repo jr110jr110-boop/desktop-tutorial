@@ -20,7 +20,7 @@ namespace ViewModels.NasbNiro.IntegrityDtos
         public string StartedAtText { get; set; }
         public DateTimeOffset? FinishedAt { get; set; }
 
-        /// <summary>Ok, Broken or Error.</summary>
+        /// <summary>Ok, Broken, Error or Running (a full pass queued to the background job).</summary>
         public string Status { get; set; }
         public string StatusText { get; set; }
         public long? FromSeq { get; set; }
@@ -39,6 +39,9 @@ namespace ViewModels.NasbNiro.IntegrityDtos
         public int? BreakRowId { get; set; }
         public string BreakEntityType { get; set; }
         public string BreakEntityTypeText { get; set; }
+
+        /// <summary>For the break kind "record-drift": the column of the record that differs from the trail.</summary>
+        public string BreakColumn { get; set; }
         public DateTimeOffset? BreakAt { get; set; }
         public string BreakAtText { get; set; }
         public string Message { get; set; }
@@ -116,6 +119,12 @@ namespace ViewModels.NasbNiro.IntegrityDtos
         /// <summary>True (show red) when the chain is broken or could not be checked, or the last good restore test is older than the limit or there is none.</summary>
         public bool Red { get; set; }
         public DateTimeOffset AsOf { get; set; }
+
+        /// <summary>The broken run that no later full pass has cleared (null when there is none).</summary>
+        public AuditChainRunDto OpenBreak { get; set; }
+
+        /// <summary>The request of «پذیرش شکست شناخته‌شده» that waits for signatures.</summary>
+        public int? PendingAcceptanceId { get; set; }
     }
 }
 
@@ -191,5 +200,53 @@ namespace ViewModels.NasbNiro.IntegrityDtos
         public int Deviations { get; set; }
         public int Weaker { get; set; }
         public List<SafetyItemDto> Items { get; set; } = new List<SafetyItemDto>();
+    }
+}
+
+namespace ViewModels.NasbNiro.IntegrityDtos
+{
+    /// <summary>«پذیرش شکست شناخته‌شده»: a known break that three distinct persons (QA, PMO, CEO) accept.</summary>
+    public class ChainBreakAcceptanceDto
+    {
+        public int Id { get; set; }
+        public int BreakRunId { get; set; }
+        public string BreakKind { get; set; }
+        public long? BreakSeq { get; set; }
+        public int? BreakRowId { get; set; }
+        public string BreakEntityType { get; set; }
+        public string BreakEntityTypeText { get; set; }
+        public string BreakColumn { get; set; }
+        public string Reason { get; set; }
+        public int RequestedByUserId { get; set; }
+        public string RequestedByName { get; set; }
+        public string RequestedAtText { get; set; }
+        public string QaName { get; set; }
+        public string QaAtText { get; set; }
+        public string PmoName { get; set; }
+        public string PmoAtText { get; set; }
+        public string CeoName { get; set; }
+        public string CeoAtText { get; set; }
+        public int Signatures { get; set; }
+
+        /// <summary>Pending, Approved or Cancelled.</summary>
+        public string Status { get; set; }
+        public string StatusText { get; set; }
+        public string AppliedAtText { get; set; }
+        public long? AnchorSeq { get; set; }
+    }
+
+    public class ChainBreakAcceptanceRequestDto
+    {
+        /// <summary>The broken run.</summary>
+        public int RunId { get; set; }
+        public string Reason { get; set; }
+    }
+
+    public class ChainBreakAcceptanceSignDto
+    {
+        public int Id { get; set; }
+
+        /// <summary>The seat the signer takes: QA, PMO or CEO (the signer must hold that role).</summary>
+        public string Role { get; set; }
     }
 }

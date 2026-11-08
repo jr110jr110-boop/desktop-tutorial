@@ -246,6 +246,17 @@ function Stop-AppPoolAndWait([string]$Name) {
     }
 }
 
+# Fix round (H3): the monthly restore test runs as SYSTEM and must NOT be a sysadmin. It needs: the server role dbcreator (to restore into, and drop, the scratch database IRNNCO_RESTORETEST,
+# which it then owns) and read access to the few live tables it compares with the restored copy. Called when the login exists (step 7) and again when the tables exist (after the first start).
+$script:RestoreTestReadTables = @('__EFMigrationsHistory', 'FnAuditLogs', 'InvItems', 'InvLots', 'InvDocuments', 'QaRecords', 'QaMeasurements', 'PcProgressEvents')   # keep equal to $tables of restore-test.ps1
+function Grant-RestoreTestAccess([string]$Database) {
+    $dbName = ConvertTo-SqlName $Database
+    Invoke-Sql -Query "IF NOT EXISTS (SELECT 1 FROM sys.server_role_members m JOIN sys.server_principals r ON r.principal_id = m.role_principal_id JOIN sys.server_principals p ON p.principal_id = m.member_principal_id WHERE r.name = N'dbcreator' AND p.name = N'NT AUTHORITY\SYSTEM') ALTER SERVER ROLE dbcreator ADD MEMBER [NT AUTHORITY\SYSTEM];" | Out-Null
+    foreach ($t in $script:RestoreTestReadTables) {
+        Invoke-Sql -Database $Database -Query "IF OBJECT_ID(N'dbo.[$t]', N'U') IS NOT NULL GRANT SELECT ON OBJECT::dbo.[$t] TO [NT AUTHORITY\SYSTEM];" | Out-Null
+    }
+}
+
 function Get-SqlServiceAccount([string]$InstanceName) {
     $serviceName = if ($InstanceName -eq 'MSSQLSERVER') { 'MSSQLSERVER' } else { 'MSSQL$' + $InstanceName }
     $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
@@ -1002,6 +1013,8 @@ $poolOwnerSql
 IF USER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE USER [NT AUTHORITY\SYSTEM] FOR LOGIN [NT AUTHORITY\SYSTEM];
 ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
 "@ | Out-Null
+    Grant-RestoreTestAccess $DatabaseName
+    Write-Ok "'NT AUTHORITY\SYSTEM' (backup and restore-test tasks) can back up, may create and drop databases (dbcreator) and read the tables the restore test compares; it is not a sysadmin."
     Write-Ok "'$poolIdentity' can use the database (no password needed); the backup tasks can back it up."
 
     # 8. Settings -------------------------------------------------------------------------------
@@ -1216,6 +1229,7 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     $migrations = [int](Invoke-Sql -Database $DatabaseName -Scalar -Query 'SELECT COUNT(*) FROM dbo.__EFMigrationsHistory')
     $lastMigration = [string](Invoke-Sql -Database $DatabaseName -Scalar -Query 'SELECT TOP (1) MigrationId FROM dbo.__EFMigrationsHistory ORDER BY MigrationId DESC')
     Write-Ok "Database structure is up to date ($migrations updates applied, last: $lastMigration)."
+    Grant-RestoreTestAccess $DatabaseName   # the tables exist now (on a new database they were made by the program's first start)
 
     # HTTPS must answer with the certificate that was chosen above
     $served = Get-ServedCertificateThumbprint '127.0.0.1' $HttpsPort

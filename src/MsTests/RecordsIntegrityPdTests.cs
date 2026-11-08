@@ -133,6 +133,19 @@ namespace MsTests
 
         // ------------------------------------------------------------------------------------------ the verification job
 
+        /// <summary>A full pass is queued to the background job (M8): the call answers Running, the test waits until it is done.</summary>
+        private static async Task<AuditChainRunDto> RunFull(AppHost host, ClaimsPrincipal who)
+        {
+            AuditChainRunDto run = FinanceTestSupport.Ok(await Run(host, who, "full"));
+            Assert.AreEqual("Running", run.Status, "the answer is the queued run");
+            for (int i = 0; i < 600 && run.Status == "Running"; i++)
+            {
+                await Task.Delay(100);
+                run = FinanceTestSupport.Ok(await host.As(who, sp => sp.GetRequiredService<IAuditIntegrityService>().GetRunAsync(run.Id, CancellationToken.None)));
+            }
+            return run;
+        }
+
         private static Task<ResponseDto<AuditChainRunDto>> Run(AppHost host, ClaimsPrincipal who, string mode) =>
             host.As(who, sp => sp.GetRequiredService<IAuditIntegrityService>().RunOnDemandAsync(new AuditChainRunRequestDto { Mode = mode }, CancellationToken.None));
 
@@ -153,16 +166,16 @@ namespace MsTests
             AuditChainRunDto second = FinanceTestSupport.Ok(await Run(host, Ceo, "incremental"));
             Assert.AreEqual("Incremental", second.Kind);
             Assert.AreEqual("Ok", second.Status);
-            Assert.AreEqual(1, second.EntriesChecked, "exactly the one new entry");
+            Assert.AreEqual(2, second.EntriesChecked, "the entry of the first run itself (the history of the verification is in the chain) and the one new record");
             Assert.AreEqual(3L, second.FromSeq);
-            Assert.AreEqual(3L, second.HeadSeq);
+            Assert.AreEqual(4L, second.HeadSeq);
 
             AuditChainRunDto none = FinanceTestSupport.Ok(await Run(host, Qa, "incremental"));
-            Assert.AreEqual(0, none.EntriesChecked);
+            Assert.AreEqual(1, none.EntriesChecked, "only the entry of the previous run itself");
 
-            AuditChainRunDto full = FinanceTestSupport.Ok(await Run(host, Pmo1, "full"));
+            AuditChainRunDto full = await RunFull(host, Pmo1);
             Assert.AreEqual("Full", full.Kind);
-            Assert.AreEqual(3, full.EntriesChecked);
+            Assert.AreEqual(7, full.EntriesChecked, "3 records, 3 earlier runs and the queued run itself");
             Assert.AreEqual(1L, full.FromSeq);
 
             ResponseDto<PagedList<AuditChainRunDto>> history = await host.As(Pmo1, sp => sp.GetRequiredService<IAuditIntegrityService>().GetRunsAsync(new AuditChainRunQuery { PageNumber = 1, PageSize = 10 }, CancellationToken.None));
@@ -186,13 +199,13 @@ namespace MsTests
             AppHost host = Host();
             int id = SaveRecord(host, "QIR-1405-00020");
             SaveRecord(host, "QIR-1405-00021");
-            Assert.AreEqual("Ok", FinanceTestSupport.Ok(await Run(host, Pmo1, "full")).Status);
+            Assert.AreEqual("Ok", (await RunFull(host, Pmo1)).Status);
             SaveRecord(host, "QIR-1405-00022");
-            Tamper(host, raw => raw.Logs.Single(r => r.Seq == 3).Summary = "edited by hand");
+            Tamper(host, raw => raw.Logs.Single(r => r.Seq == 5).Summary = "edited by hand");
 
             AuditChainRunDto broken = FinanceTestSupport.Ok(await Run(host, Pmo1, "incremental"));
             Assert.AreEqual("Broken", broken.Status);
-            Assert.AreEqual(3L, broken.BreakSeq);
+            Assert.AreEqual(5L, broken.BreakSeq);
             Assert.AreEqual(nameof(QcRecord), broken.BreakEntityType);
             Assert.IsFalse(string.IsNullOrWhiteSpace(broken.BreakEntityTypeText));
             Assert.IsNotNull(broken.BreakRowId);
@@ -200,10 +213,10 @@ namespace MsTests
 
             List<OfInboxItem> alerts = host.Read(uow => uow.Set<OfInboxItem>().AsNoTracking().Where(i => i.SourceKey.StartsWith("integrity:break")).ToList());
             CollectionAssert.AreEquivalent(new[] { "CEO", "PMO", "QA" }, alerts.Select(a => a.RecipientRole).ToArray());
-            Assert.IsTrue(alerts.All(a => a.Link == "/integrity" && a.Title.Contains("3")));
+            Assert.IsTrue(alerts.All(a => a.Link == "/integrity" && a.Title.Contains("5")));
 
             // the same break found again does not pile up alerts
-            Assert.AreEqual("Broken", FinanceTestSupport.Ok(await Run(host, Pmo1, "full")).Status);
+            Assert.AreEqual("Broken", (await RunFull(host, Pmo1)).Status);
             Assert.AreEqual(3, host.Read(uow => uow.Set<OfInboxItem>().Count(i => i.SourceKey.StartsWith("integrity:break"))));
 
             IntegritySummaryDto summary = FinanceTestSupport.Ok(await host.As(Pmo1, sp => sp.GetRequiredService<IAuditIntegrityService>().GetSummaryAsync(CancellationToken.None)));
@@ -230,7 +243,7 @@ namespace MsTests
             SaveRecord(host, "QIR-1405-00031");
             AuditChainRunDto next = await host.AsSystem(sp => sp.GetRequiredService<IAuditIntegrityService>().RunScheduledAsync(at.AddDays(1), CancellationToken.None));
             Assert.AreEqual("Incremental", next.Kind);
-            Assert.AreEqual(1, next.EntriesChecked);
+            Assert.AreEqual(2, next.EntriesChecked, "the entry of the first run and the new record");
             // Friday: the weekly full pass
             DateTime friday0 = DateTime.Today.AddDays(2);
             while (friday0.DayOfWeek != DayOfWeek.Friday) friday0 = friday0.AddDays(1);
@@ -448,7 +461,7 @@ namespace MsTests
             Assert.AreEqual(dev.Deviations, dev.Items.Count);
             Assert.IsTrue(dev.Total >= dev.Deviations);
             Assert.IsFalse(dev.Items.Any(i => i.Key == "EnforcePurchaseOrder"), "the default is on, as strict");
-            Assert.IsTrue(dev.Items.Any(i => i.Key == "BomSignatures:DistinctReviewers"), "the default stays off until the transition ends (D13 is set by Package 8)");
+            Assert.IsFalse(dev.Items.Any(i => i.Key == "BomSignatures:DistinctReviewers"), "the default is on since D13 (Package 8), as strict");
 
             List<SafetyItemDto> profile = FinanceTestSupport.Ok(await host.As(Pmo1, sp => sp.GetRequiredService<ISafetySettingsService>().GetProfileAsync(CancellationToken.None)));
             Assert.IsTrue(profile.Count >= dev.Items.Count);
@@ -469,7 +482,7 @@ namespace MsTests
             Assert.IsFalse(off.Success);
             StringAssert.Contains(off.Message, "پروفایل سخت‌گیرانه");
             Assert.IsTrue((await host.As(Pmo1, sp => sp.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = "EnforcePurchaseOrder", Value = 1 }, CancellationToken.None))).Success);
-            Assert.IsTrue((await host.As(Pmo1, sp => sp.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = "PettyCashLimit", Value = 1000 }, CancellationToken.None))).Success, "an ordinary setting is saved as before");
+            Assert.IsTrue((await host.As(Pmo1, sp => sp.GetRequiredService<IProcurementService>().SaveSettingAsync(new ProcurementSettingDto { Key = "MaxAdvancePercent", Value = 20 }, CancellationToken.None))).Success, "an ordinary setting is saved as before");
 
             // with the second person it works
             SafetyChangeDto request = FinanceTestSupport.Ok(await Request(host, Pmo1, "Procurement", "EnforcePurchaseOrder", "0", "راه‌اندازی اولیه انبار"));

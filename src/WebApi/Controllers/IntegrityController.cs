@@ -23,11 +23,33 @@ namespace WebApi.Controllers
         private readonly IAuditIntegrityService _integrity;
         private readonly IRestoreTestService _restore;
 
-        public IntegrityController(IAuditIntegrityService integrity, IRestoreTestService restore)
+        private readonly IChainBreakAcceptanceService _accept;
+
+        public IntegrityController(IAuditIntegrityService integrity, IRestoreTestService restore, IChainBreakAcceptanceService accept)
         {
             _integrity = integrity;
             _restore = restore;
+            _accept = accept;
         }
+
+        /// <summary>One run (the page polls a full pass that was queued until its status is no longer Running).</summary>
+        [HttpGet("chain/runs/{id:int}")]
+        public async Task<IActionResult> RunAsync(int id, CancellationToken ct) => Ok(await _integrity.GetRunAsync(id, ct));
+
+        /// <summary>The requests of «پذیرش شکست شناخته‌شده», newest first.</summary>
+        [HttpGet("acceptances")]
+        public async Task<IActionResult> AcceptancesAsync([FromQuery] PaginationParams query, CancellationToken ct) => Ok((await _accept.GetAsync(query, ct)).ToPaginatedResultSafe());
+
+        /// <summary>QA, PMO or CEO: asks to accept the last known break (reason required).</summary>
+        [HttpPost("acceptances")]
+        public async Task<IActionResult> RequestAcceptanceAsync([FromBody] ChainBreakAcceptanceRequestDto dto, CancellationToken ct) => Ok(await _accept.RequestAsync(dto, ct));
+
+        /// <summary>One of the three signatures (QA, PMO, CEO: three distinct persons). The third one applies the acceptance.</summary>
+        [HttpPost("acceptances/sign")]
+        public async Task<IActionResult> SignAcceptanceAsync([FromBody] ChainBreakAcceptanceSignDto dto, CancellationToken ct) => Ok(await _accept.SignAsync(dto, ct));
+
+        [HttpPost("acceptances/{id:int}/cancel")]
+        public async Task<IActionResult> CancelAcceptanceAsync(int id, CancellationToken ct) => Ok(await _accept.CancelAsync(id, ct));
 
         /// <summary>The two lights: the audit chain and the restore test (last successful restore test, red after 35 days).</summary>
         [HttpGet("summary")]

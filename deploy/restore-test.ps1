@@ -7,7 +7,7 @@
     Run by the scheduled task "INNCO monthly restore test" that install.ps1 creates (as SYSTEM, on day 1 of every month at 03:00).
     The program's application pool must not hold sysadmin, so the test runs here and the program only READS the result file.
 
-      1. takes the newest full backup in <BackupFolder>\database (x.bak, or x.bak.enc: it is decrypted with the key of backup-crypto.ps1 into a work folder first);
+      1. takes the newest full backup in <BackupFolder>\database (x.bak, or x.bak.enc: it is decrypted with the key of backup-crypto.ps1 into <BackupFolder>\restore-work first, a folder only Administrators, SYSTEM and the SQL Server service can open);
       2. restores it into the scratch database IRNNCO_RESTORETEST (never the live database; the scratch name is checked);
       3. checks: the migration history of the restored database is in the live database and the restored database has no migration the live one lacks;
          the row counts of the key tables (a table with rows in the live database has rows in the restored one); the audit chain of the restored database:
@@ -68,26 +68,42 @@ $checks = New-Object System.Collections.Generic.List[object]
 $counts = [ordered]@{}
 $result = [ordered]@{
     runId = $runId; startedAt = $started.ToString('o'); finishedAt = $null; success = $false; backupFile = $null; backupTakenAt = $null
-    migrationsMatch = $false; chainOk = $false; chainEntriesChecked = 0; scratchDropped = $false; rowCounts = $counts; checks = $checks; message = $null
+    workFolder = $workRoot; migrationsMatch = $false; chainOk = $false; chainEntriesChecked = 0; scratchDropped = $false; rowCounts = $counts; checks = $checks; message = $null
 }
 function Add-Check([string]$Name, [bool]$Passed, [string]$Detail) {
     $checks.Add([ordered]@{ name = $Name; passed = $Passed; detail = $Detail })
     Write-Log ("  check {0}: {1} {2}" -f $Name, $(if ($Passed) { 'OK' } else { 'FAILED' }), $Detail)
 }
 
-$work = Join-Path $ResultDirectory ('work-' + $runId)
+# Fix round (M1): the decrypted copy of the backup holds all the data of the company. It is NOT put in the result folder (which the program may read) but in <BackupFolder>\restore-work, which only
+# Administrators, SYSTEM and the SQL Server service account can open; whatever a killed earlier run left there is removed first.
+$workRoot = Join-Path $BackupFolder 'restore-work'
+function Initialize-WorkRoot {
+    New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+    $args2 = @($workRoot, '/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
+    try {
+        $inst = if ($SqlServer.Contains('\')) { $SqlServer.Split('\')[1] } else { 'MSSQLSERVER' }
+        $svc = Get-CimInstance Win32_Service -Filter ("Name = '" + $(if ($inst -eq 'MSSQLSERVER') { 'MSSQLSERVER' } else { 'MSSQL$' + $inst }) + "'") -ErrorAction Stop
+        if ($svc -and $svc.StartName -and $svc.StartName -ne 'LocalSystem') { $args2 += ($svc.StartName + ':(OI)(CI)M') }
+    } catch { }
+    $null = & icacls.exe @args2 '/Q' 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "The work folder $workRoot could not be restricted (icacls exit $LASTEXITCODE)." }
+    Get-ChildItem -Path $workRoot -Force -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$work = Join-Path $workRoot ('work-' + $runId)
 $scratchCreated = $false
 $exit = 0
 try {
     Write-Log "Restore test $runId starts (live database $DatabaseName, scratch database $ScratchName)."
     $dbFolder = Join-Path $BackupFolder 'database'
     $backup = Get-ChildItem -Path $dbFolder -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "${DatabaseName}_*" -and ($_.Name -like '*.bak' -or $_.Name -like '*.bak.enc') -and $_.Name -notlike '*before-restore*' -and $_.Name -notlike '*before-update*' } |
+        Where-Object { Test-RegularBackupName $_.Name $DatabaseName } |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $backup) { throw [System.InvalidOperationException]::new("No full backup of $DatabaseName in $dbFolder.") }
     $result.backupFile = $backup.Name
     Write-Log "Latest backup: $($backup.Name) ($([math]::Round($backup.Length / 1MB, 1)) MB)"
 
+    Initialize-WorkRoot
     New-Item -ItemType Directory -Force -Path $work | Out-Null
     $bak = $backup.FullName
     if ($backup.Name.EndsWith('.enc', [StringComparison]::OrdinalIgnoreCase)) {

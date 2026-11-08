@@ -245,7 +245,7 @@ namespace MsTests
                 uow.Set<FnEmployeeWage>().Add(wage);
                 uow.SaveChanges();
 
-                FnAuditLog loanRow = Trail(uow, "FnEmployeeLoan").Last(a => a.Action == "Added" && a.EntityId == null);
+                FnAuditLog loanRow = Trail(uow, "FnEmployeeLoan").Last(a => a.Action == "Added");
                 Assert.IsFalse(loanRow.AfterJson.Contains("5000000") || loanRow.AfterJson.Contains("500000"));
                 Assert.IsFalse(loanRow.AfterJson.Contains(title), "the title of a loan may name the purpose: a marker");
                 Assert.IsFalse(loanRow.AfterJson.Contains("Hash"), "no hashes of the amounts");

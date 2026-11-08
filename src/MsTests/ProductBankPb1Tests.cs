@@ -158,7 +158,6 @@ namespace MsTests
         public async Task Signatures_AreDistinctUsers_InOrder_WithTheRightRoles()
         {
             AppHost host = NewHost("sign");
-            Assert.IsFalse((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DistinctReviewers, Value = "true" }, Ct))).Success, "Package D: the setting changes only with a second person");
             SafetyTestSupport.SetProductBank(host, PbSettingKeys.DistinctReviewers, "true");
             var saved = await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().SaveAsync(Bom(Line(1, "99.11.01.001.2", "Wheel case", 1)), Ct));
             await Run(host, Eng1, p => p.GetRequiredService<IPbBomService>().SubmitAsync(new PbBomActionDto { Id = saved.Data.Id }, Ct));
@@ -629,7 +628,7 @@ namespace MsTests
             Assert.IsTrue((await Run(host, Qc, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.QcChecked }, Ct))).Success);
             Assert.IsTrue((await Run(host, Shop, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.ManufacturingChecked }, Ct))).Success);
             Assert.IsFalse((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success, "CEO decision D13: by default the same person cannot sign two blocks");
-            Assert.IsTrue((await Run(host, Plan1, p => p.GetRequiredService<IPbCodingService>().SaveSettingAsync(new SavePbSettingDto { Key = PbSettingKeys.DistinctReviewers, Value = "false" }, Ct))).Success);
+            SafetyTestSupport.SetProductBank(host, PbSettingKeys.DistinctReviewers, "false");   // Package D: a registered setting changes by the two-person request; the test writes the row as an installation would have it
             Assert.IsTrue((await Run(host, Eng2, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = id, Step = PbBomSignature.Approved }, Ct))).Success, "with the setting switched off the same person may sign two blocks");
             var prep = AppHost.Principal(11, "engineer.one", "ENGINEERING", "PMO");
             Assert.IsFalse((await Run(host, prep, p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = id }, Ct))).Success, "the preparer never releases, whatever the setting");

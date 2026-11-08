@@ -16,6 +16,8 @@ using Entities.Model.NasbNiro.Procurement;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Ai;
+using Services.NasbNiro.Sales;
+using Entities.Model.NasbNiro.Sales;
 using Services.NasbNiro.Finance;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Office;
@@ -40,6 +42,9 @@ namespace Services.NasbNiro.Integrity
         Task<ResponseDto<SafetyChangeDto>> DecideAsync(SafetyDecisionDto dto, CancellationToken ct);
         Task<ResponseDto<SafetyChangeDto>> CancelAsync(int id, CancellationToken ct);
         Task<ResponseDto<PagedList<SafetyChangeDto>>> GetChangesAsync(SafetyChangeQuery query, CancellationToken ct);
+
+        /// <summary>The background step (M4, M5): closes the requests nobody decided within 72 hours, and tells the CEO about a seat that was switched off at once and was not confirmed within 24 hours.</summary>
+        Task SweepAsync(CancellationToken ct);
     }
 
     /// <summary>
@@ -56,9 +61,11 @@ namespace Services.NasbNiro.Integrity
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly INotificationService _notify;
+        private readonly IAiAudit _aiAudit;
 
-        public SafetySettingsService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify)
+        public SafetySettingsService(IUnitOfWork uow, IInventoryUserContext user, INotificationService notify, IAiAudit aiAudit = null)
         {
+            _aiAudit = aiAudit;
             _uow = uow;
             _user = user;
             _notify = notify;
@@ -72,6 +79,7 @@ namespace Services.NasbNiro.Integrity
             {
                 case SafetyStore.ProjectControl: return "PMO,CEO";
                 case SafetyStore.ProductBank: return PbRoles.Planning + ",CEO";
+                case SafetyStore.Sales: return "CEO,PMO";
                 case SafetyStore.Procurement: return ProcurementRolesText + ",CEO";
                 case SafetyStore.Finance: return FinanceRoles.Managers + ",CEO";
                 case SafetyStore.Quality: return QualityRoles.Audit + ",CEO";
@@ -113,6 +121,7 @@ namespace Services.NasbNiro.Integrity
                 case SafetyStore.Procurement: foreach (var r in (await _uow.Set<ProcurementSetting>().AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))) result[r.Key] = N(r.Value); break;
                 case SafetyStore.Finance: foreach (var r in (await _uow.Set<FnSetting>().AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))) if (r.Value != null) result[r.Key] = r.Value; break;
                 case SafetyStore.Quality: foreach (var r in (await _uow.Set<QualitySetting>().AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))) result[r.Key] = N(r.Value); break;
+                case SafetyStore.Sales: foreach (var r in (await _uow.Set<SlSetting>().AsNoTracking().Where(x => !x.Deleted).OrderBy(x => x.Id).ToListAsync(ct))) if (r.Value != null) result[r.Key] = N(r.Value.Value); break;
                 case SafetyStore.AiSeat: foreach (var r in (await _uow.Set<AiSeat>().AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))) result[r.Code] = r.Enabled ? "1" : "0"; break;
             }
             return result;
@@ -122,7 +131,7 @@ namespace Services.NasbNiro.Integrity
         {
             var items = new List<SafetyItemDto>();
             List<SafetySettingSpec> specs = SafetyProfile.All().ToList();
-            var pending = await _uow.Set<SafetySettingChange>().AsNoTracking().Where(c => c.Status == SafetyChangeStatus.Pending).ToListAsync(ct);
+            var pending = await _uow.Set<SafetySettingChange>().AsNoTracking().Where(c => c.Status == SafetyChangeStatus.Pending || c.Status == SafetyChangeStatus.AppliedAwaitingConfirmation).ToListAsync(ct);
             foreach (SafetyStore store in specs.Select(s => s.Store).Distinct())
             {
                 Dictionary<string, string> defaults = Defaults(store);
@@ -138,10 +147,10 @@ namespace Services.NasbNiro.Integrity
                         if (!keys.Add(key)) continue;
                         string current = stored.TryGetValue(key, out string sv) ? sv : defaults.TryGetValue(key, out string dv) ? dv : null;
                         if (current == null && !spec.Key.Contains('*') && !defaults.ContainsKey(key) && !stored.ContainsKey(key)) continue;   // a registered key this installation does not have
-                        bool deviates = current != null && !SafetyProfile.SameValue(current, spec.Strict);
+                        bool deviates = current != null && spec.Strict != null && !SafetyProfile.SameValue(current, spec.Strict);
                         items.Add(new SafetyItemDto
                         {
-                            Store = StoreName(store), Key = key, Title = spec.Key.Contains('*') && store == SafetyStore.AiSeat ? "صندلی هوش مصنوعی " + key + ": فعال بماند" : spec.Title, Strict = spec.Strict, Current = current,
+                            Store = StoreName(store), Key = key, Title = spec.Key.Contains('*') && store == SafetyStore.AiSeat ? "صندلی هوش مصنوعی " + key + ": فعال بماند" : spec.Title, Strict = spec.Strict ?? "-", Current = current,
                             Deviates = deviates, Weaker = deviates && SafetyProfile.IsWeaker(spec, current), Note = spec.Note,
                             PendingRequestId = pending.Where(p => p.Store == store && string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)).Select(p => (int?)p.Id).FirstOrDefault(),
                         });
@@ -174,12 +183,52 @@ namespace Services.NasbNiro.Integrity
             return AiSeatNames.IsSeatUser(name);
         }
 
+        private static string RolesOfKey(SafetyStore store, string key)
+        {
+            if (store == SafetyStore.ProductBank && string.Equals(key, "DemoData:Enabled", StringComparison.OrdinalIgnoreCase)) return PbRoles.Admin + ",CEO";   // the module reserves the demo-data switch to the admin of the system
+            return RequestRoles(store);
+        }
+
+        /// <summary>
+        /// The checks of the module that owns the setting, made at the request AND again at the approval (M5): the range of a quality setting and the order of the thresholds (a block threshold above the warning one).
+        /// Null when the value is acceptable, else the Persian reason.
+        /// </summary>
+        private async Task<string> ModuleCheckAsync(SafetyStore store, string key, string value, CancellationToken ct)
+        {
+            if (store != SafetyStore.Quality) return null;
+            QualitySetting def = QualitySettingKeys.Defaults().FirstOrDefault(d => d.Key == key);
+            if (def == null) return "تنظیم نامعتبر است.";
+            if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal number)) return "مقدار باید عدد باشد.";
+            string range = QualitySettingRules.Check(key, def.Title, number);
+            if (range != null) return range;
+            Dictionary<string, decimal> all = new Dictionary<string, decimal>(await QualitySettingKeys.LoadAsync(_uow, ct)) { [key] = number };
+            return QualitySettingRules.CheckRelations(all);
+        }
+
+        private async Task<string> CurrentAsync(SafetyStore store, string key, CancellationToken ct)
+        {
+            Dictionary<string, string> stored = await StoredAsync(store, ct);
+            return stored.TryGetValue(key, out string sv) ? sv : Defaults(store).TryGetValue(key, out string dv) ? dv : null;
+        }
+
+        private async Task NotifySecondPersonAsync(SafetySettingChange row, SafetySettingSpec spec, string title, CancellationToken ct)
+        {
+            // the requester is not told to approve his own request
+            List<int> users = await RoleUsers.IdsAsync(_uow, Approvers, row.RequestedByUserId, ct);
+            await _notify.NotifyAsync(new NotifyRequest
+            {
+                SourceKey = "safety:" + row.Id, Module = "integrity", SourceType = "SafetySettingChange", SourceId = row.Id, Link = "/integrity/safety", Title = title,
+                Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Approval, Priority = Entities.Model.NasbNiro.Office.OfUrgency.Urgent,
+                UserIds = users, Roles = users.Count == 0 ? Approvers : null,   // no person found (a role without users): the role itself is told, so that the request is never lost
+            }, ct);
+        }
+
         public async Task<ResponseDto<SafetyChangeDto>> RequestAsync(SafetyRequestDto dto, CancellationToken ct)
         {
             if (dto == null || string.IsNullOrWhiteSpace(dto.Key) || string.IsNullOrWhiteSpace(dto.Store) || !Enum.TryParse(dto.Store.Trim(), true, out SafetyStore store)) return Bad<SafetyChangeDto>("تنظیم نامشخص است.");
-            if (!_user.IsInRole(RequestRoles(store))) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed);
-            if (await IsAiSeatUserAsync(_user.UserId, ct)) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed);
             string key = dto.Key.Trim();
+            if (!_user.IsInRole(RolesOfKey(store, key))) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed);
+            if (await IsAiSeatUserAsync(_user.UserId, ct)) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed);
             SafetySettingSpec spec = SafetyProfile.Find(store, key);
             if (spec == null) return Bad<SafetyChangeDto>("این تنظیم در پروفایل سخت‌گیرانه نیست و مستقیم از صفحه خودش تغییر می‌کند.");
             string reason = string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim();
@@ -188,32 +237,48 @@ namespace Services.NasbNiro.Integrity
             string value = SafetyProfile.Normalize(spec, dto.Value, out string error);
             if (value == null) return Bad<SafetyChangeDto>(error);
 
-            Dictionary<string, string> stored = await StoredAsync(store, ct);
-            string current = stored.TryGetValue(key, out string sv) ? sv : Defaults(store).TryGetValue(key, out string dv) ? dv : null;
+            await SweepAsync(ct);
+            string current = await CurrentAsync(store, key, ct);
             if (current == null) return ResponseDtoHelper.NotFound<SafetyChangeDto>("تنظیم پیدا نشد.");
             if (SafetyProfile.SameValue(current, value)) return Bad<SafetyChangeDto>("مقدار تازه با مقدار فعلی یکی است.");
-            if (await _uow.Set<SafetySettingChange>().AnyAsync(c => c.Store == store && c.Key == key && c.Status == SafetyChangeStatus.Pending, ct))
-                return Bad<SafetyChangeDto>("برای این تنظیم درخواست در انتظار تایید هست؛ ابتدا آن را تایید، رد یا لغو کنید.");
+            string moduleError = await ModuleCheckAsync(store, key, value, ct);
+            if (moduleError != null) return Bad<SafetyChangeDto>(moduleError);
+            if (await _uow.Set<SafetySettingChange>().AnyAsync(c => c.Store == store && c.Key == key && (c.Status == SafetyChangeStatus.Pending || c.Status == SafetyChangeStatus.AppliedAwaitingConfirmation), ct))
+                return Bad<SafetyChangeDto>("برای این تنظیم یک درخواست باز هست؛ ابتدا آن را تایید، رد یا لغو کنید.");
 
+            bool weakerNow = SafetyProfile.IsWeaker(spec, value), weakerBefore = SafetyProfile.IsWeaker(spec, current);
+            DateTimeOffset now = DateTimeOffset.Now;
             var row = new SafetySettingChange
             {
-                Store = store, Key = key, OldValue = current, NewValue = value, Reason = reason, RequestedByUserId = _user.UserId, RequestedAt = DateTimeOffset.Now, Status = SafetyChangeStatus.Pending,
-                Weakening = SafetyProfile.IsWeaker(spec, value) && !SafetyProfile.IsWeaker(spec, current) || (SafetyProfile.IsWeaker(spec, value) && SafetyProfile.IsWeaker(spec, current) && WorseThan(spec, value, current)),
+                Store = store, Key = key, OldValue = current, NewValue = value, Reason = reason, RequestedByUserId = _user.UserId, RequestedAt = now, Status = SafetyChangeStatus.Pending,
+                Weakening = (weakerNow && !weakerBefore) || (weakerNow && weakerBefore && WorseThan(spec, value, current)) || (spec.Strict == null && WorseThan(spec, value, current)),
             };
+
+            // M4: a drafting seat (it writes a brief or a draft, it checks nothing) may be switched OFF at once by one PMO or CEO user with a reason; a second person confirms within 24 hours.
+            // Switching ON, loosening and any seat that is itself a control (OPS-DATA, FIN-ANOMALY, the internal auditor) always need two persons.
+            if (store == SafetyStore.AiSeat && SafetyProfile.IsDraftingSeat(key) && value == "0")
+            {
+                row.Status = SafetyChangeStatus.AppliedAwaitingConfirmation;
+                row.AppliedAt = now;
+                row.ConfirmDueAt = now + SafetyProfile.SeatOffConfirmWithin;
+                _uow.Set<SafetySettingChange>().Add(row);
+                if (!await ApplyAsync(store, key, value, ct)) { _uow.Entry(row).State = EntityState.Detached; return Bad<SafetyChangeDto>("صندلی پیدا نشد."); }
+                await _uow.SaveChangesAsync(ct);
+                await CloseSeatAlertAsync(key, ct);
+                await NotifySecondPersonAsync(row, spec, "تایید خاموش‌شدن فوری صندلی هوش مصنوعی «" + key + "» تا " + SafetyProfile.SeatOffConfirmWithin.TotalHours.ToString("0", CultureInfo.InvariantCulture) + " ساعت (دلیل: " + (reason.Length > 120 ? reason.Substring(0, 120) : reason) + ")", ct);
+                return ResponseDtoHelper.Ok(await ToDtoAsync(row, ct));
+            }
+
             _uow.Set<SafetySettingChange>().Add(row);
             await _uow.SaveChangesAsync(ct);
-            await _notify.NotifyAsync(new NotifyRequest
-            {
-                SourceKey = "safety:" + row.Id, Module = "integrity", SourceType = "SafetySettingChange", SourceId = row.Id, Link = "/integrity/safety",
-                Title = "تایید تغییر تنظیم امنیتی «" + (spec.Key.Contains('*') ? key : spec.Title) + "» از " + current + " به " + value + " (دلیل: " + (reason.Length > 120 ? reason.Substring(0, 120) : reason) + ")",
-                Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Approval, Priority = Entities.Model.NasbNiro.Office.OfUrgency.Urgent, Roles = Approvers,
-            }, ct);
+            await NotifySecondPersonAsync(row, spec, "تایید تغییر تنظیم امنیتی «" + (spec.Key.Contains('*') ? key : spec.Title) + "» از " + current + " به " + value + " (دلیل: " + (reason.Length > 120 ? reason.Substring(0, 120) : reason) + ")", ct);
             return ResponseDtoHelper.Ok(await ToDtoAsync(row, ct));
         }
 
         private static bool WorseThan(SafetySettingSpec spec, string value, string than)
         {
             if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal a) || !decimal.TryParse(than, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal b)) return false;
+            if (spec.Kind == SafetyKind.ThresholdZeroOff) return (a == 0 && b != 0) || (a != 0 && b != 0 && a > b);
             return spec.Kind == SafetyKind.NumberAtMost || spec.Kind == SafetyKind.FlagMustBeOff ? a > b : a < b;
         }
 
@@ -223,27 +288,51 @@ namespace Services.NasbNiro.Integrity
             if (!_user.IsInRole(Approvers)) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed + " (تایید با PMO یا مدیرعامل است)");
             SafetySettingChange row = await _uow.Set<SafetySettingChange>().FirstOrDefaultAsync(c => c.Id == dto.Id, ct);
             if (row == null) return ResponseDtoHelper.NotFound<SafetyChangeDto>("درخواست پیدا نشد.");
-            if (row.Status != SafetyChangeStatus.Pending) return Bad<SafetyChangeDto>("درخواست قبلاً تعیین تکلیف شده است.");
+            if (row.Status != SafetyChangeStatus.Pending && row.Status != SafetyChangeStatus.AppliedAwaitingConfirmation) return Bad<SafetyChangeDto>("درخواست قبلاً تعیین تکلیف شده است.");
             if (row.RequestedByUserId == _user.UserId) return Bad<SafetyChangeDto>(SameUser);
             if (await IsAiSeatUserAsync(_user.UserId, ct)) return ResponseDtoHelper.Forbidden<SafetyChangeDto>(NotAllowed + " (هوش مصنوعی تایید نمی‌کند)");
             string note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim();
             if (!dto.Approve && note == null) return Bad<SafetyChangeDto>("برای رد درخواست دلیل را بنویسید.");
             if (note != null && note.Length > 1000) note = note.Substring(0, 1000);
 
+            if (row.Status == SafetyChangeStatus.Pending && DateTimeOffset.Now - row.RequestedAt > SafetyProfile.RequestExpiresAfter)
+            {
+                await SweepAsync(ct);
+                return Bad<SafetyChangeDto>("مهلت تصمیم‌گیری درخواست (۷۲ ساعت) گذشته و درخواست بسته شد؛ در صورت نیاز دوباره درخواست دهید.");
+            }
+
             row.DecidedByUserId = _user.UserId;
             row.DecidedAt = DateTimeOffset.Now;
             row.DecisionNote = note;
-            if (dto.Approve)
+            if (row.Status == SafetyChangeStatus.AppliedAwaitingConfirmation)
+            {
+                // the seat is already off: confirming keeps it so; rejecting switches it on again (the safe direction, so one person is enough)
+                if (dto.Approve) row.Status = SafetyChangeStatus.Approved;
+                else
+                {
+                    if (!await ApplyAsync(row.Store, row.Key, "1", ct)) return Bad<SafetyChangeDto>("صندلی پیدا نشد.");
+                    row.Status = SafetyChangeStatus.Rejected;
+                }
+            }
+            else if (dto.Approve)
             {
                 SafetySettingSpec spec = SafetyProfile.Find(row.Store, row.Key);
                 string value = spec == null ? null : SafetyProfile.Normalize(spec, row.NewValue, out string _);
+                // the value may have been changed by another way since the request (M5): then the request no longer describes the change and is not applied
+                string nowValue = await CurrentAsync(row.Store, row.Key, ct);
+                if (nowValue == null || !SafetyProfile.SameValue(nowValue, row.OldValue))
+                    return Bad<SafetyChangeDto>("مقدار تنظیم پس از ثبت درخواست تغییر کرده است (اکنون " + (nowValue ?? "-") + ")؛ درخواست را لغو کنید و دوباره ثبت کنید.");
+                string moduleError = value == null ? null : await ModuleCheckAsync(row.Store, row.Key, value, ct);
+                if (moduleError != null) return Bad<SafetyChangeDto>(moduleError);
                 if (value == null || !await ApplyAsync(row.Store, row.Key, value, ct)) return Bad<SafetyChangeDto>("تنظیم دیگر وجود ندارد یا مقدار آن معتبر نیست؛ درخواست اعمال نشد.");
                 row.Status = SafetyChangeStatus.Approved;
                 row.AppliedAt = DateTimeOffset.Now;
             }
             else row.Status = SafetyChangeStatus.Rejected;
             await _uow.SaveChangesAsync(ct);
+            if (row.Store == SafetyStore.AiSeat && row.Status == SafetyChangeStatus.Approved && row.NewValue == "0") await CloseSeatAlertAsync(row.Key, ct);
             await _notify.CloseAsync("safety:" + row.Id, dto.Approve ? "تایید شد" : "رد شد", ct);
+            await _notify.CloseAsync("safety-late:" + row.Id, dto.Approve ? "تایید شد" : "رد شد", ct);
             return ResponseDtoHelper.Ok(await ToDtoAsync(row, ct));
         }
 
@@ -259,6 +348,32 @@ namespace Services.NasbNiro.Integrity
             await _uow.SaveChangesAsync(ct);
             await _notify.CloseAsync("safety:" + row.Id, "لغو شد", ct);
             return ResponseDtoHelper.Ok(await ToDtoAsync(row, ct));
+        }
+
+        public async Task SweepAsync(CancellationToken ct)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            DateTimeOffset limit = now - SafetyProfile.RequestExpiresAfter;
+            List<SafetySettingChange> old = await _uow.Set<SafetySettingChange>().Where(c => c.Status == SafetyChangeStatus.Pending && c.RequestedAt < limit).ToListAsync(ct);
+            foreach (SafetySettingChange c in old) { c.Status = SafetyChangeStatus.Expired; c.DecidedAt = now; c.DecisionNote = "مهلت ۷۲ ساعته تصمیم‌گیری گذشت؛ چیزی اعمال نشد."; }
+            List<SafetySettingChange> late = await _uow.Set<SafetySettingChange>().Where(c => c.Status == SafetyChangeStatus.AppliedAwaitingConfirmation && c.ConfirmDueAt < now && c.FlaggedAt == null).ToListAsync(ct);
+            foreach (SafetySettingChange c in late) c.FlaggedAt = now;
+            if (old.Count + late.Count == 0) return;
+            await _uow.SaveChangesAsync(ct);
+            foreach (SafetySettingChange c in old) await _notify.CloseAsync("safety:" + c.Id, "مهلت گذشت", ct);
+            foreach (SafetySettingChange c in late)
+                await _notify.NotifyAsync(new NotifyRequest
+                {
+                    SourceKey = "safety-late:" + c.Id, Module = "integrity", SourceType = "SafetySettingChange", SourceId = c.Id, Link = "/integrity/safety", Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert,
+                    Title = "صندلی هوش مصنوعی «" + c.Key + "» با تصمیم یک نفر خاموش شد و نفر دوم تا مهلت ۲۴ ساعته آن را تایید نکرد.", Priority = Entities.Model.NasbNiro.Office.OfUrgency.Urgent, Roles = "CEO",
+                }, ct);
+        }
+
+        private async Task CloseSeatAlertAsync(string code, CancellationToken ct)
+        {
+            // a seat that is switched off raises no alert: the one of its last failure is closed (as the switch of the seats page does)
+            try { await _notify.CloseAsync("ai-seat:" + code, "صندلی غیرفعال شد.", ct); }
+            catch (Exception) { /* the switch is saved; a stuck alert is closed by the next success */ }
         }
 
         /// <summary>Writes the approved value into the table of its store (the same rows the save endpoints of the modules write).</summary>
@@ -327,7 +442,16 @@ namespace Services.NasbNiro.Integrity
                 {
                     AiSeat seat = await _uow.Set<AiSeat>().FirstOrDefaultAsync(r => r.Code == key, ct);
                     if (seat == null) return false;
-                    seat.Enabled = number >= 1;
+                    bool enable = number >= 1;
+                    if (seat.Enabled != enable) _aiAudit?.Add(AiAuditKinds.Admin, "seat " + seat.Code + " " + (enable ? "enabled" : "disabled") + " by a safety change", seatCode: seat.Code);
+                    seat.Enabled = enable;
+                    return true;
+                }
+                case SafetyStore.Sales:
+                {
+                    SlSetting row = await _uow.Set<SlSetting>().FirstOrDefaultAsync(r => r.Key == key && !r.Deleted, ct);
+                    if (row == null) return false;
+                    row.Value = number; row.ModifyDate = DateTimeOffset.Now; row.ModifierUserId = _user.UserId;
                     return true;
                 }
                 default: return false;
@@ -360,7 +484,7 @@ namespace Services.NasbNiro.Integrity
             {
                 Id = r.Id, Store = r.Store.ToString(), Key = r.Key, Title = spec == null || spec.Key.Contains('*') ? r.Key : spec.Title, OldValue = r.OldValue, NewValue = r.NewValue, Weakening = r.Weakening, Reason = r.Reason,
                 RequestedByUserId = r.RequestedByUserId, RequestedByName = names.Name(r.RequestedByUserId), RequestedAtText = AuditIntegrityService.StampText(r.RequestedAt),
-                Status = r.Status.ToString(), StatusText = r.Status == SafetyChangeStatus.Pending ? "در انتظار تایید نفر دوم" : r.Status == SafetyChangeStatus.Approved ? "تایید و اعمال شد" : r.Status == SafetyChangeStatus.Rejected ? "رد شد" : "لغو شد",
+                Status = r.Status.ToString(), StatusText = r.Status == SafetyChangeStatus.AppliedAwaitingConfirmation ? "اعمال شد؛ در انتظار تایید نفر دوم" + (r.FlaggedAt.HasValue ? " (مهلت گذشته؛ به مدیرعامل اطلاع داده شد)" : "") : r.Status == SafetyChangeStatus.Expired ? "مهلت تصمیم‌گیری گذشت" : r.Status == SafetyChangeStatus.Pending ? "در انتظار تایید نفر دوم" : r.Status == SafetyChangeStatus.Approved ? "تایید و اعمال شد" : r.Status == SafetyChangeStatus.Rejected ? "رد شد" : "لغو شد",
                 DecidedByUserId = r.DecidedByUserId, DecidedByName = r.DecidedByUserId.HasValue ? names.Name(r.DecidedByUserId.Value) : null, DecidedAtText = r.DecidedAt.HasValue ? AuditIntegrityService.StampText(r.DecidedAt.Value) : null,
                 DecisionNote = r.DecisionNote, AppliedAtText = r.AppliedAt.HasValue ? AuditIntegrityService.StampText(r.AppliedAt.Value) : null,
             };

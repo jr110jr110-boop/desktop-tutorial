@@ -529,6 +529,7 @@ namespace DataLayer.Context
                     // items (imports) and ITP activities (copied from a template) are made in bulk; only the changes of their gates are listed
                     if (entry.Entity is Entities.Model.NasbNiro.Inventory.InventoryItem || entry.Entity is Entities.Model.NasbNiro.Quality.ItpActivity) continue;
                     if (PdSkipsInsert(entry.Entity)) continue;   // package D: the characteristics copied from an ITP template
+                    if (PdSummarisesInsert(entry.Entity)) continue;   // package D (fix round, M7): the serial numbers of a document are listed as one entry per document, see AddSerialSummaries
                     if (entry.Entity is MfTimeBooking tb && tb.Source == MfBookingSource.Terminal) continue;
                     // (R1a2, L9: the inserts of the schedule and the WBS nodes are listed too; a node made by the generator is as much a decision as an edit)
                     // the one-off linker of legacy contracts and tenders links them in bulk; a person's manual link is listed
@@ -577,14 +578,15 @@ namespace DataLayer.Context
                 if (only != null && before.Count == 0 && after.Count == 0) continue;
 
                 int? entityId = null;
-                if (entry.State != EntityState.Added)
+                bool lateKey = false;   // Package D (H1): a new record gets its key from the database; the entry is added with the real key right after the save
                 {
                     PropertyEntry idProperty = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "Id");
-                    if (idProperty != null && idProperty.CurrentValue is int idValue) entityId = idValue;
+                    if (idProperty != null && entry.State == EntityState.Added && idProperty.IsTemporary) lateKey = true;
+                    else if (idProperty != null && idProperty.CurrentValue is int idValue && idValue != 0) entityId = idValue;
                     else if (idProperty != null && idProperty.CurrentValue is long longId && longId > 0 && longId <= int.MaxValue) entityId = (int)longId;   // the clock events have a long key
                 }
 
-                context.Set<FnAuditLog>().Add(new FnAuditLog
+                var logRow = new FnAuditLog
                 {
                     EntityType = type.Name,
                     EntityId = entityId,
@@ -595,7 +597,9 @@ namespace DataLayer.Context
                     UserId = userId,
                     At = now,
                     Ip = ip,
-                });
+                };
+                context.Set<FnAuditLog>().Add(logRow);
+                if (lateKey) LateRows(context).Add(new LateAudit { Row = logRow, Entry = entry });
             }
 
             // R1a2 (L9): the lines of a cost baseline are written in bulk (hundreds at once). One summary row per baseline says how many lines were added, changed and removed
@@ -623,6 +627,7 @@ namespace DataLayer.Context
                     Ip = ip,
                 });
             }
+            AddSerialSummaries(context, audited, userId, ip, now);
         }
 
         private static readonly System.Globalization.PersianCalendar Persian = new System.Globalization.PersianCalendar();

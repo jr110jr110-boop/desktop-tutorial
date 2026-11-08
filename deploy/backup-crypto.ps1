@@ -194,3 +194,10 @@ function Unprotect-BackupFile([string]$Path, [byte[]]$Key, [string]$Destination)
     [PmisFileCrypto]::Decrypt($Path, $Destination, $Key)
     return $Destination
 }
+
+# Fix round (M2): the ONE rule that says which files in <BackupFolder>\database are regular full backups. The restore test uses it to pick the newest backup and the CI check (install-checks.ps1) uses it
+# to know which file the test must have used, so the two can never disagree. A safety copy made before an update (x_pre-update_...) or before a restore (x_before-restore_...) is not a regular backup.
+function Test-RegularBackupName([string]$Name, [string]$Database = '*') {
+    return ($Name -like "${Database}_*") -and ($Name -like '*.bak' -or $Name -like '*.bak.enc') -and
+           ($Name -notlike '*before-restore*') -and ($Name -notlike '*_pre-update_*') -and ($Name -notlike '*before-update*')
+}

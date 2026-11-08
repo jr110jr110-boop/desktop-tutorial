@@ -280,18 +280,31 @@ namespace DataLayer.Context
             }
         }
 
+        /// <summary>Package D (H1): audit rows of NEW records whose key the database generated in the first save. Called with the chain lock held, after the first save: adds the rows and seals them at the head.</summary>
+        internal static void PlaceLate(DbContext context, List<FnAuditLog> rows)
+        {
+            foreach (FnAuditLog row in rows) context.Set<FnAuditLog>().Add(row);
+            Place(rows, HeadQuery(context).FirstOrDefault(), KeyFrom(ConfigurationOf(context)));
+        }
+
+        internal static async Task PlaceLateAsync(DbContext context, List<FnAuditLog> rows, CancellationToken ct)
+        {
+            foreach (FnAuditLog row in rows) context.Set<FnAuditLog>().Add(row);
+            Place(rows, await HeadQuery(context).FirstOrDefaultAsync(ct), KeyFrom(ConfigurationOf(context)));
+        }
+
         /// <summary>
         /// Places the new audit rows of this save in the chain. Returns the scope that holds the chain lock (dispose it after the save), or null when there is nothing to place.
         /// </summary>
-        internal static Scope Begin(DbContext context)
+        internal static Scope Begin(DbContext context, bool hasLateRows = false)
         {
             List<FnAuditLog> rows = NewRows(context);
-            if (rows.Count == 0) return null;
+            if (rows.Count == 0 && !hasLateRows) return null;
             var scope = new Scope(context);
             try
             {
                 scope.Lock();
-                Place(rows, HeadQuery(context).FirstOrDefault(), KeyFrom(ConfigurationOf(context)));
+                if (rows.Count > 0) Place(rows, HeadQuery(context).FirstOrDefault(), KeyFrom(ConfigurationOf(context)));
                 return scope;
             }
             catch
@@ -301,15 +314,15 @@ namespace DataLayer.Context
             }
         }
 
-        internal static async Task<Scope> BeginAsync(DbContext context, CancellationToken ct)
+        internal static async Task<Scope> BeginAsync(DbContext context, CancellationToken ct, bool hasLateRows = false)
         {
             List<FnAuditLog> rows = NewRows(context);
-            if (rows.Count == 0) return null;
+            if (rows.Count == 0 && !hasLateRows) return null;
             var scope = new Scope(context);
             try
             {
                 await scope.LockAsync(ct);
-                Place(rows, await HeadQuery(context).FirstOrDefaultAsync(ct), KeyFrom(ConfigurationOf(context)));
+                if (rows.Count > 0) Place(rows, await HeadQuery(context).FirstOrDefaultAsync(ct), KeyFrom(ConfigurationOf(context)));
                 return scope;
             }
             catch

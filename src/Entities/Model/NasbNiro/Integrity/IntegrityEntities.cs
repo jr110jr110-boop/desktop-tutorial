@@ -22,6 +22,9 @@ namespace Entities.Model.NasbNiro.Integrity
 
         /// <summary>The check itself could not be done (database error, missing key).</summary>
         Error = 3,
+
+        /// <summary>Fix round (M8): a full pass queued to the background job that has not finished yet.</summary>
+        Running = 4,
     }
 
     /// <summary>
@@ -61,6 +64,9 @@ namespace Entities.Model.NasbNiro.Integrity
         public int? BreakRowId { get; set; }
         public string BreakEntityType { get; set; }
         public DateTimeOffset? BreakAt { get; set; }
+
+        /// <summary>Fix round (H1): for the break kind "record-drift", the column of the record that differs from the trail (BreakEntityType and BreakRowId are the record).</summary>
+        public string BreakColumn { get; set; }
 
         /// <summary>Persian text for the person: the result in a sentence, or the error.</summary>
         public string Message { get; set; }
@@ -110,6 +116,9 @@ namespace Entities.Model.NasbNiro.Integrity
 
         /// <summary>The key is the code of an AI seat; the value is 1 (enabled) or 0 (disabled).</summary>
         AiSeat = 6,
+
+        /// <summary>Fix round (M4): the settings of the sales module (the ceiling of a proposal the sales department approves by itself).</summary>
+        Sales = 7,
     }
 
     public enum SafetyChangeStatus
@@ -123,6 +132,12 @@ namespace Entities.Model.NasbNiro.Integrity
 
         /// <summary>The requester withdrew it.</summary>
         Cancelled = 3,
+
+        /// <summary>Fix round (M5): nobody decided within the time limit (72 hours); nothing was applied.</summary>
+        Expired = 4,
+
+        /// <summary>Fix round (M4): a drafting AI seat was switched OFF at once by one person; a second person has to confirm within 24 hours, otherwise the CEO is told.</summary>
+        AppliedAwaitingConfirmation = 5,
     }
 
     /// <summary>
@@ -151,5 +166,45 @@ namespace Entities.Model.NasbNiro.Integrity
         public DateTimeOffset? DecidedAt { get; set; }
         public string DecisionNote { get; set; }
         public DateTimeOffset? AppliedAt { get; set; }
+
+        /// <summary>Fix round (M4): for a change applied at once (a drafting seat switched off), the time by which a second person must confirm, and when the CEO was told that nobody did.</summary>
+        public DateTimeOffset? ConfirmDueAt { get; set; }
+        public DateTimeOffset? FlaggedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Fix round (H2): «پذیرش شکست شناخته‌شده». A known break of the chain (or a record that differs from its trail) that cannot be repaired is accepted by three distinct persons, the QA manager, the PMO and the CEO (CEO decision D12;
+    /// never an AI seat). The acceptance re-anchors the verification: the walk continues after the broken place from the hash the row carries at the moment of the acceptance (a break of a record is reconciled by a new trail entry
+    /// that records the current values). The acceptance is evidence and stays in the chain; nothing is deleted.
+    /// </summary>
+    public class ChainBreakAcceptance : BaseEntity
+    {
+        /// <summary>The run that found the break.</summary>
+        public int BreakRunId { get; set; }
+        public string BreakKind { get; set; }
+        public long? BreakSeq { get; set; }
+        public int? BreakRowId { get; set; }
+        public string BreakEntityType { get; set; }
+        public string BreakColumn { get; set; }
+
+        public string Reason { get; set; }
+        public int RequestedByUserId { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+
+        /// <summary>The three signatures (each a different person).</summary>
+        public int? QaUserId { get; set; }
+        public DateTimeOffset? QaAt { get; set; }
+        public int? PmoUserId { get; set; }
+        public DateTimeOffset? PmoAt { get; set; }
+        public int? CeoUserId { get; set; }
+        public DateTimeOffset? CeoAt { get; set; }
+
+        /// <summary>Pending, Approved (all three signed; applied) or Cancelled.</summary>
+        public SafetyChangeStatus Status { get; set; }
+        public DateTimeOffset? AppliedAt { get; set; }
+
+        /// <summary>The new start of the verification: the place and the seal of the row at the break, as they were when the third person signed (null for the break of a record).</summary>
+        public long? AnchorSeq { get; set; }
+        public string AnchorHash { get; set; }
     }
 }
