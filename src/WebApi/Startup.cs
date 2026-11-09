@@ -338,6 +338,9 @@ namespace WebApi
             loggerFactory
                 .AddDbLogger(serviceProvider: app.ApplicationServices, minLevel: LogLevel.Warning);
 
+            // P2 part D (review M1): with Remote:Enabled the open internet is refused here, before HSTS, the HTTPS redirect, Swagger and CORS answer anything
+            app.UseRemoteNetworkGate();
+
             if (!env.IsDevelopment())
             {
                 app.UseHsts();

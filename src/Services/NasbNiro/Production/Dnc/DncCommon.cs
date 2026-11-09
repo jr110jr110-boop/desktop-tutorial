@@ -150,8 +150,12 @@ namespace Services.NasbNiro.Production.Dnc
             if (revisionIds.Count == 0) return Pass;
             Dictionary<int, DateTimeOffset?> approvedAt = await uow.Set<MfNcRevision>().AsNoTracking().Where(r => revisionIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.ApprovedAt, ct);
             // every program written to this machine (on its way or there): a confirmation counts only while its file was not written over afterwards
-            List<MfDncRulesTransfer> written = await uow.Set<MfNcTransfer>().AsNoTracking()
-                .Where(t => !t.Deleted && t.MachineId == machine && t.Direction == MfNcTransferDirection.ToMachine
+            // only the files the current revisions were confirmed under matter (the query does not grow with the history of the machine)
+            List<string> names = await uow.Set<MfNcTransfer>().AsNoTracking()
+                .Where(t => !t.Deleted && t.MachineId == machine && t.Direction == MfNcTransferDirection.ToMachine && t.Status == MfNcTransferStatus.Confirmed && t.RevisionId != null && revisionIds.Contains(t.RevisionId.Value))
+                .Select(t => t.TargetName).Distinct().ToListAsync(ct);
+            List<MfDncRulesTransfer> written = names.Count == 0 ? new List<MfDncRulesTransfer>() : await uow.Set<MfNcTransfer>().AsNoTracking()
+                .Where(t => !t.Deleted && t.MachineId == machine && t.Direction == MfNcTransferDirection.ToMachine && names.Contains(t.TargetName)
                     && (t.Status == MfNcTransferStatus.Sending || t.Status == MfNcTransferStatus.Delivered || t.Status == MfNcTransferStatus.Confirmed))
                 .Select(t => new MfDncRulesTransfer { Id = t.Id, MachineId = t.MachineId, RevisionId = t.RevisionId, Status = t.Status, ConfirmedAt = t.ConfirmedAt, DeliveredAt = t.DeliveredAt, TargetName = t.TargetName })
                 .ToListAsync(ct);

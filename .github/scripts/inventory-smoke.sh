@@ -12651,12 +12651,12 @@ as "$FM_TOKEN" GET "$FAU?EntityType=MfNcRevision&EntityId=$DNCR1&PageSize=0"; ch
 # The plan counts exactly the released and started orders the order list shows; the step finished above (DNCOP) is in no queue; the seat's run reports the same late-risk count as the plan.
 as "$MOP_TOKEN" GET "$MF/dispatch/plan"; nomsg "mf-dispatch: an operator does not read the plan" "شما مجوز این کار را ندارید."
 as "$PLAN_TOKEN" GET "$MF/dispatch/plan?HorizonDays=61"; nomsg "mf-dispatch: a horizon over 60 days is refused" "افق برنامه بین ۱ و ۶۰ روز است."
-as "$PLAN_TOKEN" GET "$MF/orders?Status=1&PageSize=0"; MFDN1=$(val '.data.data|length')
-as "$PLAN_TOKEN" GET "$MF/orders?Status=2&PageSize=0"; MFDN2=$(val '.data.data|length')
+as "$PLAN_TOKEN" GET "$MF/orders?Status=1&PageSize=1"; check "mf-dispatch: the order list answers the count of released orders" '.success and (.data.totalItems|type) == "number"'; MFDN1=$(val '.data.totalItems')
+as "$PLAN_TOKEN" GET "$MF/orders?Status=2&PageSize=1"; check "mf-dispatch: the order list answers the count of started orders" '.success and (.data.totalItems|type) == "number"'; MFDN2=$(val '.data.totalItems')
 as "$PLAN_TOKEN" GET "$MF/dispatch/plan"; check "mf-dispatch: the plan counts the $((MFDN1 + MFDN2)) released and started orders, has no finished step in a queue and says it only proposes" ".success and .data.horizonDays == 10 and .data.openOrders == $((MFDN1 + MFDN2)) and $((MFDN1 + MFDN2)) > 0 and ([.data.centers[].queue[]|select(.operationId == $DNCOP)]|length) == 0 and (.data.method|contains(\"فقط پیشنهاد\"))"
 MFDLR=$(val '.data.lateRiskOperations')
 as "$MSV_TOKEN" GET "$MF/dispatch/floor"; check "mf-dispatch: the shop-floor overview has the four readings in order and is not a remote view" '.success and ([.data.tiles[].key]) == ["running","alarms","utilisation","late"] and .data.remote == false'
-airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: the run succeeded and reports the late-risk count of the plan" ".success and .data.status == 2 and .data.seatCode == \"MF-DISPATCH\" and (.data.outputs|contains(\"lateRisk=$MFDLR;\"))"
+airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: the first run of the day succeeded, reports the late-risk count of the plan and leaves at least the plan note" ".success and .data.status == 2 and .data.seatCode == \"MF-DISPATCH\" and (.data.outputs|contains(\"lateRisk=$MFDLR;\")) and (.data.outputs|test(\"notes=[1-9]\"))"
 airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: a second run of the same day leaves no new note" '.success and .data.status == 2 and (.data.outputs|endswith("notes=0"))'
 as "$PLAN_TOKEN" GET remote/status; check "remote access: switched off on the CI server and the caller is local" '.success and .data.enabled == false and .data.remote == false and .data.readOnly == false and .data.allowed == true'
 TOKEN=$ADMIN_TOKEN

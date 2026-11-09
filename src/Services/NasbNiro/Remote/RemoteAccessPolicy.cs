@@ -42,7 +42,11 @@ namespace Services.NasbNiro.Remote
 
         public const string ItemKey = "pmis.remote";
 
-        public static readonly string[] DefaultLan = { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" };
+        /// <summary>The private IPv4 ranges and the IPv6 link-local and unique-local ranges (Windows clients on the LAN often come by IPv6: review M3).</summary>
+        public static readonly string[] DefaultLan = { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10", "fc00::/7" };
+
+        /// <summary>The address that only reports the remote-access state of the caller: open to every VPN user, so a refused role learns why (review L7).</summary>
+        public const string StatusPath = "/api/v1/remote/status";
         public static readonly string[] DefaultRoles = { "CEO", "PRODUCTIONMANAGER", "SHOPSUPERVISOR", "PMO", "PLANNING", "MAINTENANCE" };
 
         public static readonly string[] DefaultWritePaths =
@@ -53,8 +57,25 @@ namespace Services.NasbNiro.Remote
 
         public bool Enabled { get; private set; }
         public bool ReadOnly { get; private set; } = true;
-        public IReadOnlyList<(uint Network, uint Mask)> Lan { get; private set; }
-        public IReadOnlyList<(uint Network, uint Mask)> Vpn { get; private set; }
+        public IReadOnlyList<Range> Lan { get; private set; }
+        public IReadOnlyList<Range> Vpn { get; private set; }
+
+        /// <summary>An IPv4 or IPv6 network with its prefix length.</summary>
+        public sealed class Range
+        {
+            public byte[] Network { get; init; }
+            public int Prefix { get; init; }
+
+            public bool Contains(byte[] address)
+            {
+                if (address.Length != Network.Length) return false;
+                int full = Prefix / 8, rest = Prefix % 8;
+                for (int i = 0; i < full; i++) if (address[i] != Network[i]) return false;
+                if (rest == 0) return true;
+                int mask = (0xFF << (8 - rest)) & 0xFF;
+                return (address[full] & mask) == (Network[full] & mask);
+            }
+        }
         public IReadOnlyList<string> Roles { get; private set; }
         public IReadOnlyList<string> WritePaths { get; private set; }
 
@@ -88,42 +109,56 @@ namespace Services.NasbNiro.Remote
             return list;
         }
 
-        private static List<(uint, uint)> Parse(IEnumerable<string> entries, List<string> problems)
+        private static List<Range> Parse(IEnumerable<string> entries, List<string> problems)
         {
-            var list = new List<(uint, uint)>();
+            var list = new List<Range>();
             foreach (string e in entries)
             {
-                if (TryCidr(e, out uint n, out uint m)) list.Add((n, m));
+                if (TryRange(e, out Range r)) list.Add(r);
                 else problems.Add($"بازه شبکه «{e}» در تنظیمات Remote نامعتبر است و نادیده گرفته شد.");
             }
             return list;
         }
 
-        /// <summary>"a.b.c.d" or "a.b.c.d/n" (full dotted IPv4 only).</summary>
-        public static bool TryCidr(string text, out uint network, out uint mask)
+        /// <summary>"a.b.c.d[/n]" (full dotted IPv4 only) or an IPv6 address with an optional "/n".</summary>
+        public static bool TryRange(string text, out Range range)
         {
-            network = 0; mask = 0;
+            range = null;
             if (string.IsNullOrWhiteSpace(text)) return false;
             string t = text.Trim();
             int slash = t.IndexOf('/');
             string ipText = slash < 0 ? t : t.Substring(0, slash);
-            int prefix = 32;
-            if (slash >= 0 && (!int.TryParse(t.Substring(slash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out prefix) || prefix < 0 || prefix > 32)) return false;
-            string[] parts = ipText.Split('.');
-            if (parts.Length != 4 || !parts.All(x => x.Length > 0 && x.Length <= 3 && x.All(char.IsAsciiDigit))) return false;
-            if (!IPAddress.TryParse(ipText, out IPAddress ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
-            mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
-            network = ToUInt(ip) & mask;
+            if (!IPAddress.TryParse(ipText, out IPAddress ip)) return false;
+            int max;
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                string[] parts = ipText.Split('.');
+                if (parts.Length != 4 || !parts.All(x => x.Length > 0 && x.Length <= 3 && x.All(char.IsAsciiDigit))) return false;
+                max = 32;
+            }
+            else if (ip.AddressFamily == AddressFamily.InterNetworkV6 && ipText.Contains(':')) max = 128;
+            else return false;
+            int prefix = max;
+            if (slash >= 0 && (!int.TryParse(t.Substring(slash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out prefix) || prefix < 0 || prefix > max)) return false;
+            byte[] b = ip.GetAddressBytes();
+            for (int i = 0; i < b.Length; i++)
+            {
+                int bits = Math.Clamp(prefix - i * 8, 0, 8);
+                b[i] = (byte)(b[i] & ((0xFF << (8 - bits)) & 0xFF));
+            }
+            range = new Range { Network = b, Prefix = prefix };
             return true;
         }
 
-        private static uint ToUInt(IPAddress ip)
+        /// <summary>The IPv4 form of a range ("a.b.c.d/n"), for the tests.</summary>
+        public static bool TryCidr(string text, out uint network, out uint mask)
         {
-            byte[] b = ip.GetAddressBytes();
-            return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
+            network = 0; mask = 0;
+            if (!TryRange(text, out Range r) || r.Network.Length != 4) return false;
+            network = ((uint)r.Network[0] << 24) | ((uint)r.Network[1] << 16) | ((uint)r.Network[2] << 8) | r.Network[3];
+            mask = r.Prefix == 0 ? 0u : uint.MaxValue << (32 - r.Prefix);
+            return true;
         }
-
-        private static bool In(uint value, IEnumerable<(uint Network, uint Mask)> list) => list.Any(x => (value & x.Mask) == x.Network);
 
         /// <summary>local, vpn or outside for an address (an IPv4-mapped IPv6 address is unwrapped; the loopback is local; any other IPv6 address is outside).</summary>
         public string Zone(IPAddress remote)
@@ -131,20 +166,24 @@ namespace Services.NasbNiro.Remote
             if (remote == null) return "local";   // in-process tests and the server's own calls have no address
             if (remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
             if (IPAddress.IsLoopback(remote)) return "local";
-            if (remote.AddressFamily != AddressFamily.InterNetwork) return "outside";
-            uint v = ToUInt(remote);
-            if (In(v, Vpn)) return "vpn";   // the VPN pool is often a part of a private range: it is checked first
-            if (In(v, Lan)) return "local";
+            byte[] v = remote.GetAddressBytes();   // the zone of a link-local address (fe80::1%12) is not part of the bytes
+            if (Vpn.Any(r => r.Contains(v))) return "vpn";   // the VPN pool is often a part of a private range: it is checked first
+            if (Lan.Any(r => r.Contains(v))) return "local";
             return "outside";
         }
+
+        /// <summary>The first gate, before anything else answers (the API description, CORS, HTTPS redirect): only the network counts here (review M1).</summary>
+        public Verdict DecideNetwork(IPAddress remote, bool forwarded = false) => Decide(remote, "GET", "/", false, null, forwarded) == Verdict.OutsideNetwork ? Verdict.OutsideNetwork : Verdict.Local;
 
         public static bool IsRead(string method) =>
             string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) || string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase) || string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>The decision for one request. <paramref name="roles"/> are the roles of the signed-in user (empty when not signed in).</summary>
-        public Verdict Decide(IPAddress remote, string method, string path, bool signedIn, IEnumerable<string> roles)
+        public Verdict Decide(IPAddress remote, string method, string path, bool signedIn, IEnumerable<string> roles, bool forwarded = false)
         {
             if (!Enabled) return Verdict.Local;
+            // a request that a proxy on the server itself forwarded arrives from the loopback: its real sender is unknown, so it is treated as outside (review M2; IIS runs the API in-process)
+            if (forwarded && remote != null && IPAddress.IsLoopback(remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote)) return Verdict.OutsideNetwork;
             string zone = Zone(remote);
             if (zone == "local") return Verdict.Local;
             if (zone == "outside") return Verdict.OutsideNetwork;
@@ -153,6 +192,7 @@ namespace Services.NasbNiro.Remote
             bool openWrite = WritePaths.Any(w => p == w);
             // pages and files of the front end, and signing in, are open to the VPN; the API checks the token itself
             if (!api) return IsRead(method) ? Verdict.Remote : Verdict.ReadOnly;
+            if (p == StatusPath && IsRead(method)) return Verdict.Remote;
             if (signedIn && !(roles ?? Enumerable.Empty<string>()).Any(r => Roles.Contains((r ?? string.Empty).ToUpperInvariant()))) return Verdict.RoleNotAllowed;
             if (ReadOnly && !IsRead(method) && !openWrite) return Verdict.ReadOnly;
             return Verdict.Remote;

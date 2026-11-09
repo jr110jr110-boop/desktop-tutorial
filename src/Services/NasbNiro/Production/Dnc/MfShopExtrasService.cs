@@ -479,7 +479,7 @@ namespace Services.NasbNiro.Production.Dnc
     /// </summary>
     public class MfCameraService : IMfCameraService
     {
-        public const string Viewers = ProductionRoles.Readers;
+        public const string Readers = ProductionRoles.Readers;
         public const string Editors = ProductionRoles.MasterEditors;
 
         private readonly IUnitOfWork _uow;
@@ -506,7 +506,7 @@ namespace Services.NasbNiro.Production.Dnc
 
         public async Task<ResponseDto<List<CameraDto>>> GetCamerasAsync(CancellationToken ct)
         {
-            if (!_user.IsInRole(Viewers)) return Bad<List<CameraDto>>(MfText.NotAllowed);
+            if (!_user.IsInRole(Readers)) return Bad<List<CameraDto>>(MfText.NotAllowed);
             var rows = await _uow.Set<MfCamera>().AsNoTracking().Where(c => !c.Deleted).OrderBy(c => c.Title).ToListAsync(ct);
             List<int> mIds = rows.Where(r => r.MachineId.HasValue).Select(r => r.MachineId.Value).ToList(), wIds = rows.Where(r => r.WorkCenterId.HasValue).Select(r => r.WorkCenterId.Value).ToList();
             var machines = await _uow.Set<Machine>().AsNoTracking().Where(m => mIds.Contains(m.Id)).ToDictionaryAsync(m => m.Id, m => m.Title, ct);
@@ -569,7 +569,7 @@ namespace Services.NasbNiro.Production.Dnc
 
         private async Task<(MfCamera Camera, string Error)> CameraAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(Viewers)) return (null, MfText.NotAllowed);
+            if (!_user.IsInRole(Readers)) return (null, MfText.NotAllowed);
             MfCamera c = await _uow.Set<MfCamera>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
             if (c == null || !c.IsActive) return (null, "دوربین پیدا نشد یا غیرفعال است.");
             return (c, null);

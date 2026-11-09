@@ -71,8 +71,10 @@ namespace Services.NasbNiro.Production.Dispatch
             }
 
             // 3. a ready step that will be late unless it moves up (one note per step: it is not repeated every hour)
-            foreach (DispatchCenterDto c in plan.Centers)
-                foreach (DispatchItemDto i in c.Queue.Where(i => i.Stage == MfDispatchRules.StageReady && i.Risk == MfDispatchRules.RiskLate).Take(AiSeatTexts.MaxItemsPerRun))
+            // the steps already noted are left out first, then at most ten new ones a run in all (review L2)
+            var risky = plan.Centers.SelectMany(c => c.Queue.Where(i => i.Stage == MfDispatchRules.StageReady && i.Risk == MfDispatchRules.RiskLate).Select(i => (c, i))).ToList();
+            HashSet<int> noted = await _notes.ExistingTargetsAsync(Code, TargetOperation, risky.Select(x => x.i.OperationId), ct, RuleLateRisk);
+            foreach (var (c, i) in risky.Where(x => !noted.Contains(x.i.OperationId)).OrderBy(x => x.i.CriticalRatio ?? 0).Take(AiSeatTexts.MaxItemsPerRun))
                 {
                     if (!await _notes.TryAddAsync(new AiNote
                     {

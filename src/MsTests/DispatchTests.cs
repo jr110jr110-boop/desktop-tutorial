@@ -283,6 +283,31 @@ namespace MsTests
         }
 
         [TestMethod]
+        public void Remote_Access_Knows_Ipv6_Lan_Proxies_And_The_Status_Address()
+        {
+            RemoteAccessPolicy p = Policy(("Remote:Enabled", "true"), ("Remote:VpnNetworks", "10.8.0.0/24"));
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.Local, p.Decide(IPAddress.Parse("fe80::1c2b:3a4d%12"), "POST", "/api/v1/x", true, new[] { "ENGINEER" }), "IPv6 link-local on the LAN");
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.Local, p.Decide(IPAddress.Parse("fd12:3456::9"), "POST", "/api/v1/x", true, new[] { "ENGINEER" }), "IPv6 unique-local on the LAN");
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.OutsideNetwork, p.Decide(IPAddress.Loopback, "GET", "/", false, null, forwarded: true), "a proxy on the server hides the sender");
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.Local, p.Decide(IPAddress.Loopback, "GET", "/", false, null, forwarded: false));
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.Remote, p.Decide(Vpn, "GET", "/api/v1/remote/status", true, new[] { "OPERATOR" }), "a refused role still learns why");
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.OutsideNetwork, p.DecideNetwork(Internet), "the first gate: before swagger and CORS");
+            Assert.AreEqual(RemoteAccessPolicy.Verdict.Local, p.DecideNetwork(Vpn));
+            Assert.IsTrue(RemoteAccessPolicy.TryRange("2001:db8::/32", out var r6));
+            Assert.IsTrue(r6.Contains(IPAddress.Parse("2001:db8:1::5").GetAddressBytes()));
+            Assert.IsFalse(r6.Contains(IPAddress.Parse("2001:db9::5").GetAddressBytes()));
+        }
+
+        [TestMethod]
+        public void A_Centre_With_Work_And_No_Capacity_Is_The_Worst()
+        {
+            var none = new DispatchCenterDto { DemandHours = 5, CapacityHours = 0, LoadPercent = null };
+            var full = new DispatchCenterDto { DemandHours = 90, CapacityHours = 80, LoadPercent = 112.5m };
+            var empty = new DispatchCenterDto { DemandHours = 0, CapacityHours = 0, LoadPercent = null };
+            CollectionAssert.AreEqual(new[] { none, full, empty }, new[] { empty, full, none }.OrderByDescending(MfDispatchService.Severity).ToArray());
+        }
+
+        [TestMethod]
         public void Remote_Access_Settings_Are_Read_Strictly()
         {
             RemoteAccessPolicy p = Policy(("Remote:Enabled", "true"), ("Remote:VpnNetworks:0", "10.8.0.0/24"), ("Remote:VpnNetworks:1", "0.0.0.0/x"), ("Remote:ReadOnly", "false"), ("Remote:Roles", "ceo; pmo"));

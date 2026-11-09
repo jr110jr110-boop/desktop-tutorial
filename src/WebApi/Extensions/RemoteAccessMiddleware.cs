@@ -20,11 +20,15 @@ namespace WebApi.Extensions
         private readonly RemoteAccessPolicy _policy;
         private readonly ILogger<RemoteAccessMiddleware> _logger;
 
-        public RemoteAccessMiddleware(RequestDelegate next, IConfiguration configuration, ILogger<RemoteAccessMiddleware> logger)
+        private readonly bool _networkOnly;
+
+        public RemoteAccessMiddleware(RequestDelegate next, IConfiguration configuration, ILogger<RemoteAccessMiddleware> logger, bool networkOnly)
         {
             _next = next;
+            _networkOnly = networkOnly;
             _policy = RemoteAccessPolicy.From(configuration);
             _logger = logger;
+            if (networkOnly) return;   // the second instance logs the settings once
             foreach (string p in _policy.Problems) _logger?.LogWarning("Remote access setting: {Problem}", p);
             if (_policy.Enabled && _policy.Vpn.Count == 0) _logger?.LogWarning("Remote access is enabled but Remote:VpnNetworks is empty: only the company network is served.");
         }
@@ -36,9 +40,15 @@ namespace WebApi.Extensions
                 await _next(context);
                 return;
             }
-            bool signedIn = context.User?.Identity?.IsAuthenticated == true;
-            var roles = signedIn ? context.User.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value) : Enumerable.Empty<string>();
-            RemoteAccessPolicy.Verdict v = _policy.Decide(context.Connection.RemoteIpAddress, context.Request.Method, context.Request.Path.Value, signedIn, roles);
+            bool forwarded = context.Request.Headers.ContainsKey("X-Forwarded-For") || context.Request.Headers.ContainsKey("Forwarded");
+            RemoteAccessPolicy.Verdict v;
+            if (_networkOnly) v = _policy.DecideNetwork(context.Connection.RemoteIpAddress, forwarded);
+            else
+            {
+                bool signedIn = context.User?.Identity?.IsAuthenticated == true;
+                var roles = signedIn ? context.User.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value) : Enumerable.Empty<string>();
+                v = _policy.Decide(context.Connection.RemoteIpAddress, context.Request.Method, context.Request.Path.Value, signedIn, roles, forwarded);
+            }
             switch (v)
             {
                 case RemoteAccessPolicy.Verdict.Local:
@@ -62,6 +72,10 @@ namespace WebApi.Extensions
 
     public static class RemoteAccessMiddlewareExtensions
     {
-        public static IApplicationBuilder UseRemoteAccessGate(this IApplicationBuilder app) => app.UseMiddleware<RemoteAccessMiddleware>();
+        /// <summary>The network check, first in the pipeline: the open internet gets nothing, not even the API description.</summary>
+        public static IApplicationBuilder UseRemoteNetworkGate(this IApplicationBuilder app) => app.UseMiddleware<RemoteAccessMiddleware>(true);
+
+        /// <summary>The role and read-only check, after the authentication.</summary>
+        public static IApplicationBuilder UseRemoteAccessGate(this IApplicationBuilder app) => app.UseMiddleware<RemoteAccessMiddleware>(false);
     }
 }

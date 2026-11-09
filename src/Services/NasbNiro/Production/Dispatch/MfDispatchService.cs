@@ -9,6 +9,7 @@ using Entities.Model.NasbNiro.Constract;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Services.NasbNiro.Inventory;
 using Services.NasbNiro.Production.Dnc;
 using ViewModels.NasbNiro.ProductionDtos;
@@ -37,6 +38,17 @@ namespace Services.NasbNiro.Production.Dispatch
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly IMfMonitorService _monitor;
+        private readonly IMemoryCache _cache;
+
+        /// <summary>A built plan is reused this long (review H1: a wall screen refreshing every 30 s must not rebuild the whole schedule each time).</summary>
+        public static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(45);
+
+        /// <summary>The live board read while the plan was built (the overview shows the same one, it is not read twice).</summary>
+        private sealed class Built
+        {
+            public DispatchPlanDto Plan;
+            public LiveBoardDto Live;
+        }
 
         internal Func<DateTime> Clock { get; set; } = () => DateTime.Now;
 
@@ -52,11 +64,21 @@ namespace Services.NasbNiro.Production.Dispatch
             "و سپس کارهای منتظر مرحله قبل. بار هر مرکز، تقاضای افق در برابر ظرفیت است و بیش از ۱۰۰٪ گلوگاه شمرده می‌شود. وضعیت زنده ماشین‌ها و آماده‌بودن برنامه CNC هم در پیشنهادها دیده می‌شود. " +
             "این برنامه فقط پیشنهاد است و چیزی را تغییر نمی‌دهد.";
 
-        public MfDispatchService(IUnitOfWork uow, IInventoryUserContext user, IMfMonitorService monitor = null)
+        public MfDispatchService(IUnitOfWork uow, IInventoryUserContext user, IMfMonitorService monitor = null, IMemoryCache cache = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _monitor = monitor;
+            _cache = cache;
+        }
+
+        private async Task<Built> BuiltAsync(DateTime asOf, int horizonDays, int? workCenterId, CancellationToken ct)
+        {
+            string key = "mf-dispatch:" + asOf.ToString("yyyyMMdd") + ":" + horizonDays + ":" + (workCenterId?.ToString() ?? "all");
+            if (_cache != null && _cache.TryGetValue(key, out Built hit)) return hit;
+            Built built = await BuildCoreAsync(asOf, horizonDays, workCenterId, ct);
+            _cache?.Set(key, built, CacheFor);
+            return built;
         }
 
         public async Task<ResponseDto<DispatchPlanDto>> GetPlanAsync(AiDispatchQuery query, CancellationToken ct)
@@ -67,10 +89,15 @@ namespace Services.NasbNiro.Production.Dispatch
             return ResponseDtoHelper.Ok(await BuildAsync(Clock().Date, horizon, query?.WorkCenterId, ct));
         }
 
-        public async Task<DispatchPlanDto> BuildAsync(DateTime asOf, int horizonDays, int? workCenterId, CancellationToken ct)
+        public async Task<DispatchPlanDto> BuildAsync(DateTime asOf, int horizonDays, int? workCenterId, CancellationToken ct) => (await BuiltAsync(asOf.Date, horizonDays, workCenterId, ct)).Plan;
+
+        private async Task<Built> BuildCoreAsync(DateTime asOf, int horizonDays, int? workCenterId, CancellationToken ct)
         {
             asOf = asOf.Date;
+            var built = new Built();
             MfScheduleData data = await MfScheduler.ComputeAsync(_uow, asOf, ct, allCenters: true);
+            // the scheduler loads the orders and operations tracked (its own job writes the dates back); the plan only reads them, so nothing of it stays tracked (review L1)
+            if (_uow is DbContext tracked) tracked.ChangeTracker.Clear();
             var plan = new DispatchPlanDto
             {
                 AsOf = asOf, AsOfText = MfText.Date(asOf), GeneratedAtText = MfText.Stamp(Clock()), HorizonDays = horizonDays, OpenOrders = data.Orders.Count,
@@ -93,7 +120,11 @@ namespace Services.NasbNiro.Production.Dispatch
             if (_monitor != null)
             {
                 var board = await _monitor.GetLiveAsync(null, ct);
-                if (board.Success && board.Data != null) live = board.Data.Machines.Where(m => m.Source != MfMonitorSource.None).ToDictionary(m => m.MachineId);
+                if (board.Success && board.Data != null)
+                {
+                    built.Live = board.Data;
+                    live = board.Data.Machines.Where(m => m.Source != MfMonitorSource.None).ToDictionary(m => m.MachineId);
+                }
                 DateTime now = Clock();
                 var util = await _monitor.GetUtilisationAsync(new UtilisationQuery { From = now.AddDays(-7), To = now }, ct);
                 if (util.Success && util.Data != null) runShare = util.Data.ToDictionary(u => u.MachineId, u => u.RunPercent);
@@ -126,6 +157,7 @@ namespace Services.NasbNiro.Production.Dispatch
                 }
             }
 
+            var readiness = new Dictionary<(int?, int?, int), (bool?, string)>();
             foreach (MfCenter c in data.Centers.Values.Where(c => c.Wc.Kind != MfWorkCenterKind.Outside && (workCenterId == null || c.Wc.Id == workCenterId)).OrderBy(c => c.Wc.Code, StringComparer.Ordinal))
             {
                 decimal capacity = 0, demand = 0;
@@ -163,20 +195,30 @@ namespace Services.NasbNiro.Production.Dispatch
                     if (s.Stage == MfDispatchRules.StageReady && checkedPrograms < ProgramChecks && wcMachines.Count > 0)
                     {
                         checkedPrograms++;
-                        (item.ProgramReady, item.ProgramNote) = await ProgramReadinessAsync(src.Op.Op, wcMachines, ct);
+                        var rk = (src.Op.Op.OperationTemplateId, src.Op.Op.WorkCenterId, c.Wc.Id);
+                        if (!readiness.TryGetValue(rk, out var ready)) readiness[rk] = ready = await ProgramReadinessAsync(src.Op.Op, wcMachines, ct);
+                        (item.ProgramReady, item.ProgramNote) = ready;
                     }
-                    if (item.Risk == MfDispatchRules.RiskLate && s.Stage != MfDispatchRules.StageUpcoming) dto.LateRiskCount++;
+                    if (item.Risk == MfDispatchRules.RiskLate && s.Stage == MfDispatchRules.StageReady) dto.LateRiskCount++;   // a running step cannot move up (review L4)
                     if (dto.Queue.Count < MaxQueue) dto.Queue.Add(item);
                 }
                 plan.Centers.Add(dto);
             }
             plan.LateRiskOperations = plan.Centers.Sum(c => c.LateRiskCount);
-            DispatchCenterDto top = plan.Centers.Where(c => c.LoadPercent.HasValue).OrderByDescending(c => c.LoadPercent).FirstOrDefault();
-            if (top != null && top.LoadPercent > MfDispatchRules.BusyPercent)
+            // a centre with work and no capacity at all (every machine down, holidays) is the worst bottleneck (review M4)
+            plan.Centers = plan.Centers.ToList();
+            DispatchCenterDto top = plan.Centers.Where(c => c.DemandHours > 0).OrderByDescending(Severity).FirstOrDefault();
+            if (top != null && top.LoadPercent == null)
+                plan.BottleneckText = $"گلوگاه: {top.Title} ({top.Code}) در {MfDispatchRules.Fa(horizonDays)} روز آینده {MfDispatchRules.Fa(top.DemandHours)} ساعت کار دارد ولی هیچ ظرفیتی ندارد.";
+            else if (top != null && top.LoadPercent > MfDispatchRules.BusyPercent)
                 plan.BottleneckText = $"{(top.LoadPercent > MfDispatchRules.BottleneckPercent ? "گلوگاه" : "پربارترین مرکز")}: {top.Title} ({top.Code}) با {MfDispatchRules.Fa(top.LoadPercent.Value)}٪ ظرفیت در {MfDispatchRules.Fa(horizonDays)} روز آینده.";
             plan.Suggestions = Suggest(plan, live, machines);
-            return plan;
+            built.Plan = plan;
+            return built;
         }
+
+        /// <summary>The order of centres by how pressed they are: no capacity with work first, then the load.</summary>
+        public static decimal Severity(DispatchCenterDto c) => c.LoadPercent ?? (c.DemandHours > 0 ? decimal.MaxValue : -1m);
 
         /// <summary>Working days of the centre to finish the step at one day of full capacity per day (at least a tenth of a day for an open step).</summary>
         private static decimal DaysOf(MfScheduleData data, MfOpPlan p)
@@ -190,8 +232,14 @@ namespace Services.NasbNiro.Production.Dispatch
         /// <summary>Working days of the centre's calendar from today to the need date (today counts; 0 when the date has passed).</summary>
         private static decimal WorkingDays(MfCenter center, DateTime from, DateTime to)
         {
-            if (to.Date < from.Date) return -(decimal)(from.Date - to.Date).Days;
             int n = 0;
+            if (to.Date < from.Date)
+            {
+                // past due: the working days already lost, as a negative number (review L3)
+                for (DateTime d = to.Date.AddDays(1); d <= from.Date && n < 2000; d = d.AddDays(1))
+                    if (center?.Calendar == null || center.Calendar.IsWorking(d)) n++;
+                return -n;
+            }
             for (DateTime d = from.Date; d <= to.Date && n < 2000; d = d.AddDays(1))
                 if (center?.Calendar == null || center.Calendar.IsWorking(d)) n++;
             return n;
@@ -253,7 +301,7 @@ namespace Services.NasbNiro.Production.Dispatch
                         });
                     else if (lm.State == MfMachineState.Idle && c.ReadyCount > 0 && lm.MinutesInState >= 15)
                     {
-                        DispatchItemDto next = c.Queue.FirstOrDefault(i => i.Stage == MfDispatchRules.StageReady);
+                        DispatchItemDto next = c.Queue.FirstOrDefault(i => i.Stage == MfDispatchRules.StageReady && !i.KitShortage);   // review L6
                         list.Add(new DispatchSuggestionDto
                         {
                             Kind = "machine-idle", Severity = 2, WorkCenterId = c.WorkCenterId, MachineId = m.Id, OperationId = next?.OperationId, Link = "/production/terminal",
@@ -287,11 +335,12 @@ namespace Services.NasbNiro.Production.Dispatch
         {
             if (!_user.IsInRole(ProductionRoles.Readers)) return MfText.Bad<FloorOverviewDto>(MfText.NotAllowed);
             DateTime now = Clock();
-            DispatchPlanDto plan = await BuildAsync(now.Date, MfDispatchRules.DefaultHorizonDays, null, ct);
+            Built built = await BuiltAsync(now.Date, MfDispatchRules.DefaultHorizonDays, null, ct);
+            DispatchPlanDto plan = built.Plan;
             var dto = new FloorOverviewDto
             {
                 AsOfText = MfText.Stamp(now), Remote = remote, Suggestions = plan.Suggestions.Take(6).ToList(), BottleneckText = plan.BottleneckText,
-                Centers = plan.Centers.Where(c => c.DemandHours > 0 || c.ReadyCount > 0 || c.RunningCount > 0).OrderByDescending(c => c.LoadPercent ?? 0).Take(8)
+                Centers = plan.Centers.Where(c => c.DemandHours > 0 || c.ReadyCount > 0 || c.RunningCount > 0).OrderByDescending(Severity).Take(8)
                     .Select(c => new DispatchCenterDto
                     {
                         WorkCenterId = c.WorkCenterId, Code = c.Code, Title = c.Title, DemandHours = c.DemandHours, CapacityHours = c.CapacityHours, LoadPercent = c.LoadPercent, ReadyHours = c.ReadyHours,
@@ -300,11 +349,7 @@ namespace Services.NasbNiro.Production.Dispatch
                     }).ToList(),
                 GreetingText = now.Hour < 12 ? "صبح بخیر" : now.Hour < 17 ? "روز بخیر" : "عصر بخیر",
             };
-            if (_monitor != null)
-            {
-                var board = await _monitor.GetLiveAsync(null, ct);
-                if (board.Success) dto.Live = board.Data;
-            }
+            dto.Live = built.Live;
             LiveBoardDto lb = dto.Live;
             int monitored = lb?.Machines.Count(m => m.Source != MfMonitorSource.None) ?? 0;
             List<decimal> today = lb?.Machines.Where(m => m.TodayRunPercent.HasValue).Select(m => m.TodayRunPercent.Value).ToList() ?? new List<decimal>();
@@ -332,12 +377,13 @@ namespace Services.NasbNiro.Production.Dispatch
             });
 
             // what waits for a person
-            int revisions = await _uow.Set<MfNcRevision>().CountAsync(r => r.Status == MfNcRevisionStatus.Submitted, ct);
+            int revisions = await _uow.Set<MfNcRevision>().CountAsync(r => !r.Deleted && r.Status == MfNcRevisionStatus.Submitted, ct);
             int failed = await _uow.Set<MfNcTransfer>().CountAsync(t => !t.Deleted && t.Status == MfNcTransferStatus.Failed, ct);
             int checklists = await _uow.Set<MfChecklistResult>().CountAsync(r => !r.Deleted && r.Status == MfChecklistStatus.Submitted, ct);
             int staff = _user.IsInRole("HR,PRODUCTIONMANAGER") ? await _uow.Set<HrPerformanceEvent>().CountAsync(e => !e.Deleted && e.Status == HrEventStatus.Submitted, ct) : 0;
             int maintenance = await _uow.Set<MfMaintenanceRequest>().CountAsync(r => !r.Deleted && (r.Status == MfMaintenanceRequestStatus.Open || r.Status == MfMaintenanceRequestStatus.InProgress), ct);
-            int qcHold = await _uow.Set<MfOperation>().CountAsync(o => !o.Deleted && o.Status == MfOperationStatus.QcHold, ct);
+            int qcHold = await _uow.Set<MfOperation>().CountAsync(o => !o.Deleted && o.Status == MfOperationStatus.QcHold
+                && _uow.Set<MfProductionOrder>().Any(p => p.Id == o.OrderId && !p.Deleted && (p.Status == MfOrderStatus.Released || p.Status == MfOrderStatus.InProgress)), ct);
             void Wait(string key, string title, int count, string link, string tone) { if (count > 0) dto.Waiting.Add(new FloorWaitingDto { Key = key, Title = title, Count = count, Link = link, Tone = tone }); }
             Wait("nc-revisions", "نسخه برنامه CNC منتظر تأیید", revisions, "/production/dnc", "warn");
             Wait("nc-failed", "انتقال ناموفق برنامه به ماشین", failed, "/production/dnc/transfers", "bad");
