@@ -158,7 +158,7 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 کاربر خواسته است نرم‌افزار همه کار اپراتور روی ماشین را از راه اتصال به خود ماشین پایش کند و اگر فرایند رعایت نشود اجازه ادامه ندهد؛ دوربین فقط نظارت کلی؛ موقعیت اضطراری فقط با مدیر تولید، یک بار و با دلیل نوشته. **کار سرور و CI با سشن اصلی است.**
 
 **شاخه‌ها**
-- بک‌اند: `innco-dnc` (b9e485eb). آخرین `innco-net10-build` (79096189، با Package G) در آن ادغام شده و تعارضی نمانده است.
+- بک‌اند: `innco-dnc` (ce55c4f6). آخرین `innco-net10-build` (cbc84e3b، با رفع‌های Package G) در آن ادغام شده و تعارضی نمانده است.
 - فرانت: `innco-front-dnc` (38d4d9be). آخرین `innco-front` در آن ادغام شده است.
 - جزئیات: بخش «بخش E» در `docs/dnc-merge-note.md` روی `innco-dnc`.
 
@@ -171,7 +171,7 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 4. [ ] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc` و بسته `.github/ci-frontend-dist`. مسیرهای تازه `/production/guard` و `/production/dnc/posts`. `vue-tsc` در sandbox جانبی برای کمبود حافظه کامل نشد؛ لطفاً اجرا کنید.
 5. [ ] بسته نصب: `Dnc:RequireCamEvidence` نوشته نشود یا `true` باشد؛ هیچ رمزی در بسته نباشد (رمز PLC کنترلر فقط `Dnc:Credentials:<key>:Password` روی سرور).
 
-**آزمون واحد در سشن جانبی (پس از ادغام 79096189):** آزمون‌های Guard، DNC، Monitor، ShopExtras، Dispatch، AiSeat و مجوز کنترلرها ۱۱۸ از ۱۱۸. پیش‌تر: اجرای کامل پیش از ادغام ۱۴۹۹ از ۱۵۰۲ (یک مورد بخش E که رفع شد، دو مورد P9 زمان‌حساس که a10cc49f رفع کرده). پس از ادغام: آزمون‌های Guard (۱۳)، DNC، Monitor، ShopExtras، Dispatch، AiSeat، P9 و مجوز کنترلرها ۱۴۶ از ۱۴۶.
+**آزمون واحد در سشن جانبی (پس از ادغام cbc84e3b):** آزمون‌های Guard، DNC، Monitor، ShopExtras، Dispatch، AiSeat و مجوز کنترلرها ۱۱۸ از ۱۱۸. پیش‌تر: اجرای کامل پیش از ادغام ۱۴۹۹ از ۱۵۰۲ (یک مورد بخش E که رفع شد، دو مورد P9 زمان‌حساس که a10cc49f رفع کرده). پس از ادغام: آزمون‌های Guard (۱۳)، DNC، Monitor، ShopExtras، Dispatch، AiSeat، P9 و مجوز کنترلرها ۱۴۶ از ۱۴۶.
 
 ## 8. در انتظار کاربر / شرکت
 
