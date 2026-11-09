@@ -24507,6 +24507,40 @@ namespace DataLayer.Migrations
                     b.ToTable("HrPerformanceEvents", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCamTool", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal?>("Diameter")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("Length")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("RevisionId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToolNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RevisionId", "ToolNumber")
+                        .IsUnique();
+
+                    b.ToTable("MfCamTools", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCamera", b =>
                 {
                     b.Property<int>("Id")
@@ -24581,6 +24615,9 @@ namespace DataLayer.Migrations
                     b.Property<int>("ItemId")
                         .HasColumnType("int");
 
+                    b.Property<long?>("MeasurementId")
+                        .HasColumnType("bigint");
+
                     b.Property<bool>("Passed")
                         .HasColumnType("bit");
 
@@ -24615,6 +24652,13 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Characteristic")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<bool>("DeviceOnly")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
@@ -24910,6 +24954,66 @@ namespace DataLayer.Migrations
                     b.ToTable("MfCostRuns", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfGateOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Gate")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId");
+
+                    b.HasIndex("MachineId", "OperationId", "Gate");
+
+                    b.ToTable("MfGateOverrides", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfLabourPool", b =>
                 {
                     b.Property<int>("Id")
@@ -24975,6 +25079,46 @@ namespace DataLayer.Migrations
                         .IsUnique();
 
                     b.ToTable("MfLabourPools", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineActivity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Value")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MachineId", "At");
+
+                    b.HasIndex("OperationId", "At");
+
+                    b.ToTable("MfMachineActivities", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineConnection", b =>
@@ -25193,14 +25337,45 @@ namespace DataLayer.Migrations
                     b.Property<int?>("AlarmInput")
                         .HasColumnType("int");
 
+                    b.Property<string>("Capabilities")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
                     b.Property<DateTimeOffset>("CreateDate")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("CreatorUserId")
                         .HasColumnType("int");
 
+                    b.Property<string>("DataCredentialKey")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("DataError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("DataFailedPolls")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DataHost")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("DataLink")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DataPort")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DataSeenAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<bool>("Deleted")
                         .HasColumnType("bit");
+
+                    b.Property<int>("ExecMode")
+                        .HasColumnType("int");
 
                     b.Property<int>("FailedPolls")
                         .HasColumnType("int");
@@ -25212,11 +25387,37 @@ namespace DataLayer.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int>("InterlockCoil")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("InterlockEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("InterlockError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("InterlockHost")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("InterlockInvert")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("InterlockPort")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("InterlockUnitId")
+                        .HasColumnType("tinyint");
+
                     b.Property<int>("InvertMask")
                         .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("LastBlockNumber")
+                        .HasColumnType("int");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(1000)
@@ -25235,10 +25436,24 @@ namespace DataLayer.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("LastProgramSha256")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTimeOffset?>("LastProgramShaAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("LastSpindleOverride")
+                        .HasColumnType("int");
+
                     b.Property<int?>("LastSpindleRpm")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("LastToolNumber")
                         .HasColumnType("int");
 
                     b.Property<int>("MachineId")
@@ -25261,6 +25476,10 @@ namespace DataLayer.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("PlcMap")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<int?>("PollSeconds")
                         .HasColumnType("int");
 
@@ -25269,6 +25488,20 @@ namespace DataLayer.Migrations
 
                     b.Property<int?>("PowerInput")
                         .HasColumnType("int");
+
+                    b.Property<string>("ProgramFolder")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ProgramState")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResultFile")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("ResultReadAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -25283,6 +25516,16 @@ namespace DataLayer.Migrations
 
                     b.Property<int>("StartAddress")
                         .HasColumnType("int");
+
+                    b.Property<string>("StartBlockReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("StartEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("StartEnabledAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<byte>("UnitId")
                         .HasColumnType("tinyint");
@@ -25697,6 +25940,164 @@ namespace DataLayer.Migrations
                     b.ToTable("MfMaintenanceRequests", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMeasureStation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AllowedAddresses")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("KeyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("MachineId");
+
+                    b.ToTable("MfMeasureStations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMeasurement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Characteristic")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Device")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OperationId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("StationId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StationId");
+
+                    b.HasIndex("MachineId", "At");
+
+                    b.HasIndex("OperationId", "Characteristic", "At");
+
+                    b.ToTable("MfMeasurements", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfNcAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte[]>("Content")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RevisionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RevisionId", "Kind");
+
+                    b.ToTable("MfNcAttachments", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfNcContent", b =>
                 {
                     b.Property<int>("Id")
@@ -25819,6 +26220,10 @@ namespace DataLayer.Migrations
                     b.Property<int?>("BaseRevisionId")
                         .HasColumnType("int");
 
+                    b.Property<string>("CamSystem")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("ChangeNote")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -25862,6 +26267,9 @@ namespace DataLayer.Migrations
                     b.Property<DateTimeOffset>("ModifyDate")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("PostProcessorId")
+                        .HasColumnType("int");
+
                     b.Property<int>("ProgramId")
                         .HasColumnType("int");
 
@@ -25892,6 +26300,9 @@ namespace DataLayer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<int?>("SimulationAttachmentId")
+                        .HasColumnType("int");
+
                     b.Property<int>("SizeBytes")
                         .HasColumnType("int");
 
@@ -25907,12 +26318,17 @@ namespace DataLayer.Migrations
                     b.Property<int?>("SubmittedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<int>("ToolCount")
+                        .HasColumnType("int");
+
                     b.Property<int>("WarningCount")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
                     b.HasIndex("BaseRevisionId");
+
+                    b.HasIndex("PostProcessorId");
 
                     b.HasIndex("ProgramId", "Revision")
                         .IsUnique();
@@ -25940,8 +26356,17 @@ namespace DataLayer.Migrations
                     b.Property<int>("OperationId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("OverrideId")
+                        .HasColumnType("int");
+
                     b.Property<int>("ProgramId")
                         .HasColumnType("int");
+
+                    b.Property<bool>("ProveOut")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("ProveOutObserved")
+                        .HasColumnType("bit");
 
                     b.Property<int>("RecordedByUserId")
                         .HasColumnType("int");
@@ -25952,14 +26377,26 @@ namespace DataLayer.Migrations
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool?>("ToolsVerified")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("TransferId")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("VerifiedSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("EmployeeId");
 
                     b.HasIndex("OperationId");
+
+                    b.HasIndex("OverrideId");
 
                     b.HasIndex("ProgramId");
 
@@ -26459,6 +26896,108 @@ namespace DataLayer.Migrations
                     b.HasIndex("OrderId");
 
                     b.ToTable("MfOrderComponents", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfPostProcessor", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CamSystem")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ChangeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("Content")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<int>("ControllerFamily")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("MachineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SubmittedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MachineId");
+
+                    b.HasIndex("Code", "Version")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("MfPostProcessors", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>
@@ -43431,6 +43970,15 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCamTool", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfNcRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfCamera", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
@@ -43524,6 +44072,21 @@ namespace DataLayer.Migrations
                     b.Navigation("AccountingEvent");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfGateOverride", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfLabourPool", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Finance.AccountingEvent", "AccountingEvent")
@@ -43532,6 +44095,20 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("AccountingEvent");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineActivity", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMachineConnection", b =>
@@ -43682,6 +44259,41 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMeasureStation", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfMeasurement", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfMeasureStation", null)
+                        .WithMany()
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfNcAttachment", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfNcRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfNcContent", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Production.MfNcRevision", "Revision")
@@ -43728,6 +44340,11 @@ namespace DataLayer.Migrations
                         .HasForeignKey("BaseRevisionId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfPostProcessor", null)
+                        .WithMany()
+                        .HasForeignKey("PostProcessorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Entities.Model.NasbNiro.Production.MfNcProgram", null)
                         .WithMany()
                         .HasForeignKey("ProgramId")
@@ -43753,6 +44370,11 @@ namespace DataLayer.Migrations
                         .HasForeignKey("OperationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Production.MfGateOverride", null)
+                        .WithMany()
+                        .HasForeignKey("OverrideId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Entities.Model.NasbNiro.Production.MfNcProgram", null)
                         .WithMany()
@@ -43939,6 +44561,14 @@ namespace DataLayer.Migrations
                         .HasForeignKey("OrderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfPostProcessor", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Constract.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Production.MfProductionOrder", b =>

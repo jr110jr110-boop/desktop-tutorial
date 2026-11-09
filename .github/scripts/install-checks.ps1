@@ -116,6 +116,7 @@ Check 'the installer password is no longer in the settings file' {
     if ($json.Remote.Enabled -ne $false) { throw "Remote:Enabled is not false: $($json.Remote.Enabled)" }
     if ($null -eq $json.Dnc -or $json.Dnc.FolderRoots -ne '') { throw 'Dnc:FolderRoots is not present and empty' }
     if ($null -ne $json.Dnc.PSObject.Properties['AllowLoopback']) { throw 'Dnc:AllowLoopback is on the server' }
+    if ($null -ne $json.Dnc.PSObject.Properties['RequireCamEvidence'] -and "$($json.Dnc.RequireCamEvidence)" -ne 'True' -and "$($json.Dnc.RequireCamEvidence)" -ne 'true') { throw "Dnc:RequireCamEvidence is not on: $($json.Dnc.RequireCamEvidence)" }
     'password removed, marker present, https issuer, audit key present, remote access off, no machine folder'
 }
 $headers = @{ Authorization = "Bearer $token" }
