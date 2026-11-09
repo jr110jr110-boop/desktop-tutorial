@@ -12715,7 +12715,7 @@ TOKEN=$ADMIN_TOKEN
 # the contract of the work orders of this block: the quality contract allows only the 2 pump units that the quality block already made, so these work orders have their own contract of the same pump equipment (count 5)
 call POST Contracts '{"code":"PKG-CT-01","title":"قرارداد آزمون راه‌اندازی کنترل پیکربندی","status":1,"employer":"کارفرمای آزمون"}'; check "pkg data: the contract of the work orders is created" '.success and .data.id > 0'; PKGCT=$(val .data.id)
 call POST ContractEquipments "{\"contractId\":$PKGCT,\"equipmentId\":$QEQ,\"count\":5}"; check "pkg data: the pump equipment is contracted five times" '.success'
-# pkg_drawing ITEMID NUMBER [PDFFILE] : a released drawing WITHOUT a characteristic list (what the company has today). The Package B and A1 release gates apply to a drawing that is linked to a part, so the drawing is released first and linked to its part afterwards (the gates are never weakened). Sets PKGDOC (deliverable) and PKGREV (revision).
+# pkg_drawing ITEMID NUMBER [PDFFILE] : a released drawing WITHOUT a characteristic list (what the company has today). ITEMID 0 = no link to a part (a drawing of no part). Legacy drawings are released and linked while the cut-over day is ahead (before the cut-over: legacy); after the cut-over such a link is refused (see the loophole check). Sets PKGDOC (deliverable) and PKGREV (revision).
 pkg_drawing() {
   local item=$1 num=$2 fid
   as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$num\",\"title\":\"نقشه قطعه $num\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "pkg data: the document controller registers the drawing $num" '.success and .data.id > 0'; PKGDOC=$(val .data.id)
@@ -12731,8 +12731,10 @@ pkg_drawing() {
   as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"submit\"}"; check "pkg data: the revision of $num goes under review" '.success and .data.status == 2'
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"review\",\"note\":\"checked\"}"; check "pkg data: the PMO reviews $num" '.success and .data.status == 2'
   as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"approve\"}"; check "pkg data: the engineering manager approves $num" '.success and .data.status == 3'
-  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"release\"}"; check "pkg data: the PMO releases $num while it is not linked to any part (the gates of a part drawing apply to a drawing of a part: this is how the drawings of today exist)" '.success and .data.status == 4'
-  as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOC,\"kind\":1,\"itemId\":$item}"; check "pkg data: the released drawing $num is then linked to its part: a released revision with no characteristic list and no design verification" '.success and .data.id > 0'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"release\"}"; check "pkg data: the PMO releases $num while it is not linked to any part (the gates of a part drawing apply to a drawing of a part)" '.success and .data.status == 4'
+  if [ "$item" != 0 ]; then
+    as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOC,\"kind\":1,\"itemId\":$item}"; check "pkg data: the legacy drawing $num (released before the cut-over) is linked to its part" '.success and .data.id > 0'
+  fi
 }
 # pkg_wo CODE OPTION : a project work order (it has a project code)
 pkg_wo() {
@@ -12742,6 +12744,9 @@ pkg_wo() {
 item PKGI1 '{"code":"77.10.07.101.1","title":"قطعه آزمون پذیرش قدیمی الف","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part with a legacy drawing, accepted with a note"
 item PKGI2 '{"code":"77.10.07.102.1","title":"قطعه آزمون پذیرش قدیمی ب","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part with a legacy drawing, adopted into a list"
 item PKGI3 '{"code":"77.10.07.103.1","title":"قطعه آزمون ارجاع نقشه در سفارش","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part bought on an order that cites its drawing"
+# The legacy data of the company (drawings released and work orders made BEFORE the control started) is made the only honest way: the cut-over day is moved ahead by the two-person route, so that what is made now is before the cut-over. A drawing
+# released after the cut-over cannot be linked to a part without its list and its design verification (checked below), so there is no other way to make a legacy drawing.
+safety_set Quality Quality.ControlStartDate 14990101; check "pkg legacy: the cut-over day is moved ahead (second person approves)" '.success and .data.status == "Approved" and .data.newValue == "14990101"'
 pkg_drawing "$PKGI1" "PKG-DWG-L1"; PKGREV1=$PKGREV
 pkg_drawing "$PKGI2" "PKG-DWG-L2"; PKGREV2=$PKGREV
 pkg_wo "PKG-WO-1" 31; PKGWO1=$PKGWOID
@@ -12754,8 +12759,7 @@ pka2_sign "$PKGBOM" "pkg BOM"
 pka1_verify bom "$PKGBOM" "$PKGPLAN" "pkg BOM"
 as "$PMO2_TOKEN" POST $PKA1PB/boms/release "{\"id\":$PKGBOM}"; check "pkg data: the BOM is released" '.success and .data.status == 3'
 
-# --- cut-over day far ahead: everything above is legacy
-safety_set Quality Quality.ControlStartDate 14990101; check "pkg legacy: the cut-over day is moved ahead (second person approves)" '.success and .data.status == "Approved" and .data.newValue == "14990101"'
+# --- the legacy data was made while the cut-over day was ahead (see above)
 as "$ENG_TOKEN" GET "go-live/config-adoptions/candidates?Search=PKG-WO-"; check "pkg legacy: both work orders of the chain are candidates of the configuration adoption, as legacy (found by code, with the code shown)" ".success and .data.total == 2 and ([.data.items[]|select(.workOrderId == $PKGWO1 and .legacy == true and .code == \"PKG-WO-1\")]|length) == 1 and ([.data.items[]|select(.workOrderId == $PKGWO2 and .legacy == true and .code == \"PKG-WO-2\")]|length) == 1"
 as "$ENG_TOKEN" GET "go-live/char-adoptions/candidates?Search=PKG-DWG-L"; check "pkg legacy: both drawings without a list are candidates of the characteristic adoption, as legacy (found by number)" ".success and .data.total == 2 and ([.data.items[]|select(.revisionId == $PKGREV1 and .legacy == true and .hasList == false)]|length) == 1 and ([.data.items[]|select(.revisionId == $PKGREV2 and .legacy == true and .hasList == false)]|length) == 1"
 # PCA before: the legacy project work order is shown as legacy with the Persian note and is not blocked
@@ -12819,8 +12823,11 @@ open(d + "/f.raw", "wb").write(bytes([30, 30, 30, 255]) * (40 * 3))
 PY
 item PKGI4 '{"code":"77.10.07.104.1","title":"قطعه آزمون مهر نسخه کنترل‌شده","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part of the drawing that is printed as a controlled copy"
 item PKGI5 '{"code":"77.10.07.105.1","title":"قطعه آزمون مهر نقشه چرخانده","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part of the rotated drawing"
-pkg_drawing "$PKGI4" "PKG-DWG-S1" "$PKGDIR/in.pdf"; PKGREVS=$PKGREV
-pkg_drawing "$PKGI5" "PKG-DWG-S2" "$PKGDIR/rot.pdf"; PKGREVR=$PKGREV
+pkg_drawing 0 "PKG-DWG-S1" "$PKGDIR/in.pdf"; PKGREVS=$PKGREV; PKGDOCS=$PKGDOC
+pkg_drawing 0 "PKG-DWG-S2" "$PKGDIR/rot.pdf"; PKGREVR=$PKGREV
+# the loophole is closed: a drawing released after the cut-over without a list and without a design verification cannot be linked to a part afterwards, whatever the kind of link
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOCS,\"kind\":1,\"itemId\":$PKGI4}"; check "pkg loophole: a drawing released after the cut-over with no list and no design verification cannot be linked to a part afterwards (the refusal names both)" '.success == false and (.message|startswith("پیوند نقشه PKG-DWG-S1 به قطعه ممکن نیست")) and (.message|contains("فهرست مشخصه")) and (.message|contains("تایید طراحی (Verification)"))'
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOCS,\"kind\":3,\"partNumber\":\"77.10.07.104.1\"}"; nomsg "pkg loophole: the same through a part-number link" "پیوند نقشه PKG-DWG-S1 به قطعه ممکن نیست"
 as "$QC_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVS}"; check "pkg print: the first controlled copy of the released revision is numbered 1, with the document number and the header text built by the server" '.success and .data.controlled == true and .data.copyNumber == 1 and .data.printId > 0 and (.data.header|contains("PKG-DWG-S1")) and (.data.header|contains("نسخه کنترل‌شده")) and .data.maxMegabytes == 50'
 PKGPR1=$(val .data.printId)
 as "$QC_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVS}"; check "pkg print: the second controlled copy of the same revision is numbered 2" '.success and .data.copyNumber == 2'

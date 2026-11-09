@@ -107,6 +107,12 @@ namespace Services.NasbNiro.ProjectControl
             }
             else if (!await _uow.Set<ControlledDocument>().AnyAsync(c => c.Id == dto.ControlledDocumentId.Value && !c.Deleted, ct)) return PcText.NotFound<PcDocLinkDto>("سند کنترل‌شده پیدا نشد.");
 
+            if (dto.DeliverableId.HasValue && (dto.Kind == PcDocLinkKind.Item || dto.Kind == PcDocLinkKind.BomLine || dto.Kind == PcDocLinkKind.PartNumber))
+            {
+                // Package G: a drawing already in force cannot be made a part drawing by a later link without the characteristic list and the design verification that its release would have needed
+                string gate = await global::Services.NasbNiro.GoLive.GlLinkGate.ProblemAsync(_uow, dto.DeliverableId.Value, ct);
+                if (gate != null) return Bad<PcDocLinkDto>(gate);
+            }
             var link = new PcDocumentLink { DeliverableId = dto.DeliverableId, ControlledDocumentId = dto.ControlledDocumentId, Kind = dto.Kind, OperationTemplateId = dto.OperationTemplateId, Note = Clean(dto.Note) };
             string part = Clean(dto.PartNumber);
             string stage = PcText.Upper(dto.StageCode2);

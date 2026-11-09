@@ -30,7 +30,7 @@ namespace MsTests
 {
     /// <summary>Package A1: design plan, design input register, design review / verification / validation, the release gates (BOM, design-output drawings), readiness item, FCA and the registrations.</summary>
     [TestClass]
-    public class PackageA1DesignControlTests
+    public partial class PackageA1DesignControlTests
     {
         private static readonly CancellationToken Ct = CancellationToken.None;
         private static readonly ClaimsPrincipal Seeder = AppHost.Principal(1, "seed", "PMO");

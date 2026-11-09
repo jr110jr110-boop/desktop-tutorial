@@ -530,6 +530,18 @@ namespace Services.NasbNiro.Quality
                 : "انتشار نقشه ممکن نیست: محتوای فهرست مشخصه‌های تاییدشده با مهر تایید آن (SHA-256) نمی‌خواند؛ فهرست دستکاری شده است. نسخه جدید فهرست را تهیه و تایید کنید.";
         }
 
+        /// <summary>
+        /// For a drawing revision that is already in force and is being linked to a part: null when it has an approved or released list whose content still matches its approval hash, else the Persian reason.
+        /// </summary>
+        public static async Task<string> LinkProblemAsync(IUnitOfWork uow, int revisionId, CancellationToken ct)
+        {
+            QcCharacteristicList list = await uow.Set<QcCharacteristicList>().Include(x => x.Items)
+                .Where(x => !x.Deleted && x.RevisionId == revisionId && (x.Status == CharListStatus.Released || x.Status == CharListStatus.Approved)).OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
+            if (list == null) return "فهرست مشخصه‌های تاییدشده برای این بازنگری وجود ندارد";
+            string hash = CharacteristicRules.Hash(list.Items.OrderBy(i => i.RowNumber).Select(CharacteristicResolver.ToLine));
+            return string.Equals(hash, list.ContentHash, StringComparison.Ordinal) ? null : "محتوای فهرست مشخصه‌های تاییدشده با مهر تایید آن (SHA-256) نمی‌خواند";
+        }
+
         public static async Task ReleaseAsync(IUnitOfWork uow, QcCharacteristicList list, DateTimeOffset now, CancellationToken ct)
         {
             if (list.Items == null || list.Items.Count == 0) list.Items = await uow.Set<QcCharacteristic>().Where(i => i.ListId == list.Id).ToListAsync(ct);

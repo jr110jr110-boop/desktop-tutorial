@@ -415,6 +415,18 @@ namespace Services.NasbNiro.ProductBank
             return $"{label} منتشر نمی‌شود: خروجی طراحی (نقشه قطعه) پیش از انتشار به بازبینی «تایید طراحی (Verification)» بسته‌شده با نتیجه «پذیرفته» نیاز دارد که این بازنگری را دربرگیرد. کمبود: " + string.Join("؛ ", c.Missing) + ".";
         }
 
+        /// <summary>
+        /// Linking a drawing that is already in force to a part makes it a design output after the fact: the same verification the release asks for must exist now. Null when it does (or when verification is not required).
+        /// A client document is not a design output. Used by the link gate of the go-live cut-over; the release path above keeps its own check (it needs the link to exist).
+        /// </summary>
+        public static async Task<string> LinkProblemAsync(IUnitOfWork uow, PcEngineeringDeliverable d, PcDocumentRevision r, CancellationToken ct)
+        {
+            if (d == null || r == null || d.ReceivedFromClient) return null;
+            if (!await VerificationRequiredAsync(uow, ct)) return null;
+            DesignCoverage c = await DrawingCoverageAsync(uow, r.Id, $"نقشه {d.DocumentNumber} بازنگری {r.Code}", ct);
+            return c.Passed ? null : "بازبینی «تایید طراحی (Verification)» بسته‌شده با نتیجه «پذیرفته» که این بازنگری را دربرگیرد وجود ندارد (" + string.Join("؛ ", c.Missing) + ")";
+        }
+
         /// <summary>What is missing of the design control for a released BOM (readiness item RD-DESIGN): the approved plan, the declaration that the inputs are complete, the accepted verification. A legacy BOM without an adoption is reported as one Soft note.</summary>
         public static async Task<DesignReadinessResult> ReadinessAsync(IUnitOfWork uow, PbBomHeader h, CancellationToken ct)
         {
