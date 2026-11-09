@@ -52,12 +52,11 @@ namespace WebApi.Controllers.GoLive
         /// <summary>Step 2: the server loads the file of the revision from the store itself and adds the two bands. No PDF is accepted from the user. 422 = the structure cannot be stamped / too big (fall back to the HTML print); 429 = one stamp at a time.</summary>
         [HttpPost("print/stamp")]
         [RequestSizeLimit(8_000_000)]
-        public async Task<IActionResult> PrintStampAsync([FromForm] int printId, [FromForm] IFormFile headerRgba, [FromForm] IFormFile footerRgba,
-            [FromForm] int headerWidth, [FromForm] int headerHeight, [FromForm] int footerWidth, [FromForm] int footerHeight, CancellationToken ct)
+        public async Task<IActionResult> PrintStampAsync([FromForm] GlPrintStampForm form, CancellationToken ct)
         {
-            if (headerRgba == null || footerRgba == null) return BadRequest(new { success = false, message = GlText.InvalidData });
-            byte[] h = await Read(headerRgba, ct), f = await Read(footerRgba, ct);
-            GlStampOutcome o = await _print.StampAsync(printId, new PdfStampImage { Width = headerWidth, Height = headerHeight, Rgba = h }, new PdfStampImage { Width = footerWidth, Height = footerHeight, Rgba = f }, ct);
+            if (form == null || form.HeaderRgba == null || form.FooterRgba == null) return BadRequest(new { success = false, message = GlText.InvalidData });
+            byte[] h = await Read(form.HeaderRgba, ct), f = await Read(form.FooterRgba, ct);
+            GlStampOutcome o = await _print.StampAsync(form.PrintId, new PdfStampImage { Width = form.HeaderWidth, Height = form.HeaderHeight, Rgba = h }, new PdfStampImage { Width = form.FooterWidth, Height = form.FooterHeight, Rgba = f }, ct);
             if (o.Pdf != null) return File(o.Pdf, "application/pdf", o.FileName);
             if (o.Status == 400) return Ok(new { success = false, message = o.Error });
             return StatusCode(o.Status, new { success = false, message = o.Error });

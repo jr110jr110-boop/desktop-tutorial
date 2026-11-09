@@ -12524,8 +12524,8 @@ as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"planned
 as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9QAID,\"auditeeUserId\":$P9OWNID}"; nomsg "p9 audit: the lead auditor must hold the auditor role" "نقش ممیز"
 as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"NOPE\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: an unknown process is refused"
 as "$WH_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: the storekeeper does not plan an audit"
-as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; check "p9 audit: the QA manager plans the audit of the process QUALITY: the checklist is the 4 rules of the process, nothing is checked yet" '.success and .data.statusValue == 0 and .data.checks == 4 and .data.nonConform == 0 and (.data.items|length) == 4 and ([.data.items[]|select(.result == 0)]|length) == 4 and (.data.number|startswith("PA-"))'
-P9PA=$(val .data.id); P9CK1=$(val '.data.items[0].id'); P9CK2=$(val '.data.items[1].id'); P9CK3=$(val '.data.items[2].id'); P9CK4=$(val '.data.items[3].id')
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; check "p9 audit: the QA manager plans the audit of the process QUALITY: the checklist is the 5 rules of the process (AUD-CO-002 and the four NC rules), nothing is checked yet" '.success and .data.statusValue == 0 and .data.checks == 5 and .data.nonConform == 0 and (.data.items|length) == 5 and ([.data.items[]|select(.result == 0)]|length) == 5 and ([.data.items[].ruleCode]) == ["AUD-CO-002","AUD-NC-001","AUD-NC-002","AUD-NC-003","AUD-NC-004"] and (.data.number|startswith("PA-"))'
+P9PA=$(val .data.id); P9CK1=$(val '.data.items[0].id'); P9CK2=$(val '.data.items[1].id'); P9CK3=$(val '.data.items[2].id'); P9CK4=$(val '.data.items[3].id'); P9CK5=$(val '.data.items[4].id')
 as "$QA_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; nomsg "p9 audit: only the lead auditor starts the audit" "فقط ممیز ارشد"
 as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; check "p9 audit: the lead auditor starts it" '.success and .data.statusValue == 1'
 as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"نتیجه‌ی ممیزی که هنوز بندها بررسی نشده\"}"; nomsg "p9 audit: the audit does not complete while checklist items are unchecked" "فهرست بازبینی"
@@ -12536,9 +12536,10 @@ as "$AUD_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK
 P9FM=$(val .data.id)
 as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK2,\"result\":1}"; check "p9 audit: the second item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 1 and ([.data.items[]|select(.result == 2 and .findingId != null)]|length) == 1'
 as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK3,\"result\":1}"; check "p9 audit: the third item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 2'
-as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK4,\"result\":3}"; check "p9 audit: the fourth item does not apply" '.success and ([.data.items[]|select(.result == 0)]|length) == 0'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK4,\"result\":3}"; check "p9 audit: the fourth item does not apply" '.success and ([.data.items[]|select(.result == 3)]|length) == 1 and ([.data.items[]|select(.result == 0)]|length) == 1'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK5,\"result\":1}"; check "p9 audit: the fifth item is conform, nothing is unchecked" '.success and ([.data.items[]|select(.result == 1)]|length) == 3 and ([.data.items[]|select(.result == 0)]|length) == 0'
 as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"کوتاه\"}"; no "p9 audit: the summary of the result must be written (at least 20 characters)"
-as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"چهار بند بررسی شد؛ یک عدم انطباق ثبت شد و پیگیری می‌شود\"}"; check "p9 audit: the audit completes: 4 items, 1 non-conformity" '.success and .data.statusValue == 2 and .data.nonConform == 1 and .data.checks == 4'
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"پنج بند بررسی شد؛ یک عدم انطباق ثبت شد و پیگیری می‌شود\"}"; check "p9 audit: the audit completes: 5 items, 1 non-conformity" '.success and .data.statusValue == 2 and .data.nonConform == 1 and .data.checks == 5'
 
 # --- the closure chain on the manual finding: owner and re-check by a human auditor (the rule cannot re-check a human finding), refusals of the owner, of the missing re-check, of the same person twice
 p9_step "$QA_TOKEN" "$P9FM" qa; nomsg "p9 manual: QA cannot propose the closure of a finding whose action is missing" "بازبینی خودکار"
@@ -12706,12 +12707,15 @@ as "$CEO_TOKEN" GET go-live/ceo-inbox; check "pkg ceo inbox: seven groups in a f
 as "$COM_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: a commercial user cannot open the CEO inbox"
 as "$PMO2_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: the PMO manager does not read the CEO inbox (it carries approval items and reasons addressed to the CEO)"
 as "$AUD_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: the auditor does not read the CEO inbox"
-as "$CEO_TOKEN" POST go-live/ceo-inbox '{}'; [ "$CODE" = "405" ] && ok "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page)" || bad "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page) (got HTTP $CODE)"
+as "$CEO_TOKEN" POST go-live/ceo-inbox '{}'; [ "$CODE" = "404" ] && ok "pkg ceo inbox: there is no bulk approve (no endpoint accepts POST on the inbox, the application answers 404 for a route that has only GET; each item is decided on its own page)" || bad "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page) (got HTTP $CODE)"
 
 # --- PKG real-data chains (Package G follow-up). Every object is made through the API; nothing is read from a fixture. The cut-over day is moved far ahead by the two-person route so that everything made BELOW is "legacy",
 # the legacy paths are used, and the day is put back to 0 so that the same paths are strict again.
 TOKEN=$ADMIN_TOKEN
-# pkg_drawing ITEMID NUMBER [PDFFILE] : a released drawing WITHOUT a characteristic list (what the company has today). Sets PKGDOC (deliverable) and PKGREV (revision).
+# the contract of the work orders of this block: the quality contract allows only the 2 pump units that the quality block already made, so these work orders have their own contract of the same pump equipment (count 5)
+call POST Contracts '{"code":"PKG-CT-01","title":"قرارداد آزمون راه‌اندازی کنترل پیکربندی","status":1,"employer":"کارفرمای آزمون"}'; check "pkg data: the contract of the work orders is created" '.success and .data.id > 0'; PKGCT=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PKGCT,\"equipmentId\":$QEQ,\"count\":5}"; check "pkg data: the pump equipment is contracted five times" '.success'
+# pkg_drawing ITEMID NUMBER [PDFFILE] : a released drawing WITHOUT a characteristic list (what the company has today). The Package B and A1 release gates apply to a drawing that is linked to a part, so the drawing is released first and linked to its part afterwards (the gates are never weakened). Sets PKGDOC (deliverable) and PKGREV (revision).
 pkg_drawing() {
   local item=$1 num=$2 fid
   as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$num\",\"title\":\"نقشه قطعه $num\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "pkg data: the document controller registers the drawing $num" '.success and .data.id > 0'; PKGDOC=$(val .data.id)
@@ -12724,17 +12728,16 @@ pkg_drawing() {
   fi
   [ -n "$fid" ] && ok "pkg data: the file of drawing $num is uploaded" || bad "pkg data: the file of drawing $num is uploaded"
   as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PKGREV,\"documentId\":\"$fid\",\"fileName\":\"$num-00.pdf\",\"title\":\"$num\"}"; check "pkg data: the file is added to the draft revision of $num" '.success'
-  as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOC,\"kind\":1,\"itemId\":$item}"; check "pkg data: the drawing $num is linked to the part" '.success and .data.id > 0'
   as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"submit\"}"; check "pkg data: the revision of $num goes under review" '.success and .data.status == 2'
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"review\",\"note\":\"checked\"}"; check "pkg data: the PMO reviews $num" '.success and .data.status == 2'
   as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"approve\"}"; check "pkg data: the engineering manager approves $num" '.success and .data.status == 3'
-  pka1_part "$item"; pka1_verify drawing "$PKGREV" "$PKA1UMB" "$num"
-  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"release\"}"; check "pkg data: the PMO releases $num (no characteristic list exists for it)" '.success and .data.status == 4'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGREV,\"action\":\"release\"}"; check "pkg data: the PMO releases $num while it is not linked to any part (the gates of a part drawing apply to a drawing of a part: this is how the drawings of today exist)" '.success and .data.status == 4'
+  as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOC,\"kind\":1,\"itemId\":$item}"; check "pkg data: the released drawing $num is then linked to its part: a released revision with no characteristic list and no design verification" '.success and .data.id > 0'
 }
 # pkg_wo CODE OPTION : a project work order (it has a project code)
 pkg_wo() {
-  call POST WorkOrders "{\"contractId\":$QCT,\"equipmentId\":$QEQ,\"code\":\"$1\",\"title\":\"دستور کار آزمون پذیرش $1\",\"description\":\"x\",\"count\":1}"; check "pkg data: work order $1 is created" '.success and .data.id > 0'; PKGWOID=$(val .data.id)
-  as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PKGWOID,\"contractId\":$QCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"$2\"}"; check "pkg data: work order $1 is a project work order" '.success and (.data.equipmentProjectCode|length) > 0'
+  call POST WorkOrders "{\"contractId\":$PKGCT,\"equipmentId\":$QEQ,\"code\":\"$1\",\"title\":\"دستور کار آزمون پذیرش $1\",\"description\":\"x\",\"count\":1}"; check "pkg data: work order $1 is created" '.success and .data.id > 0'; PKGWOID=$(val .data.id)
+  as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PKGWOID,\"contractId\":$PKGCT,\"typeCode\":\"PU\",\"sizeCode\":\"100\",\"optionCode\":\"$2\"}"; check "pkg data: work order $1 is a project work order" '.success and (.data.equipmentProjectCode|length) > 0'
 }
 item PKGI1 '{"code":"77.10.07.101.1","title":"قطعه آزمون پذیرش قدیمی الف","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part with a legacy drawing, accepted with a note"
 item PKGI2 '{"code":"77.10.07.102.1","title":"قطعه آزمون پذیرش قدیمی ب","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part with a legacy drawing, adopted into a list"
@@ -12798,7 +12801,7 @@ def make(extra):
     body = "%PDF-1.4\n"
     offs = []
     def obj(s):
-        global body
+        nonlocal body
         offs.append(len(body)); body += "%d 0 obj\n%s\nendobj\n" % (len(offs), s)
     obj("<< /Type /Catalog /Pages 2 0 R >>")
     obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>")
@@ -12836,7 +12839,7 @@ PKGPR3=$(val .data.printId)
 PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/print/stamp" -H "Authorization: Bearer $QC_TOKEN" -F "printId=$PKGPR3" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
 [ "$PKGCODE" = "422" ] && check "pkg stamp: a rotated page is refused with a Persian message (HTTP 422) so the screen falls back to the stamped HTML print" '.success == false and (.message|contains("چرخانده"))' || bad "pkg stamp: a rotated page is refused with a Persian message (got HTTP $PKGCODE)"
 PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $QC_TOKEN" -F "file=@$PKGDIR/in.pdf;type=application/pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
-{ [ "$PKGCODE" = "404" ] || [ "$PKGCODE" = "405" ]; } && ok "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (HTTP $PKGCODE)" || bad "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (got HTTP $PKGCODE)"
+[ "$PKGCODE" = "404" ] && ok "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (HTTP $PKGCODE)" || bad "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (got HTTP $PKGCODE)"
 as "$FM_TOKEN" GET "finance/audit?EntityType=GlPrintLog&EntityId=$PKGPR1&PageSize=0"; check "pkg print: the print is in the audit chain: one Added entry and one Modified entry (the stamp) for the first copy" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select(.action == "Modified")]|length) == 1'
 rm -rf "$PKGDIR"
 
@@ -12867,9 +12870,11 @@ as "$CEO_TOKEN" GET go-live/ceo-inbox; check "pkg ceo inbox: the item has left t
 pkb_drawing "$PKGI3" "PKG-DWG-PO" "$( { pkb_line 1 Bore 100 0.05 0.05 mm; } | jq -sc . )"; PKGPOREV1=$PKBREV
 as "$ADMIN_TOKEN" GET "edms/revisions/$PKGPOREV1"; check "pkg po: the drawing revision of the ordered part is read" '.success and .data.deliverableId > 0'; PKGPODOC=$(val .data.deliverableId)
 as "$ADMIN_TOKEN" GET "inventory/items/$PKGI3"; check "pkg po: the part is read" '.success and (.data.code|length) > 0'; PKGI3CODE=$(val .data.code)
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGPODOC,\"kind\":3,\"partNumber\":\"$PKGI3CODE\"}"; check "pkg po: the drawing is also linked to the part by its part number (the engineering change order names a part number)" '.success and .data.id > 0'
 as "$WH_TOKEN" POST procurement/requests "{\"source\":2,\"kind\":1,\"requestDate\":\"$(dd 0)T00:00:00\",\"description\":\"خرید آزمون ارجاع نقشه\",\"submit\":true,\"lines\":[{\"itemId\":$PKGI3,\"quantity\":1,\"estimatedUnitPrice\":9000000,\"technicalRequirements\":\"آزمون\"},{\"itemId\":$PKGI3,\"quantity\":1,\"estimatedUnitPrice\":9000000,\"technicalRequirements\":\"آزمون\"}]}"; check "pkg po: the purchase request of two lines is submitted" '.success and .data.status == 1 and (.data.lines|length) == 2'
 PKGRQ=$(val .data.id); PKGRL1=$(val '.data.lines[0].id'); PKGRL2=$(val '.data.lines[1].id')
-as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PKGRQ,\"action\":\"approve-planning\"}"; check "pkg po: planning approves the request" '.success and .data.status == 2'
+as "$PLAN_TOKEN" POST procurement/requests/action "{\"id\":$PKGRQ,\"action\":\"approve-planning\"}"; check "pkg po: planning approves the request; a medium purchase still waits for the CEO" '.success and .data.status == 1 and .data.needsManagement == true and .data.planningApprovedByUserId > 0'
+as "$CEO_TOKEN" POST procurement/requests/action "{\"id\":$PKGRQ,\"action\":\"approve-management\"}"; check "pkg po: the CEO approves: the request is approved" '.success and .data.status == 2'
 as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"$(dd 0)T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"$(dd 30)T00:00:00\",\"lines\":[{\"requestLineId\":$PKGRL1,\"itemId\":$PKGI3,\"quantity\":1,\"unitPrice\":9000000,\"isCapital\":true}]}"; check "pkg po: order A is saved and its line cites the drawing number and the revision in force, read from the EDMS" '.success and .data.lines[0].drawingNumber == "PKG-DWG-PO" and .data.lines[0].drawingRevision == "00"'
 PKGPOA=$(val .data.id); PKGPONA=$(val .data.number); PKGLA=$(val '.data.lines[0].id')
 as "$COM_TOKEN" POST procurement/orders "{\"kind\":1,\"orderDate\":\"$(dd 0)T00:00:00\",\"providerId\":$PA,\"vatPercent\":10,\"requirements\":\"آزمون\",\"deliveryDate\":\"$(dd 30)T00:00:00\",\"lines\":[{\"requestLineId\":$PKGRL2,\"itemId\":$PKGI3,\"quantity\":1,\"unitPrice\":9000000,\"isCapital\":true}]}"; check "pkg po: order B is saved with the same citation" '.success and .data.lines[0].drawingNumber == "PKG-DWG-PO" and .data.lines[0].drawingRevision == "00"'
@@ -12883,6 +12888,9 @@ as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKGPODOC,\"reason\":\"�
 upload_as "$ADMIN_TOKEN" "pkg-po-01"; PKGPOF=$UPLOADED
 [ -n "$PKGPOF" ] && ok "pkg po: the file of revision 01 is uploaded" || bad "pkg po: the file of revision 01 is uploaded"
 as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PKGPOREV2,\"documentId\":\"$PKGPOF\",\"fileName\":\"PKG-DWG-PO-01.pdf\",\"title\":\"PKG-DWG-PO\"}"; check "pkg po: the file is added to revision 01" '.success'
+as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKGPOREV2" --argjson l "$( { pkb_line 1 Bore 100 0.05 0.05 mm; } | jq -sc . )" '{revisionId:$r,items:$l}')"; check "pkg po: engineering prepares the characteristic list of revision 01 (version 1 of that revision)" '.success and .data.version == 1 and .data.status == 0'; PKGPOLIST2=$(val .data.id)
+as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKGPOLIST2,\"action\":\"submit\"}"; check "pkg po: engineering submits the list of revision 01" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKGPOLIST2,\"action\":\"approve\"}"; check "pkg po: the QA manager approves the list of revision 01" '.success and .data.status == 2'
 as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PKGPOREV2,\"action\":\"submit\"}"; check "pkg po: revision 01 goes under review" '.success and .data.status == 2'
 as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKGPOREV2,\"action\":\"review\",\"note\":\"checked\"}"; check "pkg po: the PMO reviews revision 01" '.success and .data.status == 2'
 as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PKGPOREV2,\"action\":\"approve\"}"; check "pkg po: the engineering manager approves revision 01" '.success and .data.status == 3'
