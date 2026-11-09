@@ -9,6 +9,8 @@ using DataLayer.Context;
 using Entities.Identity;
 using Entities.Model.NasbNiro.AuditSeat;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.GoLive;
+using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Integrity;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Office;
@@ -180,7 +182,9 @@ namespace MsTests
             Put(h, new AusFinding { Number = "AF-1", RuleCode = "AUD-X-001", Title = "waits for the CEO", Status = AusFindingStatus.PmoProposed, ProcessCode = "QUALITY", ObjectType = "X", ObjectKey = "k1", DueDate = DateTime.Today });
             Put(h, new AusFinding { Number = "AF-2", RuleCode = "AUD-X-001", Title = "still with QA", Status = AusFindingStatus.QaProposed, ProcessCode = "QUALITY", ObjectType = "X", ObjectKey = "k2", DueDate = DateTime.Today });
             Put(h, new AusAcceptance { RuleCode = "AUD-X-001", ObjectKey = "k3", ObjectNumber = "N3", Reason = "r", ExpiresOn = DateTime.Today.AddDays(30), Status = AusAcceptanceStatus.PmoAgreed, QaUserId = 60, QaAt = DateTimeOffset.Now, PmoUserId = 50, PmoAt = DateTimeOffset.Now });
-            Put(h, new OpsReadinessException { WorkOrderId = 1, ProductId = 1, ItemCodes = "RD-1", Justification = "j", RequestedByUserId = 21, RequestedAt = DateTimeOffset.Now, Status = OpsReadinessExceptionStatus.Pending });
+            Put(h, new OpsReadinessException { WorkOrderId = 1, ProductId = 1, ItemCodes = "RD-1", Justification = "j", RequestedByUserId = 21, RequestedAt = DateTimeOffset.Now, Status = OpsReadinessExceptionStatus.Pending, PmoUserId = 50, PmoAt = DateTimeOffset.Now });
+            Put(h, new OpsReadinessException { WorkOrderId = 3, ProductId = 1, ItemCodes = "RD-3", Justification = "still waits for the PMO", RequestedByUserId = 21, RequestedAt = DateTimeOffset.Now, Status = OpsReadinessExceptionStatus.Pending });
+            Put(h, new AusFinding { Number = "AF-3", RuleCode = "AUD-X-001", Title = "void waits for the CEO", Status = AusFindingStatus.Open, ProcessCode = "QUALITY", ObjectType = "X", ObjectKey = "k9", DueDate = DateTime.Today, VoidReason = "r", VoidQaUserId = 60, VoidPmoUserId = 50 });
             Put(h, new OpsReadinessException { WorkOrderId = 2, ProductId = 1, ItemCodes = "RD-2", Justification = "j", RequestedByUserId = 21, RequestedAt = DateTimeOffset.Now, Status = OpsReadinessExceptionStatus.Approved });
             Put(h, new SafetySettingChange { Store = SafetyStore.Quality, Key = "Gl.Po.CiteDrawing", OldValue = "1", NewValue = "0", Weakening = true, Reason = "r", RequestedByUserId = 50, RequestedAt = DateTimeOffset.Now, Status = SafetyChangeStatus.Pending });
             Put(h, new ChainBreakAcceptance { BreakRunId = 1, BreakKind = "record-drift", Reason = "r", RequestedByUserId = 50, RequestedAt = DateTimeOffset.Now, QaUserId = 60, QaAt = DateTimeOffset.Now, PmoUserId = 50, PmoAt = DateTimeOffset.Now, Status = SafetyChangeStatus.Pending });
@@ -188,16 +192,20 @@ namespace MsTests
             Put(h, new OfInboxItem { RecipientRole = "CEO", Kind = OfInboxKind.Approval, Title = "done x", Status = OfInboxStatus.Done, CreatedAt = DateTimeOffset.Now, SourceKey = "k2", SourceModule = "m", SourceType = "t" });
             var inbox = await h.As(Ceo, sp => sp.GetRequiredService<IGoLiveOverviewService>().CeoInboxAsync(Ct));
             Assert.IsTrue(inbox.Success, inbox.Message);
-            Assert.AreEqual(6, inbox.Data.Groups.Count);
-            foreach (string key in new[] { "findings", "acceptances", "readiness", "safety", "chain", "inbox" })
-                Assert.AreEqual(1, inbox.Data.Groups.Single(g => g.Key == key).Count, key);
-            Assert.AreEqual(6, inbox.Data.Total);
-            Assert.AreEqual("AF-1", inbox.Data.Groups.Single(g => g.Key == "findings").Items.Single().Title.Split(' ')[0]);
+            Assert.AreEqual(7, inbox.Data.Groups.Count);
+            foreach (string key in new[] { "findings", "finding-void", "acceptances", "readiness", "safety", "chain", "inbox" })
+                Assert.AreEqual(1, inbox.Data.Groups.Single(g => g.Key == key).Count, key + " (a readiness exception the PMO has not decided is not the CEO's yet)");
+            Assert.AreEqual(7, inbox.Data.Total);
+            // the other roles (PMO, auditor) do not read the details of the CEO inbox
+            Assert.IsFalse((await h.As(Pmo, sp => sp.GetRequiredService<IGoLiveOverviewService>().CeoInboxAsync(Ct))).Success);
+            Assert.IsFalse((await h.As(Auditor, sp => sp.GetRequiredService<IGoLiveOverviewService>().CeoInboxAsync(Ct))).Success);
+            Assert.IsTrue(inbox.Data.Groups.Single(g => g.Key == "findings").Items.Any(i => i.Title.StartsWith("AF-1 ")));
+            Assert.IsFalse(inbox.Data.Groups.Single(g => g.Key == "findings").Items.Any(i => i.Title.StartsWith("AF-2 ")));
         }
 
         // ------------------------------------------------------------------------------------------------ record drift
 
-        private sealed class RawOne<T> : DbContext where T : class
+        internal sealed class RawOne<T> : DbContext where T : class
         {
             public static string Table;
             public RawOne(DbContextOptions<RawOne<T>> options) : base(options) { }
@@ -287,5 +295,137 @@ namespace MsTests
             var w = Put(h, new WorkOrder { Code = "WO-R", Title = "wo", ContractId = c, CreateDate = DateTimeOffset.Now });
             return Put(h, new ReleaseNote { Number = "RN-D", WorkOrderId = w.Id, ContractId = c, Status = ReleaseNoteStatus.Draft, CertificateOfConformityNumber = "CoC-1" }).Id;
         }, n => n.CertificateOfConformityNumber = "CoC-FORGED", "CertificateOfConformityNumber");
+
+        // ------------------------------------------------------------------------------------------------ fix round 1
+
+        [TestMethod]
+        public Task A_Direct_Change_Of_A_Work_Order_Creation_Date_Is_Found() => Tamper<WorkOrder>(h =>
+        {
+            int c = Put(h, new ContractEntity { Code = "C-W", Title = "c", Status = ContractStatus.Current }).Id;
+            return Put(h, new WorkOrder { Code = "WO-W", Title = "wo", ContractId = c, CreateDate = DateTimeOffset.Now }).Id;
+        }, w => w.CreateDate = DateTimeOffset.MinValue, "CreateDate");
+
+        [TestMethod]
+        public Task A_Direct_Change_Of_A_Po_Line_Unit_Price_Is_Found() => Tamper<PurchaseOrderLine>(h =>
+        {
+            var po = Put(h, new PurchaseOrder { Number = "PO-U", Status = PurchaseOrderStatus.Draft, OrderDate = DateTime.Today });
+            return Put(h, new PurchaseOrderLine { PurchaseOrderId = po.Id, RowNumber = 1, Quantity = 2, UnitPrice = 10 }).Id;
+        }, l => l.UnitPrice = 1, "UnitPrice");
+
+        [TestMethod]
+        public async Task The_First_Verification_After_The_Update_Takes_The_Newly_Covered_Records_As_Its_Starting_Point_Once_And_A_Later_Change_Is_Still_Found()
+        {
+            AppHost h = Host("baseline");
+            int c = Put(h, new ContractEntity { Code = "C-B", Title = "c", Status = ContractStatus.Current }).Id;
+            int id = Put(h, new WorkOrder { Code = "WO-B", Title = "wo", ContractId = c, CreateDate = DateTimeOffset.Now }).Id;
+            Assert.AreEqual("Ok", (await Incremental(h)).Status);
+            RawOne<WorkOrder>.Table = h.Read(u => ((DbContext)u).Model.FindEntityType(typeof(WorkOrder)).GetTableName());
+            void Behind(DateTimeOffset when) { using var raw = new RawOne<WorkOrder>(h.RawOptions<RawOne<WorkOrder>>()); raw.Set<WorkOrder>().Find(id).CreateDate = when; raw.SaveChanges(); }
+            Behind(DateTimeOffset.Now.AddYears(-3));   // a historic gap that exists on the server before the update
+            Put(h, new GlActivation { StartAt = DateTimeOffset.Now });
+
+            var rehearsal = await h.As(Pmo, sp => sp.GetRequiredService<IGoLiveOverviewService>().DriftRehearsalAsync(Ct));
+            Assert.IsTrue(rehearsal.Success, rehearsal.Message);
+            Assert.IsTrue(rehearsal.Data.BaselineDue);
+            Assert.AreEqual(1, rehearsal.Data.Tables.Single(t => t.EntityType == "WorkOrder").Differing);
+            Assert.IsFalse((await h.As(Buyer, sp => sp.GetRequiredService<IGoLiveOverviewService>().DriftRehearsalAsync(Ct))).Success, "not for every role");
+            Assert.AreEqual(0, h.Read(u => u.Set<FnAuditLog>().Count(l => l.EntityType == "RecordDriftBaseline")), "the dry run writes nothing");
+
+            Assert.AreEqual("Ok", (await Incremental(h)).Status, "the historic gap is not a break of the chain on the first run");
+            Assert.IsNotNull(h.Read(u => u.Set<GlActivation>().Single().DriftBaselineAt));
+            Assert.AreEqual(1, h.Read(u => u.Set<FnAuditLog>().Count(l => l.EntityType == "RecordDriftBaseline")));
+            var after = await h.As(Pmo, sp => sp.GetRequiredService<IGoLiveOverviewService>().DriftRehearsalAsync(Ct));
+            Assert.IsFalse(after.Data.BaselineDue);
+            Assert.AreEqual(0, after.Data.TotalDiffering);
+
+            Behind(DateTimeOffset.Now.AddYears(-9));   // a new change behind the application after the starting point
+            AuditChainRunDto found = await Incremental(h);
+            Assert.AreEqual("Broken", found.Status);
+            Assert.AreEqual("record-drift", found.BreakKind);
+            Assert.AreEqual("WorkOrder", found.BreakEntityType);
+        }
+
+        // PO citation
+
+        private (int Contract, int Doc, int Rev, int Po) PoWorld(AppHost h, string tag)
+        {
+            int contract = Put(h, new ContractEntity { Code = "C-" + tag, Title = "c", Status = ContractStatus.Current }).Id;
+            int doc = Put(h, new PcEngineeringDeliverable { ContractId = contract, DocumentNumber = "DWG-" + tag, Title = "t" }).Id;
+            int rev = Put(h, new PcDocumentRevision { DeliverableId = doc, Code = "A", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(-5) }).Id;
+            int po = Put(h, new PurchaseOrder { Number = "PO-" + tag, Status = PurchaseOrderStatus.Released, OrderDate = DateTime.Today, CreatorUserId = 46 }).Id;
+            return (contract, doc, rev, po);
+        }
+
+        [TestMethod]
+        public async Task A_Line_Whose_Item_Changes_To_A_Part_Without_Drawing_Loses_The_Old_Citation_And_An_Obsolete_Drawing_Makes_The_Line_Stale()
+        {
+            AppHost h = Host("cite2");
+            var w = PoWorld(h, "C2");
+            int withDrawing = Put(h, new InventoryItem { Code = "IT-C2A", Title = "a", PartNumber = "PN-C2A" }).Id;
+            int without = Put(h, new InventoryItem { Code = "IT-C2B", Title = "b", PartNumber = "PN-C2B" }).Id;
+            Put(h, new PcDocumentLink { DeliverableId = w.Doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-C2A" });
+            int line = Put(h, new PurchaseOrderLine { PurchaseOrderId = w.Po, RowNumber = 1, ItemId = withDrawing, Quantity = 1 }).Id;
+            h.Write(u => { var l = u.Set<PurchaseOrderLine>().Single(x => x.Id == line); Assert.IsTrue(PoDrawingCitation.CiteAsync(u, l, null, Ct).GetAwaiter().GetResult()); u.SaveChanges(); }, Seeder);
+            Assert.AreEqual("DWG-C2", h.Read(u => u.Set<PurchaseOrderLine>().Single(x => x.Id == line).DrawingNumber));
+
+            // the drawing is made obsolete: no revision is in force any more, the line is stale and cannot be "confirmed"
+            h.Write(u => { u.Set<PcDocumentRevision>().Single(x => x.Id == w.Rev).Status = PcDocStatus.Obsolete; u.SaveChanges(); }, Seeder);
+            var stale = h.Read(u => PoDrawingCitation.StaleAsync(u, null, Ct).GetAwaiter().GetResult());
+            Assert.AreEqual(1, stale.Count);
+            Assert.AreEqual(0, stale[0].CurrentRevisionId);
+            var confirm = await h.As(Buyer, sp => sp.GetRequiredService<IPoCitationService>().ConfirmAsync(new GlPoConfirmDto { LineId = line, Reference = "supplier letter 12" }, Ct));
+            Assert.IsFalse(confirm.Success, "an obsolete drawing has no revision to confirm");
+            h.Write(u => { u.Set<PcDocumentRevision>().Single(x => x.Id == w.Rev).Status = PcDocStatus.Released; u.SaveChanges(); }, Seeder);
+
+            // the item of the draft line is changed to a part with no drawing: the earlier citation must go
+            h.Write(u =>
+            {
+                var l = u.Set<PurchaseOrderLine>().Single(x => x.Id == line);
+                l.ItemId = without;
+                Assert.IsTrue(PoDrawingCitation.CiteAsync(u, l, null, Ct).GetAwaiter().GetResult());
+                u.SaveChanges();
+            }, Seeder);
+            var cleared = h.Read(u => u.Set<PurchaseOrderLine>().Single(x => x.Id == line));
+            Assert.IsNull(cleared.DrawingRevisionId);
+            Assert.IsNull(cleared.DrawingNumber);
+            Assert.IsNull(cleared.DrawingRevision);
+        }
+
+        [TestMethod]
+        public async Task The_One_Time_Job_Cites_The_Open_Lines_Of_The_Old_System_And_The_Uncited_List_Shows_What_Is_Left()
+        {
+            AppHost h = Host("backfill");
+            var w = PoWorld(h, "BF");
+            int item = Put(h, new InventoryItem { Code = "IT-BF", Title = "a", PartNumber = "PN-BF" }).Id;
+            Put(h, new PcDocumentLink { DeliverableId = w.Doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-BF" });
+            int line = Put(h, new PurchaseOrderLine { PurchaseOrderId = w.Po, RowNumber = 1, ItemId = item, Quantity = 1 }).Id;
+            var before = await h.As(Buyer, sp => sp.GetRequiredService<IPoCitationService>().UncitedLinesAsync(new GlCandidateQuery(), Ct));
+            Assert.IsTrue(before.Success, before.Message);
+            Assert.AreEqual(1, before.Data.Total);
+            Assert.AreEqual("IT-BF", before.Data.Items.Single().ItemCode);
+            Assert.IsFalse((await h.As(AppHost.Principal(90, "user.one", "SALES"), sp => sp.GetRequiredService<IPoCitationService>().UncitedLinesAsync(new GlCandidateQuery(), Ct))).Success);
+            int cited = 0;
+            h.Write(u => { cited = PoDrawingCitation.BackfillAsync(u, null, Ct).GetAwaiter().GetResult(); }, Seeder);
+            Assert.AreEqual(1, cited);
+            Assert.AreEqual("DWG-BF", h.Read(u => u.Set<PurchaseOrderLine>().Single(x => x.Id == line).DrawingNumber));
+            h.Write(u => { cited = PoDrawingCitation.BackfillAsync(u, null, Ct).GetAwaiter().GetResult(); }, Seeder);
+            Assert.AreEqual(0, cited, "idempotent");
+            Assert.AreEqual(0, (await h.As(Buyer, sp => sp.GetRequiredService<IPoCitationService>().UncitedLinesAsync(new GlCandidateQuery(), Ct))).Data.Total);
+        }
+
+        [TestMethod]
+        public void A_Part_With_Several_Drawings_Cites_The_One_Linked_To_The_Item_Itself()
+        {
+            AppHost h = Host("primary");
+            int contract = Put(h, new ContractEntity { Code = "C-PR", Title = "c", Status = ContractStatus.Current }).Id;
+            int item = Put(h, new InventoryItem { Code = "IT-PR", Title = "a", PartNumber = "PN-PR" }).Id;
+            int d1 = Put(h, new PcEngineeringDeliverable { ContractId = contract, DocumentNumber = "DWG-A", Title = "t" }).Id;
+            int d2 = Put(h, new PcEngineeringDeliverable { ContractId = contract, DocumentNumber = "DWG-Z", Title = "t" }).Id;
+            foreach (int d in new[] { d1, d2 }) Put(h, new PcDocumentRevision { DeliverableId = d, Code = "A", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(-5) });
+            Put(h, new PcDocumentLink { DeliverableId = d1, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-PR" });
+            Put(h, new PcDocumentLink { DeliverableId = d2, Kind = PcDocLinkKind.Item, ItemId = item });
+            var primary = h.Read(u => PoDrawingCitation.Primary(EdmsResolver.DrawingsForItemAsync(u, item, null, Ct).GetAwaiter().GetResult()));
+            Assert.AreEqual("DWG-Z", primary.Number, "the drawing linked to the item itself comes before the lower number");
+        }
     }
 }

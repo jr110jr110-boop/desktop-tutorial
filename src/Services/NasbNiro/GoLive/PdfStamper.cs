@@ -32,6 +32,8 @@ namespace Services.NasbNiro.GoLive
         private static readonly Encoding Latin1 = Encoding.Latin1;
         private const string Unsupported = "ساختار این PDF (رمزگذاری، جدول ارجاع فشرده یا شیء فشرده) برای مهر مستقیم پشتیبانی نمی‌شود؛ چاپ با مهر صفحه انجام می‌شود.";
 
+        private const string Geometry = "صفحهٔ این PDF چرخانده است یا اندازهٔ صفحه به‌صورت غیرمستقیم یا با برش جداگانه (CropBox) تعریف شده؛ مهر مستقیم درست قرار نمی‌گیرد و چاپ با برگهٔ مهرشدهٔ برنامه انجام می‌شود.";
+
         private sealed class Xref { public long Offset; public int Gen; public bool InUse; }
 
         public static bool LooksLikePdf(byte[] pdf) => pdf != null && pdf.Length > 20 && pdf[0] == '%' && pdf[1] == 'P' && pdf[2] == 'D' && pdf[3] == 'F';
@@ -105,7 +107,7 @@ namespace Services.NasbNiro.GoLive
             if (!pagesRef.Success) throw new PdfStampException(Unsupported);
 
             var pages = new List<(int Num, string Resources, string Box)>();
-            void Walk(int num, string inheritedRes, string inheritedBox, int depth)
+            void Walk(int num, string inheritedRes, string inheritedBox, int inheritedRotate, int depth)
             {
                 if (depth > 40 || pages.Count > 2000) throw new PdfStampException(Unsupported);
                 string body = Body(num);
@@ -113,14 +115,24 @@ namespace Services.NasbNiro.GoLive
                 string d = Dict(body, SkipWs(body, 0));
                 if (d == null) throw new PdfStampException(Unsupported);
                 string res = FindEntry(d, "/Resources") ?? inheritedRes, box = FindEntry(d, "/MediaBox") ?? inheritedBox;
+                Match rot = Regex.Match(d, @"/Rotate\s+(-?\d+)");
+                int rotate = rot.Success ? int.Parse(rot.Groups[1].Value, CultureInfo.InvariantCulture) : inheritedRotate;
                 Match kids = Regex.Match(d, @"/Kids\s*\[([^\]]*)\]");
                 if (kids.Success && Regex.IsMatch(d, @"/Type\s*/Pages"))
                 {
-                    foreach (Match k in Regex.Matches(kids.Groups[1].Value, @"(\d+)\s+\d+\s+R")) Walk(int.Parse(k.Groups[1].Value, CultureInfo.InvariantCulture), res, box, depth + 1);
+                    foreach (Match k in Regex.Matches(kids.Groups[1].Value, @"(\d+)\s+\d+\s+R")) Walk(int.Parse(k.Groups[1].Value, CultureInfo.InvariantCulture), res, box, rotate, depth + 1);
                 }
-                else pages.Add((num, res, box));
+                else
+                {
+                    // fix round 1 (M8): a rotated page, a MediaBox that is an indirect reference and a CropBox that differs from the MediaBox would get the stamp in the wrong place: refused (the caller falls back to the HTML print)
+                    if (((rotate % 360) + 360) % 360 != 0) throw new PdfStampException(Geometry);
+                    if (box != null && Regex.IsMatch(box, @"^\s*\d+\s+\d+\s+R")) throw new PdfStampException(Geometry);
+                    string crop = FindEntry(d, "/CropBox");
+                    if (crop != null && (Regex.IsMatch(crop, @"^\s*\d+\s+\d+\s+R") || box == null || Regex.Replace(crop, @"\s+", " ") != Regex.Replace(box, @"\s+", " "))) throw new PdfStampException(Geometry);
+                    pages.Add((num, res, box));
+                }
             }
-            Walk(int.Parse(pagesRef.Groups[1].Value, CultureInfo.InvariantCulture), null, null, 0);
+            Walk(int.Parse(pagesRef.Groups[1].Value, CultureInfo.InvariantCulture), null, null, 0, 0);
             if (pages.Count == 0) throw new PdfStampException(Unsupported);
 
             // the images (shared by every page)

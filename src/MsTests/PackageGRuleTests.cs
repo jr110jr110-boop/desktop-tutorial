@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Entities.Model.NasbNiro.AuditSeat;
 using Entities.Model.NasbNiro.GoLive;
 using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.Procurement;
@@ -19,19 +20,32 @@ namespace MsTests
         public void AUD_CO_001()
         {
             var h = Host();
-            var bad = Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:1", 5, "RN-1"));
-            var adopted = Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:2", 6, "RN-2"));
+            // two releases of the same work order are ONE observation; a work order that got a baseline is cleared
+            Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:1", 5, "RN-1"));
+            Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:3", 5, "RN-3"));
+            Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:2", 6, "RN-2"));
             Put(h, new PbProjectBaseline { WorkOrderId = 6, ProductId = 1, BomHeaderId = 1, IsCurrent = true });
-            Only(Run(h, "AUD-CO-001"), "GlLegacyUse", bad.Id);
+            Only(Run(h, "AUD-CO-001"), "WorkOrder", 5);
+            Assert.AreEqual(AusSeverity.Observation, AusCatalog.Find("AUD-CO-001").Severity, "an observation, not a finding that needs three signatures per use");
+            Assert.IsFalse(AusRecheckModeOf("AUD-CO-001"), "State mode: it clears itself when the baseline exists");
         }
+
+        private static bool AusRecheckModeOf(string code) => AusCatalog.Find(code).Mode == AusRecheckMode.Event;
 
         [TestMethod]
         public void AUD_CO_002()
         {
             var h = Host();
             Put(h, Use(GlLegacyKind.PcaNotApplicable, "ReleaseNote:1", 5));
-            var bad = Put(h, Use(GlLegacyKind.QcAcceptWithoutList, "QcRecord:1", null, "QIR-1"));
-            Only(Run(h, "AUD-CO-002"), "GlLegacyUse", bad.Id);
+            // two QC acceptances on the same drawing revision are one observation; a revision that has a released list is cleared
+            var u1 = Use(GlLegacyKind.QcAcceptWithoutList, "QcRecord:1", null, "QIR-1"); u1.RevisionId = 71;
+            var u2 = Use(GlLegacyKind.QcAcceptWithoutList, "QcRecord:2", null, "QIR-2"); u2.RevisionId = 71;
+            var u3 = Use(GlLegacyKind.QcAcceptWithoutList, "QcRecord:3", null, "QIR-3"); u3.RevisionId = 72;
+            Put(h, u1); Put(h, u2); Put(h, u3);
+            Put(h, new Entities.Model.NasbNiro.Quality.QcCharacteristicList { RevisionId = 72, Status = Entities.Model.NasbNiro.Quality.CharListStatus.Released });
+            Only(Run(h, "AUD-CO-002"), "PcDocumentRevision", 71);
+            Assert.AreEqual(AusSeverity.Observation, AusCatalog.Find("AUD-CO-002").Severity);
+            Assert.IsFalse(AusRecheckModeOf("AUD-CO-002"));
         }
 
         [TestMethod]
@@ -39,8 +53,23 @@ namespace MsTests
         {
             var h = Host();
             Put(h, Use(GlLegacyKind.QcAcceptWithoutList, "QcRecord:1", null, "QIR-1"));
-            var bad = Put(h, Use(GlLegacyKind.FaiNotOpened, "MfProductionOrder:MO-1", null, "MO-1"));
-            Only(Run(h, "AUD-CO-003"), "GlLegacyUse", bad.Id);
+            Put(h, new GlActivation { StartAt = DateTimeOffset.Now });
+            // part 1: its only drawing was released before the cut-over, no list: two orders = ONE observation. Part 2: its drawing is new (after the cut-over): nothing.
+            var i1 = Put(h, new Entities.Model.NasbNiro.Inventory.InventoryItem { Code = "IT-CO1", Title = "p1", PartNumber = "PN-CO1" });
+            var i2 = Put(h, new Entities.Model.NasbNiro.Inventory.InventoryItem { Code = "IT-CO2", Title = "p2", PartNumber = "PN-CO2" });
+            var d1 = Put(h, new PcEngineeringDeliverable { ContractId = 1, DocumentNumber = "DWG-CO1", Title = "t" });
+            var d2 = Put(h, new PcEngineeringDeliverable { ContractId = 1, DocumentNumber = "DWG-CO2", Title = "t" });
+            Put(h, new PcDocumentRevision { DeliverableId = d1.Id, Code = "A", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(-30) });
+            Put(h, new PcDocumentRevision { DeliverableId = d2.Id, Code = "A", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(5) });
+            Put(h, new PcDocumentLink { DeliverableId = d1.Id, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-CO1" });
+            Put(h, new PcDocumentLink { DeliverableId = d2.Id, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-CO2" });
+            var a = Use(GlLegacyKind.FaiNotOpened, "MfProductionOrder:MO-1", null, "MO-1"); a.ItemId = i1.Id;
+            var b = Use(GlLegacyKind.FaiNotOpened, "MfProductionOrder:MO-2", null, "MO-2"); b.ItemId = i1.Id;
+            var c = Use(GlLegacyKind.FaiNotOpened, "MfProductionOrder:MO-3", null, "MO-3"); c.ItemId = i2.Id;
+            Put(h, a); Put(h, b); Put(h, c);
+            Only(Run(h, "AUD-CO-003"), "InventoryItem", i1.Id);
+            Assert.AreEqual(AusSeverity.Observation, AusCatalog.Find("AUD-CO-003").Severity);
+            Assert.IsFalse(AusRecheckModeOf("AUD-CO-003"));
         }
 
         [TestMethod]

@@ -32,19 +32,19 @@ namespace MsTests
     public class PackageGFlowTests
     {
         private static readonly CancellationToken Ct = CancellationToken.None;
-        private static readonly ClaimsPrincipal Seeder = AppHost.Principal(1, "seed", "PMO");
+        internal static readonly ClaimsPrincipal Seeder = AppHost.Principal(1, "seed", "PMO");
         private static readonly ClaimsPrincipal Dcc = AppHost.Principal(31, "dcc.one", "DCC");
         private static readonly ClaimsPrincipal Reviewer = AppHost.Principal(32, "engineer.one", "ENGINEER");
         private static readonly ClaimsPrincipal Approver = AppHost.Principal(33, "engineering.manager", "ENGINEERING");
-        private static readonly ClaimsPrincipal Pmo = AppHost.Principal(34, "pmo.one", "PMO");
-        private static readonly ClaimsPrincipal Maker = AppHost.Principal(41, "eng.maker", "ENGINEER");
-        private static readonly ClaimsPrincipal Checker = AppHost.Principal(42, "qa.checker", "QA");
-        private static readonly ClaimsPrincipal Inspector = AppHost.Principal(43, "qc.inspector", "QC");
+        internal static readonly ClaimsPrincipal Pmo = AppHost.Principal(34, "pmo.one", "PMO");
+        internal static readonly ClaimsPrincipal Maker = AppHost.Principal(41, "eng.maker", "ENGINEER");
+        internal static readonly ClaimsPrincipal Checker = AppHost.Principal(42, "qa.checker", "QA");
+        internal static readonly ClaimsPrincipal Inspector = AppHost.Principal(43, "qc.inspector", "QC");
         private static readonly ClaimsPrincipal MakerAndQa = AppHost.Principal(44, "eng.and.qa", "ENGINEER", "QA");
-        private static readonly ClaimsPrincipal Prep = AppHost.Principal(21, "eng.prep", "ENGINEERING");
-        private static readonly ClaimsPrincipal Eng2 = AppHost.Principal(22, "eng.two", "ENGINEERING");
-        private static readonly ClaimsPrincipal Pmo2 = AppHost.Principal(35, "pmo.two", "PMO");
-        private static readonly ClaimsPrincipal EngAndPmo = AppHost.Principal(45, "eng.and.pmo", "ENGINEERING", "PMO");
+        internal static readonly ClaimsPrincipal Prep = AppHost.Principal(21, "eng.prep", "ENGINEERING");
+        internal static readonly ClaimsPrincipal Eng2 = AppHost.Principal(22, "eng.two", "ENGINEERING");
+        internal static readonly ClaimsPrincipal Pmo2 = AppHost.Principal(35, "pmo.two", "PMO");
+        internal static readonly ClaimsPrincipal EngAndPmo = AppHost.Principal(45, "eng.and.pmo", "ENGINEERING", "PMO");
         private static readonly ClaimsPrincipal Buyer = AppHost.Principal(46, "buyer.one", "COMMERCIAL");
 
         internal static AppHost NewHost(string name, int cutOverDays)
@@ -61,14 +61,14 @@ namespace MsTests
             return host;
         }
 
-        private static int NewContract(AppHost host)
+        internal static int NewContract(AppHost host)
         {
             int id = 0;
             host.Write(u => { var c = AppHost.Add(u, new ContractEntity { Code = "C-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "contract", Status = ContractStatus.Current }); u.SaveChanges(); id = c.Id; }, Seeder);
             return id;
         }
 
-        private static int NewItem(AppHost host, string part)
+        internal static int NewItem(AppHost host, string part)
         {
             int id = 0;
             host.Write(u => { var i = AppHost.Add(u, new InventoryItem { Code = "IT-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "part", PartNumber = part }); u.SaveChanges(); id = i.Id; }, Seeder);
@@ -313,7 +313,7 @@ namespace MsTests
 
         // ------------------------------------------------------------------------------------------------ adoption of the project configuration
 
-        private static (int WorkOrder, int Product, int Bom) LegacyProject(AppHost host)
+        internal static (int WorkOrder, int Product, int Bom) LegacyProject(AppHost host)
         {
             int wo = 0, product = 0, bom = 0;
             int contract = NewContract(host);
@@ -399,6 +399,137 @@ namespace MsTests
             var again = await host.As(Prep, s => s.GetRequiredService<IGlConfigAdoptionService>().RequestAsync(dto, Ct));
             Assert.IsTrue(again.Success, "after a void a new request is possible: " + again.Message);
             Assert.AreEqual(2, host.Read(u => u.Set<GlConfigAdoption>().Count()), "the voided row stays");
+        }
+
+        // ------------------------------------------------------------------------------------------------ fix round 1
+
+        private static async Task<GlConfigAdoptionDto> AdoptAsync(AppHost host, (int WorkOrder, int Product, int Bom) p)
+        {
+            var dto = new GlSaveConfigAdoptionDto { WorkOrderId = p.WorkOrder, ProductId = p.Product, BomHeaderId = p.Bom, Reason = "پروژه پیش از آغاز کنترل پیکربندی شروع شده است", EvidenceRef = "فهرست BOM قدیمی شماره ۷", ComparisonNote = "ردیف‌های BOM قدیمی با بانک محصول تطبیق داده شد" };
+            var made = await host.As(Prep, s => s.GetRequiredService<IGlConfigAdoptionService>().RequestAsync(dto, Ct));
+            Assert.IsTrue(made.Success, made.Message);
+            Assert.IsTrue((await host.As(Eng2, s => s.GetRequiredService<IGlConfigAdoptionService>().ActionAsync(new GlAdoptionActionDto { Id = made.Data.Id, Action = "eng-review" }, Ct))).Success);
+            var last = await host.As(Pmo, s => s.GetRequiredService<IGlConfigAdoptionService>().ActionAsync(new GlAdoptionActionDto { Id = made.Data.Id, Action = "pmo-review" }, Ct));
+            Assert.IsTrue(last.Success, last.Message);
+            Assert.AreEqual(2, last.Data.Status, "the adoption record and the baseline come together");
+            Assert.IsNotNull(last.Data.BaselineId);
+            return last.Data;
+        }
+
+        private static void ApprovedTemplate(AppHost host, int product)
+        {
+            host.Write(u =>
+            {
+                var t = AppHost.Add(u, new PbWbsTemplate { ProductId = product, Title = "t", Version = 1, IsApproved = true, Source = "x" });
+                u.SaveChanges();
+                AppHost.Add(u, new PbWbsTemplateNode { TemplateId = t.Id, Seq = 1, Uid = 1, OutlineLevel = 1, Title = "Product", Kind = PbWbsNodeKind.Summary, DurationDays = 10 });
+                u.SaveChanges();
+            }, Seeder);
+        }
+
+        [TestMethod]
+        public async Task The_Adoption_Of_A_Running_Project_With_A_Locked_Plan_And_An_Approved_Template_Does_Not_Edit_The_Plan_And_Asks_The_Pmo_Through_A_Change_Request()
+        {
+            AppHost host = NewHost("cfg_locked", 1);
+            var p = LegacyProject(host);
+            ApprovedTemplate(host, p.Product);
+            int contract = host.Read(u => u.Set<WorkOrder>().Single(w => w.Id == p.WorkOrder).ContractId);
+            host.Write(u => { AppHost.Add(u, new PcContractTerms { ContractId = contract, CurrentBaselineId = 1 }); u.SaveChanges(); }, Seeder);
+            int nodes = host.Read(u => u.Set<PcWbsNode>().Count()), acts = host.Read(u => u.Set<PcActivity>().Count());
+
+            var done = await AdoptAsync(host, p);
+            Assert.AreEqual(nodes, host.Read(u => u.Set<PcWbsNode>().Count()), "no WBS node is generated into the locked plan");
+            Assert.AreEqual(acts, host.Read(u => u.Set<PcActivity>().Count()), "no activity is generated");
+            var baseline = host.Read(u => u.Set<PbProjectBaseline>().Single(b => b.Id == done.BaselineId));
+            Assert.IsNull(baseline.PcProductNodeId);
+            Assert.IsNotNull(baseline.ChangeRequestId, "the PMO decides the link through the project's normal change path");
+            var cr = host.Read(u => u.Set<PcChangeRequest>().Single(c => c.Id == baseline.ChangeRequestId));
+            Assert.AreEqual(PcChangeStatus.Draft, cr.Status);
+            Assert.AreEqual(contract, cr.ContractId);
+        }
+
+        [TestMethod]
+        public async Task The_Adoption_Maps_The_Baseline_To_The_Product_Node_That_Already_Exists_And_Generates_Nothing()
+        {
+            AppHost host = NewHost("cfg_map", 1);
+            var p = LegacyProject(host);
+            ApprovedTemplate(host, p.Product);
+            int contract = host.Read(u => u.Set<WorkOrder>().Single(w => w.Id == p.WorkOrder).ContractId), node = 0;
+            host.Write(u =>
+            {
+                AppHost.Add(u, new PcContractTerms { ContractId = contract, CurrentBaselineId = 1 });
+                node = AppHost.Add(u, new PcWbsNode { ContractId = contract, WorkOrderId = p.WorkOrder, NodeType = PcWbsNodeType.Product, Code = "N-1", Title = "existing product node" }).Id;
+                u.SaveChanges();
+            }, Seeder);
+            int nodes = host.Read(u => u.Set<PcWbsNode>().Count()), acts = host.Read(u => u.Set<PcActivity>().Count());
+            var done = await AdoptAsync(host, p);
+            Assert.AreEqual(nodes, host.Read(u => u.Set<PcWbsNode>().Count()));
+            Assert.AreEqual(acts, host.Read(u => u.Set<PcActivity>().Count()));
+            Assert.AreEqual(node, host.Read(u => u.Set<PbProjectBaseline>().Single(b => b.Id == done.BaselineId)).PcProductNodeId, "mapped to the existing node");
+            Assert.AreEqual(0, host.Read(u => u.Set<PcChangeRequest>().Count()));
+        }
+
+        [TestMethod]
+        public async Task The_Candidate_Lists_Are_Filtered_In_The_Database_Paged_And_Searchable_And_Closed_To_Other_Roles()
+        {
+            AppHost host = NewHost("cand", 1);
+            int contract = NewContract(host);
+            host.Write(u =>
+            {
+                for (int i = 1; i <= 5; i++) AppHost.Add(u, new WorkOrder { Code = "WO-CAND-" + i, Title = "legacy " + i, ContractId = contract, CreateDate = i == 5 ? DateTimeOffset.MinValue : DateTimeOffset.Now });
+                u.SaveChanges();
+                var doc = AppHost.Add(u, new PcEngineeringDeliverable { ContractId = contract, DocumentNumber = "DWG-CAND", Title = "t" });
+                u.SaveChanges();
+                for (int i = 1; i <= 3; i++) AppHost.Add(u, new PcDocumentRevision { DeliverableId = doc.Id, Code = "R" + i, Sequence = i, Status = i == 3 ? PcDocStatus.Released : PcDocStatus.Superseded, ReleasedAt = DateTimeOffset.Now.AddDays(-10) });
+                var doc2 = AppHost.Add(u, new PcEngineeringDeliverable { ContractId = contract, DocumentNumber = "DWG-OLD", Title = "t" });
+                u.SaveChanges();
+                AppHost.Add(u, new PcDocumentRevision { DeliverableId = doc2.Id, Code = "A", Sequence = 1, Status = PcDocStatus.Released });   // never recorded: older than the record of dates
+                u.SaveChanges();
+            }, Seeder);
+            var page1 = await host.As(Prep, s => s.GetRequiredService<IGlConfigAdoptionService>().CandidatesAsync(new GlCandidateQuery { PageSize = 2, PageNumber = 1 }, Ct));
+            Assert.AreEqual(5, page1.Data.Total);
+            Assert.AreEqual(2, page1.Data.Items.Count);
+            var page3 = await host.As(Prep, s => s.GetRequiredService<IGlConfigAdoptionService>().CandidatesAsync(new GlCandidateQuery { PageSize = 2, PageNumber = 3 }, Ct));
+            Assert.AreEqual(1, page3.Data.Items.Count, "the last page");
+            Assert.IsTrue(page3.Data.Items.Single().CreatedUnknown, "a creation date that was never recorded is told so");
+            var found = await host.As(Prep, s => s.GetRequiredService<IGlConfigAdoptionService>().CandidatesAsync(new GlCandidateQuery { Search = "WO-CAND-4" }, Ct));
+            Assert.AreEqual(1, found.Data.Total);
+            Assert.AreEqual("WO-CAND-4", found.Data.Items.Single().Code);
+            Assert.IsFalse((await host.As(AppHost.Principal(90, "user.one", "SALES"), s => s.GetRequiredService<IGlConfigAdoptionService>().CandidatesAsync(null, Ct))).Success);
+
+            var revs = await host.As(Prep, s => s.GetRequiredService<IGlCharAdoptionService>().CandidatesAsync(new GlCandidateQuery { PageSize = 10 }, Ct));
+            Assert.AreEqual(2, revs.Data.Total, "the released revision and the old one without a release date; superseded ones are not offered");
+            var byNumber = await host.As(Prep, s => s.GetRequiredService<IGlCharAdoptionService>().CandidatesAsync(new GlCandidateQuery { Search = "DWG-OLD" }, Ct));
+            Assert.AreEqual(1, byNumber.Data.Total);
+            Assert.IsFalse((await host.As(AppHost.Principal(90, "user.one", "SALES"), s => s.GetRequiredService<IGlCharAdoptionService>().CandidatesAsync(null, Ct))).Success);
+        }
+
+        [TestMethod]
+        public void The_Cut_Over_Instant_Cannot_Be_Moved_Later_By_Deleting_The_Activation_Row_And_The_Slot_Is_Unique()
+        {
+            AppHost host = NewHost("cut_slot", -10);
+            DateTimeOffset first = host.Read(u => CutOver.StartAsync(u, Ct).GetAwaiter().GetResult());
+            host.Write(u => { var a = u.Set<GlActivation>().Single(); a.Delete(); u.SaveChanges(); }, Seeder);
+            host.Write(u => { CutOver.EnsureRecordedAsync(u, null, Ct).GetAwaiter().GetResult(); }, Seeder);
+            Assert.AreEqual(1, host.Read(u => u.Set<GlActivation>().IgnoreQueryFilters().Count()), "nothing is recorded again once a row has existed");
+            Assert.AreEqual(first, host.Read(u => CutOver.StartAsync(u, Ct).GetAwaiter().GetResult()), "the earliest instant, even of a deleted row, still counts");
+            var idx = host.Read(u => ((DbContext)u).Model.FindEntityType(typeof(GlActivation)).GetIndexes().Any(i => i.IsUnique && i.Properties.Select(x => x.Name).SequenceEqual(new[] { "Slot" })));
+            Assert.IsTrue(idx);
+        }
+
+        [TestMethod]
+        public async Task The_Characteristic_Adoption_Is_Accepted_By_Qa_Only_Not_By_The_Qc_Inspector()
+        {
+            AppHost host = NewHost("char_qa", 1);
+            var d = await DraftDrawing(host, NewContract(host), "PN-QAONLY");
+            host.Write(u => { var r = u.Set<PcDocumentRevision>().Single(x => x.Id == d.Revision); r.Status = PcDocStatus.Released; r.ReleasedAt = DateTimeOffset.Now.AddDays(-3); u.SaveChanges(); }, Seeder);
+            var made = await host.As(Maker, p => p.GetRequiredService<IGlCharAdoptionService>().RequestAsync(new GlSaveCharAdoptionDto { RevisionId = d.Revision, Reason = "نقشه پیش از آغاز کنترل منتشر شده است", EvidenceRef = "برگه بازرسی ۱۲", Items = TwoLines() }, Ct));
+            Assert.IsTrue(made.Success, made.Message);
+            var byQc = await host.As(Inspector, p => p.GetRequiredService<IGlCharAdoptionService>().ActionAsync(new GlAdoptionActionDto { Id = made.Data.Id, Action = "accept" }, Ct));
+            Assert.IsFalse(byQc.Success, "the brief names QA as the checker");
+            var byQa = await host.As(Checker, p => p.GetRequiredService<IGlCharAdoptionService>().ActionAsync(new GlAdoptionActionDto { Id = made.Data.Id, Action = "accept" }, Ct));
+            Assert.IsTrue(byQa.Success, byQa.Message);
+            Assert.AreEqual(2, byQa.Data.Status);
         }
     }
 }

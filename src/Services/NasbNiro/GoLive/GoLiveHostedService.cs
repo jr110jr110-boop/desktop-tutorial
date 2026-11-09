@@ -30,7 +30,7 @@ namespace Services.NasbNiro.GoLive
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            bool recorded = false;
+            bool recorded = false, backfilled = false;
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -39,7 +39,10 @@ namespace Services.NasbNiro.GoLive
                     var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                     if (!recorded) { await CutOver.EnsureRecordedAsync(uow, null, stoppingToken); recorded = true; }
                     if (!string.Equals(_configuration?["GoLive:Jobs"], "false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!backfilled) { await PoDrawingCitation.BackfillAsync(uow, await global::Services.NasbNiro.Quality.QualitySettingKeys.LoadAsync(uow, stoppingToken), stoppingToken); backfilled = true; }
                         await PoDrawingCitation.SyncAlertsAsync(uow, scope.ServiceProvider.GetService<INotificationService>(), null, stoppingToken);
+                    }
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex) { _logger?.LogWarning(ex, "Go-live job failed; it will run again."); }

@@ -22,7 +22,7 @@ namespace Services.NasbNiro.GoLive
 {
     public interface IGlCharAdoptionService
     {
-        Task<ResponseDto<List<GlCharAdoptionCandidateDto>>> CandidatesAsync(CancellationToken ct);
+        Task<ResponseDto<GlPageDto<GlCharAdoptionCandidateDto>>> CandidatesAsync(GlCandidateQuery q, CancellationToken ct);
         Task<ResponseDto<List<GlCharAdoptionDto>>> GetListAsync(CancellationToken ct);
         Task<ResponseDto<GlCharAdoptionDto>> RequestAsync(GlSaveCharAdoptionDto dto, CancellationToken ct);
         Task<ResponseDto<GlCharAdoptionDto>> ActionAsync(GlAdoptionActionDto dto, CancellationToken ct);
@@ -42,21 +42,31 @@ namespace Services.NasbNiro.GoLive
         private static bool InForce(PcDocStatus s) => s == PcDocStatus.Released || s == PcDocStatus.AsBuilt;
         private static string StatusText(GlAdoptionStatus s) => s == GlAdoptionStatus.Requested ? "در انتظار تایید QA" : s == GlAdoptionStatus.Accepted ? "پذیرفته شده" : s == GlAdoptionStatus.Void ? "باطل" : "در جریان";
 
-        public async Task<ResponseDto<List<GlCharAdoptionCandidateDto>>> CandidatesAsync(CancellationToken ct)
+        private static void Paging(GlCandidateQuery q, out int page, out int size) { page = Math.Max(1, q?.PageNumber ?? 1); size = q == null || q.PageSize <= 0 ? 50 : Math.Min(q.PageSize, 200); }
+
+        /// <summary>The released drawing revisions of before the cut-over that have no released characteristic list. Filtered in SQL, then paged (an older legacy drawing is never cut off).</summary>
+        public async Task<ResponseDto<GlPageDto<GlCharAdoptionCandidateDto>>> CandidatesAsync(GlCandidateQuery q, CancellationToken ct)
         {
+            if (!InRole("ENGINEERING,ENGINEER,QA,QC,PMO,AUDITOR,CEO")) return Bad<GlPageDto<GlCharAdoptionCandidateDto>>(GlText.NotAllowed);
+            Paging(q, out int page, out int size);
             DateTimeOffset start = await CutOver.StartAsync(Uow, ct);
-            List<PcDocumentRevision> revs = await Uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && (r.Status == PcDocStatus.Released || r.Status == PcDocStatus.AsBuilt)).OrderByDescending(r => r.Id).Take(500).ToListAsync(ct);
-            revs = revs.Where(r => start > DateTimeOffset.MinValue && (!r.ReleasedAt.HasValue || r.ReleasedAt.Value < start)).Take(300).ToList();
-            List<int> revIds = revs.Select(r => r.Id).ToList(), docIds = revs.Select(r => r.DeliverableId).Distinct().ToList();
+            var result = new GlPageDto<GlCharAdoptionCandidateDto> { PageNumber = page, PageSize = size };
+            if (start <= DateTimeOffset.MinValue) return ResponseDtoHelper.Ok(result);
+            IQueryable<PcDocumentRevision> revs = Uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && (r.Status == PcDocStatus.Released || r.Status == PcDocStatus.AsBuilt) && (r.ReleasedAt == null || r.ReleasedAt < start)
+                && !Uow.Set<QcCharacteristicList>().Any(l => l.RevisionId == r.Id && !l.Deleted && l.Status == CharListStatus.Released));
+            string search = PbText.Clean(q?.Search);
+            if (search != null) revs = revs.Where(r => Uow.Set<PcEngineeringDeliverable>().Any(d => d.Id == r.DeliverableId && (d.DocumentNumber.Contains(search) || d.Title.Contains(search))));
+            result.Total = await revs.CountAsync(ct);
+            List<PcDocumentRevision> rows = await revs.OrderBy(r => r.Id).Skip((page - 1) * size).Take(size).ToListAsync(ct);
+            List<int> revIds = rows.Select(r => r.Id).ToList(), docIds = rows.Select(r => r.DeliverableId).Distinct().ToList();
             Dictionary<int, PcEngineeringDeliverable> docs = await Uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(d => docIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, ct);
-            HashSet<int> withList = (await Uow.Set<QcCharacteristicList>().AsNoTracking().Where(l => !l.Deleted && revIds.Contains(l.RevisionId) && l.Status == CharListStatus.Released).Select(l => l.RevisionId).ToListAsync(ct)).ToHashSet();
             Dictionary<int, int> adoptions = (await Uow.Set<GlCharAdoption>().AsNoTracking().Where(a => !a.Deleted && a.Status != GlAdoptionStatus.Void && revIds.Contains(a.RevisionId)).Select(a => new { a.RevisionId, a.Id }).ToListAsync(ct)).GroupBy(x => x.RevisionId).ToDictionary(g => g.Key, g => g.First().Id);
-            var list = revs.Select(r => new GlCharAdoptionCandidateDto
+            result.Items = rows.Select(r => new GlCharAdoptionCandidateDto
             {
                 DeliverableId = r.DeliverableId, RevisionId = r.Id, DocumentNumber = docs.TryGetValue(r.DeliverableId, out var d) ? d.DocumentNumber : null, Title = d?.Title, RevisionCode = r.Code, ReleasedAt = r.ReleasedAt,
-                Legacy = true, HasList = withList.Contains(r.Id), AdoptionId = adoptions.TryGetValue(r.Id, out int aid) ? aid : (int?)null,
-            }).Where(c => !c.HasList).ToList();
-            return ResponseDtoHelper.Ok(list);
+                Legacy = true, HasList = false, AdoptionId = adoptions.TryGetValue(r.Id, out int aid) ? aid : (int?)null,
+            }).ToList();
+            return ResponseDtoHelper.Ok(result);
         }
 
         private async Task<GlCharAdoptionDto> ToDtoAsync(GlCharAdoption a, CancellationToken ct)
@@ -70,7 +80,7 @@ namespace Services.NasbNiro.GoLive
                 Id = a.Id, DeliverableId = a.DeliverableId, RevisionId = a.RevisionId, DocumentNumber = doc?.DocumentNumber, RevisionCode = rev?.Code, ReleasedAt = rev?.ReleasedAt, ListId = a.ListId, Status = (int)a.Status, StatusText = StatusText(a.Status),
                 Reason = a.Reason, EvidenceRef = a.EvidenceRef, RequestedByUserId = a.RequestedByUserId, RequestedByName = names.Name(a.RequestedByUserId), RequestedAt = a.RequestedAt,
                 AcceptedByName = names.Name(a.AcceptedByUserId), AcceptedAt = a.AcceptedAt, AcceptNote = a.AcceptNote, VoidReason = a.VoidReason,
-                CanAccept = human && a.Status == GlAdoptionStatus.Requested && InRole("QA,QC") && a.RequestedByUserId != Me,
+                CanAccept = human && a.Status == GlAdoptionStatus.Requested && InRole("QA") && a.RequestedByUserId != Me,
                 CanVoid = human && a.Status == GlAdoptionStatus.Requested && (a.RequestedByUserId == Me || InRole("QA,QC")),
                 RowVersion = a.RowVersion == null ? null : Convert.ToBase64String(a.RowVersion),
             };
@@ -86,7 +96,7 @@ namespace Services.NasbNiro.GoLive
 
         public async Task<ResponseDto<GlCharAdoptionDto>> RequestAsync(GlSaveCharAdoptionDto dto, CancellationToken ct)
         {
-            if (IsAi) return Bad<GlCharAdoptionDto>(GlText.AiNever);
+            if (IsAi || await GlText.IsAiSeatUserAsync(Uow, Me, ct)) return Bad<GlCharAdoptionDto>(GlText.AiNever);
             if (!InRole("ENGINEERING,ENGINEER")) return Bad<GlCharAdoptionDto>(GlText.NotAllowed);
             if (dto == null || dto.RevisionId <= 0) return Bad<GlCharAdoptionDto>(GlText.InvalidData);
             PcDocumentRevision rev = await Uow.Set<PcDocumentRevision>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == dto.RevisionId && !r.Deleted, ct);
@@ -117,13 +127,18 @@ namespace Services.NasbNiro.GoLive
             Stamp(a2, true);
             Uow.Set<GlCharAdoption>().Add(a2);
             string conflict = await TrySaveAsync(ct);
-            if (conflict != null) return Bad<GlCharAdoptionDto>(conflict);
+            if (conflict != null)
+            {
+                // the list was made and submitted by the ordinary service; do not leave it as an orphan
+                await _lists.ActionAsync(new CharListActionDto { Id = save.Data.Id, Action = "void", Note = "ثبت پذیرش ناموفق بود", RowVersion = submit.Data?.RowVersion }, ct);
+                return Bad<GlCharAdoptionDto>(conflict);
+            }
             return ResponseDtoHelper.Ok(await ToDtoAsync(a2, ct));
         }
 
         public async Task<ResponseDto<GlCharAdoptionDto>> ActionAsync(GlAdoptionActionDto dto, CancellationToken ct)
         {
-            if (IsAi) return Bad<GlCharAdoptionDto>(GlText.AiNever);
+            if (IsAi || await GlText.IsAiSeatUserAsync(Uow, Me, ct)) return Bad<GlCharAdoptionDto>(GlText.AiNever);
             if (dto == null || PbText.Clean(dto.Action) == null) return Bad<GlCharAdoptionDto>(GlText.InvalidData);
             GlCharAdoption a = await Uow.Set<GlCharAdoption>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
             if (a == null) return ResponseDtoHelper.NotFound<GlCharAdoptionDto>(PbMessages.NotFound);
@@ -137,13 +152,23 @@ namespace Services.NasbNiro.GoLive
             {
                 case "accept":
                     if (a.Status != GlAdoptionStatus.Requested) return Bad<GlCharAdoptionDto>("فقط پذیرش درخواست‌شده تایید می‌شود.");
-                    if (!InRole("QA,QC")) return Bad<GlCharAdoptionDto>(GlText.NotAllowed);
+                    if (!InRole("QA")) return Bad<GlCharAdoptionDto>(GlText.NotAllowed + " (تایید با تضمین کیفیت است)");
                     if (a.RequestedByUserId == Me) return Bad<GlCharAdoptionDto>(GlText.SameUser);
                     if (!a.ListId.HasValue) return Bad<GlCharAdoptionDto>(GlText.InvalidData);
-                    var ap = await _lists.ActionAsync(new CharListActionDto { Id = a.ListId.Value, Action = "approve", Note = note }, ct);
-                    if (!ap.Success) return Bad<GlCharAdoptionDto>(ap.Message);
+                    // the adoption row is taken first (its RowVersion decides a race between two approvers), then the list is approved; if the approval is refused the row goes back
                     a.Status = GlAdoptionStatus.Accepted; a.AcceptedByUserId = Me; a.AcceptedAt = DateTimeOffset.Now; a.AcceptNote = note;
-                    break;
+                    Stamp(a, false);
+                    string c1 = await TrySaveAsync(ct);
+                    if (c1 != null) return Bad<GlCharAdoptionDto>(c1);
+                    var ap = await _lists.ActionAsync(new CharListActionDto { Id = a.ListId.Value, Action = "approve", Note = note }, ct);
+                    if (!ap.Success)
+                    {
+                        a.Status = GlAdoptionStatus.Requested; a.AcceptedByUserId = null; a.AcceptedAt = null; a.AcceptNote = null;
+                        Stamp(a, false);
+                        await TrySaveAsync(ct);
+                        return Bad<GlCharAdoptionDto>(ap.Message);
+                    }
+                    return ResponseDtoHelper.Ok(await ToDtoAsync(a, ct));
                 case "void":
                     if (a.Status != GlAdoptionStatus.Requested) return Bad<GlCharAdoptionDto>("فقط پذیرش در انتظار تایید باطل می‌شود؛ فهرست تاییدشده با نسخه جدید (تغییر مهندسی) اصلاح می‌شود.");
                     if (!(a.RequestedByUserId == Me || InRole("QA,QC"))) return Bad<GlCharAdoptionDto>(GlText.NotAllowed);
@@ -166,7 +191,7 @@ namespace Services.NasbNiro.GoLive
 
     public interface IGlConfigAdoptionService
     {
-        Task<ResponseDto<List<GlConfigCandidateDto>>> CandidatesAsync(CancellationToken ct);
+        Task<ResponseDto<GlPageDto<GlConfigCandidateDto>>> CandidatesAsync(GlCandidateQuery q, CancellationToken ct);
         Task<ResponseDto<List<GlConfigAdoptionDto>>> GetListAsync(CancellationToken ct);
         Task<ResponseDto<GlConfigAdoptionDto>> RequestAsync(GlSaveConfigAdoptionDto dto, CancellationToken ct);
         Task<ResponseDto<GlConfigAdoptionDto>> ActionAsync(GlAdoptionActionDto dto, CancellationToken ct);
@@ -187,17 +212,23 @@ namespace Services.NasbNiro.GoLive
 
         private Task<int> LegacyLinesAsync(int workOrderId, CancellationToken ct) => Uow.Set<Bom>().AsNoTracking().CountAsync(b => !b.Deleted && b.Assembly.WorkOrderId == workOrderId, ct);
 
-        public async Task<ResponseDto<List<GlConfigCandidateDto>>> CandidatesAsync(CancellationToken ct)
+        public async Task<ResponseDto<GlPageDto<GlConfigCandidateDto>>> CandidatesAsync(GlCandidateQuery q, CancellationToken ct)
         {
+            if (!InRole("ENGINEERING,PMO,QA,AUDITOR,CEO")) return Bad<GlPageDto<GlConfigCandidateDto>>(GlText.NotAllowed);
+            int page = Math.Max(1, q?.PageNumber ?? 1), size = q == null || q.PageSize <= 0 ? 50 : Math.Min(q.PageSize, 200);
             DateTimeOffset start = await CutOver.StartAsync(Uow, ct);
-            if (start <= DateTimeOffset.MinValue) return ResponseDtoHelper.Ok(new List<GlConfigCandidateDto>());
-            HashSet<int> withBaseline = (await Uow.Set<PbProjectBaseline>().AsNoTracking().Where(b => !b.Deleted && b.IsCurrent).Select(b => b.WorkOrderId).ToListAsync(ct)).ToHashSet();
-            List<WorkOrder> wos = await Uow.Set<WorkOrder>().AsNoTracking().Where(w => !w.Deleted && w.CreateDate < start).OrderByDescending(w => w.Id).Take(500).ToListAsync(ct);
-            Dictionary<int, int> adoptions = (await Uow.Set<GlConfigAdoption>().AsNoTracking().Where(a => !a.Deleted && a.Status != GlAdoptionStatus.Void).Select(a => new { a.WorkOrderId, a.Id }).ToListAsync(ct)).GroupBy(x => x.WorkOrderId).ToDictionary(g => g.Key, g => g.First().Id);
-            var list = new List<GlConfigCandidateDto>();
-            foreach (WorkOrder w in wos.Where(w => !withBaseline.Contains(w.Id)).Take(200))
-                list.Add(new GlConfigCandidateDto { WorkOrderId = w.Id, Title = w.Title, CreatedAt = w.CreateDate, Legacy = true, LegacyLineCount = await LegacyLinesAsync(w.Id, ct), AdoptionId = adoptions.TryGetValue(w.Id, out int id) ? id : (int?)null });
-            return ResponseDtoHelper.Ok(list);
+            var result = new GlPageDto<GlConfigCandidateDto> { PageNumber = page, PageSize = size };
+            if (start <= DateTimeOffset.MinValue) return ResponseDtoHelper.Ok(result);
+            IQueryable<WorkOrder> wos = Uow.Set<WorkOrder>().AsNoTracking().Where(w => !w.Deleted && w.CreateDate < start && !Uow.Set<PbProjectBaseline>().Any(b => b.WorkOrderId == w.Id && !b.Deleted && b.IsCurrent));
+            string search = PbText.Clean(q?.Search);
+            if (search != null) wos = wos.Where(w => w.Title.Contains(search) || w.Code.Contains(search));
+            result.Total = await wos.CountAsync(ct);
+            List<WorkOrder> rows = await wos.OrderBy(w => w.Id).Skip((page - 1) * size).Take(size).ToListAsync(ct);
+            List<int> ids = rows.Select(w => w.Id).ToList();
+            Dictionary<int, int> adoptions = (await Uow.Set<GlConfigAdoption>().AsNoTracking().Where(a => !a.Deleted && a.Status != GlAdoptionStatus.Void && ids.Contains(a.WorkOrderId)).Select(a => new { a.WorkOrderId, a.Id }).ToListAsync(ct)).GroupBy(x => x.WorkOrderId).ToDictionary(g => g.Key, g => g.First().Id);
+            foreach (WorkOrder w in rows)
+                result.Items.Add(new GlConfigCandidateDto { WorkOrderId = w.Id, Code = w.Code, Title = w.Title, CreatedAt = w.CreateDate, CreatedUnknown = w.CreateDate.Year <= 1, Legacy = true, LegacyLineCount = await LegacyLinesAsync(w.Id, ct), AdoptionId = adoptions.TryGetValue(w.Id, out int id) ? id : (int?)null });
+            return ResponseDtoHelper.Ok(result);
         }
 
         private async Task<GlConfigAdoptionDto> ToDtoAsync(GlConfigAdoption a, CancellationToken ct)
@@ -230,7 +261,7 @@ namespace Services.NasbNiro.GoLive
 
         public async Task<ResponseDto<GlConfigAdoptionDto>> RequestAsync(GlSaveConfigAdoptionDto dto, CancellationToken ct)
         {
-            if (IsAi) return Bad<GlConfigAdoptionDto>(GlText.AiNever);
+            if (IsAi || await GlText.IsAiSeatUserAsync(Uow, Me, ct)) return Bad<GlConfigAdoptionDto>(GlText.AiNever);
             if (!InRole("ENGINEERING")) return Bad<GlConfigAdoptionDto>(GlText.NotAllowed);
             if (dto == null || dto.WorkOrderId <= 0 || dto.ProductId <= 0 || dto.BomHeaderId <= 0) return Bad<GlConfigAdoptionDto>(GlText.InvalidData);
             Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(Uow, ct);
@@ -265,7 +296,7 @@ namespace Services.NasbNiro.GoLive
 
         public async Task<ResponseDto<GlConfigAdoptionDto>> ActionAsync(GlAdoptionActionDto dto, CancellationToken ct)
         {
-            if (IsAi) return Bad<GlConfigAdoptionDto>(GlText.AiNever);
+            if (IsAi || await GlText.IsAiSeatUserAsync(Uow, Me, ct)) return Bad<GlConfigAdoptionDto>(GlText.AiNever);
             if (dto == null || PbText.Clean(dto.Action) == null) return Bad<GlConfigAdoptionDto>(GlText.InvalidData);
             GlConfigAdoption a = await Uow.Set<GlConfigAdoption>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
             if (a == null) return ResponseDtoHelper.NotFound<GlConfigAdoptionDto>(PbMessages.NotFound);
@@ -286,14 +317,35 @@ namespace Services.NasbNiro.GoLive
                     if (!InRole(eng ? "ENGINEERING" : "PMO")) return Bad<GlConfigAdoptionDto>(GlText.NotAllowed);
                     if (a.RequestedByUserId == Me || a.EngReviewerUserId == Me || a.PmoReviewerUserId == Me) return Bad<GlConfigAdoptionDto>("تفکیک وظایف: هر سه نفر (تهیه‌کننده، بازبین مهندسی و بازبین PMO) باید متفاوت باشند.");
                     if (eng ? a.EngReviewerUserId != null : a.PmoReviewerUserId != null) return Bad<GlConfigAdoptionDto>("این بازبینی پیش‌تر انجام شده است.");
-                    if (eng) { a.EngReviewerUserId = Me; a.EngReviewedAt = DateTimeOffset.Now; a.EngNote = note; } else { a.PmoReviewerUserId = Me; a.PmoReviewedAt = DateTimeOffset.Now; a.PmoNote = note; }
-                    if (a.EngReviewerUserId != null && a.PmoReviewerUserId != null)
+                    DateTimeOffset reviewedAt = DateTimeOffset.Now;
+                    bool otherDone = eng ? a.PmoReviewerUserId != null : a.EngReviewerUserId != null;
+                    if (!otherDone)
                     {
-                        var r = await _products.InstantiateAdoptedAsync(new PbInstantiateDto { WorkOrderId = a.WorkOrderId, ProductId = a.ProductId }, a.BomHeaderId, ct);
-                        if (!r.Success) return Bad<GlConfigAdoptionDto>(r.Message);
-                        a.BaselineId = r.Data?.Id; a.Status = GlAdoptionStatus.Accepted;
+                        if (eng) { a.EngReviewerUserId = Me; a.EngReviewedAt = reviewedAt; a.EngNote = note; } else { a.PmoReviewerUserId = Me; a.PmoReviewedAt = reviewedAt; a.PmoNote = note; }
+                        a.Status = GlAdoptionStatus.PartlyReviewed;
                     }
-                    else a.Status = GlAdoptionStatus.PartlyReviewed;
+                    else
+                    {
+                        // the last review: the baseline and the adoption record are saved in ONE transaction (the callback loads the record itself, so a retry of the execution strategy does not lose it)
+                        int adoptionId = a.Id, wo = a.WorkOrderId, prod = a.ProductId, bom = a.BomHeaderId, me = Me;
+                        byte[] original = !string.IsNullOrEmpty(dto.RowVersion) ? Convert.FromBase64String(dto.RowVersion) : null;
+                        try
+                        {
+                            var r = await _products.InstantiateAdoptedAsync(new PbInstantiateDto { WorkOrderId = wo, ProductId = prod }, bom, async (baseline, token) =>
+                            {
+                                GlConfigAdoption fresh = await Uow.Set<GlConfigAdoption>().FirstAsync(x => x.Id == adoptionId, token);
+                                if (original != null) Uow.Entry(fresh).Property(x => x.RowVersion).OriginalValue = original;
+                                if (eng) { fresh.EngReviewerUserId = me; fresh.EngReviewedAt = reviewedAt; fresh.EngNote = note; } else { fresh.PmoReviewerUserId = me; fresh.PmoReviewedAt = reviewedAt; fresh.PmoNote = note; }
+                                fresh.BaselineId = baseline.Id; fresh.Status = GlAdoptionStatus.Accepted;
+                                Stamp(fresh, false);
+                                await Uow.SaveChangesAsync(token);
+                            }, ct);
+                            if (!r.Success) return Bad<GlConfigAdoptionDto>(r.Message);
+                        }
+                        catch (DbUpdateConcurrencyException) { return Bad<GlConfigAdoptionDto>(GlText.Concurrent); }
+                        GlConfigAdoption done = await Uow.Set<GlConfigAdoption>().AsNoTracking().FirstAsync(x => x.Id == adoptionId, ct);
+                        return ResponseDtoHelper.Ok(await ToDtoAsync(done, ct));
+                    }
                     break;
                 }
                 case "void":

@@ -65,7 +65,7 @@ namespace Services.NasbNiro.Quality
             if (flaggedOp == null)
             {
                 DateTimeOffset cutOver = await global::Services.NasbNiro.GoLive.CutOver.StartAsync(uow, st, ct);
-                if (global::Services.NasbNiro.GoLive.CutOver.DrawingsAreLegacy(resolved.Drawings, cutOver))
+                if (!resolved.HasList && global::Services.NasbNiro.GoLive.CutOver.DrawingsAreLegacy(resolved.Drawings, cutOver))
                 {
                     req.Legacy = true;
                     req.ItemId = order.ItemId;

@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using DataLayer.Context;
 using Entities.Model.NasbNiro.Quality;
+using Microsoft.EntityFrameworkCore;
 
 namespace Services.NasbNiro.GoLive
 {
@@ -24,6 +29,9 @@ namespace Services.NasbNiro.GoLive
         /// <summary>1: every new transmittal line of a document that has revision records takes the revision from the record; free text only for a document with no revision record (flagged).</summary>
         public const string TransmittalRevisionFromEdms = "Gl.Transmittal.RevisionFromEdms";
 
+        /// <summary>The largest PDF (megabytes) the server stamps; a bigger file gets the HTML print. One stamp at a time per user. Raising it is a weakening (more memory per request).</summary>
+        public const string StampMaxMb = "Gl.Stamp.MaxMb";
+
         public const string Source = "★ تصمیم مدیرعامل (عدم تحمل انحراف؛ گذار بدون توقف کار موجود)";
 
         public static IEnumerable<QualitySetting> Defaults()
@@ -32,6 +40,7 @@ namespace Services.NasbNiro.GoLive
             yield return new QualitySetting { Key = LegacyReasonMinChars, Value = 15, Title = "حداقل نویسه دلیل پذیرش مورد قدیمی و یادداشت مدرک پذیرش QC قدیمی", Source = Source };
             yield return new QualitySetting { Key = PoCiteDrawing, Value = 1, Title = "ردیف سفارش خرید قلم دارای نقشه منتشرشده، شماره و بازنگری نقشه را (از EDMS) در خود دارد", Source = "★ ISO 9001 بند 8.4.3" };
             yield return new QualitySetting { Key = TransmittalRevisionFromEdms, Value = 1, Title = "بازنگری هر ردیف ترنسمیتال از رکورد بازنگری EDMS می‌آید (متن آزاد فقط برای سند بدون رکورد بازنگری و با علامت قدیمی)", Source = "★ IEC 82045 / ISO 19650" };
+            yield return new QualitySetting { Key = StampMaxMb, Value = 50, Title = "بیشینهٔ حجم PDF برای مهر مستقیم (مگابایت)؛ فایل بزرگ‌تر با چاپ مهرشدهٔ برنامه انجام می‌شود", Source = Source };
         }
 
         public static bool TryGetBounds(string key, out int min, out int max)
@@ -41,6 +50,7 @@ namespace Services.NasbNiro.GoLive
             {
                 case ControlStartDate: max = 99991231; return true;
                 case LegacyReasonMinChars: min = 5; max = 200; return true;
+                case StampMaxMb: min = 1; max = 200; return true;
                 case PoCiteDrawing: case TransmittalRevisionFromEdms: max = 1; return true;
                 default: return false;
             }
@@ -56,6 +66,14 @@ namespace Services.NasbNiro.GoLive
         public const string InvalidData = "اطلاعات ارسال‌شده کامل نیست.";
         public const string Concurrent = "اطلاعات هم‌زمان توسط کاربر دیگری تغییر کرد. صفحه را دوباره باز کنید و دوباره تلاش کنید.";
         public const string SameUser = "تفکیک وظایف: این کار را شخص دیگری انجام می‌دهد.";
+
+        /// <summary>True when the signed-in user is the account of an AI seat (an AI never decides; the in-process flag alone is not enough, as in the safety-settings service).</summary>
+        public static async Task<bool> IsAiSeatUserAsync(IUnitOfWork uow, int userId, CancellationToken ct)
+        {
+            if (userId <= 0) return false;
+            string name = await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.Id == userId).Select(u => u.UserName).FirstOrDefaultAsync(ct);
+            return global::Services.NasbNiro.Ai.AiSeatNames.IsSeatUser(name);
+        }
 
         public static string Cut(string s, int max) => s == null || s.Length <= max ? s : s.Substring(0, max);
 
@@ -73,5 +91,13 @@ namespace Services.NasbNiro.GoLive
 
         public static string Header(string documentNumber, string revision, string releasedAtText, string printedAtText, string userName) =>
             $"نسخه کنترل‌شده | سند {documentNumber} | بازنگری {revision} | تاریخ انتشار {releasedAtText} | چاپ: {printedAtText} توسط {userName}";
+
+        /// <summary>The header of a controlled copy with its copy number (the server builds it; the browser only draws it).</summary>
+        public static string Header(string documentNumber, string revision, string releasedAtText, string printedAtText, string userName, int copyNumber) =>
+            $"نسخه کنترل‌شده شمارهٔ {copyNumber.ToString(CultureInfo.InvariantCulture)} | سند {documentNumber} | بازنگری {revision} | تاریخ انتشار {releasedAtText} | چاپ: {printedAtText} توسط {userName}";
+
+        /// <summary>The header of an uncontrolled print (a revision that is not in force, or a plain copy asked for as uncontrolled).</summary>
+        public static string UncontrolledHeader(string documentNumber, string revision, string statusText, string printedAtText, string userName) =>
+            $"{Uncontrolled} | سند {documentNumber} | بازنگری {revision} | وضعیت {statusText} | چاپ: {printedAtText} توسط {userName}";
     }
 }

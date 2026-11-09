@@ -251,6 +251,8 @@ namespace Services.NasbNiro.Integrity
                     return;
                 }
 
+                // Package G (fix round 1, M1): the first run after the update takes the state of the newly covered record types as its starting point (once; later changes are checked normally)
+                await RecordDriftBaseline.RunOnceAsync(_uow, _user?.UserId, ct);
                 // H1: the chain is sound; now the records themselves
                 RecordDriftFinding drift = await RecordDrift.FindFirstAsync(_uow, ct);
                 if (drift != null)

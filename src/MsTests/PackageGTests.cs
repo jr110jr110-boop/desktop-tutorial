@@ -39,7 +39,7 @@ namespace MsTests
         [TestMethod]
         public void Every_Go_Live_Setting_Has_A_Default_Bounds_And_A_Strict_Safety_Spec()
         {
-            string[] keys = { GlSettingKeys.ControlStartDate, GlSettingKeys.LegacyReasonMinChars, GlSettingKeys.PoCiteDrawing, GlSettingKeys.TransmittalRevisionFromEdms };
+            string[] keys = { GlSettingKeys.ControlStartDate, GlSettingKeys.LegacyReasonMinChars, GlSettingKeys.PoCiteDrawing, GlSettingKeys.TransmittalRevisionFromEdms, GlSettingKeys.StampMaxMb };
             Dictionary<string, decimal> defaults = QualitySettingKeys.Defaults().ToDictionary(d => d.Key, d => d.Value);
             foreach (string k in keys)
             {
@@ -51,6 +51,9 @@ namespace MsTests
             Assert.AreEqual(0m, defaults[GlSettingKeys.ControlStartDate], "0 = the recorded activation instant");
             Assert.AreEqual(1m, defaults[GlSettingKeys.PoCiteDrawing]);
             Assert.AreEqual(1m, defaults[GlSettingKeys.TransmittalRevisionFromEdms]);
+            Assert.AreEqual(50m, defaults[GlSettingKeys.StampMaxMb]);
+            Assert.IsTrue(SafetyProfile.IsWeaker(SafetyProfile.Find(SafetyStore.Quality, GlSettingKeys.StampMaxMb), "80"), "a bigger stamp limit is a weakening");
+            Assert.IsFalse(SafetyProfile.IsWeaker(SafetyProfile.Find(SafetyStore.Quality, GlSettingKeys.StampMaxMb), "20"));
         }
 
         [TestMethod]
@@ -162,7 +165,7 @@ namespace MsTests
             Assert.IsFalse(denied.Success);
             var ok = host.As(Ceo, sp => sp.GetRequiredService<IGoLiveOverviewService>().CeoInboxAsync(Ct)).GetAwaiter().GetResult();
             Assert.IsTrue(ok.Success);
-            CollectionAssert.AreEqual(new[] { "findings", "acceptances", "readiness", "safety", "chain", "inbox" }, ok.Data.Groups.Select(g => g.Key).ToArray());
+            CollectionAssert.AreEqual(new[] { "findings", "finding-void", "acceptances", "readiness", "safety", "chain", "inbox" }, ok.Data.Groups.Select(g => g.Key).ToArray());
             Assert.AreEqual(0, ok.Data.Total);
             // there is no bulk approve: the service has no write method at all
             Assert.IsFalse(typeof(IGoLiveOverviewService).GetMethods().Any(m => m.Name.Contains("Approve", StringComparison.OrdinalIgnoreCase)));

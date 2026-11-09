@@ -15,6 +15,7 @@ namespace Services.NasbNiro.Integrity
             yield return new SafetySettingSpec { Store = Q, Key = GlSettingKeys.LegacyReasonMinChars, Kind = SafetyKind.NumberAtLeast, Strict = "15", Min = 5, Max = 200, Title = "حداقل نویسه دلیل پذیرش مورد قدیمی" };
             yield return new SafetySettingSpec { Store = Q, Key = GlSettingKeys.PoCiteDrawing, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "ردیف سفارش خرید شماره و بازنگری نقشه منتشرشده را دارد (ISO 9001 بند 8.4.3)" };
             yield return new SafetySettingSpec { Store = Q, Key = GlSettingKeys.TransmittalRevisionFromEdms, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "بازنگری ترنسمیتال از رکورد بازنگری EDMS می‌آید" };
+            yield return new SafetySettingSpec { Store = Q, Key = GlSettingKeys.StampMaxMb, Kind = SafetyKind.NumberAtMost, Strict = "50", Min = 1, Max = 200, Title = "بیشینهٔ حجم PDF برای مهر مستقیم (بالا بردن آن حافظهٔ هر درخواست را زیاد می‌کند)" };
         }
     }
 }

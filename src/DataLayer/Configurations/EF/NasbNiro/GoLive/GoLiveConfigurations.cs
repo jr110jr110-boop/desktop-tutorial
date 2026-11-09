@@ -14,6 +14,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             {
                 b.ToTable("GlActivations");
                 b.Property(x => x.Note).HasMaxLength(500);
+                // one row ever (a soft-deleted row also keeps the slot): the cut-over instant cannot be re-recorded later
+                b.HasIndex(x => x.Slot).IsUnique().HasDatabaseName("UX_GlActivations_Slot");
             });
             builder.Entity<GlLegacyUse>(b =>
             {
@@ -47,6 +49,19 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
                 b.Property(x => x.VoidReason).HasMaxLength(1000);
                 // one live adoption (requested, partly reviewed or accepted) per work order
                 b.HasIndex(x => x.WorkOrderId).IsUnique().HasFilter("[Deleted] = 0 AND [Status] IN (0, 1, 2)").HasDatabaseName("UX_GlConfigAdoptions_LivePerWorkOrder");
+            });
+            builder.Entity<GlPrintLog>(b =>
+            {
+                b.ToTable("GlPrintLogs");
+                b.Property(x => x.SourceFile).HasMaxLength(36);
+                b.Property(x => x.DocumentNumber).HasMaxLength(200);
+                b.Property(x => x.RevisionCode).HasMaxLength(50);
+                b.Property(x => x.Header).HasMaxLength(600);
+                b.Property(x => x.SourceSha256).HasMaxLength(64);
+                b.Property(x => x.OutputSha256).HasMaxLength(64);
+                // the copy numbers of a controlled copy are unique per revision
+                b.HasIndex(x => new { x.RevisionId, x.CopyNumber }).IsUnique().HasFilter("[Controlled] = 1 AND [Deleted] = 0").HasDatabaseName("UX_GlPrintLogs_RevisionCopy");
+                b.HasIndex(x => x.PrintedByUserId);
             });
             builder.Entity<Entities.Model.NasbNiro.Procurement.PurchaseOrderLine>(b =>
             {

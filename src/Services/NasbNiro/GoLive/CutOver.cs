@@ -31,14 +31,14 @@ namespace Services.NasbNiro.GoLive
         {
             DateTime? day = DesignGate.ShamsiDay(settings[GlSettingKeys.ControlStartDate]);
             if (day.HasValue) return new DateTimeOffset(DateTime.SpecifyKind(day.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(day.Value.Date));
-            DateTimeOffset? recorded = await uow.Set<GlActivation>().AsNoTracking().Where(a => !a.Deleted).OrderBy(a => a.Id).Select(a => (DateTimeOffset?)a.StartAt).FirstOrDefaultAsync(ct);
+            DateTimeOffset? recorded = await uow.Set<GlActivation>().AsNoTracking().OrderBy(a => a.StartAt).Select(a => (DateTimeOffset?)a.StartAt).FirstOrDefaultAsync(ct);   // the earliest ever recorded, a soft-deleted row included: deleting it cannot move the cut-over later
             return recorded ?? DateTimeOffset.MinValue;
         }
 
         /// <summary>Records the start once (the first start of the program after the update). Returns true when a row was written. Safe to call again.</summary>
         public static async Task<bool> EnsureRecordedAsync(IUnitOfWork uow, int? userId, CancellationToken ct)
         {
-            if (await uow.Set<GlActivation>().AnyAsync(a => !a.Deleted, ct)) return false;
+            if (await uow.Set<GlActivation>().AnyAsync(ct)) return false;   // never re-recorded, whatever happened to the first row
             DateTimeOffset now = DateTimeOffset.Now;
             uow.Set<GlActivation>().Add(new GlActivation { StartAt = now, RecordedByUserId = userId, Note = "ثبت خودکار در نخستین اجرای برنامه پس از به‌روزرسانی", CreateDate = now, ModifyDate = now, CreatorUserId = userId ?? 0, ModifierUserId = userId ?? 0 });
             try { await uow.SaveChangesAsync(ct); return true; }

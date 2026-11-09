@@ -39,6 +39,12 @@ namespace Entities.Model.NasbNiro.GoLive
         public DateTimeOffset StartAt { get; set; }
         public int? RecordedByUserId { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Always 1. A unique index on it makes a second row impossible, even a soft-deleted one (fix round 1, M2).</summary>
+        public int Slot { get; set; } = 1;
+
+        /// <summary>When the first integrity verification after the update took the current state of the newly covered record types as its starting point (fix round 1, M1). Not audited (a bookkeeping flag).</summary>
+        public DateTimeOffset? DriftBaselineAt { get; set; }
     }
 
     /// <summary>One use of a legacy exemption (not silent): who, when, which object and the Persian note. Written once per object (unique object key).</summary>
@@ -115,5 +121,31 @@ namespace Entities.Model.NasbNiro.GoLive
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>
+    /// One printed copy of a document file (fix round 1, H3): who printed which file of which revision, when, whether it was a CONTROLLED copy (the revision was in force) or an uncontrolled one, the copy number of the revision, the stamp text the
+    /// server built and the SHA-256 of the source file and of the stamped output. Written by the server only; part of the audit chain. A user-supplied PDF is never stamped.
+    /// </summary>
+    public class GlPrintLog : BaseEntity
+    {
+        public int RevisionId { get; set; }
+        public int DeliverableId { get; set; }
+        /// <summary>The stored file that was printed (the id as text: the print log holds a reference, not the file; access to the file stays with the revision file record).</summary>
+        public string SourceFile { get; set; }
+        public string DocumentNumber { get; set; }
+        public string RevisionCode { get; set; }
+        public bool Controlled { get; set; }
+
+        /// <summary>1, 2, 3 ... per revision for a controlled copy; 0 for an uncontrolled one.</summary>
+        public int CopyNumber { get; set; }
+        public string Header { get; set; }
+        public int PrintedByUserId { get; set; }
+        public DateTimeOffset PreparedAt { get; set; }
+
+        /// <summary>Null until the stamped PDF was produced (a print that fell back to the HTML print stays unstamped here).</summary>
+        public DateTimeOffset? StampedAt { get; set; }
+        public string SourceSha256 { get; set; }
+        public string OutputSha256 { get; set; }
     }
 }

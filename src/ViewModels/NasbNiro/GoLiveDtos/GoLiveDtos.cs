@@ -110,8 +110,12 @@ namespace ViewModels.NasbNiro.GoLiveDtos
     public class GlConfigCandidateDto
     {
         public int WorkOrderId { get; set; }
+        public string Code { get; set; }
         public string Title { get; set; }
         public DateTimeOffset? CreatedAt { get; set; }
+
+        /// <summary>True when the creation date was never recorded (a very old record): the screen says «تاریخ ثبت نشده».</summary>
+        public bool CreatedUnknown { get; set; }
         public bool Legacy { get; set; }
         public int LegacyLineCount { get; set; }
         public int? AdoptionId { get; set; }
@@ -174,6 +178,17 @@ namespace ViewModels.NasbNiro.GoLiveDtos
         public string Problem { get; set; }
     }
 
+    public class GlPoUncitedLineDto
+    {
+        public int LineId { get; set; }
+        public int OrderId { get; set; }
+        public string OrderNumber { get; set; }
+        public int RowNumber { get; set; }
+        public int ItemId { get; set; }
+        public string ItemCode { get; set; }
+        public string Drawings { get; set; }
+    }
+
     public class GlPoConfirmDto
     {
         public int LineId { get; set; }
@@ -208,5 +223,61 @@ namespace ViewModels.NasbNiro.GoLiveDtos
         public DateTimeOffset? Since { get; set; }
         public int AgeDays { get; set; }
         public string Route { get; set; }
+    }
+
+    public class GlPrintPrepareDto
+    {
+        public int RevisionId { get; set; }
+        public System.Guid? DocumentId { get; set; }
+
+        /// <summary>True: print as an uncontrolled copy even if the revision is in force (the plain download of a reader).</summary>
+        public bool Uncontrolled { get; set; }
+    }
+
+    public class GlPrintPreparedDto
+    {
+        public int PrintId { get; set; }
+        public bool Controlled { get; set; }
+        public int CopyNumber { get; set; }
+        public string Header { get; set; }
+        public string Footer { get; set; }
+        public string FileName { get; set; }
+        public System.Guid DocumentId { get; set; }
+        public string RevisionCode { get; set; }
+        public string DocumentNumber { get; set; }
+        public int MaxMegabytes { get; set; }
+    }
+
+    public class GlDriftRehearsalDto
+    {
+        /// <summary>True when the first verification run after the update has not yet taken the newly covered record types as its starting point.</summary>
+        public bool BaselineDue { get; set; }
+        public System.DateTimeOffset? BaselineAt { get; set; }
+        public int TotalDiffering { get; set; }
+        public List<GlDriftRehearsalRowDto> Tables { get; set; } = new List<GlDriftRehearsalRowDto>();
+    }
+
+    public class GlDriftRehearsalRowDto
+    {
+        public string EntityType { get; set; }
+        public string Label { get; set; }
+        public int Differing { get; set; }
+        public int PresentAfterDelete { get; set; }
+        public int Missing { get; set; }
+    }
+
+    public class GlPageDto<T>
+    {
+        public int Total { get; set; }
+        public int PageNumber { get; set; }
+        public int PageSize { get; set; }
+        public List<T> Items { get; set; } = new List<T>();
+    }
+
+    public class GlCandidateQuery
+    {
+        public string Search { get; set; }
+        public int PageNumber { get; set; }
+        public int PageSize { get; set; }
     }
 }

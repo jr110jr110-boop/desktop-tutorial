@@ -8,6 +8,7 @@ using Pb = Entities.Model.NasbNiro.ProductBank;
 using Pc = Entities.Model.NasbNiro.ProjectControl;
 using Proc = Entities.Model.NasbNiro.Procurement;
 using Q = Entities.Model.NasbNiro.Quality;
+using Co = Entities.Model.NasbNiro.Contracts;
 
 namespace DataLayer.Context
 {
@@ -43,8 +44,12 @@ namespace DataLayer.Context
             (typeof(P.MfProductionOrder), "وضعیت، مقدار، بازنگری مسیر، اجازه‌های استثنا و منبع قطعات مقایسه می‌شوند؛ زمان‌ها، پیشرفت و یادداشت‌های کف کارگاه بیرون‌اند (با هر ثبت زمان تغییر می‌کنند)."),
             (typeof(P.MfOperation), "وضعیت، علت رد، مرکز کار و تایید QC مقایسه می‌شوند؛ مقدارهای خوب/ضایعات، زمان شروع و پایان و یادداشت‌ها بیرون‌اند (با هر ثبت زمان تغییر می‌کنند)."),
             (typeof(P.MfOrderComponent), "همه ستون‌ها (قطعه، مقدار، واحد) مقایسه می‌شوند."),
-            (typeof(Proc.PurchaseOrderLine), "فقط ارجاع نقشه و تایید تامین‌کننده مقایسه می‌شود؛ مقدار دریافت‌شده و صورتحساب‌شده با هر رسید تغییر می‌کند و بیرون است."),
+            (typeof(Co.WorkOrder), "کد، عنوان، تعداد، وضعیت، قرارداد و تاریخ ثبت مقایسه می‌شوند (تاریخ ثبت تعیین می‌کند دستور کار «قدیمی» است یا نه)؛ تاریخ شروع از مسیر دیگری نوشته می‌شود و بیرون است."),
+            (typeof(Proc.PurchaseOrderLine), "ردیف، کالا، شرح، واحد، مقدار سفارش، قیمت واحد، تاریخ تحویل، دستور کار، قرارداد، سرمایه‌ای بودن، ارجاع نقشه و تایید تامین‌کننده مقایسه می‌شود؛ فقط مقدار دریافت‌شده، مقدار صورتحساب‌شده و تاریخ آخرین رسید بیرون است زیرا با هر رسید و هر صورتحساب تغییر می‌کند."),
         };
+
+        /// <summary>The record types that Package G newly put in the drift scope: the first verification run after the update takes their current state as the starting point (<see cref="RecordDriftBaseline"/>).</summary>
+        internal static IReadOnlyList<Type> GoLiveBaselineTypes => DriftScopeGoLive.Select(x => x.Type).ToList();
 
         private static void DriftAlso(Type type)
         {
@@ -53,17 +58,21 @@ namespace DataLayer.Context
 
         private static void AddGoLive()
         {
-            AuditPd(typeof(G.GlActivation), new[] { "StartAt", "RecordedByUserId", "Note", "Deleted" }, "آغاز کنترل پیکربندی و کیفیت");
+            AuditPd(typeof(G.GlActivation), new[] { "StartAt", "RecordedByUserId", "Note", "Slot", "Deleted" }, "آغاز کنترل پیکربندی و کیفیت");
+            // the date that decides «legacy» for a work order (fix round 1, M2): a direct edit of it is found by the record check
+            AuditPd(typeof(Co.WorkOrder), new[] { "Code", "Title", "Count", "WeightPercent", "Condition", "ContractId", "EquipmentId", "CreateDate", "Deleted" }, "دستور کار");
             AuditPd(typeof(G.GlLegacyUse), new[] { "Kind", "ObjectKey", "WorkOrderId", "ItemId", "RevisionId", "Number", "Note", "UsedByUserId", "UsedAt", "Deleted" }, "استفاده از معافیت قدیمی");
             AuditPd(typeof(G.GlCharAdoption), new[] { "DeliverableId", "RevisionId", "ListId", "Status", "Reason", "EvidenceRef", "RequestedByUserId", "RequestedAt", "AcceptedByUserId", "AcceptedAt", "AcceptNote", "VoidReason", "Deleted" }, "پذیرش مشخصه‌های نقشه موجود");
             AuditPd(typeof(G.GlConfigAdoption), new[] { "WorkOrderId", "ProductId", "BomHeaderId", "BaselineId", "Status", "Reason", "EvidenceRef", "ComparisonNote", "LegacyLineCount", "BankLineCount", "RequestedByUserId", "RequestedAt", "EngReviewerUserId", "EngReviewedAt", "EngNote", "PmoReviewerUserId", "PmoReviewedAt", "PmoNote", "VoidReason", "Deleted" }, "پذیرش پیکربندی پروژه موجود");
+
+            AuditPd(typeof(G.GlPrintLog), new[] { "RevisionId", "DeliverableId", "SourceFile", "DocumentNumber", "RevisionCode", "Controlled", "CopyNumber", "Header", "PrintedByUserId", "PreparedAt", "StampedAt", "SourceSha256", "OutputSha256", "Deleted" }, "چاپ نسخهٔ سند");
 
             // the existing rows say where a legacy acceptance / free-text revision came from
             ExtendInspection(typeof(Q.QcRecord), "LegacyNote");
             ExtendInspection(typeof(Pc.PcTransmittalLine), "LegacyFreeText");
 
             // the purchase order line carries the drawing and revision of the order (ISO 9001 8.4.3) and the supplier's confirmation of a newer revision
-            AuditPd(typeof(Proc.PurchaseOrderLine), new[] { "PurchaseOrderId", "RowNumber", "ItemId", "DrawingDeliverableId", "DrawingRevisionId", "DrawingNumber", "DrawingRevision", "DrawingCitedAt", "SupplierConfirmedRevisionId", "SupplierConfirmedRevision", "SupplierConfirmedAt", "SupplierConfirmedByUserId", "SupplierConfirmedRef" }, "ردیف سفارش خرید (نقشه و بازنگری)");
+            AuditPd(typeof(Proc.PurchaseOrderLine), new[] { "PurchaseOrderId", "RowNumber", "ItemId", "Description", "Unit", "Quantity", "UnitPrice", "DeliveryDate", "WorkOrderId", "ContractId", "IsCapital", "DrawingDeliverableId", "DrawingRevisionId", "DrawingNumber", "DrawingRevision", "DrawingCitedAt", "SupplierConfirmedRevisionId", "SupplierConfirmedRevision", "SupplierConfirmedAt", "SupplierConfirmedByUserId", "SupplierConfirmedRef" }, "ردیف سفارش خرید (نقشه و بازنگری)");
 
             // components of a production order were not in the map before
             if (!Audited.ContainsKey(typeof(P.MfOrderComponent)))

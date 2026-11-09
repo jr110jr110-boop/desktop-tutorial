@@ -12669,16 +12669,16 @@ TOKEN=$ADMIN_TOKEN
 # its own variables start with PKG, and the one weakening (the cut-over day moved far into the future so that every older work order and drawing is "legacy") is made through the two-person route and put back at once.
 TOKEN=$ADMIN_TOKEN
 as "$ADMIN_TOKEN" GET go-live/overview; check "pkg overview: the cut-over instant is recorded at the first start, nothing is legacy yet and the register is a list" '.success and (.data.controlStartAt != null) and .data.legacyWorkOrders == 0 and .data.legacyDrawingsWithoutList == 0 and .data.openCharAdoptions == 0 and .data.openConfigAdoptions == 0 and (.data.uses|type) == "array"'
-as "$QA_TOKEN" GET quality/settings; check "pkg settings: the four go-live settings start at their strict values (cut-over day 0 = the recorded start, 15 characters, citation on, revision from the EDMS on)" '.success and ([.data[]|select(.key=="Quality.ControlStartDate")|.value][0]) == 0 and ([.data[]|select(.key=="Gl.Legacy.ReasonMinChars")|.value][0]) == 15 and ([.data[]|select(.key=="Gl.Po.CiteDrawing")|.value][0]) == 1 and ([.data[]|select(.key=="Gl.Transmittal.RevisionFromEdms")|.value][0]) == 1'
-as "$ADMIN_TOKEN" GET safety/profile; check "pkg safety: the four go-live settings are on the safety profile and none deviates" '.success and ([.data[]|select(.store == "Quality" and (.key == "Quality.ControlStartDate" or .key == "Gl.Legacy.ReasonMinChars" or .key == "Gl.Po.CiteDrawing" or .key == "Gl.Transmittal.RevisionFromEdms"))]|length) == 4 and ([.data[]|select(.store == "Quality" and ((.key|startswith("Gl.")) or .key == "Quality.ControlStartDate") and (.deviates == true))]|length) == 0'
+as "$QA_TOKEN" GET quality/settings; check "pkg settings: the five go-live settings start at their strict values (cut-over day 0 = the recorded start, 15 characters, citation on, revision from the EDMS on, stamp limit 50 MB)" '.success and ([.data[]|select(.key=="Gl.Stamp.MaxMb")|.value][0]) == 50 and ([.data[]|select(.key=="Quality.ControlStartDate")|.value][0]) == 0 and ([.data[]|select(.key=="Gl.Legacy.ReasonMinChars")|.value][0]) == 15 and ([.data[]|select(.key=="Gl.Po.CiteDrawing")|.value][0]) == 1 and ([.data[]|select(.key=="Gl.Transmittal.RevisionFromEdms")|.value][0]) == 1'
+as "$ADMIN_TOKEN" GET safety/profile; check "pkg safety: the five go-live settings are on the safety profile and none deviates" '.success and ([.data[]|select(.store == "Quality" and (.key == "Quality.ControlStartDate" or .key == "Gl.Legacy.ReasonMinChars" or .key == "Gl.Po.CiteDrawing" or .key == "Gl.Transmittal.RevisionFromEdms" or .key == "Gl.Stamp.MaxMb"))]|length) == 5 and ([.data[]|select(.store == "Quality" and ((.key|startswith("Gl.")) or .key == "Quality.ControlStartDate") and (.deviates == true))]|length) == 0'
 as "$QA_TOKEN" POST quality/settings '{"key":"Quality.ControlStartDate","value":14990101}'; no "pkg safety: the cut-over day cannot be moved through the ordinary settings page"
 
 # --- the cut-over day moved far ahead: every older work order and drawing is legacy, and the adoption lists agree with the overview
 safety_set Quality Quality.ControlStartDate 14990101; check "pkg cut-over: moving the cut-over day later is a weakening that waits for a second person and is then applied" '.success and .data.status == "Approved" and .data.weakening == true and .data.newValue == "14990101"'
 as "$ADMIN_TOKEN" GET go-live/overview; check "pkg cut-over: the overview shows the Shamsi day 1499/01/01" '.success and .data.controlStartText == "1499/01/01"'
 PKGLEGWO=$(val .data.legacyWorkOrders); PKGLEGDW=$(val .data.legacyDrawingsWithoutList)
-as "$ENG_TOKEN" GET go-live/config-adoptions/candidates; check "pkg cut-over: the candidate list of the configuration adoption holds exactly the legacy work orders of the overview" ".success and (.data|length) == $PKGLEGWO and ([.data[]|select(.legacy != true)]|length) == 0"
-as "$ENG_TOKEN" GET go-live/char-adoptions/candidates; check "pkg cut-over: the candidate list of the characteristic adoption holds exactly the legacy drawings without a list" ".success and (.data|length) == $PKGLEGDW and ([.data[]|select(.hasList == true)]|length) == 0"
+as "$ENG_TOKEN" GET "go-live/config-adoptions/candidates?PageSize=200"; check "pkg cut-over: the candidate list of the configuration adoption counts exactly the legacy work orders of the overview (paged)" ".success and .data.total == $PKGLEGWO and (.data.items|length) == ([$PKGLEGWO, 200]|min) and ([.data.items[]|select(.legacy != true)]|length) == 0"
+as "$ENG_TOKEN" GET "go-live/char-adoptions/candidates?PageSize=200"; check "pkg cut-over: the candidate list of the characteristic adoption counts exactly the legacy drawings without a list (paged)" ".success and .data.total == $PKGLEGDW and (.data.items|length) == ([$PKGLEGDW, 200]|min) and ([.data.items[]|select(.hasList == true)]|length) == 0"
 
 # --- the adoption rules (roles, reasons, distinct persons)
 as "$ADMIN_TOKEN" POST go-live/config-adoptions '{"workOrderId":1,"productId":1,"bomHeaderId":1,"reason":"دلیل کافی برای آزمون پذیرش پیکربندی","evidenceRef":"مدرک آزمون","comparisonNote":"مقایسه BOM قدیمی با بانک محصول"}'; no "pkg adoption: the PMO is not an engineering preparer, so he cannot request a configuration adoption"
@@ -12693,54 +12693,35 @@ as "$ADMIN_TOKEN" GET go-live/overview; check "pkg cut-over: with the day back a
 as "$PMO2_TOKEN" GET go-live/edms-revision-precheck; check "pkg transmittal: the pre-check answers, the setting is still 0 and the number of rows equals the number that would break" '.success and .data.currentlyRequired == false and .data.wouldBreak == (.data.rows|length) and (.data.summary|length) > 0'
 
 # --- purchase order lines: the stale-citation list and the supplier confirmation
+as "$OHR_TOKEN" GET go-live/po-stale-lines; no "pkg po: a user outside procurement, engineering and management cannot read the stale-citation list"
+as "$OHR_TOKEN" GET go-live/overview; no "pkg overview: a user outside the quality, engineering and management roles cannot read the go-live overview"
+as "$OHR_TOKEN" GET go-live/config-adoptions/candidates; no "pkg adoption: the candidate list is closed to other roles"
+as "$OHR_TOKEN" POST go-live/po-sync '{}'; no "pkg po: a user outside procurement, engineering and management cannot trigger the alert synchronisation"
 as "$COM_TOKEN" GET go-live/po-stale-lines; check "pkg po: no open order line cites a superseded drawing revision" '.success and (.data|length) == 0'
 as "$COM_TOKEN" POST go-live/po-confirm '{"lineId":999999,"reference":"نامه شماره ۱ آزمون"}'; no "pkg po: a confirmation of a line that needs none is refused"
 as "$ENG_TOKEN" POST go-live/po-confirm '{"lineId":1,"reference":"نامه شماره ۱ آزمون"}'; no "pkg po: only the commercial role records the supplier confirmation"
 
 # --- the CEO inbox: grouped, read only, closed to other roles
-as "$CEO_TOKEN" GET go-live/ceo-inbox; check "pkg ceo inbox: six groups in a fixed order and the total is the sum of the groups" '.success and ([.data.groups[].key]) == ["findings","acceptances","readiness","safety","chain","inbox"] and .data.total == ([.data.groups[].count]|add)'
+as "$CEO_TOKEN" GET go-live/ceo-inbox; check "pkg ceo inbox: seven groups in a fixed order and the total is the sum of the groups" '.success and ([.data.groups[].key]) == ["findings","finding-void","acceptances","readiness","safety","chain","inbox"] and .data.total == ([.data.groups[].count]|add)'
 as "$COM_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: a commercial user cannot open the CEO inbox"
+as "$PMO2_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: the PMO manager does not read the CEO inbox (it carries approval items and reasons addressed to the CEO)"
+as "$AUD_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: the auditor does not read the CEO inbox"
 as "$CEO_TOKEN" POST go-live/ceo-inbox '{}'; [ "$CODE" = "405" ] && ok "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page)" || bad "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page) (got HTTP $CODE)"
-
-# --- the controlled-copy stamp on a PDF (header and footer images drawn on every page)
-PKGDIR=$(mktemp -d)
-python3 - "$PKGDIR" <<'PY'
-import sys
-d = sys.argv[1]
-body = "%PDF-1.4\n"
-offs = []
-def obj(s):
-    global body
-    offs.append(len(body)); body += "%d 0 obj\n%s\nendobj\n" % (len(offs), s)
-obj("<< /Type /Catalog /Pages 2 0 R >>")
-obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>")
-obj("<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /ProcSet [/PDF] >> >>")
-c = "0 0 m 100 100 l S"
-obj("<< /Length %d >>\nstream\n%s\nendstream" % (len(c), c))
-x = len(body)
-body += "xref\n0 5\n0000000000 65535 f \n" + "".join("%010d 00000 n \n" % o for o in offs)
-body += "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % x
-open(d + "/in.pdf", "w", encoding="latin-1").write(body)
-open(d + "/h.raw", "wb").write(bytes([200, 30, 30, 255]) * (40 * 6))
-open(d + "/f.raw", "wb").write(bytes([30, 30, 30, 255]) * (40 * 3))
-PY
-PKGCODE=$(curl -s -o "$PKGDIR/out.pdf" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $ENG_TOKEN" -F "file=@$PKGDIR/in.pdf;type=application/pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
-[ "$PKGCODE" = "200" ] && ok "pkg stamp: the PDF is stamped (HTTP 200)" || bad "pkg stamp: the PDF is stamped (got HTTP $PKGCODE)"
-head -c 8 "$PKGDIR/out.pdf" | grep -q '^%PDF-1.4' && [ "$(grep -a -c 'GlStampH Do' "$PKGDIR/out.pdf")" = "1" ] && [ "$(grep -a -c 'GlStampF Do' "$PKGDIR/out.pdf")" = "1" ] && cmp -n "$(stat -c %s "$PKGDIR/in.pdf")" "$PKGDIR/in.pdf" "$PKGDIR/out.pdf" && ok "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page" || bad "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page"
-printf 'not a pdf, plain text of some length' > "$PKGDIR/bad.pdf"
-PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $ENG_TOKEN" -F "file=@$PKGDIR/bad.pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
-[ "$PKGCODE" = "422" ] && check "pkg stamp: a file that is not a PDF is refused with a Persian message (HTTP 422)" '.success == false and (.message|length) > 0' || bad "pkg stamp: a file that is not a PDF is refused with a Persian message (got HTTP $PKGCODE)"
-rm -rf "$PKGDIR"
 
 # --- PKG real-data chains (Package G follow-up). Every object is made through the API; nothing is read from a fixture. The cut-over day is moved far ahead by the two-person route so that everything made BELOW is "legacy",
 # the legacy paths are used, and the day is put back to 0 so that the same paths are strict again.
 TOKEN=$ADMIN_TOKEN
-# pkg_drawing ITEMID NUMBER : a released drawing WITHOUT a characteristic list (what the company has today). Sets PKGDOC (deliverable) and PKGREV (revision).
+# pkg_drawing ITEMID NUMBER [PDFFILE] : a released drawing WITHOUT a characteristic list (what the company has today). Sets PKGDOC (deliverable) and PKGREV (revision).
 pkg_drawing() {
   local item=$1 num=$2 fid
   as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$num\",\"title\":\"نقشه قطعه $num\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "pkg data: the document controller registers the drawing $num" '.success and .data.id > 0'; PKGDOC=$(val .data.id)
   as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKGDOC}"; check "pkg data: the first revision of $num is 00 and a draft" '.success and .data.code == "00" and .data.status == 1'; PKGREV=$(val .data.id)
-  upload_as "$ADMIN_TOKEN" "pkg-$num"; fid=$UPLOADED
+  if [ -n "${3:-}" ]; then
+    curl -s -o "$B" -X POST "$API/Documents?Description=$num&Name=$num&Code=QUA" -H "Authorization: Bearer $ADMIN_TOKEN" -F "File=@$3"
+    fid=$(grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$B" | head -n1)
+  else
+    upload_as "$ADMIN_TOKEN" "pkg-$num"; fid=$UPLOADED
+  fi
   [ -n "$fid" ] && ok "pkg data: the file of drawing $num is uploaded" || bad "pkg data: the file of drawing $num is uploaded"
   as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PKGREV,\"documentId\":\"$fid\",\"fileName\":\"$num-00.pdf\",\"title\":\"$num\"}"; check "pkg data: the file is added to the draft revision of $num" '.success'
   as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKGDOC,\"kind\":1,\"itemId\":$item}"; check "pkg data: the drawing $num is linked to the part" '.success and .data.id > 0'
@@ -12772,8 +12753,8 @@ as "$PMO2_TOKEN" POST $PKA1PB/boms/release "{\"id\":$PKGBOM}"; check "pkg data: 
 
 # --- cut-over day far ahead: everything above is legacy
 safety_set Quality Quality.ControlStartDate 14990101; check "pkg legacy: the cut-over day is moved ahead (second person approves)" '.success and .data.status == "Approved" and .data.newValue == "14990101"'
-as "$ENG_TOKEN" GET go-live/config-adoptions/candidates; check "pkg legacy: both work orders of the chain are candidates of the configuration adoption, as legacy" ".success and ([.data[]|select(.workOrderId == $PKGWO1 and .legacy == true)]|length) == 1 and ([.data[]|select(.workOrderId == $PKGWO2 and .legacy == true)]|length) == 1"
-as "$ENG_TOKEN" GET go-live/char-adoptions/candidates; check "pkg legacy: both drawings without a list are candidates of the characteristic adoption, as legacy" ".success and ([.data[]|select(.revisionId == $PKGREV1 and .legacy == true and .hasList == false)]|length) == 1 and ([.data[]|select(.revisionId == $PKGREV2 and .legacy == true and .hasList == false)]|length) == 1"
+as "$ENG_TOKEN" GET "go-live/config-adoptions/candidates?Search=PKG-WO-"; check "pkg legacy: both work orders of the chain are candidates of the configuration adoption, as legacy (found by code, with the code shown)" ".success and .data.total == 2 and ([.data.items[]|select(.workOrderId == $PKGWO1 and .legacy == true and .code == \"PKG-WO-1\")]|length) == 1 and ([.data.items[]|select(.workOrderId == $PKGWO2 and .legacy == true and .code == \"PKG-WO-2\")]|length) == 1"
+as "$ENG_TOKEN" GET "go-live/char-adoptions/candidates?Search=PKG-DWG-L"; check "pkg legacy: both drawings without a list are candidates of the characteristic adoption, as legacy (found by number)" ".success and .data.total == 2 and ([.data.items[]|select(.revisionId == $PKGREV1 and .legacy == true and .hasList == false)]|length) == 1 and ([.data.items[]|select(.revisionId == $PKGREV2 and .legacy == true and .hasList == false)]|length) == 1"
 # PCA before: the legacy project work order is shown as legacy with the Persian note and is not blocked
 as "$QC_TOKEN" GET "quality/work-orders/$PKGWO1/release-checks"; check "pkg legacy: the physical configuration audit of the legacy work order is not blocked and says «قدیمی، پیش از شروع کنترل پیکربندی»" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")][0]|.passed == true and (.detail|contains("قدیمی، پیش از شروع کنترل پیکربندی")))'
 # QC accept before: the legacy drawing without a list; the note is the evidence of the decision
@@ -12807,6 +12788,62 @@ as "$QC_TOKEN" POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"itemId\"
 pkg_wo "PKG-WO-3" 33; PKGWO3=$PKGWOID
 as "$QC_TOKEN" GET "quality/work-orders/$PKGWO3/release-checks"; check "pkg strict: a work order made after the cut-over blocks the release without a baseline" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")][0]|.passed == false)'
 as "$ENG_TOKEN" POST go-live/config-adoptions "$(jq -c --argjson w "$PKGWO3" '.workOrderId = $w' <<<"$PKGCFG")"; nomsg "pkg strict: a work order made after the cut-over is not adopted (it needs the product bank)" "پس از آغاز کنترل"
+
+# --- the controlled copy is made on the server from the stored file of a released revision (H3): prepare numbers and records the print, stamp loads the file itself; a user-supplied PDF is no longer accepted anywhere
+PKGDIR=$(mktemp -d)
+python3 - "$PKGDIR" <<'PY'
+import sys
+d = sys.argv[1]
+def make(extra):
+    body = "%PDF-1.4\n"
+    offs = []
+    def obj(s):
+        global body
+        offs.append(len(body)); body += "%d 0 obj\n%s\nendobj\n" % (len(offs), s)
+    obj("<< /Type /Catalog /Pages 2 0 R >>")
+    obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>")
+    obj("<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /ProcSet [/PDF] >> %s >>" % extra)
+    c = "0 0 m 100 100 l S"
+    obj("<< /Length %d >>\nstream\n%s\nendstream" % (len(c), c))
+    x = len(body)
+    body += "xref\n0 5\n0000000000 65535 f \n" + "".join("%010d 00000 n \n" % o for o in offs)
+    body += "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % x
+    return body
+open(d + "/in.pdf", "w", encoding="latin-1").write(make(""))
+open(d + "/rot.pdf", "w", encoding="latin-1").write(make("/Rotate 90"))
+open(d + "/h.raw", "wb").write(bytes([200, 30, 30, 255]) * (40 * 6))
+open(d + "/f.raw", "wb").write(bytes([30, 30, 30, 255]) * (40 * 3))
+PY
+item PKGI4 '{"code":"77.10.07.104.1","title":"قطعه آزمون مهر نسخه کنترل‌شده","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part of the drawing that is printed as a controlled copy"
+item PKGI5 '{"code":"77.10.07.105.1","title":"قطعه آزمون مهر نقشه چرخانده","unit":"عدد","trackingMode":1,"requiresIncomingInspection":false}' "pkg: part of the rotated drawing"
+pkg_drawing "$PKGI4" "PKG-DWG-S1" "$PKGDIR/in.pdf"; PKGREVS=$PKGREV
+pkg_drawing "$PKGI5" "PKG-DWG-S2" "$PKGDIR/rot.pdf"; PKGREVR=$PKGREV
+as "$QC_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVS}"; check "pkg print: the first controlled copy of the released revision is numbered 1, with the document number and the header text built by the server" '.success and .data.controlled == true and .data.copyNumber == 1 and .data.printId > 0 and (.data.header|contains("PKG-DWG-S1")) and (.data.header|contains("نسخه کنترل‌شده")) and .data.maxMegabytes == 50'
+PKGPR1=$(val .data.printId)
+as "$QC_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVS}"; check "pkg print: the second controlled copy of the same revision is numbered 2" '.success and .data.copyNumber == 2'
+PKGPR2=$(val .data.printId)
+PKGCODE=$(curl -s -o "$PKGDIR/out.pdf" -w '%{http_code}' -X POST "$API/go-live/print/stamp" -H "Authorization: Bearer $QC_TOKEN" -F "printId=$PKGPR1" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "200" ] && ok "pkg stamp: the server stamps the stored file of the revision (HTTP 200)" || bad "pkg stamp: the server stamps the stored file of the revision (got HTTP $PKGCODE)"
+head -c 8 "$PKGDIR/out.pdf" | grep -q '^%PDF-1.4' && [ "$(grep -a -c 'GlStampH Do' "$PKGDIR/out.pdf")" = "1" ] && [ "$(grep -a -c 'GlStampF Do' "$PKGDIR/out.pdf")" = "1" ] && cmp -n "$(stat -c %s "$PKGDIR/in.pdf")" "$PKGDIR/in.pdf" "$PKGDIR/out.pdf" && ok "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page" || bad "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page"
+PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/print/stamp" -H "Authorization: Bearer $QC_TOKEN" -F "printId=$PKGPR1" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "200" ] && check "pkg stamp: the same print is not stamped twice" '.success == false and (.message|length) > 0' || bad "pkg stamp: the same print is not stamped twice (got HTTP $PKGCODE)"
+PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/print/stamp" -H "Authorization: Bearer $DCC_TOKEN" -F "printId=$PKGPR2" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "200" ] && check "pkg stamp: another user cannot use the prepared print of somebody else" '.success == false and (.message|length) > 0' || bad "pkg stamp: another user cannot use the prepared print of somebody else (got HTTP $PKGCODE)"
+as "$OHR_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVS}"; no "pkg print: a user outside the document readers cannot prepare a print"
+as "$QC_TOKEN" POST go-live/print/prepare '{"revisionId":999999}'; no "pkg print: an unknown revision is refused"
+as "$QC_TOKEN" POST go-live/print/prepare "{\"revisionId\":$PKGREVR}"; check "pkg print: the revision of the rotated drawing is prepared" '.success and .data.copyNumber == 1'
+PKGPR3=$(val .data.printId)
+PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/print/stamp" -H "Authorization: Bearer $QC_TOKEN" -F "printId=$PKGPR3" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "422" ] && check "pkg stamp: a rotated page is refused with a Persian message (HTTP 422) so the screen falls back to the stamped HTML print" '.success == false and (.message|contains("چرخانده"))' || bad "pkg stamp: a rotated page is refused with a Persian message (got HTTP $PKGCODE)"
+PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $QC_TOKEN" -F "file=@$PKGDIR/in.pdf;type=application/pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+{ [ "$PKGCODE" = "404" ] || [ "$PKGCODE" = "405" ]; } && ok "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (HTTP $PKGCODE)" || bad "pkg stamp: the old endpoint that stamped any uploaded PDF is gone (got HTTP $PKGCODE)"
+as "$FM_TOKEN" GET "finance/audit?EntityType=GlPrintLog&EntityId=$PKGPR1&PageSize=0"; check "pkg print: the print is in the audit chain: one Added entry and one Modified entry (the stamp) for the first copy" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select(.action == "Modified")]|length) == 1'
+rm -rf "$PKGDIR"
+
+# --- the dry run of the record-integrity baseline and the list of old order lines without a citation (read only)
+as "$PMO2_TOKEN" GET go-live/drift-rehearsal; check "pkg rehearsal: the dry run answers per table and writes nothing (the baseline is taken by the first verification run)" '.success and (.data.tables|type) == "array" and .data.totalDiffering == ([.data.tables[].differing]|add // 0)'
+as "$COM_TOKEN" GET "go-live/po-uncited-lines?PageSize=50"; check "pkg po: the list of open order lines without a drawing citation answers (paged)" '.success and (.data.items|type) == "array" and .data.total >= 0'
+as "$OHR_TOKEN" GET go-live/drift-rehearsal; no "pkg rehearsal: the dry run is closed to other roles"
 
 # --- the transmittal revision (from the EDMS) and the pre-check of EdmsRequireRevision
 as "$PMO2_TOKEN" GET go-live/edms-revision-precheck; check "pkg transmittal: the pre-check is read before the document is added" '.success and .data.currentlyRequired == false'
@@ -12859,6 +12896,7 @@ ibx "$COM_TOKEN" "po-drawing:$PKGLB"; check "pkg po: the buyer is alerted about 
 p9_run "$AUD_TOKEN"
 as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-PO-004&Limit=1000"; check "pkg po p9: the AUDIT seat raised exactly two major open findings, one per stale order" ".success and ([.data[]|select(.objectNumber == \"$PKGPONA\" or .objectNumber == \"$PKGPONB\")]|length) == 2 and ([.data[]|select((.objectNumber == \"$PKGPONA\" or .objectNumber == \"$PKGPONB\") and .severityValue == 3 and .statusValue == 1)]|length) == 2"
 PKGFA=$(jq -r --arg n "$PKGPONA" '[.data[]|select(.objectNumber == $n)][0].id' "$B"); PKGFB=$(jq -r --arg n "$PKGPONB" '[.data[]|select(.objectNumber == $n)][0].id' "$B")
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-CO-002&Limit=1000"; check "pkg legacy p9: the legacy QC acceptance is ONE observation for its drawing revision (not a finding per record, nothing for the revision that got a list)" ".success and ([.data[]|select(.objectNumber == \"REV$PKGREV1\")]|length) == 1 and ([.data[]|select(.objectNumber == \"REV$PKGREV1\" and .severityValue == 1 and .statusValue == 1)]|length) == 1 and ([.data[]|select(.objectNumber == \"REV$PKGREV2\")]|length) == 0"
 p9_action "$COM_TOKEN" "$PKGFB"; check "pkg po p9: before any resolution the automatic re-check still sees the stale line and sends the finding back to Open" '.success and .data.statusValue == 1 and (.message|contains("بازبینی خودکار رد شد"))'
 # resolution 1: the line is revised (the order is released: the citation is refreshed to the revision in force)
 as "$COM_TOKEN" POST procurement/orders/action "{\"id\":$PKGPOB,\"action\":\"release\"}"; check "pkg po: releasing order B cites revision 01 again (the line is revised)" '.success and .data.status == 2 and .data.lines[0].drawingRevision == "01"'

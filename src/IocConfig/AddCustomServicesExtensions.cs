@@ -221,6 +221,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.GoLive.IGlConfigAdoptionService, Services.NasbNiro.GoLive.GlConfigAdoptionService>();
             services.AddScoped<Services.NasbNiro.GoLive.IGoLiveOverviewService, Services.NasbNiro.GoLive.GoLiveOverviewService>();
             services.AddScoped<Services.NasbNiro.GoLive.IPoCitationService, Services.NasbNiro.GoLive.PoCitationService>();
+            services.AddScoped<Services.NasbNiro.GoLive.IGlPrintService, Services.NasbNiro.GoLive.GlPrintService>();
             services.AddHostedService<Services.NasbNiro.GoLive.GoLiveHostedService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();

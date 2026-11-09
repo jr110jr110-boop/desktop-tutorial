@@ -21,7 +21,8 @@ namespace WebApi.Controllers.GoLive
     {
         private readonly IGoLiveOverviewService _overview;
         private readonly IPoCitationService _po;
-        public GoLiveController(IGoLiveOverviewService overview, IPoCitationService po) { _overview = overview; _po = po; }
+        private readonly IGlPrintService _print;
+        public GoLiveController(IGoLiveOverviewService overview, IPoCitationService po, IGlPrintService print) { _overview = overview; _po = po; _print = print; }
 
         [HttpGet("overview")]
         public async Task<IActionResult> OverviewAsync(CancellationToken ct) => Ok(await _overview.OverviewAsync(ct));
@@ -35,27 +36,36 @@ namespace WebApi.Controllers.GoLive
         [HttpGet("po-stale-lines")]
         public async Task<IActionResult> StaleLinesAsync(CancellationToken ct) => Ok(await _po.StaleLinesAsync(ct));
 
+        [HttpGet("po-uncited-lines")]
+        public async Task<IActionResult> UncitedLinesAsync([FromQuery] GlCandidateQuery q, CancellationToken ct) => Ok(await _po.UncitedLinesAsync(q, ct));
+
         [HttpPost("po-confirm")]
         public async Task<IActionResult> ConfirmAsync([FromBody] GlPoConfirmDto dto, CancellationToken ct) => Ok(await _po.ConfirmAsync(dto, ct));
 
         [HttpPost("po-sync")]
         public async Task<IActionResult> SyncAsync(CancellationToken ct) => Ok(await _po.SyncAsync(ct));
 
-        /// <summary>Stamps a PDF with the header and footer images rendered by the browser (raw RGBA, row by row). The answer is the stamped PDF; an unsupported structure answers 422 with a Persian message (the page falls back to the HTML stamp).</summary>
-        [HttpPost("stamp-pdf")]
-        [RequestSizeLimit(60_000_000)]
-        public async Task<IActionResult> StampPdfAsync([FromForm] IFormFile file, [FromForm] IFormFile headerRgba, [FromForm] IFormFile footerRgba,
+        /// <summary>Step 1 of a printed copy: the server checks the revision, numbers the copy, records the print and returns the stamp text; the browser draws the text in the programme's font.</summary>
+        [HttpPost("print/prepare")]
+        public async Task<IActionResult> PrintPrepareAsync([FromBody] GlPrintPrepareDto dto, CancellationToken ct) => Ok(await _print.PrepareAsync(dto, ct));
+
+        /// <summary>Step 2: the server loads the file of the revision from the store itself and adds the two bands. No PDF is accepted from the user. 422 = the structure cannot be stamped / too big (fall back to the HTML print); 429 = one stamp at a time.</summary>
+        [HttpPost("print/stamp")]
+        [RequestSizeLimit(8_000_000)]
+        public async Task<IActionResult> PrintStampAsync([FromForm] int printId, [FromForm] IFormFile headerRgba, [FromForm] IFormFile footerRgba,
             [FromForm] int headerWidth, [FromForm] int headerHeight, [FromForm] int footerWidth, [FromForm] int footerHeight, CancellationToken ct)
         {
-            if (file == null || headerRgba == null || footerRgba == null) return BadRequest(new { success = false, message = GlText.InvalidData });
-            byte[] pdf = await Read(file, ct), h = await Read(headerRgba, ct), f = await Read(footerRgba, ct);
-            try
-            {
-                byte[] stamped = PdfStamper.Stamp(pdf, new PdfStampImage { Width = headerWidth, Height = headerHeight, Rgba = h }, new PdfStampImage { Width = footerWidth, Height = footerHeight, Rgba = f });
-                return File(stamped, "application/pdf", "controlled-copy.pdf");
-            }
-            catch (PdfStampException ex) { return StatusCode(422, new { success = false, message = ex.Message }); }
+            if (headerRgba == null || footerRgba == null) return BadRequest(new { success = false, message = GlText.InvalidData });
+            byte[] h = await Read(headerRgba, ct), f = await Read(footerRgba, ct);
+            GlStampOutcome o = await _print.StampAsync(printId, new PdfStampImage { Width = headerWidth, Height = headerHeight, Rgba = h }, new PdfStampImage { Width = footerWidth, Height = footerHeight, Rgba = f }, ct);
+            if (o.Pdf != null) return File(o.Pdf, "application/pdf", o.FileName);
+            if (o.Status == 400) return Ok(new { success = false, message = o.Error });
+            return StatusCode(o.Status, new { success = false, message = o.Error });
         }
+
+        /// <summary>The dry run of the record-integrity baseline (nothing is written): how many records of the newly covered types differ from their trail now. For the rehearsal on a copy of the server database.</summary>
+        [HttpGet("drift-rehearsal")]
+        public async Task<IActionResult> DriftRehearsalAsync(CancellationToken ct) => Ok(await _overview.DriftRehearsalAsync(ct));
 
         private static async Task<byte[]> Read(IFormFile file, CancellationToken ct)
         {
@@ -75,7 +85,7 @@ namespace WebApi.Controllers.GoLive
         public GlCharAdoptionController(IGlCharAdoptionService service) => _service = service;
 
         [HttpGet("candidates")]
-        public async Task<IActionResult> CandidatesAsync(CancellationToken ct) => Ok(await _service.CandidatesAsync(ct));
+        public async Task<IActionResult> CandidatesAsync([FromQuery] GlCandidateQuery q, CancellationToken ct) => Ok(await _service.CandidatesAsync(q, ct));
 
         [HttpGet]
         public async Task<IActionResult> ListAsync(CancellationToken ct) => Ok(await _service.GetListAsync(ct));
@@ -97,7 +107,7 @@ namespace WebApi.Controllers.GoLive
         public GlConfigAdoptionController(IGlConfigAdoptionService service) => _service = service;
 
         [HttpGet("candidates")]
-        public async Task<IActionResult> CandidatesAsync(CancellationToken ct) => Ok(await _service.CandidatesAsync(ct));
+        public async Task<IActionResult> CandidatesAsync([FromQuery] GlCandidateQuery q, CancellationToken ct) => Ok(await _service.CandidatesAsync(q, ct));
 
         [HttpGet]
         public async Task<IActionResult> ListAsync(CancellationToken ct) => Ok(await _service.GetListAsync(ct));

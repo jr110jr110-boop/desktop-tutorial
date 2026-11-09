@@ -32,6 +32,9 @@ namespace DataLayer.Context
 
         /// <summary>Every column of the record that differs, with the current value in the shape the trail writes it (used to write the reconciling entry when the break is accepted).</summary>
         public Dictionary<string, object> Differences { get; set; } = new Dictionary<string, object>();
+
+        /// <summary>Package G (fix round 1, M1): "column" (one or more columns differ), "present-after-delete" (the trail says deleted, the row is there; Differences holds every audited column) or "missing" (the row is gone without a Deleted entry).</summary>
+        public string Mode { get; set; } = "column";
     }
 
     /// <summary>
@@ -51,7 +54,7 @@ namespace DataLayer.Context
             foreach (Type type in FinanceAuditTrail.RecordsIntegrityTypes.OrderBy(t => t.Name, StringComparer.Ordinal))
             {
                 ct.ThrowIfCancellationRequested();
-                var task = (Task<RecordDriftFinding>)method.MakeGenericMethod(type).Invoke(null, new object[] { uow, ct });
+                var task = (Task<RecordDriftFinding>)method.MakeGenericMethod(type).Invoke(null, new object[] { uow, ct, null });
                 RecordDriftFinding f = await task;
                 if (f != null) return f;
             }
@@ -62,7 +65,16 @@ namespace DataLayer.Context
         public static Task<RecordDriftFinding> FindInTypeAsync(IUnitOfWork uow, Type type, CancellationToken ct)
         {
             MethodInfo method = typeof(RecordDrift).GetMethod(nameof(CheckTypeAsync), BindingFlags.NonPublic | BindingFlags.Static);
-            return (Task<RecordDriftFinding>)method.MakeGenericMethod(type).Invoke(null, new object[] { uow, ct });
+            return (Task<RecordDriftFinding>)method.MakeGenericMethod(type).Invoke(null, new object[] { uow, ct, null });
+        }
+
+        /// <summary>Package G (fix round 1, M1): every record of the type that differs from its trail (not only the first), for the baseline of the newly covered types and for the dry run of the rehearsal. Nothing is written.</summary>
+        public static async Task<List<RecordDriftFinding>> CollectInTypeAsync(IUnitOfWork uow, Type type, CancellationToken ct)
+        {
+            var all = new List<RecordDriftFinding>();
+            MethodInfo method = typeof(RecordDrift).GetMethod(nameof(CheckTypeAsync), BindingFlags.NonPublic | BindingFlags.Static);
+            await (Task<RecordDriftFinding>)method.MakeGenericMethod(type).Invoke(null, new object[] { uow, ct, all });
+            return all;
         }
 
         private sealed class Fold
@@ -74,7 +86,7 @@ namespace DataLayer.Context
             public readonly Dictionary<string, int> ValueTrailRow = new Dictionary<string, int>(StringComparer.Ordinal);
         }
 
-        private static async Task<RecordDriftFinding> CheckTypeAsync<T>(IUnitOfWork uow, CancellationToken ct) where T : class
+        private static async Task<RecordDriftFinding> CheckTypeAsync<T>(IUnitOfWork uow, CancellationToken ct, List<RecordDriftFinding> all) where T : class
         {
             Type type = typeof(T);
             PropertyInfo idProperty = type.GetProperty("Id");
@@ -114,7 +126,16 @@ namespace DataLayer.Context
                     int id = (int)idProperty.GetValue(row);
                     present.Add(id);
                     if (!folds.TryGetValue(id, out Fold f)) continue;   // a record the trail never saw (made before the package): nothing to compare
-                    if (f.Deleted) return Finding(name, id, "(ردیف)", f, "رکورد در سوابق حذف‌شده ثبت شده ولی هنوز در جدول هست.");
+                    if (f.Deleted)
+                    {
+                        RecordDriftFinding revived = Finding(name, id, "(ردیف)", f, "رکورد در سوابق حذف‌شده ثبت شده ولی هنوز در جدول هست.");
+                        if (all == null) return revived;
+                        revived.Mode = "present-after-delete";
+                        foreach (PropertyInfo prop in type.GetProperties())
+                            if ((only == null || only.Contains(prop.Name)) && !FinanceAuditTrail.IsMarkedColumn(type, prop.Name)) revived.Differences[prop.Name] = FinanceAuditTrail.ShapeOf(prop.Name, prop.GetValue(row));
+                        all.Add(revived);
+                        continue;
+                    }
                     RecordDriftFinding found = null;
                     foreach (KeyValuePair<string, JsonElement> pair in f.Values.OrderBy(p => p.Key, StringComparer.Ordinal))
                     {
@@ -132,11 +153,16 @@ namespace DataLayer.Context
                         }
                         found.Differences[pair.Key] = shaped;
                     }
-                    if (found != null) return found;
+                    if (found != null) { if (all == null) return found; all.Add(found); }
                 }
                 foreach (KeyValuePair<int, Fold> pair in folds.OrderBy(p => p.Key))
                     if (!pair.Value.Deleted && !present.Contains(pair.Key))
-                        return Finding(name, pair.Key, "(ردیف)", pair.Value, "رکورد در جدول نیست در حالی که سوابق حذف آن را ثبت نکرده است.");
+                    {
+                        RecordDriftFinding gone = Finding(name, pair.Key, "(ردیف)", pair.Value, "رکورد در جدول نیست در حالی که سوابق حذف آن را ثبت نکرده است.");
+                        if (all == null) return gone;
+                        gone.Mode = "missing";
+                        all.Add(gone);
+                    }
 
                 if (last) return null;
                 from = to + 1;
