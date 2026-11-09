@@ -4,12 +4,12 @@ import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getPrograms, getProgram, defaultProgram, programAction, rowsOf } from "@/api/AuditAPIs";
 import { fail, ok, printPage } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
-import { programStatuses, frequencies } from "@/composables/audit";
+import { programStatuses, frequencies, shamsiYearNow } from "@/composables/audit";
 
 // Annual audit programme (ISO 19011 clause 5): prepared and submitted by the PMO, approved by the QA manager (another person). A new version supersedes the old one.
 const rows = ref<any[]>([]);
 const open = ref<any>(null);
-const year = ref(new Date().getFullYear());
+const year = ref(shamsiYearNow());
 const note = ref("");
 const canPrepare = hasRole(["PMO"]);
 

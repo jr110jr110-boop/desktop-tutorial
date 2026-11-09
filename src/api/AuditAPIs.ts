@@ -27,6 +27,11 @@ export const getReports = (kind?: number | null, limit = 30) => call("get", base
 export const getReport = (id: number) => call("get", base + "reports/" + id);
 export const generateReport = (kind: number, day?: string | null) => call("post", base + "reports", { kind, day: day || null });
 
+/** accepted deviations: AusAcceptanceProposeDto { ruleCode, objectKey, objectNumber?, reason, expiresOn }; step: pmo, ceo (refuse needs a reason) */
+export const getAcceptances = () => call("get", base + "acceptances");
+export const proposeAcceptance = (dto: any) => call("post", base + "acceptances", dto);
+export const stepAcceptance = (acceptanceId: number, step: string, refuse = false, note?: string | null) => call("post", base + "acceptances/step", { acceptanceId, step, refuse, note: note || null });
+
 export const getPrograms = () => call("get", base + "programs");
 export const getProgram = (id: number) => call("get", base + "programs/" + id);
 export const saveProgram = (dto: any) => call("post", base + "programs", dto);

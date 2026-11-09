@@ -29,13 +29,14 @@ onMounted(async () => {
       </div>
       <input v-model="text" class="form-control form-control-sm mb-2 d-print-none" placeholder="جستجو در کد، عنوان، بند یا فرایند" />
       <table class="table table-sm table-hover">
-        <thead><tr><th>کد</th><th>عنوان</th><th>استاندارد و بند</th><th>رویه</th><th>فرایند</th><th>شدت</th><th>وضعیت</th><th>آخرین اجرا</th><th>نتیجه</th><th>یافته‌ی باز</th></tr></thead>
+        <thead><tr><th>کد</th><th>عنوان</th><th>استاندارد و بند</th><th>رویه</th><th>روش بازبینی</th><th>فرایند</th><th>شدت</th><th>وضعیت</th><th>آخرین اجرا</th><th>نتیجه</th><th>یافته‌ی باز</th></tr></thead>
         <tbody>
           <tr v-for="r in shown" :key="r.code">
             <td class="inv-ltr">{{ r.code }}</td>
             <td>{{ r.title }}</td>
             <td class="inv-ltr small">{{ r.standard }} {{ r.clause }}</td>
             <td class="small">{{ r.procedure }}</td>
+            <td class="small">{{ r.mode }}</td>
             <td>{{ r.processTitle }}</td>
             <td><span class="inv-badge" :class="severityClass[r.severityValue]">{{ r.severity }}</span></td>
             <td><span class="inv-badge" :class="r.enabled ? 'ok' : 'bad'">{{ r.enabled ? "فعال" : "غیرفعال" }}</span></td>

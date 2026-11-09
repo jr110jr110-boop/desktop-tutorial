@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import KsDatePicker from "@/components/common/KsDatePicker.vue";
+import UserSelect from "@/components/quality/UserSelect.vue";
 import { getAudits, getAudit, createAudit, auditAction, saveCheck, createManualFinding, rowsOf } from "@/api/AuditAPIs";
 import { fail, ok, printPage } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
@@ -66,8 +67,8 @@ onMounted(load);
         <div class="col-md-2"><input v-model="form.processCode" class="form-control form-control-sm inv-ltr" placeholder="کد فرایند (مثل QUALITY)" /></div>
         <div class="col-md-3"><input v-model="form.title" class="form-control form-control-sm" placeholder="عنوان" /></div>
         <div class="col-md-2"><KsDatePicker v-model="form.plannedDate" element-tag="aus-planned" placeholder="تاریخ برنامه" simple-placeholder /></div>
-        <div class="col-md-1"><input v-model.number="form.leadAuditorUserId" class="form-control form-control-sm inv-ltr" placeholder="شناسه‌ی ممیز" /></div>
-        <div class="col-md-1"><input v-model.number="form.auditeeUserId" class="form-control form-control-sm inv-ltr" placeholder="شناسه‌ی ممیزی‌شونده" /></div>
+        <div class="col-md-1"><UserSelect v-model="form.leadAuditorUserId" /></div>
+        <div class="col-md-1"><UserSelect v-model="form.auditeeUserId" /></div>
         <div class="col-md-2"><input v-model="form.auditeeUnit" class="form-control form-control-sm" placeholder="واحد" /></div>
         <div class="col-md-1"><button class="btn btn-sm btn-primary w-100" @click="create">برنامه‌ریزی</button></div>
       </div>
@@ -103,7 +104,7 @@ onMounted(load);
             <div class="col-md-1"><input v-model="nf.standard" class="form-control form-control-sm inv-ltr" placeholder="استاندارد" /></div>
             <div class="col-md-1"><input v-model="nf.clause" class="form-control form-control-sm inv-ltr" placeholder="بند" /></div>
             <div class="col-md-1"><select v-model.number="nf.severity" class="form-select form-select-sm"><option v-for="(t, k) in severities" :key="k" :value="Number(k)">{{ t }}</option></select></div>
-            <div class="col-md-1"><input v-model.number="nf.ownerUserId" class="form-control form-control-sm inv-ltr" placeholder="شناسه‌ی مسئول" /></div>
+            <div class="col-md-1"><UserSelect v-model="nf.ownerUserId" /></div>
             <div class="col-md-1"><button class="btn btn-sm btn-primary w-100" @click="finding">ثبت</button></div>
           </div>
         </div>

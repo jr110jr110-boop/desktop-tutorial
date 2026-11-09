@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onBeforeUnmount, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getRuns, getRun, runNow, rowsOf } from "@/api/AuditAPIs";
 import { fail, ok, printPage } from "@/composables/inventory";
@@ -22,15 +22,26 @@ async function show(id: number) {
   if (e) return fail(e);
   open.value = d;
 }
+let timer: any = null;
+async function poll(id: number, tries = 0) {
+  const [d, e] = await getRun(id);
+  if (e) { busy.value = false; return fail(e); }
+  open.value = d;
+  if (d?.statusValue === 0 && tries < 600) { timer = setTimeout(() => poll(id, tries + 1), 3000); return; }
+  busy.value = false;
+  ok("اجرا پایان یافت: " + (d?.newFindings ?? 0) + " یافته‌ی تازه.");
+  await load();
+}
 async function start() {
   busy.value = true;
-  try {
-    const [d, e] = await runNow(null);
-    if (e) return fail(e);
-    ok("اجرا انجام شد: " + (d?.newFindings ?? 0) + " یافته‌ی تازه.");
-    await load();
-  } finally { busy.value = false; }
+  const [d, e] = await runNow(null);
+  if (e) { busy.value = false; return fail(e); }
+  ok("اجرا در پس‌زمینه آغاز شد.");
+  await load();
+  if (d?.id) await poll(d.id);
+  else busy.value = false;
 }
+onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 onMounted(load);
 </script>
 
@@ -59,8 +70,8 @@ onMounted(load);
         <h2 class="h6">جزئیات اجرا {{ open.startedAtText }}</h2>
         <p v-if="open.message" class="small">{{ open.message }}</p>
         <table class="table table-sm">
-          <thead><tr><th>قاعده</th><th>وضعیت</th><th>انحراف</th><th>تازه</th><th>زمان (ms)</th></tr></thead>
-          <tbody><tr v-for="x in open.rules" :key="x.code"><td class="inv-ltr">{{ x.code }}</td><td>{{ x.status }}</td><td>{{ x.hits }}</td><td>{{ x.new }}</td><td>{{ x.ms }}</td></tr></tbody>
+          <thead><tr><th>قاعده</th><th>وضعیت</th><th>انحراف</th><th>تازه</th><th>پذیرفته‌شده</th><th>انباشته</th><th>سرکوب‌شده</th><th>زمان (ms)</th></tr></thead>
+          <tbody><tr v-for="x in open.rules" :key="x.code"><td class="inv-ltr">{{ x.code }}</td><td>{{ x.status }}</td><td>{{ x.hits }}</td><td>{{ x.new }}</td><td>{{ x.accepted }}</td><td>{{ x.backlog }}</td><td>{{ x.suppressed }}</td><td>{{ x.ms }}</td></tr></tbody>
         </table>
       </div>
     </div>

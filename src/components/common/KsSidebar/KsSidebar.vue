@@ -460,6 +460,7 @@ const links = {
   audit: [
     { title: "یافته‌های ممیزی", routeName: "AuditFindings", disabled: !hasRole(AuditRoles.actioners) },
     { title: "گزارش‌های ممیزی", routeName: "AuditReports", disabled: !hasRole(AuditRoles.readers) },
+    { title: "انحراف‌های پذیرفته‌شده", routeName: "AuditAcceptances", disabled: !hasRole(AuditRoles.readers) },
     { title: "فهرست قواعد", routeName: "AuditRules", disabled: !hasRole(AuditRoles.readers) },
     { title: "اجراهای ممیز", routeName: "AuditRuns", disabled: !hasRole(AuditRoles.readers) },
     { title: "برنامه‌ی ممیزی", routeName: "AuditPrograms", disabled: !hasRole(AuditRoles.readers) },

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { getReports, getReport, generateReport, rowsOf } from "@/api/AuditAPIs";
 import { fail, ok, printPage } from "@/composables/inventory";
@@ -30,7 +31,12 @@ async function generate() {
   await load();
   open.value = d;
 }
-onMounted(load);
+const route = useRoute();
+onMounted(async () => {
+  await load();
+  const id = Number(route.params.id);
+  if (id > 0) await show(id);
+});
 </script>
 
 <template>
