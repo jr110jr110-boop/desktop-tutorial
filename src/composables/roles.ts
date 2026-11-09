@@ -547,3 +547,9 @@ export const IntegrityRoles = {
   /** the second person who approves a change of a security-relevant setting */
   approvers: list("PMO,CEO"),
 };
+
+/** Package G «گذار به کنترل» (the API checks again on every call): the overview is read by the roles that run quality and configuration; the CEO inbox by the CEO, the PMO and the auditor. */
+export const GoLiveRoles = {
+  readers: list("PMO,CEO,QA,QC,AUDITOR,ENGINEERING,ENGINEER,COMMERCIAL,DCC"),
+  ceoInbox: list("CEO,PMO,AUDITOR"),
+};

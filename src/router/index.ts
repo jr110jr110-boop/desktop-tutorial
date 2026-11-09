@@ -9,7 +9,7 @@ import { AuditRoles } from "@/composables/audit";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { DncRoles } from "@/composables/dnc";
-import { AccountRoles, AiRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, GoLiveRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -731,6 +731,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/eng-change/requests/:id", name: "EngChangeRequestEdit", component: () => import("@/views/engChange/RequestEdit.vue"), meta: { roles: EcRoles.readers } },
   { path: "/eng-change/orders", name: "EngChangeOrders", component: () => import("@/views/engChange/Orders.vue"), meta: { roles: EcRoles.readers } },
   { path: "/eng-change/orders/:id", name: "EngChangeOrderEdit", component: () => import("@/views/engChange/OrderEdit.vue"), meta: { roles: EcRoles.readers } },
+  // Package G: go-live cut-over (legacy exemptions, the two adoptions, pre-check) and the CEO decision inbox (no bulk approval)
+  { path: "/go-live", name: "GoLive", component: () => import("@/views/golive/GoLive.vue"), meta: { roles: GoLiveRoles.readers } },
+  { path: "/go-live/char-adoptions", redirect: "/go-live" },
+  { path: "/go-live/config-adoptions", redirect: "/go-live" },
+  { path: "/go-live/ceo-inbox", name: "CeoInbox", component: () => import("@/views/golive/CeoInbox.vue"), meta: { roles: GoLiveRoles.ceoInbox } },
   { path: "/audit", redirect: "/audit/findings" },
   { path: "/audit/findings", name: "AuditFindings", component: () => import("@/views/audit/Findings.vue"), meta: { roles: AuditRoles.actioners } },
   { path: "/audit/findings/:id", name: "AuditFinding", component: () => import("@/views/audit/FindingDetail.vue"), meta: { roles: AuditRoles.actioners } },

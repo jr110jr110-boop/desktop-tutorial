@@ -5,13 +5,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getShopDocuments, printControlledCopy } from "@/api/EdmsAPIs";
 import { http } from "@/api/ApiClient";
 import { downloadFile } from "@/api/InventoryAPIs";
+import { preparePrint, stampPrint } from "@/api/GoLiveAPIs";
 import { fail, jalali } from "@/composables/inventory";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 const props = defineProps<{ orderId: number; operationId?: number | null }>();
 const docs = ref<any[]>([]);
 const loaded = ref(false);
-const copy = ref<{ stamp: any; url: string; image: boolean } | null>(null);
+const copy = ref<{ stamp: any; url: string; image: boolean; stamped?: boolean } | null>(null);
 const canRaw = computed(() => hasRole(ProjectControlRoles.docReaders));
 
 async function load() {
@@ -28,17 +29,38 @@ function close() {
   document.body.classList.remove("edms-printing");
 }
 
+async function fetchBlob(documentId: string): Promise<Blob | null> {
+  try {
+    return (await http.get("Documents", { params: { DocumentId: documentId }, responseType: "blob" })).data;
+  } catch {
+    fail("بارگیری فایل ممکن نشد.");
+    return null;
+  }
+}
+
 async function controlledPrint(doc: any, file: any) {
-  // the print is logged by a POST (a GET never writes); the answer carries the stamp
+  const isPdf = /\.pdf$/i.test(file.fileName || "");
+  if (isPdf) {
+    // Package G (fix round 1): the server checks that the revision is in force, numbers the copy, records the print and stamps the stored file itself
+    const [prep, pe] = await preparePrint({ revisionId: doc.revisionId, documentId: file.documentId });
+    if (pe) return fail(pe);
+    const out = await stampPrint(prep.printId, prep.header, prep.footer, prep.controlled);
+    if (out) {
+      copy.value = { stamp: { stampText: prep.header, stampFooter: prep.footer }, url: URL.createObjectURL(out), image: false, stamped: true };
+      return;
+    }
+    // the server could not stamp this file: the HTML stamp of the prepared (already recorded) print over the file
+    const blob = await fetchBlob(file.documentId);
+    if (!blob) return;
+    copy.value = { stamp: { stampText: prep.header, stampFooter: prep.footer }, url: URL.createObjectURL(blob), image: false, stamped: false };
+    return;
+  }
+  // other files (images...): the stamp of the page, logged by a POST (a GET never writes)
   const [stamp, e] = await printControlledCopy(doc.revisionId, file.documentId);
   if (e) return fail(e);
-  let blob: Blob;
-  try {
-    blob = (await http.get("Documents", { params: { DocumentId: file.documentId }, responseType: "blob" })).data;
-  } catch {
-    return fail("بارگیری فایل ممکن نشد.");
-  }
-  copy.value = { stamp, url: URL.createObjectURL(blob), image: (blob.type || "").startsWith("image/") };
+  const blob = await fetchBlob(file.documentId);
+  if (!blob) return;
+  copy.value = { stamp, url: URL.createObjectURL(blob), image: (blob.type || "").startsWith("image/"), stamped: false };
 }
 
 function doPrint() {
@@ -80,7 +102,7 @@ watch(() => [props.orderId, props.operationId], load);
         <button class="btn btn-sm btn-primary" @click="doPrint">چاپ</button>
         <button class="btn btn-sm btn-secondary" @click="close">بستن</button>
       </div>
-      <div class="edms-stamp"><b>نسخه کنترل‌شده</b><span>{{ copy.stamp.stampText }}</span></div>
+      <div v-if="!copy.stamped" class="edms-stamp"><b>نسخه کنترل‌شده</b><span>{{ copy.stamp.stampText }}</span><small>{{ copy.stamp.stampFooter }}</small></div>
       <img v-if="copy.image" :src="copy.url" class="edms-file" alt="" />
       <iframe v-else :src="copy.url" class="edms-file"></iframe>
     </div>

@@ -142,6 +142,7 @@ onMounted(async () => {
         <div>
           <h1 class="inv-title">سابقه بازرسی <span v-if="rec.number" class="inv-ltr ms-2">{{ rec.number }}</span></h1>
           <span v-if="!isNew" :class="{ ok: rec.result === 1, bad: rec.result === 2, warn: rec.result > 2 }" class="inv-badge">{{ qcResults[rec.result] }}</span>
+          <span v-if="rec.legacyNote" class="inv-badge warn ms-1" :title="rec.legacyNote">پذیرش در حالت قدیمی</span>
           <span v-if="rec.selfInspection" class="inv-badge info ms-1">خودبازرسی اپراتور</span>
         </div>
         <div class="d-flex gap-2">
