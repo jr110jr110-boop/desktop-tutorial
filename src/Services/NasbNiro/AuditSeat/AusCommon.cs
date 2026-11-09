@@ -93,6 +93,10 @@ namespace Services.NasbNiro.AuditSeat
         public const string ExceptionPendingDays = "Audit.T.ExceptionPendingDays";
         public const string LegacyBomFreezeDay = "Audit.T.LegacyBomFreezeDay";
 
+        // fix round 1
+        public const string HorizonDate = "Audit.HorizonDate";
+        public const string SystemicMinObjects = "Audit.SystemicMinObjects";
+
         public static string RuleKey(string code) => Prefix + "Rule." + code + ".Enabled";
 
         private sealed class Def
@@ -101,6 +105,7 @@ namespace Services.NasbNiro.AuditSeat
         }
 
         private const string SrcD = "★ تصمیم مدیرعامل D11/D12 (سخت‌گیری صفر)";
+        private const string SrcZero = "بدون استاندارد یا رویه‌ی مرجع؛ پیش‌فرض بدون تحمل (تصمیم D12)";
         private const string SrcIso = "★ پیشنهاد PMIS بر پایه ISO 19011 / ISO 9001";
 
         private static readonly List<Def> Table = new List<Def>
@@ -116,16 +121,18 @@ namespace Services.NasbNiro.AuditSeat
             new Def { Key = MaxHits, Value = 2000, Min = 100, Max = 20000, Title = "سقف یافته هر قاعده در یک اجرا (فراتر از آن یافته‌ی «اجرای ناقص» ثبت می‌شود)", Source = SrcIso },
             new Def { Key = FullPassDays, Value = 7, Min = 1, Max = 31, Title = "هر چند روز یک بار قاعده‌های رویدادی همه سابقه را مرور کنند", Source = SrcIso },
             new Def { Key = RestoreTestDays, Value = 35, Min = 1, Max = 365, Title = "حداکثر سن آزمون بازیابی پشتیبان (روز)", Source = "تصمیم بسته D (۳۵ روز)" },
-            new Def { Key = ChainRunHours, Value = 36, Min = 6, Max = 720, Title = "حداکثر فاصله دو راستی‌آزمایی زنجیره ممیزی (ساعت)", Source = "تصمیم بسته D (اجرای شبانه)" },
+            new Def { Key = ChainRunHours, Value = 0, Min = 0, Max = 720, Title = "حداکثر فاصله دو راستی‌آزمایی زنجیره ممیزی (ساعت؛ ۰ = بدون تحمل: همان چرخه‌ی شبانه، ۲۴ ساعت)", Source = SrcZero + " ★ پیشنهاد PMIS: ۳۶ ساعت" },
             new Def { Key = EvmStaleDays, Value = 7, Min = 1, Max = 90, Title = "حداکثر کهنگی تاریخ داده EVM پروژه فعال (روز)", Source = "EIA-748 GL22 (ماهانه) سخت‌گیرانه تر: هفتگی ★" },
-            new Def { Key = RiskStaleDays, Value = 30, Min = 1, Max = 365, Title = "حداکثر کهنگی مرور ثبت ریسک پروژه فعال (روز)", Source = "ISO 21502 7.11 ★" },
+            new Def { Key = RiskStaleDays, Value = 0, Min = 0, Max = 365, Title = "حداکثر کهنگی ریسکی که موعد مرور ندارد (روز؛ ۰ = بدون تحمل: از یک روز بی‌تغییری)", Source = SrcZero + " ★ پیشنهاد PMIS: ۳۰ روز" },
             new Def { Key = SupplierEvalDays, Value = 365, Min = 30, Max = 1100, Title = "حداکثر فاصله ارزیابی دوره‌ای تامین‌کننده فعال (روز)", Source = "WI-PO-003 ★ سالانه" },
             new Def { Key = ManagementReviewDays, Value = 365, Min = 30, Max = 1100, Title = "حداکثر فاصله دو بازنگری مدیریت (روز)", Source = "ISO 9001 9.3 ★ سالانه" },
-            new Def { Key = GateExceptionMax, Value = 3, Min = 1, Max = 100, Title = "بیشینه استثنای تاییدشده یک قاعده کنترل داده در پنجره (بیش از آن یافته)", Source = SrcIso },
+            new Def { Key = GateExceptionMax, Value = 0, Min = 0, Max = 100, Title = "بیشینه استثنای تاییدشده یک قاعده کنترل داده در پنجره (بیش از آن یافته؛ ۰ = هر استثنا)", Source = SrcZero + " ★ پیشنهاد PMIS: ۳" },
             new Def { Key = GateExceptionWindow, Value = 30, Min = 1, Max = 365, Title = "پنجره شمارش استثناهای کنترل داده (روز)", Source = SrcIso },
-            new Def { Key = BackupStaleDays, Value = 2, Min = 1, Max = 30, Title = "حداکثر سن پشتیبان مورد استفاده آزمون بازیابی هنگام آزمون (روز)", Source = "ISO 27001 A.8.13 ★" },
-            new Def { Key = ExceptionPendingDays, Value = 3, Min = 1, Max = 60, Title = "حداکثر انتظار درخواست استثنا برای تصمیم (روز)", Source = SrcIso },
+            new Def { Key = BackupStaleDays, Value = 0, Min = 0, Max = 30, Title = "حداکثر سن پشتیبان مورد استفاده آزمون بازیابی هنگام آزمون (روز؛ ۰ = بدون تحمل: بیش از یک روز)", Source = SrcZero + " ★ پیشنهاد PMIS: ۲ روز" },
+            new Def { Key = ExceptionPendingDays, Value = 0, Min = 0, Max = 60, Title = "حداکثر انتظار درخواست استثنا برای تصمیم (روز؛ ۰ = بدون تحمل: از روز بعد)", Source = SrcZero + " ★ پیشنهاد PMIS: ۳ روز" },
             new Def { Key = LegacyBomFreezeDay, Value = 0, Min = 0, Max = 99999999, Title = "روز انجماد BOM قدیمی (عدد شمسی yyyyMMdd؛ صفر = روز نخستین اجرای ممیزی)", Source = "برنامه بسته A2" },
+            new Def { Key = HorizonDate, Value = 0, Min = 0, Max = 99999999, Title = "افق ممیزی (عدد شمسی yyyyMMdd؛ صفر = روز نخستین اجرای ممیزی): رخدادهای پیش از آن در یک یافته‌ی پس‌زمینه‌ی هر قاعده جمع می‌شوند و از زنجیره‌ی بستن می‌گذرند", Source = SrcD },
+            new Def { Key = SystemicMinObjects, Value = 3, Min = 2, Max = 100, Title = "اگر یک قاعده در پنجره‌ی تکرار روی این تعداد شیء متفاوت یک فرایند دیده شود، یک یافته‌ی سیستمی عمده ساخته می‌شود", Source = SrcD },
         };
 
         /// <summary>Every key of the audit that the strict profile lists, with the kind of change that weakens it.</summary>
@@ -167,16 +174,18 @@ namespace Services.NasbNiro.AuditSeat
             yield return (MaxHits, 2000, 100, 20000, "سقف یافته هر قاعده کمتر از مقدار پیش‌فرض نشود", "atleast");
             yield return (FullPassDays, 7, 1, 31, "فاصله مرور کامل از مقدار پیش‌فرض بیشتر نشود", "atmost");
             yield return (RestoreTestDays, 35, 1, 365, "سن مجاز آزمون بازیابی از مقدار پیش‌فرض بیشتر نشود", "atmost");
-            yield return (ChainRunHours, 36, 6, 720, "فاصله مجاز راستی‌آزمایی زنجیره از مقدار پیش‌فرض بیشتر نشود", "atmost");
+            yield return (ChainRunHours, 0, 0, 720, "فاصله مجاز راستی‌آزمایی زنجیره از مقدار پیش‌فرض (بدون تحمل) بیشتر نشود", "atmost");
             yield return (EvmStaleDays, 7, 1, 90, "کهنگی مجاز تاریخ داده EVM از مقدار پیش‌فرض بیشتر نشود", "atmost");
-            yield return (RiskStaleDays, 30, 1, 365, "کهنگی مجاز ثبت ریسک از مقدار پیش‌فرض بیشتر نشود", "atmost");
+            yield return (RiskStaleDays, 0, 0, 365, "کهنگی مجاز ثبت ریسک از مقدار پیش‌فرض (بدون تحمل) بیشتر نشود", "atmost");
             yield return (SupplierEvalDays, 365, 30, 1100, "فاصله ارزیابی تامین‌کننده از مقدار پیش‌فرض بیشتر نشود", "atmost");
             yield return (ManagementReviewDays, 365, 30, 1100, "فاصله بازنگری مدیریت از مقدار پیش‌فرض بیشتر نشود", "atmost");
-            yield return (GateExceptionMax, 3, 1, 100, "سقف استثنای تاییدشده از مقدار پیش‌فرض بیشتر نشود", "atmost");
+            yield return (GateExceptionMax, 0, 0, 100, "سقف استثنای تاییدشده از مقدار پیش‌فرض (بدون تحمل) بیشتر نشود", "atmost");
             yield return (GateExceptionWindow, 30, 1, 365, "پنجره شمارش استثنا کوتاه‌تر از مقدار پیش‌فرض نشود", "atleast");
-            yield return (BackupStaleDays, 2, 1, 30, "سن مجاز پشتیبان از مقدار پیش‌فرض بیشتر نشود", "atmost");
-            yield return (ExceptionPendingDays, 3, 1, 60, "انتظار مجاز درخواست استثنا از مقدار پیش‌فرض بیشتر نشود", "atmost");
-            yield return (LegacyBomFreezeDay, 0, 0, 99999999, "روز انجماد BOM قدیمی جابه‌جا نشود (صفر = روز نخستین اجرای ممیزی)", "atmost");
+            yield return (BackupStaleDays, 0, 0, 30, "سن مجاز پشتیبان از مقدار پیش‌فرض (بدون تحمل) بیشتر نشود", "atmost");
+            yield return (ExceptionPendingDays, 0, 0, 60, "انتظار مجاز درخواست استثنا از مقدار پیش‌فرض (بدون تحمل) بیشتر نشود", "atmost");
+            yield return (LegacyBomFreezeDay, 0, 0, 99999999, "روز انجماد BOM قدیمی فقط با تصمیم دو نفره تغییر کند (تعیین یک روز مشخص ضعیف‌کننده نیست)", "threshold");
+            yield return (HorizonDate, 0, 0, 99999999, "افق ممیزی فقط با تصمیم دو نفره تغییر کند (جابه‌جایی آن رخدادها را به یافته‌ی پس‌زمینه منتقل می‌کند)", "threshold");
+            yield return (SystemicMinObjects, 3, 2, 100, "آستانه‌ی یافته‌ی سیستمی از مقدار پیش‌فرض بیشتر نشود", "atmost");
         }
     }
 

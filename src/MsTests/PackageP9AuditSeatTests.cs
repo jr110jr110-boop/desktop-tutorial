@@ -87,6 +87,21 @@ namespace MsTests
             return id;
         }
 
+        /// <summary>The on-demand run is queued and runs in the background (fix round 1, M4): start it and poll the run row (bounded) until it has ended.</summary>
+        internal static async Task<ResponseDto<AusRunDto>> RunNow(AppHost host, ClaimsPrincipal who)
+        {
+            var res = await As(host, who, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            if (!res.Success || res.Data == null || res.Data.Id <= 0 || res.Data.StatusValue != (int)AusRunStatus.Running) return res;
+            for (int i = 0; i < 1500; i++)
+            {
+                await Task.Delay(200);
+                var again = await As(host, who, p => p.GetRequiredService<IAusRunService>().GetRunAsync(res.Data.Id, Ct));
+                if (again.Success && again.Data.StatusValue != (int)AusRunStatus.Running) return again;
+            }
+            Assert.Fail("the queued run did not end");
+            return res;
+        }
+
         internal static AusFinding Get(AppHost host, int id) => host.Read(u => u.Set<AusFinding>().AsNoTracking().Single(f => f.Id == id));
         private static List<AusFindingEvent> Events(AppHost host, int id) => host.Read(u => u.Set<AusFindingEvent>().AsNoTracking().Where(e => e.FindingId == id).OrderBy(e => e.Id).ToList());
         private static Task<ResponseDto<AusFindingDto>> Step(AppHost host, ClaimsPrincipal who, int id, string step, string note = "یادداشت کافی برای این مرحله", bool refuse = false) =>
@@ -189,7 +204,7 @@ namespace MsTests
         public async Task An_On_Demand_Run_On_An_Empty_Database_Gives_A_Known_Finding_With_Evidence_And_Hash_And_No_Rule_Fails()
         {
             AppHost host = NewHost();
-            var res = await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            var res = await RunNow(host, Qa1);
             Assert.IsTrue(res.Success, res.Message);
             Assert.AreEqual(0, res.Data.RulesFailed, string.Join("; ", res.Data.Rules.Where(r => r.Status != "ok" && r.Status != "disabled").Select(r => r.Code + "=" + r.Status)));
             Assert.AreEqual(AusCatalog.All.Count, res.Data.RulesRun);
@@ -218,15 +233,15 @@ namespace MsTests
         public async Task A_Second_Run_Sees_The_Same_Findings_Again_And_Creates_Nothing_New_And_Closes_Nothing_Even_When_The_Condition_Is_Gone()
         {
             AppHost host = NewHost();
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             int count = host.Read(u => u.Set<AusFinding>().Count());
-            var second = await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            var second = await RunNow(host, Qa1);
             Assert.AreEqual(0, second.Data.NewFindings);
             Assert.AreEqual(count, host.Read(u => u.Set<AusFinding>().Count()));
             Assert.AreEqual(2, host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-INT-002").SeenCount));
             // the owner fixes the data: a successful restore test now exists; the finding stays Open (no auto-close, zero tolerance)
             host.Write(u => { AppHost.Add(u, new RestoreTestResult { RunId = "r1", StartedAt = DateTimeOffset.Now, Success = true, BackupFile = "b.bak", BackupTakenAt = DateTimeOffset.Now }); u.SaveChanges(); });
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             Assert.AreEqual(AusFindingStatus.Open, host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-INT-002").Status));
             Assert.AreEqual(count, host.Read(u => u.Set<AusFinding>().Count()), "nothing is deleted");
         }
@@ -235,12 +250,12 @@ namespace MsTests
         public async Task The_Run_Is_Refused_For_Other_Roles_And_For_An_Ai_Seat_And_The_Master_Switch_Stops_It()
         {
             AppHost host = NewHost();
-            Assert.IsFalse((await As(host, Stranger, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct))).Success);
+            Assert.IsFalse((await RunNow(host, Stranger)).Success);
             var seat = new AiActingUser { UserId = 99, UserName = "seat.audit", Roles = new[] { "AUDITOR" } };
             var viaAi = await AiActing.RunAsync(host.Provider.GetRequiredService<IServiceScopeFactory>(), seat, "AUDIT", sp => sp.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
             Assert.IsFalse(viaAi.Success, "the on-demand endpoint is for people; the seat runs through its job");
             host.Write(u => { AppHost.Add(u, new QualitySetting { Key = AusSettingKeys.Master, Value = 0, Title = "t", Source = "t" }); u.SaveChanges(); });
-            var off = await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            var off = await RunNow(host, Qa1);
             Assert.AreEqual("Disabled", off.Data.Status);
             Assert.AreEqual(0, host.Read(u => u.Set<AusFinding>().Count()));
         }
@@ -250,7 +265,7 @@ namespace MsTests
         {
             AppHost host = NewHost();
             host.Write(u => { AppHost.Add(u, new QualitySetting { Key = AusSettingKeys.RuleKey("AUD-MR-001"), Value = 0, Title = "t", Source = "t" }); u.SaveChanges(); });
-            var run = await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            var run = await RunNow(host, Qa1);
             Assert.AreEqual("disabled", run.Data.Rules.Single(r => r.Code == "AUD-MR-001").Status);
             Assert.AreEqual(0, host.Read(u => u.Set<AusFinding>().Count(f => f.RuleCode == "AUD-MR-001")));
             Assert.AreEqual(AusCatalog.All.Count - 1, run.Data.RulesRun);
@@ -265,11 +280,11 @@ namespace MsTests
             AppHost host = NewHost();
             // a rule with a person as owner: a safety change decided by its own requester
             host.Write(u => { AppHost.Add(u, new SafetySettingChange { Store = SafetyStore.Quality, Key = "k", RequestedByUserId = 308, DecidedByUserId = 308, DecidedAt = DateTimeOffset.Now, Status = SafetyChangeStatus.Approved, NewValue = "1", OldValue = "0", Reason = "r" }); u.SaveChanges(); });
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             AusFinding f = host.Read(u => u.Set<AusFinding>().AsNoTracking().Single(x => x.RuleCode == "AUD-MC-002"));
             Assert.AreEqual(308, f.OwnerUserId);
             Assert.AreEqual(AusSeverity.Major, f.Severity);
-            List<OfInboxItem> items = host.Read(u => u.Set<OfInboxItem>().AsNoTracking().Where(i => i.SourceKey == "aus:" + f.Id).ToList());
+            List<OfInboxItem> items = host.Read(u => u.Set<OfInboxItem>().AsNoTracking().Where(i => i.SourceKey.StartsWith("aus-run:")).ToList());   // one consolidated alert per run and recipient (fix round 1, H4)
             Assert.IsTrue(items.Any(i => i.RecipientUserId == 308), "the owner is told");
             foreach (string role in new[] { "QA", "PMO", "CEO" }) Assert.IsTrue(items.Any(i => i.RecipientRole == role), "role " + role + " is told");
             Assert.IsFalse(items.Any(i => i.RecipientRole == "AUDITOR"), "a plain auditor is not in the closure chain");
@@ -282,7 +297,7 @@ namespace MsTests
         public async Task The_Owner_Proposes_An_Action_The_Rule_Re_Runs_And_The_Finding_Goes_Back_To_Open_Until_The_Deviation_Is_Gone()
         {
             AppHost host = NewHost();
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             int id = host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-INT-002").Id);
             var action = new AusActionDto { FindingId = id, RootCause = "اسکریپت آزمون بازیابی اجرا نمی‌شد", Correction = "آزمون بازیابی دستی اجرا شد", CorrectiveAction = "زمان‌بندی ماهانه با هشدار" };
             // the owner of the INTEGRITY process is the PMO role (nobody is named): a QA person is not the owner
@@ -435,7 +450,7 @@ namespace MsTests
         public async Task A_Finding_That_Comes_Back_On_The_Way_To_Closure_Is_Reopened_By_The_Next_Run()
         {
             AppHost host = NewHost();
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             int id = host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-MR-001").Id);
             host.Write(u =>
             {
@@ -443,7 +458,7 @@ namespace MsTests
                 f.Status = AusFindingStatus.QaProposed; f.RecheckPassed = true; f.QaUserId = 302; f.QaAt = DateTimeOffset.Now;
                 u.SaveChanges();
             });
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             AusFinding after = Get(host, id);
             Assert.AreEqual(AusFindingStatus.Open, after.Status);
             Assert.IsNull(after.QaUserId);
@@ -499,7 +514,7 @@ namespace MsTests
             AppHost host = NewHost();
             // a closed minor finding of the same rule and the same object
             int old = SeedFinding(host, AusFindingStatus.Closed, owner: 308, rule: "AUD-MR-001", severity: AusSeverity.Minor, key: "ManagementReview|0|overdue", tweak: f => { f.ClosedAt = DateTimeOffset.Now.AddDays(-5); f.QaUserId = 302; f.PmoUserId = 304; f.CeoUserId = 306; });
-            var run = await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            var run = await RunNow(host, Qa1);
             AusFinding f2 = host.Read(u => u.Set<AusFinding>().AsNoTracking().Single(x => x.RuleCode == "AUD-MR-001" && x.Id != old));
             Assert.AreEqual(old, f2.RecurrenceOfId);
             Assert.AreEqual(1, f2.RecurrenceCount);
@@ -520,15 +535,15 @@ namespace MsTests
             AppHost host = NewHost();
             int inside = SeedFinding(host, AusFindingStatus.Closed, rule: "AUD-AI-001", severity: AusSeverity.Observation, key: "AiMessage|999", tweak: f => f.ClosedAt = DateTimeOffset.Now.AddDays(-10));
             host.Write(u => { AppHost.Add(u, new AiMessage { ConversationId = 5, Role = AiMessageRole.Assistant, Verified = false, Text = "x", CreatedAt = DateTimeOffset.Now }); u.SaveChanges(); });
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host, Qa1);
             AusFinding f = host.Read(u => u.Set<AusFinding>().AsNoTracking().Single(x => x.RuleCode == "AUD-AI-001" && x.Id != inside));
             Assert.AreEqual(inside, f.RecurrenceOfId);
-            Assert.AreEqual(AusSeverity.Minor, f.Severity, "observation + recurrence = minor");
+            Assert.AreEqual(AusSeverity.Observation, f.Severity, "another object of the same rule is linked but not raised (H5: only the same object raises)");
 
             AppHost host2 = NewHost();
             int outside = SeedFinding(host2, AusFindingStatus.Closed, rule: "AUD-AI-001", severity: AusSeverity.Observation, key: "AiMessage|999", tweak: x => x.ClosedAt = DateTimeOffset.Now.AddDays(-200));
             host2.Write(u => { AppHost.Add(u, new AiMessage { ConversationId = 5, Role = AiMessageRole.Assistant, Verified = false, Text = "x", CreatedAt = DateTimeOffset.Now }); u.SaveChanges(); });
-            await As(host2, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            await RunNow(host2, Qa1);
             AusFinding g = host2.Read(u => u.Set<AusFinding>().AsNoTracking().Single(x => x.RuleCode == "AUD-AI-001" && x.Id != outside));
             Assert.IsNull(g.RecurrenceOfId);
             Assert.AreEqual(AusSeverity.Observation, g.Severity);
@@ -644,22 +659,23 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task A_Rule_That_Fails_Or_Is_Truncated_Is_Reported_As_A_Finding_Of_The_Audit_Itself()
+        public async Task A_Rule_That_Passes_The_Hit_Ceiling_Continues_The_Next_Run_From_A_Checkpoint_And_Is_Not_A_Failure()
         {
             AppHost host = NewHost();
-            // a hit ceiling of 100 (the lowest the setting allows) with 101 unverified AI answers
+            // a hit ceiling of 100 (the lowest the setting allows) with 101 safety changes decided by their own requester
             host.Write(u =>
             {
                 AppHost.Add(u, new QualitySetting { Key = AusSettingKeys.MaxHits, Value = 100, Title = "t", Source = "t" });
-                for (int i = 0; i < 101; i++) AppHost.Add(u, new AiMessage { ConversationId = 1, Role = AiMessageRole.Assistant, Verified = false, Text = "x", CreatedAt = DateTimeOffset.Now });
+                for (int i = 0; i < 101; i++)
+                    AppHost.Add(u, new SafetySettingChange { Store = SafetyStore.Quality, Key = "k" + i, RequestedByUserId = 308, DecidedByUserId = 308, DecidedAt = DateTimeOffset.Now, Status = SafetyChangeStatus.Approved, NewValue = "1", OldValue = "0", Reason = "r" });
                 u.SaveChanges();
             });
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
-            Assert.AreEqual("truncated", host.Read(u => u.Set<AusRuleState>().Single(s => s.RuleCode == "AUD-AI-001").LastStatus));
-            Assert.AreEqual(100, host.Read(u => u.Set<AusFinding>().Count(f => f.RuleCode == "AUD-AI-001")));
-            await As(host, Qa1, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
-            AusFinding sys = host.Read(u => u.Set<AusFinding>().AsNoTracking().Single(f => f.RuleCode == "AUD-SYS-001" && f.ObjectKey.Contains("AUD-AI-001")));
-            Assert.AreEqual(AusSeverity.Major, sys.Severity);
+            await RunNow(host, Qa1);
+            Assert.AreEqual("continued", host.Read(u => u.Set<AusRuleState>().Single(s => s.RuleCode == "AUD-MC-002").LastStatus));
+            Assert.AreEqual(100, host.Read(u => u.Set<AusFinding>().Count(f => f.RuleCode == "AUD-MC-002" && f.ObjectType != "Systemic")), "no silent cut: the rest waits for the next run");
+            await RunNow(host, Qa1);
+            Assert.AreEqual(101, host.Read(u => u.Set<AusFinding>().Count(f => f.RuleCode == "AUD-MC-002" && f.ObjectType != "Systemic")), "the checkpoint continues where the run stopped");
+            Assert.AreEqual(0, host.Read(u => u.Set<AusFinding>().Count(f => f.RuleCode == "AUD-SYS-001")), "size alone is no failure of the audit");
         }
     }
 }

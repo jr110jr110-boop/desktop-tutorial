@@ -12403,7 +12403,7 @@ as "$ADMIN_TOKEN" PUT Boms "{\"id\":$MFBOM,\"assemblyId\":$MFASM,\"positionNumbe
 as "$MPM_TOKEN" GET "$MF/orders/$MFORDC"; check "pka2: an order of a project without a baseline says in Persian that its components came from the legacy BOM (read only fallback)" '.success and .data.componentSource == "LEGACY" and (.data.componentNote|contains("BOM قدیمی"))'
 
 # --- P9 (Package 9: the AI internal auditor, CEO decisions D11 and D12). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
-# The AUDIT seat checks 56 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
+# The AUDIT seat checks 57 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
 # Own user: p9.dual.ci holds QA and PMO (a person who tries to give both proposals). The owner of the process-audit finding is the existing QA user pka2.qa1.ci. The restore test of this server was never made (pbd above),
 # which is the exact known finding AUD-INT-002 of the first run. The background job of the seat is switched off in CI (Audit__Jobs); the runs here are on demand.
 TOKEN=$ADMIN_TOKEN
@@ -12420,10 +12420,21 @@ p9_action() { # p9_action TOKEN FINDINGID : root cause, correction and correctiv
   as "$1" POST audit/findings/action "{\"findingId\":$2,\"rootCause\":\"ریشه‌ی علت: رویه اجرا نشده بود\",\"correction\":\"اصلاح همان مورد انجام شد\",\"correctiveAction\":\"اقدام برای جلوگیری از تکرار تعریف شد\"}"
 }
 
+P9RUNID=0
+p9_run() { # p9_run TOKEN : the on-demand run is queued; the run row is polled (bounded, 150 x 2 s) until it ended; the final answer of GET audit/runs/ID stays in $B for the check that follows
+  as "$1" POST audit/runs '{}'; P9RUNID=$(jq -r '.data.id // 0' "$B"); [ "$P9RUNID" != "0" ] || return 0
+  local i
+  for i in $(seq 1 150); do
+    as "$1" GET audit/runs/$P9RUNID
+    case "$(jq -r '.data.statusValue // 0' "$B")" in 1|2|3) break ;; esac
+    sleep 2
+  done
+}
+
 # --- the catalogue (read only), who may read, and the auditor who only reads
-as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 56 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 56 and ([.data[]|select(.enabled)]|length) == 56 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
+as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 57 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 57 and ([.data[]|select(.enabled)]|length) == 57 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
 P9CLAUSES=$(jq '[.data[]|"\(.standard)|\(.clause)"]|unique|length' "$B")
-as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 56 of 56 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 56 and .data.rulesTotal == 56 and .data.lastRunAtText == null'
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 57 of 57 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 57 and .data.rulesTotal == 57 and .data.lastRunAtText == null'
 as "$WH_TOKEN" GET audit/rules; no "p9 role: the storekeeper does not read the catalogue"
 as "$WH_TOKEN" GET audit/findings; no "p9 role: the storekeeper does not read the findings"
 as "$WH_TOKEN" POST audit/runs '{}'; no "p9 role: the storekeeper does not start a run"
@@ -12442,23 +12453,39 @@ as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"submit\"}";
 as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"approve\"}"; no "p9 programme: ... but he cannot approve the programme he prepared, although he holds the QA role (maker-checker)"
 as "$AUD_TOKEN" GET audit/programs; check "p9 programme: the auditor reads exactly the two programmes" '.success and (.data|length) == 2'
 
+# --- the accepted deviation (CEO decision on EdmsRequireRevision): QA proposes, PMO agrees, the CEO accepts (three different people); until its expiry date the rule reports the deviation as accepted, without a finding
+P9ACCKEY="SafetySetting|0|ProjectControl|EdmsRequireRevision"
+as "$ADMIN_TOKEN" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 30)\"}"; no "p9 accept: only QA proposes an accepted deviation (the PMO manager does not)"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"کوتاه\",\"expiresOn\":\"$(dd 30)\"}"; nomsg "p9 accept: the reason must be written (at least 15 characters)" "دلیل پذیرش"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd -1)\"}"; nomsg "p9 accept: the expiry date must be after today" "پس از امروز"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 400)\"}"; nomsg "p9 accept: an acceptance holds one year at most" "یک سال"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 30)\"}"; check "p9 accept: the user with the QA role proposes the acceptance: waiting for PMO" '.success and .data.statusValue == 0 and .data.valid == false and .data.ruleCode == "AUD-INT-003"'
+P9ACC=$(val .data.id)
+as "$CEO_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"ceo\"}"; nomsg "p9 accept: the CEO step waits for the PMO step" "در نوبت نیست"
+as "$P9DUAL" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"pmo\"}"; nomsg "p9 accept: the proposer, although he holds the PMO role, does not agree to his own proposal" "دو نفر متفاوت"
+as "$ADMIN_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"pmo\"}"; check "p9 accept: the PMO manager agrees: waiting for the CEO" '.success and .data.statusValue == 1 and .data.valid == false'
+as "$CEO_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"ceo\"}"; check "p9 accept: the CEO, the third person, accepts: the deviation is accepted until the expiry date" '.success and .data.statusValue == 2 and .data.valid == true and .data.expiresOnText != null'
+as "$AUD_TOKEN" GET audit/acceptances; check "p9 accept: the auditor reads exactly this one acceptance" ".success and (.data|length) == 1 and .data[0].id == $P9ACC"
+
 # --- the first run: the known finding. The restore test of this server was never made, so the rule AUD-INT-002 reports it (major, due in 7 days); a project risk with a review date in the past is a second known finding (minor)
 as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -3)\"}"; check "p9 setup: a project risk with a review date three days in the past is saved" '.success and .data.id > 0 and (.data.number|startswith("RK"))'
 P9RK=$(val .data.id); P9RKN=$(val .data.number)
 safety_set Quality Audit.Rule.AUD-MR-002.Enabled 0; check "p9 switch: one rule is switched off (a security-relevant setting: the second PMO user approves)" '.success and .data.status == "Approved" and .data.newValue == "0"'
-as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 55 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 55'
-as "$AUD_TOKEN" POST audit/runs '{}'; check "p9 run 1: the auditor starts a run: 55 rules ran, none failed, the disabled rule is listed as disabled, AUD-INT-002 and AUD-RK-001 each found exactly one object and created one finding, nothing is a recurrence" '.success and .data.rulesRun == 55 and .data.rulesFailed == 0 and .data.statusValue == 1 and .data.recurrences == 0 and ([.data.rules[]|select(.code == "AUD-MR-002")][0].status == "disabled") and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 1) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 56 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 56'
+p9_run "$AUD_TOKEN"; check "p9 run 1: the auditor starts a run (queued, then polled to its end); the accepted deviation of AUD-INT-003 is counted as accepted: 56 rules ran, none failed, the disabled rule is listed as disabled, AUD-INT-002 and AUD-RK-001 each found exactly one object and created one finding, nothing is a recurrence" '.success and .data.rulesRun == 56 and .data.rulesFailed == 0 and .data.statusValue == 1 and .data.recurrences == 0 and ([.data.rules[]|select(.code == "AUD-MR-002")][0].status == "disabled") and ([.data.rules[]|select(.code == "AUD-INT-003")][0].accepted == 1) and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 1) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+P9RUN1=$P9RUNID
 safety_set Quality Audit.Rule.AUD-MR-002.Enabled 1; check "p9 switch: the rule is switched on again (two-person change)" '.success and .data.status == "Approved" and .data.newValue == "1"'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-INT-003&Limit=1000"; check "p9 accept: the accepted deviation EdmsRequireRevision is no finding (reported as accepted in the run and in the reports)" '.success and ([.data[]|select(.objectNumber == "EdmsRequireRevision")]|length) == 0'
 as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-INT-002&Limit=1000"; check "p9 finding: the restore-test finding is exact: major, open, due in 7 days, clause A.8.13, owner role PMO, a number AF-yyyy-nnnn" ".success and (.data|length) == 1 and (.data[0]|.severityValue == 3 and .statusValue == 1 and .clause == \"A.8.13\" and .standard == \"ISO/IEC 27001:2022\" and .ownerRole == \"PMO\" and .processCode == \"INTEGRITY\" and (.dueDate|startswith(\"$(dd 7)\")) and (.number|test(\"^AF-[0-9]{4}-[0-9]{4}\$\")) and .recurrenceCount == 0)"
 P9FI=$(val '.data[0].id')
 as "$AUD_TOKEN" GET audit/findings/$P9FI; P9EV=$(jq -j '.data.evidenceJson' "$B"); P9EVH=$(printf '%s' "$P9EV" | sha256sum | cut -d' ' -f1)
 check "p9 finding: the evidence snapshot is JSON of the rule, the clause and the object RestoreTestResult 0, and its SHA-256 is the hash of exactly that text" ".success and .data.ruleCode == \"AUD-INT-002\" and .data.objectType == \"RestoreTestResult\" and .data.objectId == 0 and (.data.evidenceJson|fromjson|.rule == \"AUD-INT-002\" and .clause == \"A.8.13\" and .object.type == \"RestoreTestResult\") and .data.evidenceSha256 == \"$P9EVH\""
 as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 finding: the risk with the lapsed review date is exactly one minor open finding, due in 30 days, owner role PMO" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\")][0]|.severityValue == 2 and .statusValue == 1 and .ruleCode == \"AUD-RK-001\" and .ownerRole == \"PMO\" and (.dueDate|startswith(\"$(dd 30)\")))"
 P9F1=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\")|.id" "$B")
-as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the CEO has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
-as "$QA_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the QA manager has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
-as "$PMO2_TOKEN" GET "office/inbox?SourceKey=aus:$P9FI"; check "p9 alert: the PMO manager has exactly one immediate alert of the major finding" '.success and (.data.data|length) == 1'
-as "$AUD_TOKEN" GET audit/runs; check "p9 runs: the history holds exactly this one run, started by hand" '.success and (.data|length) == 1 and .data[0].rulesRun == 55'
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the CEO has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the QA manager has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$PMO2_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the PMO manager has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$AUD_TOKEN" GET audit/runs; check "p9 runs: the history holds exactly this one run, started by hand" '.success and (.data|length) == 1 and .data[0].rulesRun == 56'
 as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=0"; check "p9 chain: the finding has exactly one Added entry in the audit chain and every entry names its user" '.success and ([.data.data[]|select(.action == "Added" and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
 
 # --- the closure chain on the rule finding (the risk): the owner role is PMO, so the PMO user who proposes the action is its actioner and can never close it
@@ -12484,10 +12511,10 @@ as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=
 
 # --- recurrence: the same object deviates again after its finding was closed; the new finding is linked and one level more severe (minor to major), due in 7 days, with an immediate alert
 as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -2)\"}"; check "p9 recurrence setup: the review date lapses again" '.success and .data.id > 0'
-as "$QA_TOKEN" POST audit/runs '{}'; check "p9 run 2: the QA manager starts a run: 56 rules ran, none failed, exactly one recurrence, the restore-test finding is seen again and not created twice" '.success and .data.rulesRun == 56 and .data.rulesFailed == 0 and .data.recurrences == 1 and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 0) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+p9_run "$QA_TOKEN"; check "p9 run 2: the QA manager starts a run: 57 rules ran, none failed, exactly one recurrence, the restore-test finding is seen again and not created twice" '.success and .data.rulesRun == 57 and .data.rulesFailed == 0 and .data.recurrences == 1 and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 0) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
 as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 recurrence: two findings for the risk: the closed one and a new open major one that points to it, with the recurrence count 1, due in 7 days" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 2 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 6)]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)][0]|.severityValue == 3 and .recurrenceOfId == $P9F1 and .recurrenceCount == 1 and (.dueDate|startswith(\"$(dd 7)\")))"
-P9F1R=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)|.id" "$B")
-as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus:$P9F1R"; check "p9 recurrence: the CEO has exactly one immediate alert of the recurrence (major)" '.success and (.data.data|length) == 1'
+P9F1R=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)|.id" "$B"); P9RUN2=$P9RUNID
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN2"; check "p9 recurrence: the CEO has exactly one consolidated immediate alert of the run that found the recurrence (major)" '.success and (.data.data|length) == 1'
 as "$AUD_TOKEN" GET audit/findings/$P9F1R; check "p9 recurrence: the detail lists the earlier finding as related and the evidence names the risk" ".success and (.data.related|map(.id)|index($P9F1)) != null and (.data.evidenceJson|contains(\"$P9RKN\"))"
 as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd 25)\"}"; check "p9 recurrence: the review date is corrected again (so that this finding too can be closed by the chain)" '.success and .data.id > 0'
 
@@ -12530,14 +12557,15 @@ p9_step "$CEO_TOKEN" "$P9FM" ceo true "رد آزمایشی مدیرعامل: ن�
 as "$AUD_TOKEN" GET audit/findings/$P9FM; check "p9 manual: the refusal and its reason are in the history of the finding" '.success and ([.data.events[]|select(.kind == "refused")]|length) == 1 and ([.data.events[]|select(.kind == "refused")][0].note|contains("مدیرعامل"))'
 
 # --- the weekly report: counts agree with the status, the score covers the clauses of the catalogue, the report is stored once and sealed
-as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 56'
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 57'
 P9OPEN=$(val .data.open); P9OVER=$(val .data.overdue)
 as "$WH_TOKEN" POST audit/reports '{"kind":2}'; no "p9 report: the storekeeper does not generate a report"
-as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: the weekly report goes to PMO and QA; its counts equal the status; one finding was closed and one recurred; every severity and status adds up; the score covers every clause of the catalogue; sealed with SHA-256" ".success and .data.kindValue == 2 and .data.recipients == \"PMO,QA\" and (.data.sha256|length) == 64 and .data.narrativeSource == \"template\" and (.data.narrative|length) > 20 and (.data.content|.open == $P9OPEN and .overdue == $P9OVER and .open == (.openMajor + .openMinor + .openObservation) and .newInPeriod == (.newMajor + .newMinor + .newObservation) and .closedInPeriod == 1 and .recurrences == 1 and ([.byStatus[].count]|add) == .open and ([.byProcess[].count]|add) == .open and .rulesTotal == 56 and .rulesEnabled == 56 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 56 and (.scores|map(.met + .["not"])|add) == 56)"
+as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: the weekly report goes to the CEO, PMO and QA and ends at the previous midnight (the closure and the recurrence of today are not in its period); its counts equal the status; every severity and status adds up; the score covers every clause of the catalogue; sealed with SHA-256" ".success and .data.kindValue == 2 and .data.recipients == \"CEO,PMO,QA\" and (.data.sha256|length) == 64 and .data.narrativeSource == \"template\" and (.data.narrative|length) > 20 and (.data.content|.open == $P9OPEN and .overdue == $P9OVER and .open == (.openMajor + .openMinor + .openObservation) and .newInPeriod == (.newMajor + .newMinor + .newObservation) and .closedInPeriod == 0 and .recurrences == 0 and ([.byStatus[].count]|add) == .open and ([.byProcess[].count]|add) == .open and .rulesTotal == 57 and .rulesEnabled == 57 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 57 and (.scores|map(.met + .["not"])|add) == 57)"
 P9REP=$(val .data.id); P9REPH=$(val .data.sha256)
 as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: asking again for the same week returns the stored report (same id and same hash): reports never change" ".success and .data.id == $P9REP and .data.sha256 == \"$P9REPH\""
 as "$PMO2_TOKEN" GET "audit/reports?kind=2"; check "p9 report: the PMO manager lists exactly one weekly report" ".success and (.data|length) == 1 and .data[0].id == $P9REP"
 as "$CEO_TOKEN" GET audit/reports/$P9REP; check "p9 report: the CEO reads it" ".success and .data.id == $P9REP"
+as "$QA_TOKEN" POST audit/reports '{"kind":1}'; check "p9 report: the daily digest goes to the CEO, PMO and QA too" '.success and .data.kindValue == 1 and .data.recipients == "CEO,PMO,QA" and (.data.sha256|length) == 64'
 as "$QA_TOKEN" POST audit/reports '{"kind":9}'; no "p9 report: an unknown kind is refused"
 
 # --- the audit chain holds the new records and still fits

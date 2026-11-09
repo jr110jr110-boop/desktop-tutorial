@@ -100,6 +100,20 @@ namespace DataLayer.Configurations.EF.NasbNiro.AuditSeat
                 b.Property(x => x.NarrativeSource).HasMaxLength(20);
                 b.Property(x => x.Sha256).HasMaxLength(80);
                 b.HasIndex(x => new { x.Kind, x.PeriodTo });
+                // one report per kind and period (a missed day is caught up once, a second call finds the first)
+                b.HasIndex(x => new { x.Kind, x.PeriodFrom }).IsUnique().HasFilter("[Deleted] = 0");
+            });
+
+            builder.Entity<AusAcceptance>(b =>
+            {
+                b.ToTable("AusAcceptances");
+                b.Property(x => x.RuleCode).HasMaxLength(30).IsRequired();
+                b.Property(x => x.ObjectKey).HasMaxLength(200).IsRequired();
+                b.Property(x => x.ObjectNumber).HasMaxLength(80);
+                b.Property(x => x.Reason).HasMaxLength(1000).IsRequired();
+                b.Property(x => x.RefusalReason).HasMaxLength(1000);
+                b.HasIndex(x => new { x.RuleCode, x.ObjectKey });
+                b.HasIndex(x => new { x.Status, x.ExpiresOn });
             });
 
             builder.Entity<AusAudit>(b =>

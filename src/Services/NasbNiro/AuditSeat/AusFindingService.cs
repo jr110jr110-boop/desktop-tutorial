@@ -21,7 +21,9 @@ namespace Services.NasbNiro.AuditSeat
     {
         public static void Event(IUnitOfWork uow, AusFinding f, DateTimeOffset at, string kind, int userId, AusFindingStatus from, AusFindingStatus to, string note)
         {
-            uow.Set<AusFindingEvent>().Add(new AusFindingEvent { FindingId = f.Id, At = at, Kind = kind, UserId = userId, FromStatus = from, ToStatus = to, Note = note, CreateDate = at, ModifyDate = at });
+            // the column holds 1000 characters: a longer text is cut with the «…» marker (the full text stays in the field of the finding it came from)
+            string text = note != null && note.Length > 1000 ? note.Substring(0, 999) + "…" : note;
+            uow.Set<AusFindingEvent>().Add(new AusFindingEvent { FindingId = f.Id, At = at, Kind = kind, UserId = userId, FromStatus = from, ToStatus = to, Note = text, CreateDate = at, ModifyDate = at });
         }
 
         public static void ClearClosure(AusFinding f)
@@ -238,6 +240,7 @@ namespace Services.NasbNiro.AuditSeat
             if (!owner) return Bad<AusFindingDto>("فقط مسئول یافته می‌تواند اقدام را پیشنهاد دهد.");
             if (f.Status != AusFindingStatus.Open) return Bad<AusFindingDto>("اقدام فقط برای یافته‌ی باز ثبت می‌شود؛ وضعیت فعلی: " + AusRules.StatusText(f.Status));
             string root = QualityText.Clean(dto.RootCause), corr = QualityText.Clean(dto.Correction), act = QualityText.Clean(dto.CorrectiveAction);
+            if (root != null && root.Length > 2000 || corr != null && corr.Length > 2000 || act != null && act.Length > 2000) return Bad<AusFindingDto>("هر یک از متن‌های ریشه‌ی علت، اصلاح و اقدام اصلاحی حداکثر ۲۰۰۰ نویسه است.");
             if (root == null || root.Length < MinText) return Bad<AusFindingDto>("ریشه‌ی علت را (دست‌کم ۱۰ نویسه) بنویسید.");
             if (corr == null || corr.Length < MinText) return Bad<AusFindingDto>("اصلاح انجام‌شده را (دست‌کم ۱۰ نویسه) بنویسید.");
             if (act == null || act.Length < MinText) return Bad<AusFindingDto>("اقدام اصلاحی برای جلوگیری از تکرار را (دست‌کم ۱۰ نویسه) بنویسید.");
@@ -273,6 +276,7 @@ namespace Services.NasbNiro.AuditSeat
             if (f.OwnerUserId == Me || Actioners(f, ev).Contains(Me)) return Bad<AusFindingDto>("مسئول یا پیشنهاددهنده‌ی اقدام نمی‌تواند خودش آن را راستی‌آزمایی کند.");
             string note = QualityText.Clean(dto.Note);
             if (note == null || note.Length < MinText) return Bad<AusFindingDto>("نتیجه‌ی راستی‌آزمایی را (دست‌کم ۱۰ نویسه) بنویسید.");
+            if (note.Length > 1000) return Bad<AusFindingDto>("نتیجه‌ی راستی‌آزمایی حداکثر ۱۰۰۰ نویسه است.");
             AusFindingFlow.ApplyRecheck(f, dto.Passed, DateTimeOffset.Now, 0, Me, note, _uow);
             if (!await Save(ct)) return Bad<AusFindingDto>(QualityText.Concurrency);
             return ResponseDtoHelper.Ok(await DetailAsync(f, ct));
@@ -296,6 +300,7 @@ namespace Services.NasbNiro.AuditSeat
             if (refusal == null && Actioners(f, ev).Contains(Me)) refusal = "کسی که اقدام اصلاحی را پیشنهاد داده است نمی‌تواند آن را ببندد یا ابطال کند.";
             if (refusal != null) return Bad<AusFindingDto>(refusal);
             string note = QualityText.Clean(dto.Note);
+            if (note != null && note.Length > 1000) return Bad<AusFindingDto>("توضیح هر مرحله حداکثر ۱۰۰۰ نویسه است.");
             DateTimeOffset now = DateTimeOffset.Now;
             AusFindingStatus from = f.Status;
 
@@ -337,6 +342,10 @@ namespace Services.NasbNiro.AuditSeat
             {
                 if (note == null || note.Length < MinText) return Bad<AusFindingDto>("دلیل رد ابطال را (دست‌کم ۱۰ نویسه) بنویسید.");
                 if (f.VoidQaUserId == null) return Bad<AusFindingDto>("درخواست ابطالی در جریان نیست.");
+                // only the person whose turn it is refuses; QA may only withdraw the request that QA made itself
+                if (step == "void-qa" && f.VoidQaUserId != Me) return Bad<AusFindingDto>("درخواست ابطال را فقط خود درخواست‌کننده پس می‌گیرد؛ نفر بعدی (PMO یا مدیرعامل) آن را رد می‌کند.");
+                if (step == "void-pmo" && f.VoidPmoUserId != null) return Bad<AusFindingDto>("PMO پیش‌تر ابطال را تایید کرده است؛ رد آن با مدیرعامل است.");
+                if (step == "void-ceo" && f.VoidPmoUserId == null) return Bad<AusFindingDto>("ابتدا QA و PMO باید ابطال را تایید کنند.");
                 f.VoidReason = null; f.VoidQaUserId = null; f.VoidPmoUserId = null; f.ModifyDate = now;
                 AusFindingFlow.Event(_uow, f, now, "void-refused", Me, f.Status, f.Status, step + " رد کرد: " + note);
             }
@@ -399,6 +408,7 @@ namespace Services.NasbNiro.AuditSeat
             string title = QualityText.Clean(dto.Title), desc = QualityText.Clean(dto.Description);
             if (title == null || title.Length < 5) return Bad<AusFindingDto>("عنوان یافته را بنویسید.");
             if (desc == null || desc.Length < MinText) return Bad<AusFindingDto>("شرح یافته را (دست‌کم ۱۰ نویسه) بنویسید.");
+            if (title.Length > 300 || desc.Length > 2000 || (dto.Standard ?? "").Length > 60 || (dto.Clause ?? "").Length > 60 || (dto.ObjectNumber ?? "").Length > 80) return Bad<AusFindingDto>("طول متن‌ها از حد مجاز بیشتر است: عنوان ۳۰۰، شرح ۲۰۰۰، استاندارد و بند ۶۰، شماره‌ی شیء ۸۰ نویسه.");
             if (dto.Severity < 1 || dto.Severity > 3) return Bad<AusFindingDto>("شدت یافته نامعتبر است.");
             int? owner = dto.OwnerUserId ?? audit.AuditeeUserId;
             if (owner == Me) return Bad<AusFindingDto>("ممیز و مسئول یافته نمی‌توانند یک نفر باشند.");
@@ -412,9 +422,9 @@ namespace Services.NasbNiro.AuditSeat
             DateTimeOffset now = DateTimeOffset.Now;
             var sev = (AusSeverity)dto.Severity;
             int year = AusRules.PersianYear(now.LocalDateTime);
-            await AusRunService.Gate.WaitAsync(ct);
-            AusFinding f;
-            try
+            AusFinding f = null;
+            // the number is allocated from the highest sequence of the year; the unique index of (year, sequence) guards a collision with a running audit, and the allocation is repeated
+            for (int attempt = 0; attempt < 3 && f == null; attempt++)
             {
                 int seq = await _uow.Set<AusFinding>().Where(x => x.Year == year).Select(x => (int?)x.Sequence).MaxAsync(ct) ?? 0;
                 seq++;
@@ -429,12 +439,17 @@ namespace Services.NasbNiro.AuditSeat
                     OwnerUnit = audit.AuditeeUnit ?? AusProcesses.Find(audit.ProcessCode)?.OwnerUnit, DueDate = AusRules.DueDate(now.LocalDateTime, sev, st), DetectedAt = now, LastSeenAt = now, SeenCount = 1, Status = AusFindingStatus.Open, AuditId = audit.Id, CreateDate = now, ModifyDate = now,
                 };
                 _uow.Set<AusFinding>().Add(f);
-                await _uow.SaveChangesAsync(ct);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) when (attempt < 2)
+                {
+                    _uow.Entry(f).State = EntityState.Detached; f = null;
+                    continue;
+                }
                 AusFindingFlow.Event(_uow, f, now, "manual", Me, AusFindingStatus.Open, AusFindingStatus.Open, title);
                 if (check != null) { check.Result = AusCheckResult.NonConform; check.FindingId = f.Id; check.CheckedAt = now; check.CheckedByUserId = Me; check.ModifyDate = now; }
                 await _uow.SaveChangesAsync(ct);
             }
-            finally { AusRunService.Gate.Release(); }
+            if (f == null) return Bad<AusFindingDto>("ثبت یافته با شماره‌ی تکراری روبه‌رو شد؛ دوباره تلاش کنید.");
             if (_notify != null && sev == AusSeverity.Major)
             {
                 var req = new NotifyRequest { SourceKey = "aus:" + f.Id, Module = "AUDIT", SourceType = "AusFinding", SourceId = f.Id, Kind = Entities.Model.NasbNiro.Office.OfInboxKind.Alert, Priority = Entities.Model.NasbNiro.Office.OfUrgency.Immediate, DueDate = f.DueDate, Title = $"یافته‌ی عمده‌ی ممیزی {f.Number}: {f.Title}", Link = "/audit/findings/" + f.Id, Roles = AusRoles.Qa + "," + AusRoles.Pmo + "," + AusRoles.Ceo };
@@ -472,7 +487,7 @@ namespace Services.NasbNiro.AuditSeat
             {
                 Enabled = master, Open = open.Count, OpenMajor = open.Count(f => f.Severity == AusSeverity.Major), OpenMinor = open.Count(f => f.Severity == AusSeverity.Minor), OpenObservation = open.Count(f => f.Severity == AusSeverity.Observation),
                 Overdue = open.Count(f => f.DueDate < today), WaitingQa = open.Count(f => f.Status == AusFindingStatus.Rechecked), WaitingPmo = open.Count(f => f.Status == AusFindingStatus.QaProposed), WaitingCeo = open.Count(f => f.Status == AusFindingStatus.PmoProposed),
-                MyTurn = my, LastRunAtText = last == null ? null : AusRunService.Stamp(last.StartedAt), LastRunStatus = last == null ? null : last.Status.ToString(), RulesEnabled = master ? enabled : 0, RulesTotal = AusCatalog.All.Count,
+                MyTurn = my, LastRunAtText = last == null ? null : AusRunService.Stamp(last.StartedAt), LastRunStatus = last == null ? null : last.Status == AusRunStatus.Ok ? "موفق" : last.Status == AusRunStatus.Partial ? "ناقص" : last.Status == AusRunStatus.Failed ? "ناموفق" : "در حال اجرا", RulesEnabled = master ? enabled : 0, RulesTotal = AusCatalog.All.Count,
             };
         }
     }

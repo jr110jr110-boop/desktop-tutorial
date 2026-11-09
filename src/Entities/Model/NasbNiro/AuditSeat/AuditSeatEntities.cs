@@ -175,6 +175,12 @@ namespace Entities.Model.NasbNiro.AuditSeat
 
         public string LastError { get; set; }
         public int TotalRuns { get; set; }
+
+        /// <summary>Fix round 1 (H2): the checkpoint of a pass that the time budget or the hit ceiling cut: the next run resumes after this row id (0 = no pass is pending).</summary>
+        public int CursorId { get; set; }
+
+        /// <summary>The time window (Since) of the pass the checkpoint belongs to, so that the continued pass sees the same rows.</summary>
+        public DateTimeOffset? CursorSince { get; set; }
     }
 
     /// <summary>One run of the catalogue (the nightly run of the seat or a run on demand).</summary>
@@ -285,6 +291,9 @@ namespace Entities.Model.NasbNiro.AuditSeat
         /// <summary>The process audit that entered a manual finding.</summary>
         public int? AuditId { get; set; }
 
+        /// <summary>Fix round 1 (M6): the moment the overdue finding was escalated to QA, PMO and the CEO (once; the finding itself stays the same row).</summary>
+        public DateTimeOffset? EscalatedAt { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -365,5 +374,46 @@ namespace Entities.Model.NasbNiro.AuditSeat
         public int? FindingId { get; set; }
         public DateTimeOffset? CheckedAt { get; set; }
         public int? CheckedByUserId { get; set; }
+    }
+
+    public enum AusAcceptanceStatus
+    {
+        /// <summary>Proposed by a QA manager (step 1 of 3).</summary>
+        Proposed = 0,
+
+        /// <summary>Agreed by the PMO manager (step 2 of 3).</summary>
+        PmoAgreed = 1,
+
+        /// <summary>Approved by the CEO (step 3 of 3): the deviation is accepted until the expiry date.</summary>
+        Active = 2,
+
+        Rejected = 3,
+    }
+
+    /// <summary>
+    /// Fix round 1 (EdmsRequireRevision decision): a time-boxed accepted deviation of one rule and object («انحراف پذیرفته‌شده موقت»). Three distinct persons (QA, PMO, CEO) with a reason and an expiry date.
+    /// While it is active the rule reports the deviation as accepted (visible in the reports; no finding, no alert); on the expiry date it becomes a finding again. Never deleted.
+    /// </summary>
+    public class AusAcceptance : BaseEntity
+    {
+        public string RuleCode { get; set; }
+        public string ObjectKey { get; set; }
+        public string ObjectNumber { get; set; }
+        public string Reason { get; set; }
+
+        /// <summary>The last day the acceptance holds (at most one year after the proposal).</summary>
+        public DateTime ExpiresOn { get; set; }
+
+        public AusAcceptanceStatus Status { get; set; }
+        public int QaUserId { get; set; }
+        public DateTimeOffset QaAt { get; set; }
+        public int? PmoUserId { get; set; }
+        public DateTimeOffset? PmoAt { get; set; }
+        public int? CeoUserId { get; set; }
+        public DateTimeOffset? CeoAt { get; set; }
+        public string RefusalReason { get; set; }
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
     }
 }

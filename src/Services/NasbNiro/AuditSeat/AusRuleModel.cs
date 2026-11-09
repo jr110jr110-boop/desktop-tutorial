@@ -38,6 +38,20 @@ namespace Services.NasbNiro.AuditSeat
         /// <summary>A rule may raise the default severity of one object (an expired welder on a pressure part).</summary>
         public AusSeverity? Severity { get; set; }
 
+        /// <summary>
+        /// Fix round 1 (H4): the day the deviating event happened (event rules only). An event before the audit horizon goes into the one backlog finding of its rule instead of a finding of its own.
+        /// A hit without a date is always individual.
+        /// </summary>
+        public DateTime? EventDate { get; set; }
+
+        /// <summary>True for a hit that belongs to the backlog whatever its date (for example a lot that has only the legacy certificate number, from before the certificate register of Package C).</summary>
+        public bool InBacklog { get; set; }
+
+        public AusHit Backlog(bool value = true) { InBacklog = value; return this; }
+
+        public AusHit On(DateTime? d) { EventDate = d; return this; }
+        public AusHit On(DateTimeOffset? d) { EventDate = d?.LocalDateTime; return this; }
+
         public SortedDictionary<string, string> Facts { get; } = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
         public AusHit Fact(string key, object value)
@@ -58,6 +72,16 @@ namespace Services.NasbNiro.AuditSeat
         public string Key => AusRules.ObjectKey(ObjectType, ObjectId, Sub);
     }
 
+    /// <summary>Fix round 1 (H1): how the automatic re-check of a finding of the rule works.</summary>
+    public enum AusRecheckMode
+    {
+        /// <summary>A current state (an overdue date, an open item): the object is evaluated again and must no longer deviate.</summary>
+        State = 0,
+
+        /// <summary>A past, immutable event: the re-check passes when the owner's corrective action is recorded and no new occurrence of the rule happened for the same object or owner since the action.</summary>
+        Event = 1,
+    }
+
     /// <summary>What a rule sees while it runs.</summary>
     public sealed class AusContext
     {
@@ -73,25 +97,108 @@ namespace Services.NasbNiro.AuditSeat
         /// <summary>A re-check of one finding: the rule may restrict its query to this record.</summary>
         public int? FocusId { get; set; }
 
+        /// <summary>The ceiling of HITS per pass (not of candidate rows): predicates are in SQL, so the rows read are the deviations.</summary>
         public int Max { get; set; } = 2000;
 
-        /// <summary>Set by <see cref="BoundedAsync{T}"/> when a query had more rows than the ceiling.</summary>
-        public bool Truncated { get; set; }
+        /// <summary>Fix round 1 (H2): the pass resumes after this row id (the checkpoint of an earlier pass that was cut); 0 = from the start.</summary>
+        public int Cursor { get; set; }
+
+        /// <summary>Set when the pass stopped before the end (hit ceiling or time budget): the run stores <see cref="NextCursor"/> and the next run continues there. Nothing is dropped silently.</summary>
+        public bool Continued { get; set; }
+
+        public int NextCursor { get; set; }
+
+        /// <summary>The soft end of the time budget: paged scans stop here and leave a checkpoint (the hard limit cancels the token).</summary>
+        public DateTimeOffset? Deadline { get; set; }
+
+        /// <summary>Kept for the callers that only ask whether the pass was incomplete.</summary>
+        public bool Truncated => Continued;
 
         public CancellationToken Ct { get; set; }
 
         public decimal S(string key) => Settings != null && Settings.TryGetValue(key, out decimal v) ? v : AusSettingKeys.DefaultOf(key);
         public int Days(string key) => (int)S(key);
 
-        /// <summary>The query's rows up to the ceiling; one more than the ceiling marks the pass as truncated (a finding about the run is raised, nothing is silently dropped).</summary>
+        /// <summary>Zero tolerance (D12): a threshold of 0 means no tolerance beyond the shortest cycle of the process itself (<paramref name="cycle"/>); the PMIS proposal is shown on the setting for the CEO to confirm.</summary>
+        public decimal Tol(string key, decimal cycle) { decimal v = S(key); return v > 0 ? v : cycle; }
+
+        private static System.Linq.Expressions.Expression<Func<T, bool>> IdWhere<T>(bool equal, int value)
+        {
+            var p = System.Linq.Expressions.Expression.Parameter(typeof(T), "x");
+            var id = System.Linq.Expressions.Expression.Property(p, "Id");
+            var c = System.Linq.Expressions.Expression.Constant(value);
+            return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(equal ? System.Linq.Expressions.Expression.Equal(id, c) : System.Linq.Expressions.Expression.GreaterThan(id, c), p);
+        }
+
+        private static System.Linq.Expressions.Expression<Func<T, int>> IdKey<T>()
+        {
+            var p = System.Linq.Expressions.Expression.Parameter(typeof(T), "x");
+            return System.Linq.Expressions.Expression.Lambda<Func<T, int>>(System.Linq.Expressions.Expression.Property(p, "Id"), p);
+        }
+
+        /// <summary>Re-check focus and checkpoint, pushed into SQL on the entity the hit refers to (so a cap never hides the object and a continued pass resumes where it stopped). The entity has an int Id.</summary>
+        public IQueryable<T> Scope<T>(IQueryable<T> q) where T : class
+        {
+            if (FocusId.HasValue) return q.Where(IdWhere<T>(true, FocusId.Value));
+            return Cursor > 0 ? q.Where(IdWhere<T>(false, Cursor)) : q;
+        }
+
+        /// <summary>The same with the key named by an expression (an entity whose key is not called Id).</summary>
+        public IQueryable<T> ScopeBy<T>(IQueryable<T> q, System.Linq.Expressions.Expression<Func<T, int>> id)
+        {
+            if (!FocusId.HasValue && Cursor <= 0) return q;
+            var body = FocusId.HasValue ? System.Linq.Expressions.Expression.Equal(id.Body, System.Linq.Expressions.Expression.Constant(FocusId.Value))
+                                        : System.Linq.Expressions.Expression.GreaterThan(id.Body, System.Linq.Expressions.Expression.Constant(Cursor));
+            return q.Where(System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, id.Parameters));
+        }
+
+        public IQueryable<T> Focus<T>(IQueryable<T> q) where T : class => FocusId.HasValue ? q.Where(IdWhere<T>(true, FocusId.Value)) : q;
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, System.Reflection.PropertyInfo> IdProps = new System.Collections.Concurrent.ConcurrentDictionary<Type, System.Reflection.PropertyInfo>();
+
+        private static int? IdOf<T>(T row)
+        {
+            System.Reflection.PropertyInfo p = IdProps.GetOrAdd(typeof(T), t => t.GetProperty("Id"));
+            return p?.GetValue(row) is int i ? i : (int?)null;
+        }
+
+        /// <summary>
+        /// The rows of a query whose predicate is in SQL (so they are the deviations), up to the hit ceiling. More than the ceiling does not raise a finding about the run: the pass is marked continued and the next run
+        /// resumes after the last row kept (the query must be ordered by Id and start from <see cref="Scope{T}"/>).
+        /// </summary>
         public async Task<List<T>> BoundedAsync<T>(IQueryable<T> query)
         {
             List<T> rows = await query.Take(Max + 1).ToListAsync(Ct);
-            if (rows.Count > Max) { Truncated = true; rows.RemoveAt(rows.Count - 1); }
+            if (rows.Count > Max)
+            {
+                rows.RemoveAt(rows.Count - 1);
+                int? last = IdOf(rows[rows.Count - 1]);
+                if (last.HasValue) { Continued = true; NextCursor = last.Value; }
+                else Continued = true;
+            }
             return rows;
         }
 
-        public IQueryable<T> Focus<T>(IQueryable<T> q) where T : BaseEntity => FocusId.HasValue ? q.Where(x => x.Id == FocusId.Value) : q;
+        /// <summary>
+        /// A set-based paged scan for rules that must judge each row in memory (gate helpers, hashes): keyset pages by Id of the base table, each page judged, stopping at the hit ceiling or the soft deadline with a checkpoint.
+        /// <paramref name="baseQuery"/> is the unpaged candidate query (predicates in SQL where possible).
+        /// </summary>
+        public async Task<List<AusHit>> ScanAsync<T>(IQueryable<T> baseQuery, Func<List<T>, Task<List<AusHit>>> judge, int page = 300, bool useFocus = true) where T : class
+        {
+            var hits = new List<AusHit>();
+            int last = FocusId.HasValue ? 0 : Cursor;
+            while (true)
+            {
+                IQueryable<T> q = baseQuery;
+                if (useFocus && FocusId.HasValue) q = q.Where(IdWhere<T>(true, FocusId.Value));
+                List<T> rows = await q.Where(IdWhere<T>(false, last)).OrderBy(IdKey<T>()).Take(page).ToListAsync(Ct);
+                if (rows.Count == 0) return hits;
+                hits.AddRange(await judge(rows));
+                last = IdOf(rows[rows.Count - 1]) ?? int.MaxValue;
+                if (rows.Count < page || (useFocus && FocusId.HasValue)) return hits;
+                if (hits.Count >= Max || (Deadline.HasValue && DateTimeOffset.Now >= Deadline.Value)) { Continued = true; NextCursor = last; return hits; }
+            }
+        }
     }
 
     /// <summary>One rule of the catalogue.</summary>
@@ -118,6 +225,9 @@ namespace Services.NasbNiro.AuditSeat
         public string OwnerRole { get; set; }
 
         public Func<AusContext, Task<List<AusHit>>> Query { get; set; }
+
+        /// <summary>Fix round 1 (H1): State (default) or Event.</summary>
+        public AusRecheckMode Mode { get; set; }
 
         public string ResolveOwnerRole() => OwnerRole ?? AusProcesses.Find(ProcessCode)?.OwnerRole;
         public string ResolveOwnerUnit() => AusProcesses.Find(ProcessCode)?.OwnerUnit;
@@ -171,11 +281,26 @@ namespace Services.NasbNiro.AuditSeat
 
         public static AusRuleDef Find(string code) => All.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase));
 
-        internal static AusRuleDef Def(string code, string process, AusSeverity severity, string title, string standard, string clause, string procedure, string summary, bool incremental, Func<AusContext, Task<List<AusHit>>> query, string ownerRole = null) =>
-            new AusRuleDef { Code = code, ProcessCode = process, Severity = severity, Title = title, Standard = standard, Clause = clause, Procedure = procedure, QuerySummary = summary, Incremental = incremental, Query = query, OwnerRole = ownerRole };
+        /// <summary>The rules about a past, immutable event (the record cannot change afterwards): their re-check is the Event mode.</summary>
+        private static readonly HashSet<string> EventRules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AUD-MC-001", "AUD-MC-002", "AUD-MC-003", "AUD-MC-004", "AUD-MC-005", "AUD-MC-006", "AUD-EX-005", "AUD-DC-001", "AUD-DC-002", "AUD-BL-001", "AUD-QL-001", "AUD-QL-002", "AUD-QL-003", "AUD-QL-004",
+            "AUD-CAL-002", "AUD-NC-003", "AUD-SP-001", "AUD-AI-001", "AUD-INT-004", "AUD-DS-003", "AUD-EC-003", "AUD-LB-001",
+        };
 
-        internal static AusHit Hit(string type, int id, string number, string text, string sub = null, int? owner = null, string link = null) =>
-            new AusHit { ObjectType = type, ObjectId = id, Number = number, Text = text, Sub = sub, OwnerUserId = owner.HasValue && owner.Value > 0 ? owner : null, Link = link };
+        internal static AusRuleDef Def(string code, string process, AusSeverity severity, string title, string standard, string clause, string procedure, string summary, bool incremental, Func<AusContext, Task<List<AusHit>>> query, string ownerRole = null) =>
+            new AusRuleDef { Code = code, ProcessCode = process, Severity = severity, Title = title, Standard = standard, Clause = clause, Procedure = procedure, QuerySummary = summary, Incremental = incremental, Query = query, OwnerRole = ownerRole, Mode = EventRules.Contains(code) ? AusRecheckMode.Event : AusRecheckMode.State };
+
+        /// <summary>Fix round 1 (H6): every text is cut to the size of its column; a cut text ends with the «…» marker and its full text goes into the facts (so into the evidence JSON).</summary>
+        internal static string Cut(string s, int n) => s == null || s.Length <= n ? s : s.Substring(0, Math.Max(0, n - 1)) + "…";
+
+        internal static AusHit Hit(string type, int id, string number, string text, string sub = null, int? owner = null, string link = null)
+        {
+            var h = new AusHit { ObjectType = Cut(type, 60), ObjectId = id, Number = Cut(number, 80), Text = Cut(text, 1990), Sub = sub, OwnerUserId = owner.HasValue && owner.Value > 0 ? owner : null, Link = Cut(link, 200) };
+            if (number != null && number.Length > 80) h.Facts["fullNumber"] = number;
+            if (text != null && text.Length > 1990) h.Facts["fullText"] = text;
+            return h;
+        }
 
         internal static string P(DateTime? d) => d.HasValue ? InventoryText.PersianDate(d.Value) : "-";
         internal static string P(DateTimeOffset? d) => d.HasValue ? InventoryText.PersianDate(d.Value.LocalDateTime) : "-";

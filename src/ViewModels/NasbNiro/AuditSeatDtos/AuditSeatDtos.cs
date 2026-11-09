@@ -18,6 +18,7 @@ namespace ViewModels.NasbNiro.AuditSeatDtos
         public string Severity { get; set; }
         public int SeverityValue { get; set; }
         public bool Incremental { get; set; }
+        public string Mode { get; set; }
         public bool Enabled { get; set; }
         public string SettingKey { get; set; }
         public string OwnerRole { get; set; }
@@ -55,6 +56,9 @@ namespace ViewModels.NasbNiro.AuditSeatDtos
         public int Hits { get; set; }
         public int New { get; set; }
         public int Ms { get; set; }
+        public int Accepted { get; set; }
+        public int Backlog { get; set; }
+        public int Suppressed { get; set; }
     }
 
     public class AusFindingListDto
@@ -379,6 +383,46 @@ namespace ViewModels.NasbNiro.AuditSeatDtos
         public List<AusCountDto> TopRules { get; set; } = new List<AusCountDto>();
         public List<AusScoreDto> Scores { get; set; } = new List<AusScoreDto>();
         public List<AusFindingListDto> MajorOpen { get; set; } = new List<AusFindingListDto>();
+        public int AcceptedActive { get; set; }
+        public List<AusAcceptanceDto> Accepted { get; set; } = new List<AusAcceptanceDto>();
+        public int BacklogOpen { get; set; }
+        public int SystemicOpen { get; set; }
+    }
+
+    public class AusAcceptanceProposeDto
+    {
+        public string RuleCode { get; set; }
+        public string ObjectKey { get; set; }
+        public string ObjectNumber { get; set; }
+        public string Reason { get; set; }
+        public DateTime ExpiresOn { get; set; }
+    }
+
+    public class AusAcceptanceStepDto
+    {
+        public int AcceptanceId { get; set; }
+        public string Step { get; set; }
+        public bool Refuse { get; set; }
+        public string Note { get; set; }
+    }
+
+    public class AusAcceptanceDto
+    {
+        public int Id { get; set; }
+        public string RuleCode { get; set; }
+        public string RuleTitle { get; set; }
+        public string ObjectKey { get; set; }
+        public string ObjectNumber { get; set; }
+        public string Reason { get; set; }
+        public DateTime ExpiresOn { get; set; }
+        public string ExpiresOnText { get; set; }
+        public string Status { get; set; }
+        public int StatusValue { get; set; }
+        public bool Valid { get; set; }
+        public int QaUserId { get; set; }
+        public int? PmoUserId { get; set; }
+        public int? CeoUserId { get; set; }
+        public string RefusalReason { get; set; }
     }
 
     public class AusReportGenerateDto

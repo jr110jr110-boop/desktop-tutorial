@@ -53,20 +53,21 @@ namespace Services.NasbNiro.AuditSeat
 
         // ---------- periods
 
+        /// <summary>The period of the report generated on the day: it always ends at the previous midnight (the last full day), never on a partial day.</summary>
         public static (DateTime From, DateTime To) Period(AusReportKind kind, DateTime day)
         {
-            day = day.Date;
-            if (kind == AusReportKind.Daily) return (day, day);
-            if (kind == AusReportKind.Weekly) return (day.AddDays(-6), day);
+            DateTime last = day.Date.AddDays(-1);
+            if (kind == AusReportKind.Daily) return (last, last);
+            if (kind == AusReportKind.Weekly) return (last.AddDays(-6), last);
             var pc = new PersianCalendar();
-            DateTime thisMonth = day.AddDays(1 - pc.GetDayOfMonth(day));
+            DateTime thisMonth = day.Date.AddDays(1 - pc.GetDayOfMonth(day.Date));
             DateTime to = thisMonth.AddDays(-1);
             DateTime from = to.AddDays(1 - pc.GetDayOfMonth(to));
             return (from, to);
         }
 
         private static string KindTitle(AusReportKind k) => k == AusReportKind.Daily ? "خلاصه‌ی روزانه‌ی ممیزی" : k == AusReportKind.Weekly ? "گزارش هفتگی ممیزی" : "گزارش ماهانه‌ی ممیزی";
-        private static string Recipients(AusReportKind k) => k == AusReportKind.Daily ? "CEO,PMO,QA" : k == AusReportKind.Weekly ? "PMO,QA" : "CEO";
+        private static string Recipients(AusReportKind k) => "CEO,PMO,QA";
 
         // ---------- content
 
@@ -79,7 +80,7 @@ namespace Services.NasbNiro.AuditSeat
             DateTimeOffset pf0 = new DateTimeOffset(pFrom, TimeZoneInfo.Local.GetUtcOffset(pFrom));
 
             var all = await _uow.Set<AusFinding>().AsNoTracking().Where(f => !f.Deleted && (f.Status != AusFindingStatus.Closed && f.Status != AusFindingStatus.Voided || f.DetectedAt >= pf0 || (f.ClosedAt != null && f.ClosedAt >= pf0)))
-                .Select(f => new { f.Id, f.Number, f.Title, f.RuleCode, f.ProcessCode, f.Severity, f.Status, f.DueDate, f.DetectedAt, f.ClosedAt, f.RecurrenceOfId, f.OwnerUserId, f.OwnerRole, f.Standard, f.Clause, f.ObjectNumber, f.Source, f.RecurrenceCount }).ToListAsync(ct);
+                .Select(f => new { f.Id, f.Number, f.Title, f.RuleCode, f.ProcessCode, f.Severity, f.Status, f.DueDate, f.DetectedAt, f.ClosedAt, f.RecurrenceOfId, f.OwnerUserId, f.OwnerRole, f.Standard, f.Clause, f.ObjectNumber, f.ObjectType, f.RecurrenceCount }).ToListAsync(ct);
             var open = all.Where(f => !AusRules.IsTerminal(f.Status)).ToList();
             var created = all.Where(f => f.DetectedAt >= f0 && f.DetectedAt < t1).ToList();
             var closed = all.Where(f => f.Status == AusFindingStatus.Closed && f.ClosedAt != null && f.ClosedAt >= f0 && f.ClosedAt < t1).ToList();
@@ -111,6 +112,13 @@ namespace Services.NasbNiro.AuditSeat
                 Status = AusRules.StatusText(f.Status), StatusValue = (int)f.Status, ObjectNumber = f.ObjectNumber, OwnerUserId = f.OwnerUserId, OwnerName = AusNames.Of(names, f.OwnerUserId), OwnerRole = f.OwnerRole, DueDate = f.DueDate, DueDateText = AusEvidence.Day(f.DueDate),
                 Overdue = f.DueDate < todayDay, AgeDays = Math.Max(0, (int)(todayDay - f.DetectedAt.LocalDateTime.Date).TotalDays), DetectedAtText = AusRunService.Stamp(f.DetectedAt), RecurrenceCount = f.RecurrenceCount, RecurrenceOfId = f.RecurrenceOfId,
             }).ToList();
+
+            DateTime todayOnly = today;
+            var acc = await _uow.Set<AusAcceptance>().AsNoTracking().Where(a => !a.Deleted && a.Status == AusAcceptanceStatus.Active && a.ExpiresOn >= todayOnly).OrderBy(a => a.ExpiresOn).ThenBy(a => a.Id).Take(100).ToListAsync(ct);
+            c.AcceptedActive = acc.Count;
+            c.Accepted = acc.Select(AusAcceptanceService.ToDto).ToList();
+            c.BacklogOpen = open.Count(f => f.ObjectType == "Backlog");
+            c.SystemicOpen = open.Count(f => f.ObjectType == "Systemic");
 
             // the compliance score per standard clause: a rule is met when it is enabled, ran without a problem and has no open finding
             Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(_uow, ct);
@@ -172,7 +180,7 @@ namespace Services.NasbNiro.AuditSeat
         private async Task<int> GenerateCoreAsync(AusReportKind kind, DateTime day, int by, bool allowModel, CancellationToken ct)
         {
             var (from, to) = Period(kind, day);
-            AusReport existing = await _uow.Set<AusReport>().AsNoTracking().Where(r => !r.Deleted && r.Kind == kind && r.PeriodFrom == from && r.PeriodTo == to).OrderBy(r => r.Id).FirstOrDefaultAsync(ct);
+            AusReport existing = await _uow.Set<AusReport>().AsNoTracking().Where(r => !r.Deleted && r.Kind == kind && r.PeriodFrom == from).OrderBy(r => r.Id).FirstOrDefaultAsync(ct);
             if (existing != null) return existing.Id;
             AusReportContentDto content = await BuildContentAsync(from, to, ct);
             var (text, source) = await NarrativeAsync(kind, content, allowModel, ct);
@@ -185,7 +193,15 @@ namespace Services.NasbNiro.AuditSeat
                 Sha256 = AusEvidence.Sha256Hex(title + "|" + from.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "|" + to.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "|" + json + "|" + text), GeneratedAt = now, GeneratedByUserId = by, CreateDate = now, ModifyDate = now,
             };
             _uow.Set<AusReport>().Add(r);
-            await _uow.SaveChangesAsync(ct);
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateException)
+            {
+                // the unique (kind, period start) index: another run made the same report first
+                _uow.Entry(r).State = EntityState.Detached;
+                AusReport again = await _uow.Set<AusReport>().AsNoTracking().Where(x => !x.Deleted && x.Kind == kind && x.PeriodFrom == from).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+                if (again != null) return again.Id;
+                throw;
+            }
             if (_notify != null)
                 await _notify.NotifyAsync(new NotifyRequest { SourceKey = "aus-report:" + r.Id, Module = "AUDIT", SourceType = "AusReport", SourceId = r.Id, Kind = OfInboxKind.Alert, Title = title, Link = "/audit/reports/" + r.Id, Roles = r.Recipients }, ct);
             return r.Id;
@@ -196,10 +212,18 @@ namespace Services.NasbNiro.AuditSeat
             today = today.Date;
             Dictionary<string, decimal> st = await QualitySettingKeys.LoadAsync(_uow, ct);
             var made = new List<int>();
-            made.Add(await GenerateCoreAsync(AusReportKind.Daily, today, 0, allowModel, ct));
-            int weekIndex = ((int)today.DayOfWeek + 1) % 7;   // Saturday = 0 ... Friday = 6
-            if (weekIndex == (int)st[AusSettingKeys.WeeklyDay]) made.Add(await GenerateCoreAsync(AusReportKind.Weekly, today, 0, allowModel, ct));
-            if (new PersianCalendar().GetDayOfMonth(today) == (int)st[AusSettingKeys.MonthlyDay]) made.Add(await GenerateCoreAsync(AusReportKind.Monthly, today, 0, allowModel, ct));
+            // missed days are caught up: start the day after the last daily report (at most 31 days back)
+            DateTime? lastDaily = await _uow.Set<AusReport>().AsNoTracking().Where(r => !r.Deleted && r.Kind == AusReportKind.Daily).MaxAsync(r => (DateTime?)r.PeriodTo, ct);
+            DateTime start = lastDaily.HasValue ? lastDaily.Value.Date.AddDays(2) : today;
+            if (start > today) start = today;
+            if (start < today.AddDays(-31)) start = today.AddDays(-31);
+            for (DateTime d = start; d <= today; d = d.AddDays(1))
+            {
+                made.Add(await GenerateCoreAsync(AusReportKind.Daily, d, 0, allowModel, ct));
+                int weekIndex = ((int)d.DayOfWeek + 1) % 7;   // Saturday = 0 ... Friday = 6
+                if (weekIndex == (int)st[AusSettingKeys.WeeklyDay]) made.Add(await GenerateCoreAsync(AusReportKind.Weekly, d, 0, allowModel, ct));
+                if (new PersianCalendar().GetDayOfMonth(d) == (int)st[AusSettingKeys.MonthlyDay]) made.Add(await GenerateCoreAsync(AusReportKind.Monthly, d, 0, allowModel, ct));
+            }
             return made;
         }
 

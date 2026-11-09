@@ -285,6 +285,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusRunService, Services.NasbNiro.AuditSeat.AusRunService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusFindingService, Services.NasbNiro.AuditSeat.AusFindingService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusReportService, Services.NasbNiro.AuditSeat.AusReportService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusAcceptanceService, Services.NasbNiro.AuditSeat.AusAcceptanceService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusProgramService, Services.NasbNiro.AuditSeat.AusProgramService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusAuditService, Services.NasbNiro.AuditSeat.AusAuditService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();

@@ -13,7 +13,7 @@ namespace Services.NasbNiro.Integrity
             const SafetyStore Q = SafetyStore.Quality;
             foreach (var s in AusSettingKeys.Strict())
             {
-                SafetyKind kind = s.Kind == "on" ? SafetyKind.FlagMustBeOn : s.Kind == "atmost" ? SafetyKind.NumberAtMost : SafetyKind.NumberAtLeast;
+                SafetyKind kind = s.Kind == "on" ? SafetyKind.FlagMustBeOn : s.Kind == "atmost" ? SafetyKind.NumberAtMost : s.Kind == "threshold" ? SafetyKind.ThresholdZeroOff : SafetyKind.NumberAtLeast;
                 yield return new SafetySettingSpec { Store = Q, Key = s.Key, Kind = kind, Strict = s.Strict.ToString(CultureInfo.InvariantCulture), Min = s.Min, Max = s.Max, Title = s.Title };
             }
             yield return new SafetySettingSpec { Store = Q, Key = AusSettingKeys.Prefix + "Rule.*", Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "قاعده ممیزی فعال بماند", Note = "غیرفعال کردن هر قاعده، تصمیمی دو نفره است" };

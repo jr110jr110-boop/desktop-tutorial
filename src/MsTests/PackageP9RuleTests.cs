@@ -83,8 +83,7 @@ namespace MsTests
             var bad = Host();
             Put(bad, new AuditChainRun { Kind = IntegrityRunKind.Full, StartedAt = Now, Status = IntegrityRunStatus.Broken, BreakKind = "hash", BreakEntityType = "Capa", BreakRowId = 5 });
             List<AusHit> hits = Run(bad, "AUD-INT-001");
-            Assert.IsTrue(hits.Any(x => x.Sub == "broken"));
-            Assert.IsTrue(hits.All(x => x.ObjectType == "AuditChainRun"));
+            Assert.IsTrue(hits.Any(x => x.ObjectType == "AuditChainBreak" && x.ObjectId == 5 && x.Sub == "Capa|hash"), "the key is the break, not the run");
 
             var ok = Host();
             Put(ok, new AuditChainRun { Kind = IntegrityRunKind.Incremental, StartedAt = Now.AddHours(-2), Status = IntegrityRunStatus.Ok });
@@ -100,7 +99,7 @@ namespace MsTests
             Only(Run(Host(), "AUD-INT-002"), "RestoreTestResult", 0, "never");
             var failed = Host();
             var r = Put(failed, new RestoreTestResult { RunId = "r1", StartedAt = Now, Success = false });
-            Assert.IsTrue(Run(failed, "AUD-INT-002").Any(x => x.Sub == "failed" && x.ObjectId == r.Id));
+            Assert.IsTrue(Run(failed, "AUD-INT-002").Any(x => x.Sub == "failed" && x.ObjectId == int.Parse(Now.LocalDateTime.ToString("yyyyMMdd"))), "the key is the day of the test, never the row");
             var ok = Host();
             Put(ok, new RestoreTestResult { RunId = "r2", StartedAt = Now.AddDays(-3), Success = true, BackupFile = "b.bak", BackupTakenAt = Now.AddDays(-3) });
             None(Run(ok, "AUD-INT-002"));
@@ -229,8 +228,11 @@ namespace MsTests
             var host = Host();
             for (int i = 0; i < 4; i++) Put(host, new OpsException { RuleCode = "RX", DocumentNumber = "D" + i, RequestedByUserId = 5, RequestedAt = Now, Status = OpsExceptionStatus.Approved, DecidedByUserId = 6, DecidedAt = Now });
             for (int i = 0; i < 3; i++) Put(host, new OpsException { RuleCode = "RY", DocumentNumber = "E" + i, RequestedByUserId = 5, RequestedAt = Now, Status = OpsExceptionStatus.Approved, DecidedByUserId = 6, DecidedAt = Now });
-            AusHit h = Only(Run(host, "AUD-EX-003"), "OpsRule", 0, "RX");
-            Assert.AreEqual("4", h.Facts["count"]);
+            // zero tolerance (fix round 1, M3): a rule with 3 approved exceptions is also reported, the proposal of the PMIS is the ★ value
+            var hits = Run(host, "AUD-EX-003");
+            Assert.AreEqual(2, hits.Count);
+            Assert.AreEqual("4", hits.Single(x => x.Sub == "RX").Facts["count"]);
+            Assert.AreEqual("3", hits.Single(x => x.Sub == "RY").Facts["count"]);
         }
 
         [TestMethod]
@@ -274,12 +276,18 @@ namespace MsTests
             var host = Host();
             var eqBad = Put(host, new MeasuringEquipment { Code = "E1", Name = "n", RequiresCalibration = true, Status = EquipmentStatus.Calibrated, NextDue = Today.AddDays(100) });
             var eqOk = Put(host, new MeasuringEquipment { Code = "E2", Name = "n", RequiresCalibration = true, Status = EquipmentStatus.Calibrated, NextDue = Today.AddDays(100) });
-            Put(host, new CalibrationEvent { EquipmentId = eqOk.Id, EventDate = Today.AddDays(-10), NextDue = Today.AddDays(100) });
+            Put(host, new CalibrationEvent { EquipmentId = eqOk.Id, EventDate = Today.AddDays(-10), NextDue = Today.AddDays(100), AsLeftPass = true });
             var recBad = Put(host, new QcRecord { Number = "QR1", RecordDate = Today, InspectorUserId = 7 });
             var recOk = Put(host, new QcRecord { Number = "QR2", RecordDate = Today, InspectorUserId = 7 });
             Put(host, new QcMeasurement { RecordId = recBad.Id, Characteristic = "c", EquipmentId = eqBad.Id });
             Put(host, new QcMeasurement { RecordId = recOk.Id, Characteristic = "c", EquipmentId = eqOk.Id });
             Only(Run(host, "AUD-CAL-002"), "QcRecord", recBad.Id);
+            // an as-left result that failed does not cover the date
+            var eqFail = Put(host, new MeasuringEquipment { Code = "E3", Name = "n", RequiresCalibration = true, Status = EquipmentStatus.Calibrated, NextDue = Today.AddDays(100) });
+            Put(host, new CalibrationEvent { EquipmentId = eqFail.Id, EventDate = Today.AddDays(-10), NextDue = Today.AddDays(100), AsLeftPass = false });
+            var recFail = Put(host, new QcRecord { Number = "QR3", RecordDate = Today, InspectorUserId = 7 });
+            Put(host, new QcMeasurement { RecordId = recFail.Id, Characteristic = "c", EquipmentId = eqFail.Id });
+            Assert.AreEqual(2, Run(host, "AUD-CAL-002").Count);
         }
 
         [TestMethod]
@@ -616,9 +624,10 @@ namespace MsTests
         public void AUD_EVM_002()
         {
             var host = Host();
-            var bad = Put(host, new CostEntry { ContractId = 1, WbsNodeId = null, EntryDate = Today, SourceType = "po", SourceNumber = "S1", CreatedAt = Now, Amount = 5 });
+            var bad = Put(host, new CostEntry { ContractId = 1, WbsNodeId = null, Kind = CostKind.Subcontract, EntryDate = Today, SourceType = "po", SourceNumber = "S1", CreatedAt = Now, Amount = 5 });
             Put(host, new CostEntry { ContractId = 1, WbsNodeId = 9, EntryDate = Today, SourceType = "po", SourceNumber = "S2", CreatedAt = Now, Amount = 5 });
             Put(host, new CostEntry { ContractId = null, WbsNodeId = null, EntryDate = Today, SourceType = "po", SourceNumber = "S3", CreatedAt = Now, Amount = 5 });
+            Put(host, new CostEntry { ContractId = 1, WbsNodeId = null, Kind = CostKind.Material, EntryDate = Today, SourceType = "issue", SourceNumber = "S4", CreatedAt = Now, Amount = 5 });   // material issues carry no WBS by design
             AusHit h = Only(Run(host, "AUD-EVM-002"), "CostEntry", bad.Id);
             Assert.IsFalse(h.Facts.ContainsKey("amount"), "the amount can be a protected labour figure and is not copied");
         }
@@ -750,7 +759,7 @@ namespace MsTests
             var bad = Put(host, new AiMessage { ConversationId = 1, Role = AiMessageRole.Assistant, Verified = false, CreatedAt = Now, Text = "t" });
             Put(host, new AiMessage { ConversationId = 1, Role = AiMessageRole.Assistant, Verified = true, CreatedAt = Now, Text = "t" });
             Put(host, new AiMessage { ConversationId = 1, Role = AiMessageRole.User, Verified = null, CreatedAt = Now, Text = "t" });
-            AusHit h = Only(Run(host, "AUD-AI-001"), "AiMessage", bad.Id);
+            AusHit h = Only(Run(host, "AUD-AI-001"), "AiVerification", int.Parse(Now.LocalDateTime.ToString("yyyyMMdd")));   // one finding per day, not per message
             Assert.IsFalse(h.Facts.Values.Any(v => v == "t"), "the text of the answer is not copied into the evidence");
         }
 
@@ -784,7 +793,20 @@ namespace MsTests
             var failedRun = Put(host, new AiSeatRun { SeatId = bad.Id, StartedAt = Now, Status = AiSeatRunStatus.Failed, Error = "e" });
             Put(host, new AiSeatRun { SeatId = ok.Id, StartedAt = Now.AddHours(-2), Status = AiSeatRunStatus.Failed, Error = "e" });
             Put(host, new AiSeatRun { SeatId = ok.Id, StartedAt = Now.AddHours(-1), Status = AiSeatRunStatus.Succeeded });
-            Only(Run(host, "AUD-AI-003"), "AiSeatRun", failedRun.Id, "ZZ1");
+            Only(Run(host, "AUD-AI-003"), "AiSeat", bad.Id, "ZZ1");   // the key is the seat, never the run
+        }
+
+        [TestMethod]
+        public void AUD_SYS_003()
+        {
+            var host = Host();
+            string json = "{\"a\":1}";
+            Put(host, new AusFinding { Number = "AF-1", Year = 1405, Sequence = 1, RuleCode = "AUD-INT-002", ObjectType = "x", ObjectKey = "k", EvidenceJson = json, EvidenceSha256 = AusEvidence.Sha256Hex(json), Title = "t", Description = "d", Status = AusFindingStatus.Open });
+            var tampered = Put(host, new AusFinding { Number = "AF-2", Year = 1405, Sequence = 2, RuleCode = "AUD-INT-002", ObjectType = "x", ObjectKey = "k2", EvidenceJson = "{\"a\":2}", EvidenceSha256 = AusEvidence.Sha256Hex(json), Title = "t", Description = "d", Status = AusFindingStatus.Open });
+            Only(Run(host, "AUD-SYS-003"), "AusFinding", tampered.Id);
+            var rep = Put(host, new AusReport { Kind = AusReportKind.Daily, PeriodFrom = Today, PeriodTo = Today, Title = "t", Recipients = "CEO,PMO,QA", ContentJson = "{}", Narrative = "n", NarrativeSource = "template", Sha256 = "tampered" });
+            Assert.AreEqual(2, Run(host, "AUD-SYS-003").Count);
+            Assert.IsTrue(Run(host, "AUD-SYS-003").Any(x => x.ObjectType == "AusReport" && x.ObjectId == rep.Id));
         }
 
         [TestMethod]

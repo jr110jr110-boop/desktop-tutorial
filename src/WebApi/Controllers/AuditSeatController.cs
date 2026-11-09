@@ -24,10 +24,11 @@ namespace WebApi.Controllers
         private readonly IAusReportService _reports;
         private readonly IAusProgramService _programs;
         private readonly IAusAuditService _audits;
+        private readonly IAusAcceptanceService _accept;
 
-        public AuditSeatController(IAusRunService runs, IAusFindingService findings, IAusReportService reports, IAusProgramService programs, IAusAuditService audits)
+        public AuditSeatController(IAusRunService runs, IAusFindingService findings, IAusReportService reports, IAusProgramService programs, IAusAuditService audits, IAusAcceptanceService accept)
         {
-            _runs = runs; _findings = findings; _reports = reports; _programs = programs; _audits = audits;
+            _accept = accept; _runs = runs; _findings = findings; _reports = reports; _programs = programs; _audits = audits;
         }
 
         [HttpGet("status")]
@@ -74,6 +75,16 @@ namespace WebApi.Controllers
 
         [HttpPost("reports")]
         public async Task<IActionResult> GenerateReportAsync([FromBody] AusReportGenerateDto dto, CancellationToken ct) => Ok(await _reports.GenerateAsync(dto, ct));
+
+        // ---- accepted deviations (QA proposes, PMO agrees, CEO accepts)
+        [HttpGet("acceptances")]
+        public async Task<IActionResult> AcceptancesAsync(CancellationToken ct) => Ok(await _accept.GetAsync(ct));
+
+        [HttpPost("acceptances")]
+        public async Task<IActionResult> ProposeAcceptanceAsync([FromBody] AusAcceptanceProposeDto dto, CancellationToken ct) => Ok(await _accept.ProposeAsync(dto, ct));
+
+        [HttpPost("acceptances/step")]
+        public async Task<IActionResult> AcceptanceStepAsync([FromBody] AusAcceptanceStepDto dto, CancellationToken ct) => Ok(await _accept.StepAsync(dto, ct));
 
         // ---- programme
         [HttpGet("programs")]
