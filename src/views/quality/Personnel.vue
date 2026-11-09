@@ -43,6 +43,14 @@ const blankQual = (personId: number | null = null, renews: any = null) => ({
   level: renews?.level ?? 0,
   scheme: renews?.scheme ?? 1,
   scope: renews?.scope ?? "",
+  rangePNos: renews?.rangePNos ?? "",
+  rangeGroupNos: renews?.rangeGroupNos ?? "",
+  rangeFNos: renews?.rangeFNos ?? "",
+  rangePositions: renews?.rangePositions ?? "",
+  rangeThicknessMin: renews?.rangeThicknessMin ?? null,
+  rangeThicknessMax: renews?.rangeThicknessMax ?? null,
+  rangeDiameterMin: renews?.rangeDiameterMin ?? null,
+  rangeDiameterMax: renews?.rangeDiameterMax ?? null,
   certificateNumber: "",
   certificateDocumentId: null,
   issuedDate: today(),
@@ -70,7 +78,11 @@ async function openPerson(p: any) {
 async function saveQualForm() {
   const q = qualForm.value;
   busy.value = true;
-  const [, error] = await saveQualification({ ...q, level: ndt.value ? Number(q.level) : 0, expiryDate: q.expiryDate || null });
+  const nn = (v: any) => (v === "" || v === undefined ? null : v);
+  const [, error] = await saveQualification({
+    ...q, level: ndt.value ? Number(q.level) : 0, expiryDate: q.expiryDate || null,
+    rangeThicknessMin: nn(q.rangeThicknessMin), rangeThicknessMax: nn(q.rangeThicknessMax), rangeDiameterMin: nn(q.rangeDiameterMin), rangeDiameterMax: nn(q.rangeDiameterMax),
+  });
   busy.value = false;
   if (error) return fail(error);
   ok("گواهی ثبت شد.");
@@ -145,6 +157,17 @@ onMounted(persons.load);
           <div v-if="ndt" class="col-md-1"><label class="form-label small mb-0">سطح</label><select v-model="qualForm.level" class="form-select form-select-sm"><option v-for="(t, k) in ndtLevels" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div v-if="ndt" class="col-md-2"><label class="form-label small mb-0">طرح گواهی</label><select v-model="qualForm.scheme" class="form-select form-select-sm"><option :value="2">ASNT SNT-TC-1A (با رویه نوشتاری)</option><option :value="3">ISO 9712</option></select></div>
           <div class="col-md-4"><label class="form-label small mb-0">دامنه (P-No, F-No, ضخامت، وضعیت‌ها)</label><input v-model="qualForm.scope" class="form-control form-control-sm" /></div>
+          <template v-if="qualForm.kind === 1">
+            <div class="col-12 small inv-muted">دامنه ساختاریافته جوشکار (مقایسه با WPS هنگام ثبت جوشکاری؛ خارج از دامنه رد می‌شود). چند مقدار را با کاما جدا کنید.</div>
+            <div class="col-md-2"><label class="form-label small mb-0">P-No ها</label><input v-model="qualForm.rangePNos" class="form-control form-control-sm inv-ltr" placeholder="P-1, P-8" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">گروه ها</label><input v-model="qualForm.rangeGroupNos" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">F-No فیلر</label><input v-model="qualForm.rangeFNos" class="form-control form-control-sm inv-ltr" placeholder="F-4" /></div>
+            <div class="col-md-2"><label class="form-label small mb-0">وضعیت‌ها</label><input v-model="qualForm.rangePositions" class="form-control form-control-sm inv-ltr" placeholder="1G, 2G" /></div>
+            <div class="col-md-1"><label class="form-label small mb-0">ضخامت از</label><input v-model="qualForm.rangeThicknessMin" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
+            <div class="col-md-1"><label class="form-label small mb-0">ضخامت تا</label><input v-model="qualForm.rangeThicknessMax" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
+            <div class="col-md-1"><label class="form-label small mb-0">قطر از</label><input v-model="qualForm.rangeDiameterMin" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
+            <div class="col-md-1"><label class="form-label small mb-0">قطر تا</label><input v-model="qualForm.rangeDiameterMax" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
+          </template>
           <div class="col-md-2"><label class="form-label small mb-0">شماره گواهی *</label><input v-model="qualForm.certificateNumber" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">تاریخ صدور / آزمون *</label><input v-model="qualForm.issuedDate" class="form-control form-control-sm" type="date" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">تاریخ انقضا</label><input v-model="qualForm.expiryDate" class="form-control form-control-sm" type="date" /></div>

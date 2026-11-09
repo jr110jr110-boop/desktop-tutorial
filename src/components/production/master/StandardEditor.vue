@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { saveOperationStandard } from "@/api/ProductionAPIs";
-import { getWpsList } from "@/api/QualityAPIs";
+import { getSpTypes, getWpsList } from "@/api/QualityAPIs";
 import { fail, ok } from "@/composables/inventory";
 import { inspectionRequirements } from "@/composables/production";
 import { testTypes } from "@/composables/quality";
@@ -16,10 +16,13 @@ const f = ref<any>({
   isOutside: !!r.isOutside, defaultSupplierId: r.defaultSupplierId ?? null, outsideLeadDays: r.outsideLeadDays ?? 0, workInstructionDocumentId: r.workInstructionDocumentId ?? null,
   drawingReferenceRule: r.drawingReferenceRule || "", requiredQualificationKind: r.requiredQualificationKind || "", requiredQualificationProcess: r.requiredQualificationProcess || "",
   inspectionRequirement: r.inspectionRequirement ?? 0, itpTestType: r.itpTestType ?? null, firstArticleRequired: !!r.firstArticleRequired, setupCount: r.setupCount ?? null,
-  isWelding: !!r.isWelding, wpsId: r.wpsId ?? null,
+  isWelding: !!r.isWelding, wpsId: r.wpsId ?? null, isSpecialProcess: !!r.isSpecialProcess, specialProcessTypeId: r.specialProcessTypeId ?? null,
 });
 const wpsRows = ref<any[]>([]);
+const spTypes = ref<any[]>([]);
 onMounted(async () => {
+  const [types] = await getSpTypes();
+  spTypes.value = Array.isArray(types) ? types.filter((t: any) => t.isActive && !t.existingControl) : [];
   // only an approved WPS can be chosen for a welding step; the one already saved stays visible even if it was superseded since
   const [data] = await getWpsList({ Status: 1, PageSize: 200 });
   const rows: any[] = Array.isArray(data) ? data : data?.items || data?.data || [];
@@ -32,6 +35,8 @@ async function save() {
   const x = f.value;
   if (!x.isOutside && !x.workCenterId) return fail("مرکز کار مرحله را انتخاب کنید (یا مرحله را «بیرونی» علامت بزنید).");
   if (x.isWelding && !x.wpsId) return fail("برای مرحله‌ی جوشکاری، WPS تاییدشده را انتخاب کنید.");
+  if (x.isSpecialProcess && !x.specialProcessTypeId) return fail("برای مرحله‌ی «فرایند ویژه»، نوع فرایند را انتخاب کنید.");
+  if (x.isSpecialProcess && x.isWelding) return fail("جوشکاری با قواعد WPS کنترل می‌شود؛ علامت «فرایند ویژه» را برندارید.");
   if (x.inspectionRequirement === 3 && !x.itpTestType) return fail("برای بازرسی از نوع نقطه ITP، نوع آزمون را انتخاب کنید.");
   busy.value = true;
   const [, error] = await saveOperationStandard({
@@ -39,6 +44,7 @@ async function save() {
     workInstructionDocumentId: x.workInstructionDocumentId ? Number(x.workInstructionDocumentId) : null, drawingReferenceRule: blankToNull(x.drawingReferenceRule),
     requiredQualificationKind: blankToNull(x.requiredQualificationKind), requiredQualificationProcess: blankToNull(x.requiredQualificationProcess),
     itpTestType: x.inspectionRequirement === 3 ? x.itpTestType : null, isWelding: !!x.isWelding, wpsId: x.isWelding ? x.wpsId : null,
+    isSpecialProcess: !!x.isSpecialProcess, specialProcessTypeId: x.isSpecialProcess ? x.specialProcessTypeId : null,
   });
   busy.value = false;
   if (error) return fail(error);
@@ -74,6 +80,10 @@ async function save() {
         <div v-if="f.isWelding" class="col-md-8"><label class="form-label small mb-0">WPS تاییدشده (الزامی)</label>
           <select v-model="f.wpsId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="w in wpsRows" :key="w.id" :value="w.id">{{ w.number }}<template v-if="w.revision"> / {{ w.revision }}</template><template v-if="w.process"> - {{ w.process }}</template></option></select>
           <div class="inv-muted small">شروع این مرحله در پایانه فقط با WPS تاییدشده و جوشکار واجد صلاحیت همان فرایند ممکن است؛ پس از پایان، سامانه گزارش جوش را پیش‌نویس می‌کند.</div></div>
+        <div class="col-md-4 d-flex align-items-end"><label class="form-check"><input v-model="f.isSpecialProcess" :disabled="f.isWelding" class="form-check-input" type="checkbox" /> <span class="form-check-label">فرایند ویژه (عملیات حرارتی، پوشش، ...)</span></label></div>
+        <div v-if="f.isSpecialProcess" class="col-md-8"><label class="form-label small mb-0">نوع فرایند ویژه (الزامی)</label>
+          <select v-model="f.specialProcessTypeId" class="form-select form-select-sm"><option :value="null">-</option><option v-for="t in spTypes" :key="t.id" :value="t.id">{{ t.title }} ({{ t.code }})</option></select>
+          <div class="inv-muted small">این مرحله بدون اجرای ثبت‌شده با صلاحیت فرایند تاییدشده و بازبینی دو نفره QA پایان نمی‌یابد و رد نمی‌شود. در فرایند برون‌سپاری، پیمانکار باید برای این فرایند تایید شده باشد و نمودار و گواهی او ثبت شود.</div></div>
       </div>
       <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="emit('close')">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button></div>
     </div>

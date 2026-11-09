@@ -122,6 +122,23 @@
 
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="links.audit"
+        has-sub
+        route-name="Audit"
+        tag="audit-collapse"
+        title="ممیزی داخلی هوشمند">
+        <CopyIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="
+            String($route.name || '').startsWith('Audit')
+              ? Colors.primary
+              : Colors.primaryLight
+          "
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.productBank"
         has-sub
         route-name="ProductBank"
@@ -303,6 +320,8 @@ import { Features } from "@/utils/features";
 import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
+import { EcRoles } from "@/composables/engChange";
+import { AuditRoles } from "@/composables/audit";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
 import type { PropType } from "vue";
@@ -439,11 +458,26 @@ const links = {
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
     { title: "ارتباط با سپیدار", routeName: "InventorySepidar", disabled: !accessList.includes("SepidarLink") },
   ] as Links[],
+  audit: [
+    { title: "یافته‌های ممیزی", routeName: "AuditFindings", disabled: !hasRole(AuditRoles.actioners) },
+    { title: "گزارش‌های ممیزی", routeName: "AuditReports", disabled: !hasRole(AuditRoles.readers) },
+    { title: "انحراف‌های پذیرفته‌شده", routeName: "AuditAcceptances", disabled: !hasRole(AuditRoles.readers) },
+    { title: "فهرست قواعد", routeName: "AuditRules", disabled: !hasRole(AuditRoles.readers) },
+    { title: "اجراهای ممیز", routeName: "AuditRuns", disabled: !hasRole(AuditRoles.readers) },
+    { title: "برنامه‌ی ممیزی", routeName: "AuditPrograms", disabled: !hasRole(AuditRoles.readers) },
+    { title: "ممیزی فرایند", routeName: "AuditProcessAudits", disabled: !hasRole(AuditRoles.readers) },
+  ] as Links[],
   productBank: [
     { title: "بانک محصول", routeName: "ProductBankProducts" },
     { title: "فهرست مواد (BOM)", routeName: "ProductBankBoms" },
     { title: "چارت‌های فرآیند (OPC)", routeName: "ProductBankRoutings" },
     { title: "مبنای BOM پروژه و انحراف‌ها", routeName: "ProductBankDeviations" },
+    { title: "برنامه‌های طراحی", routeName: "DesignPlans" },
+    { title: "ورودی‌های طراحی", routeName: "DesignInputs" },
+    { title: "بازبینی، تایید و صحه‌گذاری طراحی", routeName: "DesignReviews" },
+    { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions" },
+    { title: "درخواست‌های تغییر مهندسی (ECR)", routeName: "EngChangeRequests", disabled: !hasRole(EcRoles.readers) },
+    { title: "دستورهای تغییر مهندسی (ECO)", routeName: "EngChangeOrders", disabled: !hasRole(EcRoles.readers) },
     { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance" },
     { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
@@ -472,6 +506,11 @@ const links = {
     { title: "بازرسی نمونه اول (FAI)", routeName: "QualityFirstArticles", disabled: !hasRole(QualityRoles.readers) },
     { title: "پرچم «بدون نقشه»", routeName: "QualityNoDrawing", disabled: !hasRole(QualityRoles.readers) },
     { title: "پیکربندی ساخته‌شده", routeName: "QualityAsBuilt", disabled: !hasRole(QualityRoles.readers) },
+    { title: "فهرست فرایندهای ویژه", routeName: "QualitySpTypes", disabled: !hasRole(QualityRoles.readers) },
+    { title: "صلاحیت فرایندهای ویژه", routeName: "QualitySpQualifications", disabled: !hasRole(QualityRoles.readers) },
+    { title: "اجرای فرایندهای ویژه", routeName: "QualitySpRuns", disabled: !hasRole(QualityRoles.readers) },
+    { title: "تایید پیمانکار فرایند ویژه", routeName: "QualitySpSuppliers", disabled: !hasRole(QualityRoles.readers) },
+    { title: "مشخصات مواد", routeName: "QualityMaterialSpecs", disabled: !hasRole(QualityRoles.readers) },
     { title: "گزارش‌های آزمون", routeName: "QualityReports", disabled: !hasRole(QualityRoles.readers) },
     { title: "تجهیزات اندازه‌گیری و کالیبراسیون", routeName: "QualityCalibration", disabled: !hasRole(QualityRoles.readers) },
     { title: "پرسنل صلاحیت‌دار و گواهی‌ها", routeName: "QualityPersonnel", disabled: !hasRole(QualityRoles.readers) },

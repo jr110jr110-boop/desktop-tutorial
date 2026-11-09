@@ -3,6 +3,9 @@ import { createRouter, createWebHistory } from "vue-router";
 import showWarnNotification from "@/composables/showWarnNotification";
 import { Features } from "@/utils/features";
 import { PbRoles } from "@/composables/productBank";
+import { DesignRoles } from "@/composables/designControl";
+import { EcRoles } from "@/composables/engChange";
+import { AuditRoles } from "@/composables/audit";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { DncRoles } from "@/composables/dnc";
@@ -558,6 +561,11 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/quality/no-drawing", name: "QualityNoDrawing", component: () => import("@/views/quality/NoDrawing.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/first-articles", name: "QualityFirstArticles", component: () => import("@/views/quality/FirstArticles.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/first-articles/:id", name: "QualityFirstArticleEdit", component: () => import("@/views/quality/FirstArticleEdit.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/special-process-types", name: "QualitySpTypes", component: () => import("@/views/quality/SpecialProcessTypes.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/special-process-qualifications", name: "QualitySpQualifications", component: () => import("@/views/quality/SpecialQualifications.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/special-process-runs", name: "QualitySpRuns", component: () => import("@/views/quality/SpecialRuns.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/special-process-suppliers", name: "QualitySpSuppliers", component: () => import("@/views/quality/SpSupplierApprovals.vue"), meta: { roles: QualityRoles.readers } },
+  { path: "/quality/material-specs", name: "QualityMaterialSpecs", component: () => import("@/views/quality/MaterialSpecs.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/as-built", name: "QualityAsBuilt", component: () => import("@/views/quality/AsBuiltView.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/complaints", name: "QualityComplaints", component: () => import("@/views/quality/Complaints.vue"), meta: { roles: QualityRoles.readers } },
   { path: "/quality/documents", name: "QualityDocuments", component: () => import("@/views/quality/Documents.vue"), meta: { roles: QualityRoles.readers } },
@@ -712,8 +720,32 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/product-bank/routings", name: "ProductBankRoutings", component: () => import("@/views/productBank/Routings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/routings/:id", name: "ProductBankRoutingEdit", component: () => import("@/views/productBank/RoutingEdit.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/stages", name: "ProductBankStages", component: () => import("@/views/productBank/Stages.vue"), meta: { roles: PbRoles.readers } },
+  // Package A2: engineering change requests / orders, impact, dispositions, effectivity
+  { path: "/eng-change/requests", name: "EngChangeRequests", component: () => import("@/views/engChange/Requests.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/requests/:id", name: "EngChangeRequestEdit", component: () => import("@/views/engChange/RequestEdit.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/orders", name: "EngChangeOrders", component: () => import("@/views/engChange/Orders.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/eng-change/orders/:id", name: "EngChangeOrderEdit", component: () => import("@/views/engChange/OrderEdit.vue"), meta: { roles: EcRoles.readers } },
+  { path: "/audit", redirect: "/audit/findings" },
+  { path: "/audit/findings", name: "AuditFindings", component: () => import("@/views/audit/Findings.vue"), meta: { roles: AuditRoles.actioners } },
+  { path: "/audit/findings/:id", name: "AuditFinding", component: () => import("@/views/audit/FindingDetail.vue"), meta: { roles: AuditRoles.actioners } },
+  { path: "/audit/rules", name: "AuditRules", component: () => import("@/views/audit/Rules.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/runs", name: "AuditRuns", component: () => import("@/views/audit/Runs.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/reports", name: "AuditReports", component: () => import("@/views/audit/Reports.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/reports/:id", name: "AuditReport", component: () => import("@/views/audit/Reports.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/acceptances", name: "AuditAcceptances", component: () => import("@/views/audit/Acceptances.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/programs", name: "AuditPrograms", component: () => import("@/views/audit/Programs.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/audit/process-audits", name: "AuditProcessAudits", component: () => import("@/views/audit/ProcessAudits.vue"), meta: { roles: AuditRoles.readers } },
+  { path: "/eng-change/history", name: "EngChangeHistory", component: () => import("@/views/engChange/History.vue"), meta: { roles: EcRoles.readers } },
   { path: "/product-bank/mappings", name: "ProductBankMappings", component: () => import("@/views/productBank/Mappings.vue"), meta: { roles: PbRoles.readers } },
   { path: "/product-bank/deviations", name: "ProductBankDeviations", component: () => import("@/views/productBank/Deviations.vue"), meta: { roles: PbRoles.readers } },
+  // Package A1: design and development control (plan, inputs, reviews, dossier)
+  { path: "/product-bank/design/plans", name: "DesignPlans", component: () => import("@/views/productBank/design/DesignPlans.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/plans/:id", name: "DesignPlan", component: () => import("@/views/productBank/design/DesignPlan.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/inputs", name: "DesignInputs", component: () => import("@/views/productBank/design/DesignInputs.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/reviews", name: "DesignReviews", component: () => import("@/views/productBank/design/DesignReviews.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/reviews/:id", name: "DesignReview", component: () => import("@/views/productBank/design/DesignReview.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/adoptions", name: "DesignAdoptions", component: () => import("@/views/productBank/design/DesignAdoptions.vue"), meta: { roles: DesignRoles.readers } },
+  { path: "/product-bank/design/dossier/:productId", name: "DesignDossier", component: () => import("@/views/productBank/design/DesignDossier.vue"), meta: { roles: DesignRoles.readers } },
   { path: "/project-balance", name: "ProjectBalance", component: () => import("@/views/projectBalance/Balance.vue"), meta: { roles: BalanceRoles.readers } },
   { path: "/project-balance/substitutes", name: "ProjectBalanceSubstitutes", component: () => import("@/views/projectBalance/Substitutes.vue"), meta: { roles: BalanceRoles.readers } },
   { path: "/inventory/labels", name: "InventoryLabels", component: () => import("@/views/inventory/Labels.vue") },

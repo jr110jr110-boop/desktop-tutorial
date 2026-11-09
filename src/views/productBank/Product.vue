@@ -92,6 +92,7 @@ onMounted(load);
         <div class="d-flex gap-2 d-print-none">
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ</button>
           <router-link :to="{ name: 'ProductBankProducts' }" class="btn btn-sm btn-outline-secondary">بانک محصول</router-link>
+          <router-link :to="{ name: 'DesignDossier', params: { productId: Number($route.params.id) } }" class="btn btn-sm btn-outline-secondary">پرونده طراحی</router-link>
         </div>
       </div>
       <ul class="nav nav-tabs mb-3 d-print-none">
