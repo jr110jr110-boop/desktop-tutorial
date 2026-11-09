@@ -43,6 +43,8 @@ namespace ViewModels.NasbNiro.AuditSeatDtos
         public int Hits { get; set; }
         public int NewFindings { get; set; }
         public int Recurrences { get; set; }
+        /// <summary>Of the new findings, the systemic ones (one per rule that hit 3 or more objects); they are not recurrences.</summary>
+        public int Systemic { get; set; }
         public int Rechecked { get; set; }
         public int RecheckFailed { get; set; }
         public string Message { get; set; }
