@@ -68,6 +68,9 @@ namespace Services.NasbNiro.Production
         public const int MaxBackdateDefault = 7;
 
         private readonly global::Services.NasbNiro.OpsData.IOpsDataEvaluator _opsEvaluator;
+
+        /// <summary>P2 part E: the guarded machining process (null: not wired, e.g. in older tests).</summary>
+        private readonly global::Services.NasbNiro.Production.Dnc.IMfGuardService _guard;
         private readonly global::Services.NasbNiro.OpsData.IOpsGateService _opsGate;
 
         /// <summary>PB8: the real-time gate on a production booking or the finish of an operation (time against the routing standard, scrap against history, sequence and work centre of the routing). The Persian refusal or null.</summary>
@@ -96,8 +99,10 @@ namespace Services.NasbNiro.Production
         private static readonly HashSet<string> OpsTimeAndScrap = new HashSet<string> { global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdTime, global::Services.NasbNiro.OpsData.OpsRuleCodes.PrdScrap };
 
         public MfShopFloorService(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, IAttendanceService attendance, INotificationService notify = null, IConfiguration configuration = null,
-            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null)
+            global::Services.NasbNiro.OpsData.IOpsDataEvaluator opsEvaluator = null, global::Services.NasbNiro.OpsData.IOpsGateService opsGate = null,
+            global::Services.NasbNiro.Production.Dnc.IMfGuardService guard = null)
         {
+            _guard = guard;
             _opsEvaluator = opsEvaluator;
             _opsGate = opsGate;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
@@ -326,6 +331,12 @@ namespace Services.NasbNiro.Production
             // P2 (DNC): on a machine that requires it, a setup, run or rework starts only after the current approved program revision was sent to the machine and confirmed on the control
             var nc = await global::Services.NasbNiro.Production.Dnc.MfDncGate.CheckStartAsync(_uow, l.Op, dto.MachineId, dto.Kind, ct);
             if (nc.Error != null) return Bad<TerminalOperationDto>(nc.Error);
+            // P2 part E: on a machine with a data link the control itself confirms the program, the tools and the link; the first run of a revision is marked for its proof
+            if (_guard != null)
+            {
+                string guarded = await _guard.CheckStartAsync(l.Op, dto.MachineId, dto.Kind, l.Employee.Id, nc.Runs, ct);
+                if (guarded != null) return Bad<TerminalOperationDto>(guarded);
+            }
             MfTimeBooking running = await RunningOfAsync(l.Employee.Id, ct);
             DateTime now = Now();
             if (running != null)
@@ -380,6 +391,12 @@ namespace Services.NasbNiro.Production
                 return Bad<TerminalOperationDto>("برای شما ثبت زمانِ در حال اجرای دیگری وجود دارد؛ آن را پایان دهید.");
             }
             await _flow.AfterSaveAsync(ct);
+            // P2 part E: the start interlock lets the start button work now (and locks the machine of a booking this start closed)
+            if (_guard != null)
+            {
+                if (dto.MachineId.HasValue) await _guard.SyncInterlockAsync(dto.MachineId.Value, ct);
+                if (running?.MachineId != null && running.MachineId != dto.MachineId) await _guard.SyncInterlockAsync(running.MachineId.Value, ct);
+            }
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
 
@@ -446,6 +463,7 @@ namespace Services.NasbNiro.Production
             {
                 return Bad<TerminalOperationDto>(MfText.Concurrency);
             }
+            if (_guard != null && running.MachineId.HasValue) await _guard.SyncInterlockAsync(running.MachineId.Value, ct);   // P2 part E: a paused machine is locked again
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct));
         }
 
@@ -613,6 +631,12 @@ namespace Services.NasbNiro.Production
             if (spFinish != null) return Bad<TerminalOperationDto>(spFinish);
             if (await _uow.Set<MfTimeBooking>().AnyAsync(b => !b.Deleted && b.OperationId == l.Op.Id && b.EndAt == null && b.EmployeeId != l.Employee.Id, ct))
                 return Bad<TerminalOperationDto>("هنوز شخص دیگری روی این عملیات در حال کار است؛ او باید ابتدا کار خود را متوقف کند.");
+            // P2 part E: the first run of a revision on a guarded machine finishes only when the data link saw it proven (or with the production manager's one-time override)
+            if (_guard != null)
+            {
+                string proof = await _guard.CheckFinishAsync(l.Op, ct);
+                if (proof != null) return Bad<TerminalOperationDto>(proof);
+            }
 
             DateTimeOffset stamp = DateTimeOffset.Now;
             if (booking.EndAt == null) Close(booking, Now());
@@ -652,6 +676,7 @@ namespace Services.NasbNiro.Production
             notes.AddRange(await ScrapDocumentsAsync(ct));
             notes.AddRange(await WeldLogAsync(l, ct));
             await MfGates.QcAsync(_notify, l.Op, l.Order.Number, ct);
+            if (_guard != null && booking.MachineId.HasValue) await _guard.SyncInterlockAsync(booking.MachineId.Value, ct);   // P2 part E: the finished machine is locked again
             return ResponseDtoHelper.Ok(await OneAsync(l.Op, l.Employee.Id, ct), notes.Count == 0 ? null : Join(notes));
         }
 

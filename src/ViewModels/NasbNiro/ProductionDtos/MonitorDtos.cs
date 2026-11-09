@@ -205,5 +205,15 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? SpindleRpm { get; set; }
         public int? FeedOverride { get; set; }
         public long? PartCount { get; set; }
+
+        // P2 part E: what a FOCAS (or similar) agent at the machine reads from the control; the guard records it like the LSV2 poll
+        public MfExecMode? ExecMode { get; set; }
+        public MfProgramState? ProgramState { get; set; }
+        public int? SpindleOverride { get; set; }
+        public int? ToolNumber { get; set; }
+        public int? BlockNumber { get; set; }
+
+        /// <summary>The canonical fingerprint of the selected program (upper case, one space, no empty lines, LF; SHA-256 hex), for the program identity gate.</summary>
+        public string ProgramSha256 { get; set; }
     }
 }

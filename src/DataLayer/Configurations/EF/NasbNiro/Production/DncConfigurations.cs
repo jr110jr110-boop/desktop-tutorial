@@ -60,6 +60,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.ProgramNumber).HasMaxLength(Code);
                 b.Property(x => x.ChangeNote).HasMaxLength(Text);
                 b.Property(x => x.Findings).HasMaxLength(LongText);
+                b.Property(x => x.CamSystem).HasMaxLength(Code);
+                b.HasOne<MfPostProcessor>().WithMany().HasForeignKey(x => x.PostProcessorId).OnDelete(DeleteBehavior.Restrict);
                 b.Property(x => x.RejectReason).HasMaxLength(Text);
                 b.HasOne<MfNcProgram>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfNcRevision>().WithMany().HasForeignKey(x => x.BaseRevisionId).OnDelete(DeleteBehavior.Restrict);
@@ -97,6 +99,18 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.LastProgramName).HasMaxLength(Name);
                 b.Property(x => x.MismatchAlertOpen).HasMaxLength(20);
                 b.Property(x => x.Note).HasMaxLength(Text);
+                // P2 part E: the data link and the start interlock
+                b.Property(x => x.DataHost).HasMaxLength(Name);
+                b.Property(x => x.DataCredentialKey).HasMaxLength(Code);
+                b.Property(x => x.PlcMap).HasMaxLength(Text);
+                b.Property(x => x.ProgramFolder).HasMaxLength(Name);
+                b.Property(x => x.ResultFile).HasMaxLength(Name);
+                b.Property(x => x.Capabilities).HasMaxLength(LongText);
+                b.Property(x => x.DataError).HasMaxLength(Text);
+                b.Property(x => x.LastProgramSha256).HasMaxLength(64).IsUnicode(false);
+                b.Property(x => x.InterlockHost).HasMaxLength(Name);
+                b.Property(x => x.StartBlockReason).HasMaxLength(Text);
+                b.Property(x => x.InterlockError).HasMaxLength(Text);
                 b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
             });
             builder.Entity<MfMachineStateEvent>(b =>
@@ -128,6 +142,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.Property(x => x.Max).HasPrecision(18, 4);
                 b.Property(x => x.Unit).HasMaxLength(20);
                 b.Property(x => x.Mandatory).HasDefaultValue(true).HasSentinel(true);
+                b.Property(x => x.Characteristic).HasMaxLength(Code);
                 b.Property(x => x.IsActive).HasDefaultValue(true).HasSentinel(true);
             });
             builder.Entity<MfChecklistResult>(b =>
@@ -174,12 +189,88 @@ namespace DataLayer.Configurations.EF.NasbNiro.Production
                 b.HasIndex(x => x.OperationId);
                 b.HasIndex(x => new { x.MachineId, x.StartedAt });
                 b.HasIndex(x => x.RevisionId);
+                b.Property(x => x.VerifiedSha256).HasMaxLength(64);
+                b.HasOne<MfGateOverride>().WithMany().HasForeignKey(x => x.OverrideId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfNcProgram>().WithMany().HasForeignKey(x => x.ProgramId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfNcRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<MfNcTransfer>().WithMany().HasForeignKey(x => x.TransferId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<FnEmployee>().WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // ------------------------------------------------------------------ P2 part E: the guarded machining process
+            builder.Entity<MfMachineActivity>(b =>
+            {
+                b.ToTable("MfMachineActivities");
+                b.HasIndex(x => new { x.MachineId, x.At });
+                b.HasIndex(x => new { x.OperationId, x.At });
+                b.Property(x => x.Value).HasMaxLength(Name);
+                b.Property(x => x.Text).HasMaxLength(Text);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfGateOverride>(b =>
+            {
+                b.ToTable("MfGateOverrides");
+                b.HasIndex(x => new { x.MachineId, x.OperationId, x.Gate });
+                b.Property(x => x.Gate).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.Reason).HasMaxLength(Text).IsRequired();
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfPostProcessor>(b =>
+            {
+                b.ToTable("MfPostProcessors");
+                b.HasIndex(x => new { x.Code, x.Version }).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.Code).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.CamSystem).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.FileName).HasMaxLength(Name).IsRequired();
+                b.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+                b.Property(x => x.ChangeNote).HasMaxLength(Text);
+                b.Property(x => x.RejectReason).HasMaxLength(Text);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfNcAttachment>(b =>
+            {
+                b.ToTable("MfNcAttachments");
+                b.HasIndex(x => new { x.RevisionId, x.Kind });
+                b.Property(x => x.FileName).HasMaxLength(Name).IsRequired();
+                b.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+                b.HasOne<MfNcRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfCamTool>(b =>
+            {
+                b.ToTable("MfCamTools");
+                b.HasIndex(x => new { x.RevisionId, x.ToolNumber }).IsUnique();
+                b.Property(x => x.Name).HasMaxLength(Name);
+                b.Property(x => x.Diameter).HasPrecision(18, 4);
+                b.Property(x => x.Length).HasPrecision(18, 4);
+                b.HasOne<MfNcRevision>().WithMany().HasForeignKey(x => x.RevisionId).OnDelete(DeleteBehavior.Cascade);
+            });
+            builder.Entity<MfMeasurement>(b =>
+            {
+                b.ToTable("MfMeasurements");
+                b.HasIndex(x => new { x.OperationId, x.Characteristic, x.At });
+                b.HasIndex(x => new { x.MachineId, x.At });
+                b.Property(x => x.Characteristic).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.Value).HasPrecision(18, 4);
+                b.Property(x => x.Device).HasMaxLength(Name);
+                b.HasOne<MfOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<MfMeasureStation>().WithMany().HasForeignKey(x => x.StationId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<MfMeasureStation>(b =>
+            {
+                b.ToTable("MfMeasureStations");
+                b.HasIndex(x => x.Code).IsUnique().HasFilter(NotDeleted);
+                b.Property(x => x.Code).HasMaxLength(Code).IsRequired();
+                b.Property(x => x.Title).HasMaxLength(Title).IsRequired();
+                b.Property(x => x.KeyHash).HasMaxLength(64);
+                b.Property(x => x.AllowedAddresses).HasMaxLength(Name);
+                b.Property(x => x.IsActive).HasDefaultValue(true).HasSentinel(true);
+                b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.Restrict);
             });
         }
     }

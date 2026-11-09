@@ -12601,6 +12601,18 @@ DNCP=$(val .data.id)
 as "$ENG_TOKEN" POST $DNC/programs "{\"code\":\"DNC-100\",\"title\":\"تکراری\",\"controllerFamily\":3}"; nomsg "dnc: a duplicate program code is refused" "قبلاً ثبت شده"
 as "$ENG_TOKEN" POST $DNC/revisions "{\"programId\":$DNCP,\"fileName\":\"j10.h\",\"contentBase64\":\"$DNCB64\",\"changeNote\":\"نسخه اول\"}"; check "dnc: revision 1 is a draft with no finding, the program number 100 from BEGIN PGM, the exact size and the SHA-256 of the file" ".success and .data.revision == 1 and .data.status == 0 and .data.errorCount == 0 and .data.warningCount == 0 and .data.programNumber == \"100\" and .data.sizeBytes == $DNCLEN and .data.lineCount == 9 and .data.sha256 == \"$DNCSHA\" and .data.allowedActions == [\"submit\",\"withdraw\"]"
 DNCR1=$(val .data.id)
+# P2 part E: a revision goes for approval only with what it was made with: an approved post processor (two people), the simulation report and the CAM tool list
+CAMP=$DNC/cam
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"submit\"}"; nomsg "guard: a revision without its CAM evidence is not submitted" "مدارک CAM نسخه کامل نیست"
+as "$ENG_TOKEN" POST $CAMP/posts "{\"code\":\"HH-TNC426\",\"title\":\"پست هایدن‌هاین سه‌محور\",\"camSystem\":\"PowerMill\",\"controllerFamily\":3,\"fileName\":\"tnc426.pmoptz\",\"contentBase64\":\"$(printf 'post processor TNC 426' | base64 -w0)\"}"; check "guard: engineering registers post processor HH-TNC426 version 1 as a draft" '.success and .data.version == 1 and .data.status == 0 and .data.allowedActions == ["submit","withdraw"]'
+GPOST=$(val .data.id)
+as "$ENG_TOKEN" POST $CAMP/posts/action "{\"id\":$GPOST,\"action\":\"submit\",\"rowVersion\":\"$(val .data.rowVersion)\"}"; check "guard: the post processor goes for approval" '.success and .data.status == 1'
+GPOSTRV=$(val .data.rowVersion)
+as "$ENG_TOKEN" POST $CAMP/posts/action "{\"id\":$GPOST,\"action\":\"approve\",\"rowVersion\":\"$GPOSTRV\"}"; nomsg "guard: its author cannot approve the post processor" "شخص دیگری"
+as "$MPM_TOKEN" POST $CAMP/posts/action "{\"id\":$GPOST,\"action\":\"approve\",\"rowVersion\":\"$GPOSTRV\"}"; check "guard: the production manager approves the post processor" '.success and .data.status == 2 and .data.approvedByName != null'
+as "$ENG_TOKEN" POST $CAMP/revisions "{\"revisionId\":$DNCR1,\"postProcessorId\":$GPOST,\"camSystem\":\"PowerMill\"}"; check "guard: revision 1 names the approved post processor; the simulation and the tool list are still missing" ".success and .data.postProcessorId == $GPOST and (.data.missing|length) == 2"
+as "$ENG_TOKEN" POST $CAMP/revisions/attachments "{\"revisionId\":$DNCR1,\"kind\":1,\"fileName\":\"j10-simulation.pdf\",\"contentBase64\":\"$(printf '%%PDF-1.4 simulation report' | base64 -w0)\"}"; check "guard: the simulation report is attached to revision 1" '.success and .data.simulationAttachmentId != null and (.data.missing|length) == 1 and .data.attachments[0].kind == 1'
+as "$ENG_TOKEN" POST $CAMP/revisions/tools "{\"revisionId\":$DNCR1,\"csv\":\"T;Name;D;L\\n3;EM12;12;60\"}"; check "guard: the CAM tool list of revision 1 (tool 3) is in; nothing is missing" '.success and (.data.missing|length) == 0 and (.data.tools|length) == 1 and .data.tools[0].toolNumber == 3 and .data.tools[0].diameter == 12'
 as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"submit\"}"; check "dnc: the author submits revision 1" '.success and .data.status == 1 and .data.submittedByName != null'
 ibx "$MPM_TOKEN" "mf:nc-rev:$DNCR1"; check "dnc: the production manager has revision 1 in the inbox" '.success and (.data.data|length) == 1'
 as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"approve\"}"; nomsg "dnc: the author cannot approve his own revision" "شخص دیگری"
@@ -12639,6 +12651,9 @@ as "$MSV_TOKEN" POST $DNC/transfers/run-pending; check "dnc: the queue fetches t
 as "$MSV_TOKEN" GET "$DNC/programs/$DNCP"; check "dnc: revision 2 is a draft from the machine, authored by the supervisor who asked, counted against revision 1: one line removed and one added" ".success and .data.currentRevisionId == $DNCR1 and (.data.revisions|length) == 2 and (.data.revisions[0] | .revision == 2 and .status == 0 and .source == 2 and .fromTransferId == $DNCT2 and .baseRevisionId == $DNCR1 and .diffAdded == 1 and .diffRemoved == 1 and .sha256 == \"$DNCSHA2\" and .changeNote == \"اصلاح پیشروی پشت ماشین\")"
 DNCR2=$(val '.data.revisions[0].id')
 as "$MSV_TOKEN" GET "$DNC/revisions/$DNCR2/diff"; check "dnc: the difference lists block 6 with the old and the new feed" ".success and .data.baseRevisionId == $DNCR1 and .data.added == 1 and .data.removed == 1 and (.data.lines|index(\"- 7 6 L Z-5 F300\")) != null and (.data.lines|index(\"+ 7 6 L Z-5 F250\")) != null"
+as "$MSV_TOKEN" POST $CAMP/revisions "{\"revisionId\":$DNCR2,\"postProcessorId\":$GPOST,\"camSystem\":\"PowerMill\"}"; check "guard: the supervisor (author of revision 2) names the post processor" '.success and (.data.missing|length) == 2'
+as "$MSV_TOKEN" POST $CAMP/revisions/attachments "{\"revisionId\":$DNCR2,\"kind\":1,\"fileName\":\"j10-r2-simulation.pdf\",\"contentBase64\":\"$(printf '%%PDF-1.4 simulation report r2' | base64 -w0)\"}"; check "guard: the simulation of revision 2 is attached" '.success and (.data.missing|length) == 1'
+as "$MSV_TOKEN" POST $CAMP/revisions/tools "{\"revisionId\":$DNCR2,\"csv\":\"T;Name;D;L\\n3;EM12;12;60\"}"; check "guard: the tool list of revision 2 is in" '.success and (.data.missing|length) == 0'
 as "$MSV_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"submit\"}"; check "dnc: the supervisor (its author) submits revision 2" '.success and .data.status == 1'
 as "$MSV_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"approve\"}"; nomsg "dnc: who fetched the program back cannot approve it" "شخص دیگری"
 as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"approve\"}"; check "dnc: engineering approves revision 2" '.success and .data.status == 2'
@@ -12650,7 +12665,7 @@ DNCR3=$(val .data.id)
 as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR3,\"action\":\"submit\"}"; nomsg "dnc: the revision with an error is not submitted" "خطای بررسی"
 as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR3,\"action\":\"withdraw\"}"; check "dnc: the author withdraws revision 3" '.success and .data.status == 5'
 as "$MOP_TOKEN" GET "$DNC/revisions/$DNCR2/content"; if [ "$CODE" = "200" ] && [ "$(sha256sum "$B" | cut -d' ' -f1 | tr 'a-f' 'A-F')" = "$DNCSHA2" ]; then ok "dnc: the operator downloads revision 2 with exactly its stored bytes"; else bad "dnc: the operator downloads revision 2 with exactly its stored bytes (HTTP $CODE)"; fi
-as "$FM_TOKEN" GET "$FAU?EntityType=MfNcRevision&EntityId=$DNCR1&PageSize=0"; check "dnc: the submission, the approval and the supersession of revision 1 are in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) == 3'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfNcRevision&EntityId=$DNCR1&PageSize=0"; check "dnc: the three CAM evidence edits (post processor, simulation, tool list), the submission, the approval and the supersession of revision 1 are in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) == 6'
 # --- P2 part D: the planning seat MF-DISPATCH and the shop-floor overview (read-only; nothing of the plan is written to an order or an operation).
 # The plan counts exactly the released and started orders the order list shows; the step finished above (DNCOP) is in no queue; the seat's run reports the same late-risk count as the plan.
 as "$MOP_TOKEN" GET "$MF/dispatch/plan"; nomsg "mf-dispatch: an operator does not read the plan" "شما مجوز این کار را ندارید."
@@ -12663,6 +12678,45 @@ as "$MSV_TOKEN" GET "$MF/dispatch/floor"; check "mf-dispatch: the shop-floor ove
 airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: the first run of the day succeeded, reports the late-risk count of the plan and leaves at least the plan note" ".success and .data.status == 2 and .data.seatCode == \"MF-DISPATCH\" and (.data.outputs|contains(\"lateRisk=$MFDLR;\")) and (.data.outputs|test(\"notes=[1-9]\"))"
 airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: a second run of the same day leaves no new note" '.success and .data.status == 2 and (.data.outputs|endswith("notes=0"))'
 as "$PLAN_TOKEN" GET remote/status; check "remote access: switched off on the CI server and the caller is local" '.success and .data.enabled == false and .data.remote == false and .data.readOnly == false and .data.allowed == true'
+# --- P2 part E: the guarded machining process. No control answers on the CI network: the smoke proves the settings, the link failure, the refusals, the one-time override and the
+# gauge push; the gates against a control (program read back, tool table, prove-out, interlock, unapproved program) are proven against a fake LSV2 control in GuardTests.
+GRD=$MF/guard
+as "$MOP_TOKEN" POST $GRD/machines "{\"machineId\":$R1M,\"dataLink\":1,\"dataHost\":\"10.255.255.1\"}"; nomsg "guard: an operator does not set the data link of a machine" "مجوز"
+as "$MPM_TOKEN" POST $GRD/machines "{\"machineId\":$R1M,\"dataLink\":1,\"dataHost\":\"8.8.8.8\",\"dataPort\":19000}"; nomsg "guard: a control outside the shop network is refused" "شبکه داخلی"
+as "$MPM_TOKEN" POST $GRD/machines "{\"machineId\":$R1M,\"dataLink\":1,\"dataHost\":\"10.255.255.1\",\"dataPort\":19000,\"plcMap\":\"speed=W10\"}"; nomsg "guard: a wrong PLC map entry is refused" "نشانی PLC نامعتبر"
+as "$MPM_TOKEN" POST $GRD/machines "{\"machineId\":$R1M,\"dataLink\":0,\"interlockEnabled\":true,\"interlockHost\":\"10.255.255.2\",\"interlockPort\":502}"; nomsg "guard: the start interlock needs the data link" "اتصال داده"
+as "$MPM_TOKEN" POST $GRD/machines "{\"machineId\":$R1M,\"dataLink\":1,\"dataHost\":\"10.255.255.1\",\"dataPort\":19000,\"dataCredentialKey\":\"tnc-r1\",\"plcMap\":\"exec=W100;state=W102;feed=W104\",\"programFolder\":\"TNC:\\\\nc_prog\\\\\",\"resultFile\":\"TNC:\\\\RESULT.TXT\"}"
+check "guard: the production manager links R1M to its TNC over LSV2 (password only by key name); the machine is guarded and the link has not answered yet" ".success and .data.machineId == $R1M and .data.guarded == true and .data.dataLink == 1 and .data.linkHealthy == false and .data.dataCredentialKey == \"tnc-r1\" and .data.plcMap == \"exec=W100;state=W102;feed=W104\" and .data.programFolder == \"TNC:\\\\nc_prog\\\\\""
+as "$MMT_TOKEN" POST $GRD/machines/test "{\"machineId\":$R1M}"; check "guard: maintenance tests the link: no control answers, said in Persian" '.success and .data.ok == false and ((.data.message|contains("اتصال برقرار نشد")) or (.data.message|contains("پاسخی در زمان مقرر نیامد")))'
+as "$MOP_TOKEN" POST $GRD/poll; nomsg "guard: an operator does not run the poll" "مجوز"
+as "$MSV_TOKEN" POST $GRD/poll; check "guard: the supervisor runs the poll: the one guarded machine is asked and fails" '.success and .data.polled == 1 and .data.failed == 1'
+as "$MSV_TOKEN" GET "$GRD/machines"; check "guard: R1M shows the failed poll with its reason" "([.data[]|select(.machineId == $R1M)][0] | .dataFailedPolls == 1 and .dataError != null and .linkHealthy == false)"
+as "$MOP_TOKEN" GET "$GRD/terminal?operationId=$DNCOP&machineId=$R1M"; check "guard: the terminal panel of the guarded machine opens no start while revision 2 is not sent and confirmed" '.success and .data.guarded == true and .data.canStart == false and .data.gates[0].code == "dnc" and .data.gates[0].state == "blocked"'
+as "$MSV_TOKEN" GET "$MF/orders/$DNCO"; DNCOP20=$(val '.data.operations[1].id')
+GRSN="کنترلر در تعمیر شبکه است و قطعه برای مونتاژ فوری لازم است"
+as "$MSV_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP20,\"gate\":\"interlock\",\"reason\":\"$GRSN\"}"; nomsg "guard: a supervisor cannot open a gate (only the production manager)" "مجوز"
+as "$MPM_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP20,\"gate\":\"interlock\",\"reason\":\"فوری\"}"; nomsg "guard: the reason of an override is written in full" "دست‌کم 10 نویسه"
+as "$MPM_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP20,\"gate\":\"speed\",\"reason\":\"$GRSN\"}"; nomsg "guard: an unknown gate is refused" "نامعتبر"
+as "$MPM_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP,\"gate\":\"interlock\",\"reason\":\"$GRSN\"}"; nomsg "guard: a finished operation takes no override" "تمام شده"
+as "$MPM_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP20,\"gate\":\"interlock\",\"reason\":\"$GRSN\"}"; check "guard: the production manager opens the data-link gate of step 20 once, for 30 minutes" '.success and .data.gate == "interlock" and .data.active == true and .data.consumedAtText == null and .data.byName != null'
+GOV=$(val .data.id)
+as "$MPM_TOKEN" POST $GRD/overrides "{\"machineId\":$R1M,\"operationId\":$DNCOP20,\"gate\":\"interlock\",\"reason\":\"$GRSN\"}"; nomsg "guard: a second override of the same gate waits for the first" "مجوز فعال"
+ibx "$CEO_TOKEN" "mf:guard-override:$GOV"; check "guard: the CEO is told about the override" '.success and (.data.data|length) == 1'
+ibx "$AUD_TOKEN" "mf:guard-override:$GOV"; check "guard: the auditor is told about the override" '.success and (.data.data|length) == 1'
+as "$MSV_TOKEN" GET "$GRD/activity?machineId=$R1M&PageSize=0"; check "guard: the override is on the time line of the machine with its gate" '.success and ([.data.data[]|select(.kind == 14 and .value == "interlock" and .operationId == '$DNCOP20')]|length) == 1'
+as "$FM_TOKEN" GET "$FAU?EntityType=MfGateOverride&EntityId=$GOV&PageSize=0"; check "guard: the override is in the audit trail" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1'
+# a gauge station: its key is shown once; a value it pushes is a measurement of the operation (a typed value never is)
+as "$MOP_TOKEN" POST production/measure/stations '{"code":"G-01","title":"گیج ایستگاه R1","allowedAddresses":"127.0.0.1"}'; nomsg "guard: an operator does not register a gauge station" "مجوز"
+as "$MPM_TOKEN" POST production/measure/stations "{\"code\":\"G-01\",\"title\":\"گیج ایستگاه R1\",\"machineId\":$R1M,\"isActive\":true}"; nomsg "guard: a gauge station without its addresses is refused" "نشانی"
+as "$MPM_TOKEN" POST production/measure/stations "{\"code\":\"G-01\",\"title\":\"گیج ایستگاه R1\",\"allowedAddresses\":\"127.0.0.1\",\"machineId\":$R1M,\"isActive\":true}"; check "guard: the gauge station G-01 is registered without a key yet" '.success and .data.code == "G-01" and .data.hasKey == false'
+GST=$(val .data.id)
+as "$MPM_TOKEN" POST production/measure/stations/$GST/key; check "guard: the key of G-01 is shown once" '.success and (.data.key|length) == 43'
+GSKEY=$(val .data.key)
+mpush() { CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/production/measure/device/push" -H "X-Measure-Station: $1" -H "X-Measure-Key: $2" -H 'Content-Type: application/json' --data-binary "$3"); }
+GMEAS="{\"items\":[{\"operationId\":$DNCOP20,\"characteristic\":\"d1\",\"value\":12.004,\"device\":\"bore gauge 2\"}]}"
+mpush G-01 wrong-key "$GMEAS"; [ "$CODE" = "401" ] && jq -e '.success == false' "$B" >/dev/null 2>&1 && ok "guard: a push with a wrong station key is refused (401)" || bad "guard: a push with a wrong station key is refused (401) got $CODE"
+mpush G-01 "$GSKEY" "$GMEAS"; [ "$CODE" = "200" ] && jq -e '.success and .data.accepted == 1' "$B" >/dev/null 2>&1 && ok "guard: the gauge pushes one value with its key" || bad "guard: the gauge pushes one value with its key got $CODE"
+as "$MPM_TOKEN" GET "production/measure/values?operationId=$DNCOP20"; check "guard: the value is a gauge measurement of step 20 under the code D1" ".success and (.data.data|length) == 1 and (.data.data[0] | .characteristic == \"D1\" and .value == 12.004 and .source == 2 and .stationCode == \"G-01\" and .machineId == $R1M)"
 TOKEN=$ADMIN_TOKEN
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.

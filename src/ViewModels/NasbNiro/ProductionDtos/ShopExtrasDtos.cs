@@ -19,6 +19,12 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal? Max { get; set; }
         public string Unit { get; set; }
         public bool Mandatory { get; set; } = true;
+
+        /// <summary>P2 part E: the code the probe cycle or the gauge reports (e.g. "D1").</summary>
+        public string Characteristic { get; set; }
+
+        /// <summary>P2 part E: the value comes only from a measuring device; a typed value is ignored.</summary>
+        public bool DeviceOnly { get; set; }
     }
 
     public class ChecklistTemplateDto
@@ -42,6 +48,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         /// <summary>Read only: the rule of the item applied to the answer.</summary>
         public bool Passed { get; set; }
+
+        /// <summary>Read only (P2 part E): the device measurement the value came from.</summary>
+        public long? MeasurementId { get; set; }
     }
 
     /// <summary>The checklist of an operation: the items of its step and the answers given so far.</summary>

@@ -39,6 +39,12 @@ namespace Entities.Model.NasbNiro.Production
         public string Unit { get; set; }
         public bool Mandatory { get; set; } = true;
 
+        /// <summary>P2 part E: the code of the characteristic (as the measuring cycle or the gauge reports it, e.g. "D1").</summary>
+        public string Characteristic { get; set; }
+
+        /// <summary>P2 part E: the value is taken only from a machine probe or a digital gauge, never typed.</summary>
+        public bool DeviceOnly { get; set; }
+
         /// <summary>A removed item stays for the answers given to it.</summary>
         public bool IsActive { get; set; } = true;
     }
@@ -70,6 +76,9 @@ namespace Entities.Model.NasbNiro.Production
         public decimal? Value { get; set; }
         public string Text { get; set; }
         public bool Passed { get; set; }
+
+        /// <summary>P2 part E: the device measurement the value came from (null: typed).</summary>
+        public long? MeasurementId { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ staff performance events

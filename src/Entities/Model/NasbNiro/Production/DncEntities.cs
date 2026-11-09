@@ -179,6 +179,20 @@ namespace Entities.Model.NasbNiro.Production
         public DateTimeOffset? RejectedAt { get; set; }
         public string RejectReason { get; set; }
 
+        // ------------------------------------------------------------------ P2 part E: what the revision was made with and how it was proven
+
+        /// <summary>The approved post processor the program was made with.</summary>
+        public int? PostProcessorId { get; set; }
+
+        /// <summary>The CAM system (PowerMill, Mastercam, NX ...), as the programmer named it.</summary>
+        public string CamSystem { get; set; }
+
+        /// <summary>The simulation report of the CAM system or of an independent G-code simulator (stored as an attachment).</summary>
+        public int? SimulationAttachmentId { get; set; }
+
+        /// <summary>The tools the CAM program uses (rows in MfCamTools).</summary>
+        public int ToolCount { get; set; }
+
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
@@ -256,5 +270,24 @@ namespace Entities.Model.NasbNiro.Production
         public MfBookingKind Kind { get; set; }
         public DateTime StartedAt { get; set; }
         public int RecordedByUserId { get; set; }
+
+        // ------------------------------------------------------------------ P2 part E: what the machine itself confirmed at the start
+
+        /// <summary>The fingerprint of the program read back from the control at the start (equal to the revision's, or the start was refused).</summary>
+        public string VerifiedSha256 { get; set; }
+
+        public DateTime? VerifiedAt { get; set; }
+
+        /// <summary>The first run of this revision on this machine: it has to be proven (single block or reduced feed, seen by the data link).</summary>
+        public bool ProveOut { get; set; }
+
+        /// <summary>The data link saw the prove-out conditions during the run (null: not judged yet).</summary>
+        public bool? ProveOutObserved { get; set; }
+
+        /// <summary>The tool table of the control matched the CAM tool list at the start (null: no tool list or no link).</summary>
+        public bool? ToolsVerified { get; set; }
+
+        /// <summary>The one-time override of the production manager the start used (MfGateOverrides).</summary>
+        public int? OverrideId { get; set; }
     }
 }

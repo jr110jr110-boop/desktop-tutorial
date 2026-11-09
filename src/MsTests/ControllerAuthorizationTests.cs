@@ -28,6 +28,8 @@ namespace MsTests
             "ApiSettingsController.Get", "OfficeAttendanceController.PushAsync",
             // P2 (DNC): the edge box at a machine proves itself with the machine's own key (hashed, address-bound like the attendance devices)
             "ProductionDncGatewayController.JobsAsync", "ProductionDncGatewayController.ContentAsync", "ProductionDncGatewayController.ResultAsync", "ProductionDncGatewayController.UploadAsync", "ProductionDncGatewayController.StatusAsync",
+            // P2 part E: a gauge interface proves itself with its station key (hashed, bound to its addresses)
+            "ProductionMeasureDeviceController.PushAsync",
         };
 
         /// <summary>

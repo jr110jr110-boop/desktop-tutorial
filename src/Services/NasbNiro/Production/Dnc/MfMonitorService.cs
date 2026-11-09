@@ -50,8 +50,12 @@ namespace Services.NasbNiro.Production.Dnc
         /// <summary>Server local time (the bookings use it too); replaceable in tests.</summary>
         internal Func<DateTime> Clock { get; set; } = () => DateTime.Now;
 
-        public MfMonitorService(IUnitOfWork uow, IInventoryUserContext user, IMfModbusReader modbus = null, INotificationService notify = null, Microsoft.Extensions.Configuration.IConfiguration configuration = null)
+        private readonly IMfGuardService _guard;
+
+        public MfMonitorService(IUnitOfWork uow, IInventoryUserContext user, IMfModbusReader modbus = null, INotificationService notify = null, Microsoft.Extensions.Configuration.IConfiguration configuration = null,
+            IMfGuardService guard = null)
         {
+            _guard = guard;
             _configuration = configuration;
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
@@ -135,6 +139,8 @@ namespace Services.NasbNiro.Production.Dnc
             }
             if (dto.Source == MfMonitorSource.GatewayPush && !await _uow.Set<MfMachineConnection>().AnyAsync(c => !c.Deleted && c.MachineId == dto.MachineId && c.LinkKind == MfNcLinkKind.EdgeGateway, ct))
                 return Bad<MachineMonitorDto>("برای دریافت وضعیت از گیت‌وی، ابتدا اتصال DNC ماشین را «گیت‌وی لبه» تعریف و کلید آن را صادر کنید.");
+            if (dto.Source == MfMonitorSource.ControlLink && !await _uow.Set<MfMachineMonitor>().AnyAsync(x => x.MachineId == dto.MachineId && !x.Deleted && x.DataLink == MfDataLinkKind.Lsv2Tcp, ct))
+                return Bad<MachineMonitorDto>("برای گرفتن وضعیت از خود کنترلر، ابتدا اتصال داده LSV2 ماشین را در صفحه «پایش اپراتور و قفل استارت» تعریف کنید.");
             if (dto.PollSeconds is < 2 or > 3600) return Bad<MachineMonitorDto>("فاصله پایش بین ۲ ثانیه و یک ساعت است.");
             if (dto.MismatchMinutes < 1 || dto.MismatchMinutes > 1440) return Bad<MachineMonitorDto>("آستانه ناهمخوانی بین ۱ و ۱۴۴۰ دقیقه است.");
             MfMachineMonitor row = await _uow.Set<MfMachineMonitor>().FirstOrDefaultAsync(x => x.MachineId == dto.MachineId && !x.Deleted, ct);
@@ -318,6 +324,17 @@ namespace Services.NasbNiro.Production.Dnc
             m.LastSeenAt = new DateTimeOffset(now); m.LastProgramName = Cut(Clean(dto.ProgramName), 200); m.LastSpindleRpm = dto.SpindleRpm; m.LastFeedOverride = dto.FeedOverride; m.LastPartCount = dto.PartCount;
             var result = new MonitorPollResultDto();
             await ApplyAsync(m, dto.State, MfMonitorSource.GatewayPush, dto.AlarmCode, dto.AlarmText, now, result, ct);
+            // P2 part E: the box is also the machine's data link (mode, program state, overrides, program fingerprint)
+            if (_guard != null && m.DataLink == MfDataLinkKind.GatewayPush)
+            {
+                if ((dto.ExecMode.HasValue && !Enum.IsDefined(typeof(MfExecMode), dto.ExecMode.Value)) || (dto.ProgramState.HasValue && !Enum.IsDefined(typeof(MfProgramState), dto.ProgramState.Value)))
+                    return Bad<LiveMachineDto>(MfText.InvalidData);
+                await _guard.ApplyPushAsync(m, new ControlSnapshot
+                {
+                    ExecMode = dto.ExecMode, ProgramState = dto.ProgramState, FeedOverride = dto.FeedOverride, SpindleOverride = dto.SpindleOverride, SelectedProgram = dto.ProgramName,
+                    ToolNumber = dto.ToolNumber, BlockNumber = dto.BlockNumber,
+                }, dto.ProgramSha256, now, ct);
+            }
             string title = await _uow.Set<Machine>().AsNoTracking().Where(x => x.Id == machineId).Select(x => x.Title).FirstOrDefaultAsync(ct);
             await SaveAsync(new Dictionary<int, string> { [machineId] = title }, ct);
             await AlertsAsync(new List<MfMachineMonitor> { m }, new Dictionary<int, string> { [machineId] = title }, now, ct);

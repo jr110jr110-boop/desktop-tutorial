@@ -245,6 +245,12 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.Dnc.IMfChecklistService, Services.NasbNiro.Production.Dnc.MfChecklistService>();
             services.AddScoped<Services.NasbNiro.Production.Dnc.IHrEventService, Services.NasbNiro.Production.Dnc.HrEventService>();
             services.AddScoped<Services.NasbNiro.Production.Dnc.IMfCameraService, Services.NasbNiro.Production.Dnc.MfCameraService>();
+            // production P2 part E: the guarded machining process (data link to the control, start interlock, measurements, CAM evidence)
+            services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfControlLinkFactory, Services.NasbNiro.Production.Dnc.MfControlLinkFactory>();
+            services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfCoilWriter, Services.NasbNiro.Production.Dnc.ModbusCoilWriter>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfGuardService, Services.NasbNiro.Production.Dnc.MfGuardService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfCamEvidenceService, Services.NasbNiro.Production.Dnc.MfCamEvidenceService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfMeasureService, Services.NasbNiro.Production.Dnc.MfMeasureService>();
             services.AddHostedService<Services.NasbNiro.Production.Dnc.MfDncHostedService>();
             // sales (release S1 part A)
             services.AddScoped<Services.NasbNiro.Sales.ISlCrmService, Services.NasbNiro.Sales.SlCrmService>();

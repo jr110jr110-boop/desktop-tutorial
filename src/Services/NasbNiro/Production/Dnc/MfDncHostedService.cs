@@ -66,6 +66,15 @@ namespace Services.NasbNiro.Production.Dnc
                 catch (Exception ex) { _logger?.LogWarning(ex, "DNC transfer job failed; it runs again shortly."); }
                 try
                 {
+                    // P2 part E: the data links to the controls (what the operator does on the machine), then the start interlocks
+                    using IServiceScope scope = _scopes.CreateScope();
+                    var g = await scope.ServiceProvider.GetRequiredService<IMfGuardService>().PollAsync(stoppingToken);
+                    if (g.Activities > 0 || g.Unapproved > 0) _logger?.LogInformation("Guard: {Activities} activities, {Unapproved} unapproved programs, {Measurements} measurements", g.Activities, g.Unapproved, g.Measurements);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Machine data link poll failed; it runs again shortly."); }
+                try
+                {
                     // P2 part B: the live monitoring (each monitor is polled at its own interval; silent gateways go offline)
                     using IServiceScope scope = _scopes.CreateScope();
                     var m = await scope.ServiceProvider.GetRequiredService<IMfMonitorService>().PollAsync(stoppingToken);

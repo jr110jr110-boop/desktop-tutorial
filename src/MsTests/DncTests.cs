@@ -768,7 +768,8 @@ namespace MsTests
             public Flow()
             {
                 Directory.CreateDirectory(FolderRoot);
-                var settings = new Dictionary<string, string> { ["Dnc:AllowLoopback"] = "true", ["Dnc:FolderRoots:0"] = FolderRoot };
+                // P2 part E: the CAM evidence at submit has its own tests (GuardTests); this flow is about the program library and the transfers
+                var settings = new Dictionary<string, string> { ["Dnc:AllowLoopback"] = "true", ["Dnc:FolderRoots:0"] = FolderRoot, ["Dnc:RequireCamEvidence"] = "false" };
                 Provider = CeoOverviewServiceTests.InMemory(s =>
                 {
                     s.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());

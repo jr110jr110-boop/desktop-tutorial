@@ -130,6 +130,7 @@ namespace Services.NasbNiro.Production.Dnc
             Items = (t?.Items ?? new List<MfChecklistItem>()).Where(i => i.IsActive).OrderBy(i => i.Sequence).Select(i => new ChecklistItemDto
             {
                 Id = i.Id, Sequence = i.Sequence, Text = i.Text, Kind = i.Kind, Nominal = i.Nominal, Min = i.Min, Max = i.Max, Unit = i.Unit, Mandatory = i.Mandatory,
+                Characteristic = i.Characteristic, DeviceOnly = i.DeviceOnly,
             }).ToList(),
             RowVersion = MfConcurrency.Text(t?.RowVersion),
         };
@@ -153,6 +154,10 @@ namespace Services.NasbNiro.Production.Dnc
                 if (string.IsNullOrWhiteSpace(i.Text) || i.Text.Length > 1000 || !Enum.IsDefined(typeof(MfChecklistItemKind), i.Kind)) return Bad<ChecklistTemplateDto>("متن و نوع همه بندها را درست وارد کنید.");
                 if (i.Kind == MfChecklistItemKind.Measure && !i.Min.HasValue && !i.Max.HasValue) return Bad<ChecklistTemplateDto>($"برای بند اندازه‌گیری «{i.Text}» حد پایین یا بالا را وارد کنید.");
                 if (i.Min.HasValue && i.Max.HasValue && i.Min > i.Max) return Bad<ChecklistTemplateDto>($"حد پایین بند «{i.Text}» از حد بالای آن بیشتر است.");
+                string code = MfText.Clean(i.Characteristic)?.ToUpperInvariant();
+                if (code != null && !MfMeasureService.Characteristic.IsMatch(code)) return Bad<ChecklistTemplateDto>($"کد مشخصه بند «{i.Text}» نامعتبر است (حرف لاتین در ابتدا، حداکثر ۵۰ نویسه؛ مثل D1).");
+                if (i.DeviceOnly && (i.Kind != MfChecklistItemKind.Measure || code == null))
+                    return Bad<ChecklistTemplateDto>($"بند «{i.Text}»: «فقط از دستگاه اندازه‌گیری» برای بند اندازه‌گیری با کد مشخصه است.");
             }
             MfChecklistTemplate t = await _uow.Set<MfChecklistTemplate>().Include(x => x.Items).FirstOrDefaultAsync(x => !x.Deleted && x.OperationTemplateId == dto.OperationTemplateId, ct);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -173,6 +178,7 @@ namespace Services.NasbNiro.Production.Dnc
                 if (row == null) { row = new MfChecklistItem(); t.Items.Add(row); }
                 else keep.Add(row.Id);
                 row.Sequence = seq; row.Text = i.Text.Trim(); row.Kind = i.Kind; row.Nominal = i.Nominal; row.Min = i.Min; row.Max = i.Max; row.Unit = MfText.Clean(i.Unit); row.Mandatory = i.Mandatory; row.IsActive = true;
+                row.Characteristic = MfText.Clean(i.Characteristic)?.ToUpperInvariant(); row.DeviceOnly = i.DeviceOnly;
             }
             foreach (MfChecklistItem old in t.Items.Where(x => x.Id > 0 && !keep.Contains(x.Id))) old.IsActive = false;
             try { await _uow.SaveChangesAsync(ct); }
@@ -200,7 +206,7 @@ namespace Services.NasbNiro.Production.Dnc
                 dto.ResultId = r.Id; dto.Status = r.Status; dto.AllPassed = r.AllPassed; dto.FilledByName = ExtrasShared.NameOf(names, r.FilledByUserId);
                 dto.SubmittedAtText = MfText.Stamp(r.SubmittedAt); dto.ReviewedByName = ExtrasShared.NameOf(names, r.ReviewedByUserId); dto.ReviewedAtText = MfText.Stamp(r.ReviewedAt);
                 dto.ReviewNote = r.ReviewNote; dto.RowVersion = MfConcurrency.Text(r.RowVersion);
-                dto.Answers = r.Answers.Select(a => new ChecklistAnswerDto { ItemId = a.ItemId, YesNo = a.YesNo, Value = a.Value, Text = a.Text, Passed = a.Passed }).ToList();
+                dto.Answers = r.Answers.Select(a => new ChecklistAnswerDto { ItemId = a.ItemId, YesNo = a.YesNo, Value = a.Value, Text = a.Text, Passed = a.Passed, MeasurementId = a.MeasurementId }).ToList();
                 if (r.Status == MfChecklistStatus.Submitted && reviewer && r.FilledByUserId != Me) { dto.AllowedActions.Add("approve"); dto.AllowedActions.Add("reject"); }
             }
             if (filler && (r == null || r.Status == MfChecklistStatus.Draft || r.Status == MfChecklistStatus.Rejected) && op.Status != MfOperationStatus.Done && op.Status != MfOperationStatus.Skipped)
@@ -234,14 +240,43 @@ namespace Services.NasbNiro.Production.Dnc
                 if (!MfConcurrency.Apply(_uow, r, dto.RowVersion)) return Bad<OperationChecklistDto>(MfText.Concurrency);
             }
             var items = t.Items.Where(i => i.IsActive).ToDictionary(i => i.Id);
+            // P2 part E: a device-only item takes the last value a probe or gauge reported for this operation; a typed value counts only under the production manager's one-time override
+            DateTimeOffset nowAt = DateTimeOffset.Now;
+            MfGateOverride manual = items.Values.Any(i => i.DeviceOnly)
+                ? await _uow.Set<MfGateOverride>().Where(o => !o.Deleted && o.OperationId == op.Id && o.Gate == "measurement" && o.ConsumedAt == null && o.ExpiresAt > nowAt).OrderBy(o => o.Id).FirstOrDefaultAsync(ct)
+                : null;
+            bool manualUsed = false;
             foreach (var a in dto.Answers ?? new List<ChecklistAnswerDto>())
             {
                 if (!items.TryGetValue(a.ItemId, out MfChecklistItem item)) return Bad<OperationChecklistDto>("بند چک‌لیست پیدا نشد.");
                 if (a.Text != null && a.Text.Length > 1000) return Bad<OperationChecklistDto>("متن پاسخ حداکثر ۱۰۰۰ نویسه است.");
                 MfChecklistAnswer row = r.Answers.FirstOrDefault(x => x.ItemId == a.ItemId);
                 if (row == null) { row = new MfChecklistAnswer { ItemId = a.ItemId }; r.Answers.Add(row); }
+                if (item.DeviceOnly) continue;   // filled below from the devices
                 row.YesNo = a.YesNo; row.Value = a.Value; row.Text = MfText.Clean(a.Text); row.Passed = MfChecklistRules.Passed(item, row.YesNo, row.Value, row.Text);
             }
+            foreach (MfChecklistItem item in items.Values.Where(i => i.DeviceOnly))
+            {
+                MfMeasurement last = await _uow.Set<MfMeasurement>().AsNoTracking().Where(m => m.OperationId == op.Id && m.Characteristic == item.Characteristic)
+                    .OrderByDescending(m => m.At).ThenByDescending(m => m.Id).FirstOrDefaultAsync(ct);
+                MfChecklistAnswer row = r.Answers.FirstOrDefault(x => x.ItemId == item.Id);
+                ChecklistAnswerDto typed = (dto.Answers ?? new List<ChecklistAnswerDto>()).FirstOrDefault(x => x.ItemId == item.Id);
+                if (last != null)
+                {
+                    if (row == null) { row = new MfChecklistAnswer { ItemId = item.Id }; r.Answers.Add(row); }
+                    row.Value = last.Value; row.MeasurementId = last.Id; row.YesNo = null;
+                    row.Text = (last.Source == MfMeasurementSource.Probe ? "پراب ماشین" : "گیج دیجیتال") + (last.Device != null ? " · " + last.Device : "");
+                }
+                else if (manual != null && typed?.Value != null)
+                {
+                    if (row == null) { row = new MfChecklistAnswer { ItemId = item.Id }; r.Answers.Add(row); }
+                    row.Value = typed.Value; row.MeasurementId = null; row.YesNo = null; row.Text = "مقدار دستی با مجوز یک‌باره مدیر تولید #" + manual.Id;
+                    manualUsed = true;
+                }
+                else if (row != null) { row.Value = null; row.MeasurementId = null; row.Text = null; }
+                if (row != null) row.Passed = MfChecklistRules.Passed(item, row.YesNo, row.Value, row.Text);
+            }
+            if (manualUsed && dto.Submit) manual.ConsumedAt = nowAt;
             r.AllPassed = MfChecklistRules.AllPassed(items.Values, r.Answers);
             r.FilledByUserId = Me; r.ModifyDate = now; r.ModifierUserId = Me;
             if (dto.Submit)

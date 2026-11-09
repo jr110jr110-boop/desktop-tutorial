@@ -620,6 +620,12 @@ namespace Services.NasbNiro.Production.Dnc
                         await SaveQuietAsync(ct);
                         return Bad<NcRevisionDto>("برنامه خطای بررسی دارد و برای تأیید ارسال نمی‌شود (" + a.ErrorCount + " خطا).");
                     }
+                    // P2 part E: the approved post processor, the simulation report and the CAM tool list go with the program (Dnc:RequireCamEvidence, default on)
+                    if (MfCamEvidence.Required(_configuration))
+                    {
+                        List<string> missing = await MfCamEvidence.MissingAsync(_uow, r, p.ControllerFamily, ct);
+                        if (missing.Count > 0) { await SaveQuietAsync(ct); return Bad<NcRevisionDto>("مدارک CAM نسخه کامل نیست: " + string.Join("؛ ", missing) + "."); }
+                    }
                     r.Status = MfNcRevisionStatus.Submitted; r.SubmittedByUserId = Me; r.SubmittedAt = now;
                     break;
                 }
@@ -655,6 +661,11 @@ namespace Services.NasbNiro.Production.Dnc
                     {
                         MfNcRevision old = await _uow.Set<MfNcRevision>().FirstOrDefaultAsync(x => x.Id == p.CurrentRevisionId.Value, ct);
                         if (old != null && old.Status == MfNcRevisionStatus.Approved) { old.Status = MfNcRevisionStatus.Superseded; old.ModifyDate = now; old.ModifierUserId = Me; }
+                    }
+                    if (MfCamEvidence.Required(_configuration))
+                    {
+                        List<string> missing = await MfCamEvidence.MissingAsync(_uow, r, p.ControllerFamily, ct);
+                        if (missing.Count > 0) { await SaveQuietAsync(ct); return Bad<NcRevisionDto>("مدارک CAM نسخه کامل نیست و تأیید نمی‌شود: " + string.Join("؛ ", missing) + "."); }
                     }
                     r.Status = MfNcRevisionStatus.Approved; r.ApprovedByUserId = Me; r.ApprovedAt = now;
                     p.CurrentRevisionId = r.Id; p.ModifyDate = now; p.ModifierUserId = Me;
