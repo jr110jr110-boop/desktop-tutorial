@@ -34,7 +34,7 @@ namespace MsTests
     /// and runs the query of the rule itself: the violating record is found, the compliant one is not. The test method of a rule is named after its code (AUD-CAL-001 = AUD_CAL_001); the last test makes sure no rule is without one.
     /// </summary>
     [TestClass]
-    public class PackageP9RuleTests
+    public partial class PackageP9RuleTests
     {
         private static readonly CancellationToken Ct = CancellationToken.None;
         private static DateTime Today => DateTime.Today;

@@ -889,6 +889,7 @@ namespace Services.NasbNiro.Procurement
                         Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = Math.Round(l.Quantity * l.UnitPrice, 0), DeliveryDate = l.DeliveryDate,
                         WorkOrderId = l.WorkOrderId, ContractId = l.ContractId, IsCapital = l.IsCapital, ReceivedQuantity = l.ReceivedQuantity, AcceptedQuantity = acc,
                         InvoicedQuantity = l.InvoicedQuantity, OpenQuantity = Math.Max(0, l.Quantity - l.ReceivedQuantity), LastReceiptDate = l.LastReceiptDate,
+                        DrawingNumber = l.DrawingNumber, DrawingRevision = l.DrawingRevision, DrawingConfirmedRevision = l.SupplierConfirmedRevision,
                         Late = (l.DeliveryDate ?? o.DeliveryDate).HasValue && l.ReceivedQuantity < l.Quantity && (l.DeliveryDate ?? o.DeliveryDate) < DateTime.Today &&
                                o.Status != PurchaseOrderStatus.Closed && o.Status != PurchaseOrderStatus.Cancelled,
                     });
@@ -1122,6 +1123,7 @@ namespace Services.NasbNiro.Procurement
                 line.RowNumber = rowNumber++; line.RequestLineId = l.RequestLineId; line.ItemId = l.ItemId; line.Description = Clean(l.Description); line.Unit = Clean(l.Unit) ?? "عدد";
                 line.Quantity = l.Quantity; line.UnitPrice = Math.Round(l.UnitPrice * rate, 4); line.DeliveryDate = l.DeliveryDate?.Date ?? order.DeliveryDate;
                 line.WorkOrderId = l.WorkOrderId ?? dto.WorkOrderId; line.ContractId = l.ContractId ?? dto.ContractId; line.IsCapital = l.IsCapital;
+                await global::Services.NasbNiro.GoLive.PoDrawingCitation.CiteAsync(_uow, line, await global::Services.NasbNiro.Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken), cancellationToken);   // Package G: the drawing and revision in force
             }
             List<PurchaseOrderLine> dropped = existingLines.Where(e => !reused.Contains(e.Id)).ToList();
             if (dropped.Count > 0)
@@ -1255,6 +1257,12 @@ namespace Services.NasbNiro.Procurement
                     break;
                 default:
                     return Bad<PurchaseOrderDto>("عمل نامعتبر است.");
+            }
+            if (o.Status == PurchaseOrderStatus.Approved || o.Status == PurchaseOrderStatus.Released)
+            {
+                // Package G (ISO 9001 8.4.3): the order is approved and released with the drawing revision in force at that time
+                Dictionary<string, decimal> glSettings = await global::Services.NasbNiro.Quality.QualitySettingKeys.LoadAsync(_uow, cancellationToken);
+                foreach (PurchaseOrderLine cited in o.Lines) await global::Services.NasbNiro.GoLive.PoDrawingCitation.CiteAsync(_uow, cited, glSettings, cancellationToken);
             }
             o.ModifyDate = now;
             o.ModifierUserId = Me;

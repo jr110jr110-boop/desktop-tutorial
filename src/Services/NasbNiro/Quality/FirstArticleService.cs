@@ -36,6 +36,10 @@ namespace Services.NasbNiro.Quality
         /// <summary>The routing step after which nothing runs until the FAI is approved (sequence number).</summary>
         public int? PointSequence { get; set; }
         public QcFirstArticle Satisfying { get; set; }
+
+        /// <summary>Package G: the automatic first article was not opened because every drawing revision of the part was released before the cut-over (the note says so; the release registers the use).</summary>
+        public bool Legacy { get; set; }
+        public string LegacyNote { get; set; }
     }
 
     /// <summary>
@@ -57,6 +61,18 @@ namespace Services.NasbNiro.Quality
             // H2: a part with a drawing in force always gets its first article after a new revision; a missing list is a refusal (below), never a way out
             bool onNewRevision = st[QualitySettingKeys.PkbFaiOnNewRevision] >= 1 && resolved.HasDrawing;
             if (flaggedOp == null && !onNewRevision) return req;
+            // Package G: a part whose drawing revisions were all released before the cut-over does not open a first article automatically (a flagged routing step still does); a revision released after it does
+            if (flaggedOp == null)
+            {
+                DateTimeOffset cutOver = await global::Services.NasbNiro.GoLive.CutOver.StartAsync(uow, st, ct);
+                if (global::Services.NasbNiro.GoLive.CutOver.DrawingsAreLegacy(resolved.Drawings, cutOver))
+                {
+                    req.Legacy = true;
+                    req.ItemId = order.ItemId;
+                    req.LegacyNote = $"نمونه اول خودکار باز نشد: همه بازنگری‌های نقشه این قطعه ({resolved.DrawingNumber}، بازنگری {resolved.DrawingRevision}) پیش از آغاز کنترل پیکربندی ({(global::Services.NasbNiro.GoLive.CutOver.Text(cutOver))}) منتشر شده‌اند.";
+                    return req;
+                }
+            }
 
             var item = await uow.Set<InventoryItem>().AsNoTracking().Where(i => i.Id == order.ItemId.Value).Select(i => new { i.Id, i.Code, i.PartNumber }).FirstAsync(ct);
             req.ItemId = item.Id; req.PartNumber = item.PartNumber ?? item.Code;
@@ -92,6 +108,8 @@ namespace Services.NasbNiro.Quality
         public static async Task<string> EnsureAtReleaseAsync(IUnitOfWork uow, MfProductionOrder order, IEnumerable<MfOperation> ops, int userId, DateTimeOffset now, CancellationToken ct)
         {
             FaiRequirement req = await EvaluateAsync(uow, order, ops, ct);
+            if (req.Legacy)
+                await global::Services.NasbNiro.GoLive.GlLegacyRegister.NoteAsync(uow, global::Entities.Model.NasbNiro.GoLive.GlLegacyKind.FaiNotOpened, "MfProductionOrder:" + (string.IsNullOrEmpty(order.Number) ? order.Id.ToString() : order.Number), order.WorkOrderId, order.ItemId, null, order.Number, req.LegacyNote, userId, ct);
             if (!req.Required) return null;
             if (req.Problem != null) return req.Problem;
             QcFirstArticle live = await uow.Set<QcFirstArticle>().FirstOrDefaultAsync(f => !f.Deleted && f.ItemId == req.ItemId && f.Fingerprint == req.Fingerprint

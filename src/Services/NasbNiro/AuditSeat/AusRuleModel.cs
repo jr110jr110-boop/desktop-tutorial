@@ -274,6 +274,7 @@ namespace Services.NasbNiro.AuditSeat
             list.AddRange(EngineeringRules());
             list.AddRange(ProjectRules());
             list.AddRange(SupportRules());
+            list.AddRange(GoLiveRules());
             return list;
         });
 
@@ -285,7 +286,7 @@ namespace Services.NasbNiro.AuditSeat
         private static readonly HashSet<string> EventRules = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "AUD-MC-001", "AUD-MC-002", "AUD-MC-003", "AUD-MC-004", "AUD-MC-005", "AUD-MC-006", "AUD-EX-005", "AUD-DC-001", "AUD-DC-002", "AUD-BL-001", "AUD-QL-001", "AUD-QL-002", "AUD-QL-003", "AUD-QL-004",
-            "AUD-CAL-002", "AUD-NC-003", "AUD-SP-001", "AUD-AI-001", "AUD-INT-004", "AUD-DS-003", "AUD-EC-003", "AUD-LB-001",
+            "AUD-CAL-002", "AUD-NC-003", "AUD-SP-001", "AUD-AI-001", "AUD-INT-004", "AUD-DS-003", "AUD-EC-003", "AUD-LB-001", "AUD-CO-002", "AUD-CO-003",
         };
 
         internal static AusRuleDef Def(string code, string process, AusSeverity severity, string title, string standard, string clause, string procedure, string summary, bool incremental, Func<AusContext, Task<List<AusHit>>> query, string ownerRole = null) =>

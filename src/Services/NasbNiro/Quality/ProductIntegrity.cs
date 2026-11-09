@@ -23,6 +23,9 @@ namespace Services.NasbNiro.Quality
     {
         public bool Applicable { get; set; }
         public string NotApplicableReason { get; set; }
+
+        /// <summary>Package G: a project work order created before the cut-over that has no product-bank baseline: shown as not applicable WITH the note, never silently; the release registers the use.</summary>
+        public bool Legacy { get; set; }
         public List<PcaLineDto> Lines { get; } = new List<PcaLineDto>();
         public List<string> Problems => Lines.Where(l => l.Problem != null).Select(l => $"{l.PartNumber}: {l.Problem}").ToList();
         public bool Passed => !Applicable || Lines.All(l => l.Problem == null);
@@ -46,6 +49,14 @@ namespace Services.NasbNiro.Quality
                 if (!isProject)
                 {
                     result.NotApplicableReason = "اعمال نمی‌شود: این دستور کار پروژه‌ای نیست (ساخت برای موجودی انبار) و BOM پروژه ندارد.";
+                    return result;
+                }
+                // Package G: a work order that exists from before the cut-over is shown as legacy (not applicable, with the note); after the cut-over the rule below stands
+                DateTimeOffset cutOver = await global::Services.NasbNiro.GoLive.CutOver.StartAsync(uow, ct);
+                if (await global::Services.NasbNiro.GoLive.CutOver.WorkOrderIsLegacyAsync(uow, workOrderId, cutOver, ct))
+                {
+                    result.Legacy = true;
+                    result.NotApplicableReason = $"{(global::Services.NasbNiro.GoLive.GlText.PcaLegacy)} ({(global::Services.NasbNiro.GoLive.CutOver.Text(cutOver))}): این دستور کار پروژه‌ای پیش از آن ساخته شده و BOM پروژه (baseline) از بانک محصول ندارد؛ ممیزی پیکربندی فیزیکی انجام نشده و ترخیص مسدود نمی‌شود. برای ورود به کنترل، «پذیرش پیکربندی پروژه موجود» را ثبت کنید.";
                     return result;
                 }
                 // H3: a project work order without its BOM baseline cannot be audited, so it cannot be released

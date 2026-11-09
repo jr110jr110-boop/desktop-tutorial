@@ -324,6 +324,9 @@ namespace Entities.Model.NasbNiro.ProjectControl
 
         /// <summary>P-B7b: the revision this line sends (E7). The Revision text is then its code.</summary>
         public int? RevisionId { get; set; }
+
+        /// <summary>Package G: the revision text was typed for a document that has no revision record in the EDMS (a legacy register row). New lines of documents with revision records always come from the record.</summary>
+        public bool LegacyFreeText { get; set; }
         public PcTransmittalPurpose Purpose { get; set; }
         public string ResponseCode { get; set; }
         public DateTime? ResponseDate { get; set; }

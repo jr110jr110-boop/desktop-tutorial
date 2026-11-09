@@ -12665,6 +12665,73 @@ airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: a second run of the same da
 as "$PLAN_TOKEN" GET remote/status; check "remote access: switched off on the CI server and the caller is local" '.success and .data.enabled == false and .data.remote == false and .data.readOnly == false and .data.allowed == true'
 TOKEN=$ADMIN_TOKEN
 
+# --- PKG (Package G: go-live cut-over and remaining integrity gaps). Exact checks; every request is checked and no check sits between a request and the reads of its answer. The block is self-contained: it uses the tokens created above,
+# its own variables start with PKG, and the one weakening (the cut-over day moved far into the future so that every older work order and drawing is "legacy") is made through the two-person route and put back at once.
+TOKEN=$ADMIN_TOKEN
+as "$ADMIN_TOKEN" GET go-live/overview; check "pkg overview: the cut-over instant is recorded at the first start, nothing is legacy yet and the register is a list" '.success and (.data.controlStartAt != null) and .data.legacyWorkOrders == 0 and .data.legacyDrawingsWithoutList == 0 and .data.openCharAdoptions == 0 and .data.openConfigAdoptions == 0 and (.data.uses|type) == "array"'
+as "$QA_TOKEN" GET quality/settings; check "pkg settings: the four go-live settings start at their strict values (cut-over day 0 = the recorded start, 15 characters, citation on, revision from the EDMS on)" '.success and ([.data[]|select(.key=="Quality.ControlStartDate")|.value][0]) == 0 and ([.data[]|select(.key=="Gl.Legacy.ReasonMinChars")|.value][0]) == 15 and ([.data[]|select(.key=="Gl.Po.CiteDrawing")|.value][0]) == 1 and ([.data[]|select(.key=="Gl.Transmittal.RevisionFromEdms")|.value][0]) == 1'
+as "$ADMIN_TOKEN" GET safety/profile; check "pkg safety: the four go-live settings are on the safety profile and none deviates" '.success and ([.data[]|select(.store == "Quality" and (.key == "Quality.ControlStartDate" or .key == "Gl.Legacy.ReasonMinChars" or .key == "Gl.Po.CiteDrawing" or .key == "Gl.Transmittal.RevisionFromEdms"))]|length) == 4 and ([.data[]|select(.store == "Quality" and ((.key|startswith("Gl.")) or .key == "Quality.ControlStartDate") and (.deviates == true))]|length) == 0'
+as "$QA_TOKEN" POST quality/settings '{"key":"Quality.ControlStartDate","value":14990101}'; no "pkg safety: the cut-over day cannot be moved through the ordinary settings page"
+
+# --- the cut-over day moved far ahead: every older work order and drawing is legacy, and the adoption lists agree with the overview
+safety_set Quality Quality.ControlStartDate 14990101; check "pkg cut-over: moving the cut-over day later is a weakening that waits for a second person and is then applied" '.success and .data.status == "Approved" and .data.weakening == true and .data.newValue == "14990101"'
+as "$ADMIN_TOKEN" GET go-live/overview; check "pkg cut-over: the overview shows the Shamsi day 1499/01/01" '.success and .data.controlStartText == "1499/01/01"'
+PKGLEGWO=$(val .data.legacyWorkOrders); PKGLEGDW=$(val .data.legacyDrawingsWithoutList)
+as "$ENG_TOKEN" GET go-live/config-adoptions/candidates; check "pkg cut-over: the candidate list of the configuration adoption holds exactly the legacy work orders of the overview" ".success and (.data|length) == $PKGLEGWO and ([.data[]|select(.legacy != true)]|length) == 0"
+as "$ENG_TOKEN" GET go-live/char-adoptions/candidates; check "pkg cut-over: the candidate list of the characteristic adoption holds exactly the legacy drawings without a list" ".success and (.data|length) == $PKGLEGDW and ([.data[]|select(.hasList == true)]|length) == 0"
+
+# --- the adoption rules (roles, reasons, distinct persons)
+as "$ADMIN_TOKEN" POST go-live/config-adoptions '{"workOrderId":1,"productId":1,"bomHeaderId":1,"reason":"دلیل کافی برای آزمون پذیرش پیکربندی","evidenceRef":"مدرک آزمون","comparisonNote":"مقایسه BOM قدیمی با بانک محصول"}'; no "pkg adoption: the PMO is not an engineering preparer, so he cannot request a configuration adoption"
+as "$ENG_TOKEN" POST go-live/config-adoptions '{"workOrderId":0,"productId":0,"bomHeaderId":0}'; no "pkg adoption: an incomplete configuration adoption request is refused"
+as "$QA_TOKEN" POST go-live/char-adoptions '{"revisionId":1,"reason":"دلیل کافی برای آزمون پذیرش مشخصه","evidenceRef":"مدرک آزمون"}'; no "pkg adoption: QA is the checker, never the maker, so he cannot request a characteristic adoption"
+as "$ENG_TOKEN" POST go-live/char-adoptions '{"revisionId":999999,"reason":"دلیل کافی برای آزمون پذیرش مشخصه","evidenceRef":"مدرک آزمون"}'; no "pkg adoption: an unknown drawing revision is refused"
+as "$ENG_TOKEN" POST go-live/config-adoptions/action '{"id":999999,"action":"eng-review"}'; no "pkg adoption: an unknown adoption is refused"
+safety_set Quality Quality.ControlStartDate 0; check "pkg cut-over: the cut-over day is put back to the strict 0 with a second person" '.success and .data.status == "Approved" and .data.newValue == "0"'
+as "$ADMIN_TOKEN" GET go-live/overview; check "pkg cut-over: with the day back at 0 nothing is legacy again" '.success and .data.legacyWorkOrders == 0 and .data.legacyDrawingsWithoutList == 0'
+
+# --- the pre-check of the transmittal revision setting (its default is not changed)
+as "$PMO2_TOKEN" GET go-live/edms-revision-precheck; check "pkg transmittal: the pre-check answers, the setting is still 0 and the number of rows equals the number that would break" '.success and .data.currentlyRequired == false and .data.wouldBreak == (.data.rows|length) and (.data.summary|length) > 0'
+
+# --- purchase order lines: the stale-citation list and the supplier confirmation
+as "$COM_TOKEN" GET go-live/po-stale-lines; check "pkg po: no open order line cites a superseded drawing revision" '.success and (.data|length) == 0'
+as "$COM_TOKEN" POST go-live/po-confirm '{"lineId":999999,"reference":"نامه شماره ۱ آزمون"}'; no "pkg po: a confirmation of a line that needs none is refused"
+as "$ENG_TOKEN" POST go-live/po-confirm '{"lineId":1,"reference":"نامه شماره ۱ آزمون"}'; no "pkg po: only the commercial role records the supplier confirmation"
+
+# --- the CEO inbox: grouped, read only, closed to other roles
+as "$CEO_TOKEN" GET go-live/ceo-inbox; check "pkg ceo inbox: six groups in a fixed order and the total is the sum of the groups" '.success and ([.data.groups[].key]) == ["findings","acceptances","readiness","safety","chain","inbox"] and .data.total == ([.data.groups[].count]|add)'
+as "$COM_TOKEN" GET go-live/ceo-inbox; no "pkg ceo inbox: a commercial user cannot open the CEO inbox"
+as "$CEO_TOKEN" POST go-live/ceo-inbox '{}'; [ "$CODE" = "405" ] && ok "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page)" || bad "pkg ceo inbox: there is no bulk approve (POST is not allowed, each item is decided on its own page) (got HTTP $CODE)"
+
+# --- the controlled-copy stamp on a PDF (header and footer images drawn on every page)
+PKGDIR=$(mktemp -d)
+python3 - "$PKGDIR" <<'PY'
+import sys
+d = sys.argv[1]
+body = "%PDF-1.4\n"
+offs = []
+def obj(s):
+    global body
+    offs.append(len(body)); body += "%d 0 obj\n%s\nendobj\n" % (len(offs), s)
+obj("<< /Type /Catalog /Pages 2 0 R >>")
+obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>")
+obj("<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /ProcSet [/PDF] >> >>")
+c = "0 0 m 100 100 l S"
+obj("<< /Length %d >>\nstream\n%s\nendstream" % (len(c), c))
+x = len(body)
+body += "xref\n0 5\n0000000000 65535 f \n" + "".join("%010d 00000 n \n" % o for o in offs)
+body += "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % x
+open(d + "/in.pdf", "w", encoding="latin-1").write(body)
+open(d + "/h.raw", "wb").write(bytes([200, 30, 30, 255]) * (40 * 6))
+open(d + "/f.raw", "wb").write(bytes([30, 30, 30, 255]) * (40 * 3))
+PY
+PKGCODE=$(curl -s -o "$PKGDIR/out.pdf" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $ENG_TOKEN" -F "file=@$PKGDIR/in.pdf;type=application/pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "200" ] && ok "pkg stamp: the PDF is stamped (HTTP 200)" || bad "pkg stamp: the PDF is stamped (got HTTP $PKGCODE)"
+head -c 8 "$PKGDIR/out.pdf" | grep -q '^%PDF-1.4' && [ "$(grep -a -c 'GlStampH Do' "$PKGDIR/out.pdf")" = "1" ] && [ "$(grep -a -c 'GlStampF Do' "$PKGDIR/out.pdf")" = "1" ] && cmp -n "$(stat -c %s "$PKGDIR/in.pdf")" "$PKGDIR/in.pdf" "$PKGDIR/out.pdf" && ok "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page" || bad "pkg stamp: the original bytes are kept and the header and footer are drawn once on the one page"
+printf 'not a pdf, plain text of some length' > "$PKGDIR/bad.pdf"
+PKGCODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/go-live/stamp-pdf" -H "Authorization: Bearer $ENG_TOKEN" -F "file=@$PKGDIR/bad.pdf" -F "headerRgba=@$PKGDIR/h.raw" -F "footerRgba=@$PKGDIR/f.raw" -F headerWidth=40 -F headerHeight=6 -F footerWidth=40 -F footerHeight=3)
+[ "$PKGCODE" = "422" ] && check "pkg stamp: a file that is not a PDF is refused with a Persian message (HTTP 422)" '.success == false and (.message|length) > 0' || bad "pkg stamp: a file that is not a PDF is refused with a Persian message (got HTTP $PKGCODE)"
+rm -rf "$PKGDIR"
+
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":100000}]}"; check "pb2 fix: the receipt draft of 1 ring part is saved into quarantine (the part needs incoming inspection)" '.success and .data.id > 0'; PB2RC=$(val .data.id)

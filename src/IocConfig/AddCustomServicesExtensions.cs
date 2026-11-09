@@ -216,6 +216,12 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProductBank.IDesignInputService, Services.NasbNiro.ProductBank.DesignInputService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IDesignReviewService, Services.NasbNiro.ProductBank.DesignReviewService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IDesignAdoptionService, Services.NasbNiro.ProductBank.DesignAdoptionService>();
+            // Package G (go-live cut-over): adoption workflows, overview / CEO inbox, purchase-order drawing citation, activation record
+            services.AddScoped<Services.NasbNiro.GoLive.IGlCharAdoptionService, Services.NasbNiro.GoLive.GlCharAdoptionService>();
+            services.AddScoped<Services.NasbNiro.GoLive.IGlConfigAdoptionService, Services.NasbNiro.GoLive.GlConfigAdoptionService>();
+            services.AddScoped<Services.NasbNiro.GoLive.IGoLiveOverviewService, Services.NasbNiro.GoLive.GoLiveOverviewService>();
+            services.AddScoped<Services.NasbNiro.GoLive.IPoCitationService, Services.NasbNiro.GoLive.PoCitationService>();
+            services.AddHostedService<Services.NasbNiro.GoLive.GoLiveHostedService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
             services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();

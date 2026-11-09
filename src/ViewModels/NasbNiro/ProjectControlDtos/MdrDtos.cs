@@ -121,6 +121,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string Title { get; set; }
         public string Revision { get; set; }
 
+        /// <summary>Package G: the revision is a legacy free text (the document has no EDMS revision record); read-only.</summary>
+        public bool LegacyFreeText { get; set; }
+
         /// <summary>P-B7b: the revision that is sent. A document with revisions is sent by revision id (a released one; for information also one under review or approved).</summary>
         public int? RevisionId { get; set; }
 

@@ -55,6 +55,9 @@ namespace Services.NasbNiro.ProjectControl
             {
                 RevisionId = r.Id, DocumentNumber = d.DocumentNumber, Title = d.Title, Code = r.Code, PrintedAt = now, PrintedByUserId = Me, PrintedByName = name,
                 StampText = EdmsRules.StampText(d.DocumentNumber, r.Code, global::Services.NasbNiro.Finance.FiscalCalendars.Current.TextTime(now.DateTime), name), DocumentId = f.DocumentId, FileName = f.FileName,
+                ReleasedAtText = r.ReleasedAt.HasValue ? global::Services.NasbNiro.Finance.FiscalCalendars.Current.Text(r.ReleasedAt.Value.LocalDateTime.Date) : "-",
+                StampHeader = global::Services.NasbNiro.GoLive.GlStampText.Header(d.DocumentNumber, r.Code, r.ReleasedAt.HasValue ? global::Services.NasbNiro.Finance.FiscalCalendars.Current.Text(r.ReleasedAt.Value.LocalDateTime.Date) : "-", global::Services.NasbNiro.Finance.FiscalCalendars.Current.TextTime(now.DateTime), name),
+                StampFooter = global::Services.NasbNiro.GoLive.GlStampText.Footer,
             });
         }
 

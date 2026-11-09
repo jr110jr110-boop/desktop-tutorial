@@ -98,6 +98,10 @@ namespace Services.NasbNiro.Quality
         public List<CharValue> Values { get; } = new List<CharValue>();
         public List<CharLine> Scope { get; set; } = new List<CharLine>();
         public bool AnyFailed => Measurements.Any(m => !m.Pass);
+
+        /// <summary>Package G: the acceptance is allowed in the legacy mode (the drawing revision was released before the cut-over and has no characteristic list); the note is shown on the record. The caller asks for the evidence.</summary>
+        public bool Legacy { get; set; }
+        public string LegacyNote { get; set; }
     }
 
     /// <summary>
@@ -106,6 +110,16 @@ namespace Services.NasbNiro.Quality
     /// </summary>
     public static class CharacteristicPicker
     {
+        /// <summary>Package G: true (and the outcome says so) when every drawing in force of the part was released before the cut-over: the acceptance is allowed without a list, with a visible note.</summary>
+        private static async Task<bool> LegacyAsync(IUnitOfWork uow, ResolvedCharacteristics resolved, PickOutcome outcome, CancellationToken ct)
+        {
+            DateTimeOffset start = await global::Services.NasbNiro.GoLive.CutOver.StartAsync(uow, ct);
+            if (!global::Services.NasbNiro.GoLive.CutOver.DrawingsAreLegacy(resolved.Drawings, start)) return false;
+            outcome.Legacy = true;
+            outcome.LegacyNote = $"پذیرش در حالت قدیمی: نقشه {resolved.DrawingNumber} بازنگری {resolved.DrawingRevision} پیش از آغاز کنترل پیکربندی ({(global::Services.NasbNiro.GoLive.CutOver.Text(start))}) منتشر شده و فهرست مشخصه ندارد؛ مقدار اسمی و تلرانس ثبت نشده و تصمیم با مدرک است. برای ورود به کنترل، «پذیرش مشخصه‌های نقشه موجود» را ثبت کنید.";
+            return true;
+        }
+
         public static async Task<PickOutcome> BuildAsync(IUnitOfWork uow, int? itemId, QcRecordType type, int? operationSeq, decimal quantity, QcResult result,
             IReadOnlyList<PickInput> inputs, CancellationToken ct, bool incoming = false)
         {
@@ -124,6 +138,8 @@ namespace Services.NasbNiro.Quality
                     outcome.Error = resolved.HasDrawing
                         ? "برای نقشه منتشرشده این قطعه فهرست مشخصه‌های منتشرشده وجود ندارد؛ مهندسی باید فهرست مشخصه‌ها را تهیه و با نقشه منتشر کند. اندازه‌گیری با نام و تلرانس دستی پذیرفته نمی‌شود."
                         : "برای این قطعه نقشه منتشرشده و فهرست مشخصه وجود ندارد؛ اندازه‌گیری با نام و تلرانس دستی پذیرفته نمی‌شود.";
+                else if (!incoming && resolved.HasDrawing && result == QcResult.Accept && type != QcRecordType.Dimensional && type != QcRecordType.FirstArticle
+                    && await LegacyAsync(uow, resolved, outcome, ct)) { /* legacy mode: no typed nominal or tolerance, the decision needs evidence (checked by the caller) */ }
                 else if (!incoming && resolved.HasDrawing && result == QcResult.Accept)
                     outcome.Error = "برای نقشه منتشرشده این قطعه فهرست مشخصه‌های منتشرشده وجود ندارد؛ بدون آن قبول بازرسی ممکن نیست. مهندسی باید فهرست مشخصه‌ها (یا فهرست خالی «بدون مشخصه قابل اندازه‌گیری» با دلیل) را تهیه و منتشر کند.";
                 else if (!incoming && (type == QcRecordType.Dimensional || type == QcRecordType.FirstArticle))

@@ -177,6 +177,7 @@ jobs:
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           OpsData__Jobs: 'false'  # the PB8 daily OPS-DATA data-control seat must not run on its own; the smoke runs it by hand
           Audit__Jobs: 'false'  # the P9 daily AUDIT seat must not run on its own; the smoke runs the audit on demand
+          GoLive__Jobs: 'false'  # the Package G purchase-order drawing sweep must not run on its own; the smoke calls it by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
@@ -208,6 +209,7 @@ jobs:
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           OpsData__Jobs: 'false'  # the PB8 daily OPS-DATA data-control seat must not run on its own; the smoke runs it by hand
           Audit__Jobs: 'false'  # the P9 daily AUDIT seat must not run on its own; the smoke runs the audit on demand
+          GoLive__Jobs: 'false'  # the Package G purchase-order drawing sweep must not run on its own; the smoke calls it by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder
@@ -236,6 +238,7 @@ jobs:
           Warehouse__Jobs: 'false'  # the PB5 daily consignment and incoming-inspection alerts must not run on their own; the smoke runs them by hand
           OpsData__Jobs: 'false'  # the PB8 daily OPS-DATA data-control seat must not run on its own; the smoke runs it by hand
           Audit__Jobs: 'false'  # the P9 daily AUDIT seat must not run on its own; the smoke runs the audit on demand
+          GoLive__Jobs: 'false'  # the Package G purchase-order drawing sweep must not run on its own; the smoke calls it by hand
           Office__Jobs: 'false'  # the office jobs (task reminders, recurring tasks, waiting-approval reminders) must not run on their own; the smoke runs them by hand
           Integrity__Jobs: 'false'  # the 02:30 audit-chain verification must not run on its own; the smoke runs it by hand (POST api/v1/integrity/chain/run)
           AdminUserSeed__Password: 'Ci#Adm1n-Build-2026'  # CI-only test password; the repo and the package carry the placeholder

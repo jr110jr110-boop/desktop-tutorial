@@ -26,6 +26,9 @@ namespace Services.NasbNiro.ProductBank
         Task<ResponseDto<PbWbsTemplateDto>> ApproveTemplateAsync(int id, CancellationToken ct);
 
         Task<ResponseDto<PbBaselineDto>> InstantiateAsync(PbInstantiateDto dto, CancellationToken ct);
+
+        /// <summary>Package G: the baseline of an adopted legacy project (the adoption workflow has its own three-person review; the readiness gate and the plan lock do not apply to a project that is already running).</summary>
+        Task<ResponseDto<PbBaselineDto>> InstantiateAdoptedAsync(PbInstantiateDto dto, int bomHeaderId, CancellationToken ct);
         Task<ResponseDto<PbBaselineDto>> GetBaselineAsync(int workOrderId, CancellationToken ct);
         Task<ResponseDto<PbBaselineDto>> GenerateWbsAsync(PbGenerateWbsDto dto, CancellationToken ct);
 
@@ -313,9 +316,11 @@ namespace Services.NasbNiro.ProductBank
             return r;
         }
 
-        private async Task<ResponseDto<PbBaselineDto>> InstantiateCoreAsync(PbInstantiateDto dto, CancellationToken ct)
+        public Task<ResponseDto<PbBaselineDto>> InstantiateAdoptedAsync(PbInstantiateDto dto, int bomHeaderId, CancellationToken ct) => InstantiateCoreAsync(dto, ct, bomHeaderId);
+
+        private async Task<ResponseDto<PbBaselineDto>> InstantiateCoreAsync(PbInstantiateDto dto, CancellationToken ct, int? adoptedBomId = null)
         {
-            if (!InRole(PbRoles.Requesters)) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
+            if (adoptedBomId == null && !InRole(PbRoles.Requesters)) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
             if (dto == null || dto.WorkOrderId <= 0 || dto.ProductId <= 0) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.InvalidData);
             WorkOrder wo = await Uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<PbBaselineDto>("دستور کار پیدا نشد.");
@@ -325,16 +330,16 @@ namespace Services.NasbNiro.ProductBank
                 return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این دستور کار قبلا پایه‌ریزی از بانک محصول انجام شده است؛ تغییرات را از راه انحراف ثبت کنید.");
             // R1c: once the contract has a current baseline the plan is locked and a product enters it only through an approved change request
             PcChangeRequest cr = null;
-            if (await PcPlanLock.IsLockedAsync(Uow, wo.ContractId, ct))
+            if (adoptedBomId == null && await PcPlanLock.IsLockedAsync(Uow, wo.ContractId, ct))
             {
                 var gate = await LockedPlanRequestAsync(dto.ChangeRequestId, wo, null, ct);
                 if (gate.Error != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(gate.Error);
                 cr = gate.Cr;
             }
-            PbBomHeader bomHead = await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == product.Id && h.Status == PbBomStatus.Released).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
+            PbBomHeader bomHead = await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == product.Id && h.Status == PbBomStatus.Released && (adoptedBomId == null || h.Id == adoptedBomId.Value)).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
             if (bomHead == null) return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این محصول BOM منتشرشده (Released) وجود ندارد.");
             // PB8: the engineering readiness gate (hard checklist items); an exception approved by the PMO and the CEO lets it pass
-            if (_readiness != null)
+            if (_readiness != null && adoptedBomId == null)
             {
                 global::Services.NasbNiro.OpsData.ReadinessGateResult ready = await _readiness.GateForBaselineAsync(wo.Id, product.Id, ct);
                 if (ready.Refusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(ready.Refusal);

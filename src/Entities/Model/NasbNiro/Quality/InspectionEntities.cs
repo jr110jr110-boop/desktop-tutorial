@@ -38,6 +38,9 @@ namespace Entities.Model.NasbNiro.Quality
         public int? DrawingRevisionId { get; set; }
         public int? CharacteristicListId { get; set; }
 
+        /// <summary>Package G: the acceptance was made in the legacy mode (the drawing revision was released before the cut-over and has no characteristic list); the Persian note is shown on the record. Empty otherwise.</summary>
+        public string LegacyNote { get; set; }
+
         public int InspectorUserId { get; set; }
 
         /// <summary>The operator checked his own work (allowed only for activities that are not on the ITP).</summary>

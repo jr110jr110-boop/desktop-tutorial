@@ -463,6 +463,11 @@ namespace ViewModels.NasbNiro.ProcurementDtos
         public int? ContractId { get; set; }
         public bool IsCapital { get; set; }
 
+        /// <summary>Package G (ISO 9001 8.4.3): the drawing and revision cited by the line (read from the EDMS), and the revision the supplier confirmed when a newer one was released.</summary>
+        public string DrawingNumber { get; set; }
+        public string DrawingRevision { get; set; }
+        public string DrawingConfirmedRevision { get; set; }
+
         /// <summary>Physically received (receipts minus returns) or accepted services.</summary>
         public decimal ReceivedQuantity { get; set; }
 
