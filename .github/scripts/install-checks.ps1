@@ -112,7 +112,11 @@ Check 'the installer password is no longer in the settings file' {
     if (-not (Test-Path "$InstallRoot\admin-seed-done.txt")) { throw 'no admin-seed-done.txt marker' }
     if ($text -notmatch '"https://') { throw 'the token issuer is not an https address' }
     if ($text -notmatch '"AuditHmacKey"') { throw 'no Identity:AuditHmacKey in the settings file' }
-    'password removed, marker present, https issuer, audit key present'
+    $json = $text | ConvertFrom-Json
+    if ($json.Remote.Enabled -ne $false) { throw "Remote:Enabled is not false: $($json.Remote.Enabled)" }
+    if ($null -eq $json.Dnc -or $json.Dnc.FolderRoots -ne '') { throw 'Dnc:FolderRoots is not present and empty' }
+    if ($null -ne $json.Dnc.PSObject.Properties['AllowLoopback']) { throw 'Dnc:AllowLoopback is on the server' }
+    'password removed, marker present, https issuer, audit key present, remote access off, no machine folder'
 }
 $headers = @{ Authorization = "Bearer $token" }
 Check 'contracts list (database query)' {

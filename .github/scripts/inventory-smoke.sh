@@ -8154,10 +8154,10 @@ print("%04d/%02d/%02d" % (jy, jm, jd))
 PYJ
 }
 
-AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true"
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true;MF-DISPATCH|seat.mf-dispatch|PLANNING|poll 60|true"
 as "$CEO_TOKEN" GET $AI/admin/seats
-check "ai seats: the CEO reads exactly the nine seats (PB8: OPS-DATA is the eighth, P9: AUDIT the ninth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
-check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 9'
+check "ai seats: the CEO reads exactly the ten seats (PB8: OPS-DATA is the eighth, P9: AUDIT the ninth, P2: MF-DISPATCH the tenth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 10'
 as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
 as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
 as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
