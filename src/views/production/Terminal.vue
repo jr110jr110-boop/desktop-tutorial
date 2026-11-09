@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ShopDocuments from "@/components/pc/edms/ShopDocuments.vue";
 import DncTerminalPanel from "@/components/production/dnc/DncTerminalPanel.vue";
+import GuardTerminalPanel from "@/components/production/guard/GuardTerminalPanel.vue";
 import ChecklistPanel from "@/components/production/floor/ChecklistPanel.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
@@ -251,6 +252,8 @@ onBeforeUnmount(() => {
           </template>
           <!-- P2 (DNC): the program of the operation on the chosen machine (send, confirm on the control); the API refuses the start until it is confirmed when the machine requires it -->
           <DncTerminalPanel v-if="f.machineId && dialog.op && f.kind !== 4" :machine-id="f.machineId" :operation-id="dialog.op.id" />
+          <!-- P2 part E: on a machine with a data link, the control itself confirms the program, the tools and the link before the start -->
+          <GuardTerminalPanel v-if="f.machineId && dialog.op && f.kind !== 4" :machine-id="f.machineId" :operation-id="dialog.op.id" />
         </template>
 
         <template v-if="dialog.type === 'pause'">

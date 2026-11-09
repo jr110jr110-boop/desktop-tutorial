@@ -12,6 +12,7 @@ import {
 } from "@/composables/dnc";
 import { hasRole } from "@/composables/roles";
 import TransfersTable from "./TransfersTable.vue";
+import RevisionCam from "./RevisionCam.vue";
 
 // One CNC program: its revisions (the author never approves; the check runs against every machine the program may go to), the upload of a new revision, the difference to the revision before,
 // the check per machine, the send to a machine and the fetch back from a machine, the transfers and the record of what ran.
@@ -20,6 +21,7 @@ const emit = defineEmits(["back"]);
 const p = ref<any>(null);
 const busy = ref(false);
 const openFindings = ref<number | null>(null);
+const openCam = ref<number | null>(null);
 const upload = ref<null | { file: File | null; note: string }>(null);
 const diff = ref<any>(null);
 const checks = ref<any[] | null>(null);
@@ -190,10 +192,14 @@ async function setStatus(status: number) {
                 </td>
                 <td class="text-nowrap">
                   <button v-for="a in r.allowedActions" :key="a" :class="a === 'approve' ? 'btn-success' : a === 'reject' || a === 'withdraw' ? 'btn-outline-danger' : 'btn-primary'" :disabled="busy" class="btn btn-sm me-1" @click="act(r, a)">{{ revisionActionTitles[a] }}</button>
+                  <button class="btn btn-sm btn-outline-secondary me-1" @click="openCam = openCam === r.id ? null : r.id">مدارک CAM</button>
                   <button class="btn btn-sm btn-outline-secondary me-1" @click="showDiff(r)">تفاوت</button>
                   <button class="btn btn-sm btn-outline-secondary me-1" @click="check(r)">بررسی با ماشین‌ها</button>
                   <button class="btn btn-sm btn-outline-secondary" @click="download(r)">دانلود</button>
                 </td>
+              </tr>
+              <tr v-if="openCam === r.id">
+                <td colspan="9"><RevisionCam :revision-id="r.id" @changed="load" /></td>
               </tr>
               <tr v-if="openFindings === r.id">
                 <td colspan="9">
