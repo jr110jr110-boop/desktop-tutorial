@@ -129,6 +129,9 @@ namespace Services.NasbNiro
             }
 
             WorkOrder workOrderToAdd = _mapper.Map<WorkOrder>(addWorkOrderDto);
+            // Package G: the creation date is what tells a work order of the new control (created after the cut-over) from a legacy one; older rows keep the empty date and count as legacy
+            workOrderToAdd.CreateDate = DateTimeOffset.Now;
+            workOrderToAdd.ModifyDate = workOrderToAdd.CreateDate;
             IEnumerable<AssemblyEntity> assembliesToAdd = responseGeneratedAssembliesDto.Assemblies;
 
             EntityEntry<WorkOrder> entityEntry = await _workOrders.AddAsync(workOrderToAdd);
