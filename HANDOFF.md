@@ -124,19 +124,28 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 - نسخه‌ای از یادداشت در `docs/production-p2-merge-request.md` روی همین شاخه.
 
 **گام‌ها به ترتیب** (هر کدام انجام شد، همین‌جا علامت بزنید)
-1. [ ] منتظر بمانید تا اجرای جاری CI تمام شود. سپس روی `innco-net10-build`: `git merge origin/innco-dnc`. اگر کامیت تازه‌ای بعد از 08033e6 آمده، تعارض‌ها کوچک‌اند و در یادداشت ادغام فهرست شده‌اند.
-2. [ ] مایگریشن را محلی و با نام `ProductionDnc` بسازید (روش بخش 3).
+1. [x] منتظر بمانید تا اجرای جاری CI تمام شود. سپس روی `innco-net10-build`: `git merge origin/innco-dnc`. اگر کامیت تازه‌ای بعد از 08033e6 آمده، تعارض‌ها کوچک‌اند و در یادداشت ادغام فهرست شده‌اند.
+2. [x] مایگریشن را محلی و با نام `ProductionDnc` بسازید (روش بخش 3).
    - در سشن جانبی آزمایشی ساخته شد (commit نشد). بخش `Up` فقط افزودنی بود: ۱۴ `CreateTable`، یک `AddColumn` (`MfOperationStandards.SetupCount`)، ۳۵ ایندکس و ۲ کلید خارجی؛ هیچ Drop، Rename یا Alter.
-3. [ ] push کنید و CI را کامل سبز کنید (هر دو SQL و نصب ×۳).
+3. [x] push کنید و CI را کامل سبز کنید (هر دو SQL و نصب ×۳).
    - آزمون دود سه بخش تازه دارد: `dnc:`، `dnc review:` و `mf-dispatch`.
    - خط اجرای برنامه در ابتدای اسکریپت متغیر `Dnc__FolderRoots__0="$OUT"` گرفته است.
-4. [ ] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc`. سپس بسته را در `.github/ci-frontend-dist` بسازید.
+4. [x] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc`. سپس بسته را در `.github/ci-frontend-dist` بسازید.
    - مسیرهای تازه: `/production/dnc`، `/production/monitor`، `/production/staff-events`، `/production/floor`، `/production/dispatch`.
-5. [ ] بسته نصب: کلیدهای تازه `appsettings` با مقدار امن پیش‌فرض.
+5. [x] بسته نصب: کلیدهای تازه `appsettings` با مقدار امن پیش‌فرض.
    - `Dnc:FolderRoots` خالی بماند؛ مدیر سیستم پر می‌کند.
    - `Remote:Enabled=false`.
    - هیچ رمزی در بسته نباشد. رمز FTP و دوربین فقط در `Dnc:Credentials:<key>` روی سرور است.
-6. [ ] در صورت امکان راهنمای آزمون فارسی بخش تولید P2 را بسازید. فهرست تجهیزات خرید در سند پروژه `claude/production-p2-elecio-equivalence-and-procurement.md` است.
+6. [x] در صورت امکان راهنمای آزمون فارسی بخش تولید P2 را بسازید. فهرست تجهیزات خرید در سند پروژه `claude/production-p2-elecio-equivalence-and-procurement.md` است.
+
+**انجام شد در سشن اصلی (1405/08/19):**
+- ادغام: `innco-net10-build` 92d50bac (کامیت ادغام c2890c6d)، فرانت `innco-front` 1cf4f98a.
+- مایگریشن `ProductionDnc`: دقیقاً ۱۴ جدول، ستون `SetupCount`، ۳۵ ایندکس، ۲ کلید خارجی؛ هیچ Drop/Alter.
+- رفع‌های پس از ادغام: یک خطای نوع تازه در `Floor.vue`؛ آزمون دود فهرست صندلی‌ها ده‌تایی شد (`MF-DISPATCH|seat.mf-dispatch|PLANNING|poll 60`)؛ لاگ برنامه بالای ۴۰ مگابایت فشرده منتشر می‌شود (سقف ۱۰۰ مگابایت GitHub).
+- بسته نصب: `Remote:Enabled=false` و `Dnc:FolderRoots` خالی فقط اگر نبودند؛ `Dnc:AllowLoopback` پاک می‌شود؛ بررسی نصب هر سه را می‌سنجد.
+- مسابقه آزمون‌های P9 در کد برنامه رفع شد (a10cc49f): اجرا فقط پس از ارسال هشدارها «پایان‌یافته» می‌شود و اجرای دستی چند لحظه منتظر آزادشدن قفل می‌ماند. آزمون‌های P9: ۹۹ از ۹۹.
+- CI سبز روی 2c5c525a: دود ۷۴۳۹/۰ روی SQL 2022 و 2025 Express؛ نصب ۱۳۷/۰ در پنج مرحله. آزمون واحد کامل: ۱۴۸۸ از ۱۴۸۹ پیش از رفع P9.
+- راهنمای آزمون فارسی تولید P2 به‌صورت سند Claude ساخته شد.
 
 **آزمون واحد در سشن جانبی (پس از رفع یافته‌های بازبینی دوم)**
 - `innco-dnc`: ۱۴۸۷ از ۱۴۸۸ قبول.
