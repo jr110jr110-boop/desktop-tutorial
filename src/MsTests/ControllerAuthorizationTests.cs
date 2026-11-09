@@ -26,6 +26,8 @@ namespace MsTests
             // R1a: the user who signed in with a temporary password has no token yet; the temporary password is the proof
             "AccountsController.ChangeTemporaryPasswordAsync",
             "ApiSettingsController.Get", "OfficeAttendanceController.PushAsync",
+            // P2 (DNC): the edge box at a machine proves itself with the machine's own key (hashed, address-bound like the attendance devices)
+            "ProductionDncGatewayController.JobsAsync", "ProductionDncGatewayController.ContentAsync", "ProductionDncGatewayController.ResultAsync", "ProductionDncGatewayController.UploadAsync", "ProductionDncGatewayController.StatusAsync",
         };
 
         /// <summary>

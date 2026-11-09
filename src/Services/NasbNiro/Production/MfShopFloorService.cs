@@ -323,6 +323,9 @@ namespace Services.NasbNiro.Production
             // Package C: a special process step is worked only by a person with a valid operator competence record for the process
             string spStart = await global::Services.NasbNiro.Quality.SpecialProcessGate.StartProblemAsync(_uow, l.Op, l.Employee, dto.Kind, DateTime.Today, ct);
             if (spStart != null) return Bad<TerminalOperationDto>(spStart);
+            // P2 (DNC): on a machine that requires it, a setup, run or rework starts only after the current approved program revision was sent to the machine and confirmed on the control
+            var nc = await global::Services.NasbNiro.Production.Dnc.MfDncGate.CheckStartAsync(_uow, l.Op, dto.MachineId, dto.Kind, ct);
+            if (nc.Error != null) return Bad<TerminalOperationDto>(nc.Error);
             MfTimeBooking running = await RunningOfAsync(l.Employee.Id, ct);
             DateTime now = Now();
             if (running != null)
@@ -352,6 +355,12 @@ namespace Services.NasbNiro.Production
                 OperationId = l.Op.Id, EmployeeId = l.Employee.Id, MachineId = dto.MachineId, Kind = dto.Kind, StartAt = now, Source = MfBookingSource.Terminal, Note = Clean(dto.Note),
                 CreateDate = stamp, ModifyDate = stamp, CreatorUserId = Me, ModifierUserId = Me,
             });
+            foreach (MfNcRun run in nc.Runs)
+            {
+                // P2 (DNC): the record of the revision this start runs by (one per program of the step), stored with the booking
+                run.EmployeeId = l.Employee.Id; run.StartedAt = now; run.RecordedByUserId = Me;
+                _uow.Set<MfNcRun>().Add(run);
+            }
             l.Op.Status = MfOperationStatus.InProgress;
             l.Op.StartedAt ??= stamp;
             l.Op.ModifyDate = stamp;
@@ -585,6 +594,9 @@ namespace Services.NasbNiro.Production
             if (l.Op.Status != MfOperationStatus.InProgress && l.Op.Status != MfOperationStatus.Paused) return Bad<TerminalOperationDto>("فقط عملیاتی که شروع شده پایان می‌یابد.");
             string faiFinish = await global::Services.NasbNiro.Quality.FirstArticleGate.OperationProblemAsync(_uow, l.Order, l.Op, ct, dto.GoodQty + dto.ScrapQty);
             if (faiFinish != null) return Bad<TerminalOperationDto>(faiFinish);
+            // P2 part C: a step with a required in-process checklist finishes only after it was submitted with every item passing
+            string checklist = await global::Services.NasbNiro.Production.Dnc.MfChecklistGate.FinishProblemAsync(_uow, l.Op, ct);
+            if (checklist != null) return Bad<TerminalOperationDto>(checklist);
             MfTimeBooking booking = await MyBookingAsync(l, ct);
             if (booking == null) return Bad<TerminalOperationDto>("ابتدا کار را شروع کنید.");
             // PB8: before anything is changed, the rules look at the time of the running booking and the quantities of this finish

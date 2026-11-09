@@ -273,7 +273,7 @@ namespace Services.NasbNiro.Production
                 DefaultSupplierName = r.S?.DefaultSupplierId != null && suppliers.TryGetValue(r.S.DefaultSupplierId.Value, out string sn) ? sn : null,
                 OutsideLeadDays = r.S?.OutsideLeadDays ?? 0, WorkInstructionDocumentId = r.S?.WorkInstructionDocumentId, DrawingReferenceRule = r.S?.DrawingReferenceRule,
                 RequiredQualificationKind = r.S?.RequiredQualificationKind, RequiredQualificationProcess = r.S?.RequiredQualificationProcess,
-                InspectionRequirement = r.S?.InspectionRequirement ?? MfInspectionRequirement.None, ItpTestType = r.S?.ItpTestType, FirstArticleRequired = r.S?.FirstArticleRequired ?? false,
+                InspectionRequirement = r.S?.InspectionRequirement ?? MfInspectionRequirement.None, ItpTestType = r.S?.ItpTestType, FirstArticleRequired = r.S?.FirstArticleRequired ?? false, SetupCount = r.S?.SetupCount,
                 IsSpecialProcess = r.S?.IsSpecialProcess ?? false, SpecialProcessTypeId = r.S?.SpecialProcessTypeId, SpecialProcessTypeTitle = r.S?.SpecialProcessTypeId != null && spTypes.TryGetValue(r.S.SpecialProcessTypeId.Value, out string spt) ? spt : null,
                 IsWelding = r.S?.IsWelding ?? false, WpsId = r.S?.WpsId, WpsNumber = r.S?.WpsId != null && wpsNumbers.TryGetValue(r.S.WpsId.Value, out string wn) ? wn : null,
             }).OrderBy(d => d.ItemCode ?? d.ItemGroupCode).ThenBy(d => d.Sequence).ToList();
@@ -302,6 +302,7 @@ namespace Services.NasbNiro.Production
             OperationTemplate template = await _uow.Set<OperationTemplate>().AsNoTracking().FirstOrDefaultAsync(t => t.Id == dto.OperationTemplateId && !t.Deleted, ct);
             if (template == null) return MfText.NotFound<OperationStandardDto>("مرحله ساخت (قالب عملیات) پیدا نشد.");
             if (dto.SetupHours < 0 || dto.RunHoursPerUnit < 0 || dto.MoveDays < 0 || dto.QueueDays < 0 || dto.OutsideLeadDays < 0) return Bad<OperationStandardDto>("زمان‌ها نمی‌تواند منفی باشد.");
+            if (dto.SetupCount is < 1 or > 100) return Bad<OperationStandardDto>("تعداد چیدمان بین ۱ و ۱۰۰ است.");
             if (dto.SetupHours > 10000 || dto.RunHoursPerUnit > 10000 || dto.MoveDays > 365 || dto.QueueDays > 365 || dto.OutsideLeadDays > 730) return Bad<OperationStandardDto>("زمان واردشده از حد مجاز بیشتر است.");
             if (!Enum.IsDefined(typeof(MfInspectionRequirement), dto.InspectionRequirement)) return Bad<OperationStandardDto>(MfText.InvalidData);
             if (dto.ItpTestType.HasValue && !Enum.IsDefined(typeof(QaTestType), dto.ItpTestType.Value)) return Bad<OperationStandardDto>("نوع آزمون ITP نامعتبر است.");
@@ -331,7 +332,7 @@ namespace Services.NasbNiro.Production
             row.IsOutside = dto.IsOutside; row.DefaultSupplierId = dto.DefaultSupplierId; row.OutsideLeadDays = dto.OutsideLeadDays; row.WorkInstructionDocumentId = dto.WorkInstructionDocumentId;
             row.DrawingReferenceRule = Clean(dto.DrawingReferenceRule); row.RequiredQualificationKind = Clean(dto.RequiredQualificationKind);
             row.RequiredQualificationProcess = Clean(dto.RequiredQualificationProcess); row.InspectionRequirement = dto.InspectionRequirement; row.ItpTestType = dto.ItpTestType;
-            row.FirstArticleRequired = dto.FirstArticleRequired; row.IsWelding = dto.IsWelding; row.WpsId = dto.IsWelding ? dto.WpsId : null; row.IsSpecialProcess = dto.IsSpecialProcess; row.SpecialProcessTypeId = dto.IsSpecialProcess ? dto.SpecialProcessTypeId : null; row.ModifyDate = now; row.ModifierUserId = Me;
+            row.FirstArticleRequired = dto.FirstArticleRequired; row.SetupCount = dto.SetupCount; row.IsWelding = dto.IsWelding; row.WpsId = dto.IsWelding ? dto.WpsId : null; row.IsSpecialProcess = dto.IsSpecialProcess; row.SpecialProcessTypeId = dto.IsSpecialProcess ? dto.SpecialProcessTypeId : null; row.ModifyDate = now; row.ModifierUserId = Me;
             await _uow.SaveChangesAsync(ct);
             return ResponseDtoHelper.Ok((await StandardRowsAsync(_uow.Set<OperationTemplate>().Where(t => t.Id == dto.OperationTemplateId), ct))[0]);
         }

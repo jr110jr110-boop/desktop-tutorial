@@ -26,7 +26,8 @@ B="$OUT/inv-body.tmp"
 mkdir -p "$OUT"; : > "$R"; : > "$F"
 
 cd src/WebApi
-Finance__AutoPost=false dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
+# Dnc__FolderRoots__0: P2 DNC, the only folder the network-folder links of the smoke may use (the "machine" folder of the DNC section is made inside it)
+Finance__AutoPost=false Dnc__FolderRoots__0="$OUT" dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &
 APP_PID=$!
 cd ../..
 for i in $(seq 1 120); do
@@ -12576,6 +12577,93 @@ as "$QA_TOKEN" POST audit/reports '{"kind":9}'; no "p9 report: an unknown kind i
 as "$FM_TOKEN" GET "finance/audit?EntityType=AusReport&EntityId=$P9REP&PageSize=0"; check "p9 chain: the report has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
 as "$FM_TOKEN" GET "finance/audit?EntityType=AusProgram&EntityId=$P9PG&PageSize=0"; check "p9 chain: the programme has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
 as "$FM_TOKEN" GET finance/audit/verify; check "p9 chain: the whole hash chain still fits after the audit records" '.success and .data.ok == true'
+
+# --- P2 DNC (production release P2 part A): the CNC program library, two-person approval of a revision, the transfer to a machine through a folder link, the operator's confirmation on the control,
+# the start gate of the terminal, the record of the revision an operation ran by, and the program fetched back from the machine as a new revision with its difference.
+# Placed before the PB2 fix round on purpose: it uses its own order (BOM position 8 of item J (position 7 is the PKC part) on MF-R1, machine R1M) and no stock, and no later section starts an operation on R1M.
+# The "machine" is a new folder of the CI runner that the API writes to (link kind 2, network folder): what arrives there is compared byte for byte.
+TOKEN=$ADMIN_TOKEN
+DNC=$MF/dnc
+DNCDIR="$OUT/dnc-machine-$$"; mkdir -p "$DNCDIR"
+DNCPRG=$'0 BEGIN PGM 100 MM\r\n1 BLK FORM 0.1 Z X+0 Y+0 Z-40\r\n2 BLK FORM 0.2 X+100 Y+100 Z+0\r\n3 TOOL CALL 3 Z S8000 F600\r\n4 L Z+100 R0 FMAX M3\r\n5 L X+10 Y+10 R0 FMAX\r\n6 L Z-5 F300\r\n7 L Z+100 FMAX M30\r\n8 END PGM 100 MM\r\n'
+DNCB64=$(printf '%s' "$DNCPRG" | base64 -w0); DNCSHA=$(printf '%s' "$DNCPRG" | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F'); DNCLEN=$(printf '%s' "$DNCPRG" | wc -c)
+as "$MOP_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\"}"; nomsg "dnc: an operator does not set the link of a machine" "مجوز"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"controllerModel\":\"TNC 426/430\",\"linkKind\":3}"; nomsg "dnc: an FTP link without the address of the control is refused" "نشانی دستگاه لازم است"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"credentialKey\":\"pass word\"}"; nomsg "dnc: a credential key with a space is refused (the secret itself lives in the server settings)" "نام کلید اعتبارنامه"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$PWD/src/WebApi\",\"programNameFormat\":\"{number}\",\"fileExtension\":\".H\"}"; nomsg "dnc review: a folder outside the allowed machine folders of the server settings (here the application folder) is refused" "Dnc:FolderRoots"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"programNameFormat\":\"appsettings\",\"fileExtension\":\".json\"}"; nomsg "dnc review: a fixed program name with a non-CNC extension is refused" "پسوند فایل باید پسوند برنامه CNC"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"linkKind\":3,\"host\":\"8.8.8.8\"}"; nomsg "dnc review: an FTP control outside the LAN is refused (no password leaves the shop network)" "شبکه داخلی"
+as "$MPM_TOKEN" POST $DNC/connections "{\"machineId\":$R1M,\"controllerFamily\":3,\"controllerModel\":\"TNC 426/430\",\"linkKind\":2,\"remotePath\":\"$DNCDIR\",\"programNameFormat\":\"{number}\",\"fileExtension\":\".H\",\"axes\":\"XYZ\",\"maxSpindleRpm\":12000,\"toolCapacity\":30}"; check "dnc: the production manager links machine R1M as a Heidenhain TNC through a folder; the start gate is on by default and no secret is configured" ".success and .data.id > 0 and .data.machineId == $R1M and .data.linkKind == 2 and .data.controllerFamily == 3 and .data.requireConfirmedProgram == true and .data.credentialConfigured == false and .data.axes == \"XYZ\""
+as "$MMT_TOKEN" POST $DNC/connections/test "{\"machineId\":$R1M}"; check "dnc: maintenance tests the link: the folder answers" '.success and .data.ok == true'
+as "$MOP_TOKEN" POST $DNC/programs "{\"code\":\"DNC-100\",\"title\":\"x\",\"controllerFamily\":3}"; nomsg "dnc: an operator does not open programs" "مجوز"
+as "$ENG_TOKEN" POST $DNC/programs "{\"code\":\"DNC-100\",\"title\":\"ماشینکاری قطعه J\",\"itemId\":$R1PJ,\"operationTemplateId\":$R1TJ10,\"workCenterId\":$R1WC,\"controllerFamily\":3}"; check "dnc: engineering opens program DNC-100 for step 10 of item J on MF-R1; no approved revision yet" ".success and .data.id > 0 and .data.operationTemplateId == $R1TJ10 and .data.workCenterCode == \"MF-R1\" and .data.currentRevisionId == null and .data.status == 1"
+DNCP=$(val .data.id)
+as "$ENG_TOKEN" POST $DNC/programs "{\"code\":\"DNC-100\",\"title\":\"تکراری\",\"controllerFamily\":3}"; nomsg "dnc: a duplicate program code is refused" "قبلاً ثبت شده"
+as "$ENG_TOKEN" POST $DNC/revisions "{\"programId\":$DNCP,\"fileName\":\"j10.h\",\"contentBase64\":\"$DNCB64\",\"changeNote\":\"نسخه اول\"}"; check "dnc: revision 1 is a draft with no finding, the program number 100 from BEGIN PGM, the exact size and the SHA-256 of the file" ".success and .data.revision == 1 and .data.status == 0 and .data.errorCount == 0 and .data.warningCount == 0 and .data.programNumber == \"100\" and .data.sizeBytes == $DNCLEN and .data.lineCount == 9 and .data.sha256 == \"$DNCSHA\" and .data.allowedActions == [\"submit\",\"withdraw\"]"
+DNCR1=$(val .data.id)
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"submit\"}"; check "dnc: the author submits revision 1" '.success and .data.status == 1 and .data.submittedByName != null'
+ibx "$MPM_TOKEN" "mf:nc-rev:$DNCR1"; check "dnc: the production manager has revision 1 in the inbox" '.success and (.data.data|length) == 1'
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"approve\"}"; nomsg "dnc: the author cannot approve his own revision" "شخص دیگری"
+as "$MOP_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"approve\"}"; nomsg "dnc: an operator does not approve revisions" "مجوز"
+as "$MPM_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"approve\"}"; check "dnc: the production manager approves revision 1" '.success and .data.status == 2 and .data.approvedByName != null'
+ibx "$MPM_TOKEN" "mf:nc-rev:$DNCR1"; check "dnc: the inbox item of revision 1 is closed by the approval" '.success and (.data.data|length) == 0'
+as "$MOP_TOKEN" GET "$DNC/programs/$DNCP"; check "dnc: the operator reads the program: revision 1 is current" ".success and .data.currentRevisionId == $DNCR1 and .data.currentRevision == 1 and (.data.revisions|length) == 1"
+r1draft 8 2 "77.10.00.010.1" "قطعه ماشینکاری R1 DNC"; DNCO=$R1O; DNCN=$R1N
+pkb_nodraw_order "$DNCO"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$DNCO}"; check "dnc: the order of 2 pieces of item J is released: step 10 ready" '.success and .data.status == 1 and .data.operations[0].status == 1'
+DNCOP=$(val '.data.operations[0].id')
+as "$MOP_TOKEN" GET "$DNC/terminal?OperationId=$DNCOP&MachineId=$R1M"; check "dnc: the terminal shows program DNC-100 revision 1 for step 10 on R1M; the machine requires the confirmed program, so the start is not open yet" '.success and .data.hasProgram == true and .data.programCode == "DNC-100" and .data.currentRevision == 1 and .data.required == true and .data.canStart == false and .data.lastTransfer == null'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$DNCOP,\"machineId\":$R1M,\"kind\":2}"; check "dnc: the run does not start before the program is on the control and confirmed; the answer names the program" '.success == false and (.message|contains("DNC-100")) and (.message|contains("DNC"))'
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$DNCOP,\"kind\":4}"; check "dnc: waiting for material needs no program: the operator starts a waiting booking" '.success and .data.status == 2 and .data.myRunning == true'
+as "$MOP_TOKEN" POST $DNC/transfers/send "{\"programId\":$DNCP,\"machineId\":$R1M,\"operationId\":$DNCOP}"; check "dnc: the operator sends the current revision to R1M: queued under the name 100.H" ".success and .data.status == 0 and .data.revisionId == $DNCR1 and .data.targetName == \"100.H\" and .data.linkKind == 2 and .data.direction == 1"
+DNCT1=$(val .data.id)
+as "$MOP_TOKEN" POST $DNC/transfers/send "{\"programId\":$DNCP,\"machineId\":$R1M,\"operationId\":$DNCOP}"; check "dnc: a second tap answers the same transfer (nothing is sent twice)" ".success and .data.id == $DNCT1"
+as "$MOP_TOKEN" POST $DNC/transfers/run-pending; nomsg "dnc: an operator does not run the transfer queue" "مجوز"
+as "$MSV_TOKEN" POST $DNC/transfers/run-pending; check "dnc: the shop supervisor runs the queue: one transfer processed and delivered" '.success and .data.processed == 1 and .data.delivered == 1 and .data.failed == 0'
+if [ -f "$DNCDIR/100.H" ] && [ "$(sha256sum "$DNCDIR/100.H" | cut -d' ' -f1 | tr 'a-f' 'A-F')" = "$DNCSHA" ] && [ "$(find "$DNCDIR" -type f | wc -l)" = "1" ]; then ok "dnc: the machine folder holds exactly 100.H with the bytes of revision 1 (no temporary file left)"; else bad "dnc: the machine folder holds exactly 100.H with the bytes of revision 1 (no temporary file left)"; fi
+as "$MOP_TOKEN" GET "$DNC/transfers?MachineId=$R1M"; check "dnc: the transfer is delivered with the SHA-256 and size of what went out, and the operator may confirm it" ".success and (.data.data|length) == 1 and (.data.data[0] | .id == $DNCT1 and .status == 2 and .sentSha256 == \"$DNCSHA\" and .sentBytes == $DNCLEN and (.allowedActions|index(\"confirm\")) != null)"
+as "$MOP_TOKEN" POST $DNC/transfers/action "{\"transferId\":$DNCT1,\"action\":\"confirm\",\"note\":\"روی کنترلر بررسی شد\"}"; check "dnc: the operator confirms the program on the control" '.success and .data.status == 3 and .data.confirmedByName != null'
+as "$MOP_TOKEN" GET "$DNC/terminal?OperationId=$DNCOP&MachineId=$R1M"; check "dnc: the terminal now opens the start and shows the confirmed transfer" ".success and .data.canStart == true and .data.problem == null and .data.lastTransfer.id == $DNCT1 and .data.lastTransfer.status == 3"
+as "$MOP_TOKEN" POST $MF/terminal/start "{\"operationId\":$DNCOP,\"machineId\":$R1M,\"kind\":2}"; check "dnc: with the confirmed program the run starts on R1M (the waiting booking is closed)" '.success and .data.status == 2 and .data.myRunning == true and .data.runningBookings == 1'
+as "$MSV_TOKEN" GET "$DNC/runs?OperationId=$DNCOP"; check "dnc: the run record names revision 1, its SHA-256 and the confirmed transfer; the supervisor sees the operator's name" ".success and (.data.data|length) == 1 and (.data.data[0] | .revision == 1 and .revisionId == $DNCR1 and .sha256 == \"$DNCSHA\" and .transferId == $DNCT1 and .machineId == $R1M and .kind == 2 and .employeeName != null and (.operationName|startswith(\"$DNCN/10\")))"
+as "$MOP_TOKEN" GET "$DNC/runs?OperationId=$DNCOP"; check "dnc: the operator reads the run record without names behind hours" '.success and (.data.data|length) == 1 and .data.data[0].employeeName == null'
+as "$MOP_TOKEN" POST $MF/terminal/finish "{\"operationId\":$DNCOP,\"goodQty\":2}"; check "dnc: the operator finishes step 10 with the 2 good pieces" '.success and .data.status == 4 and .data.goodQty == 2'
+# the operator changed the feed of block 6 at the control (F300 -> F250); the supervisor fetches the program back
+sed -i 's/6 L Z-5 F300/6 L Z-5 F250/' "$DNCDIR/100.H"
+DNCSHA2=$(sha256sum "$DNCDIR/100.H" | cut -d' ' -f1 | tr 'a-f' 'A-F')
+as "$MOP_TOKEN" POST $DNC/transfers/receive "{\"programId\":$DNCP,\"machineId\":$R1M}"; nomsg "dnc: an operator does not fetch programs back from a machine" "مجوز"
+as "$MSV_TOKEN" POST $DNC/transfers/receive "{\"programId\":$DNCP,\"machineId\":$R1M,\"changeNote\":\"اصلاح پیشروی پشت ماشین\"}"; check "dnc: the supervisor asks for the program back from R1M under its name on the control" '.success and .data.status == 0 and .data.direction == 2 and .data.targetName == "100.H"'
+DNCT2=$(val .data.id)
+as "$MSV_TOKEN" POST $DNC/transfers/receive "{\"programId\":$DNCP,\"machineId\":$R1M}"; nomsg "dnc: a second request for the same program waits for the first" "در جریان است"
+as "$MSV_TOKEN" POST $DNC/transfers/run-pending; check "dnc: the queue fetches the program back: one received" '.success and .data.processed == 1 and .data.received == 1 and .data.failed == 0'
+as "$MSV_TOKEN" GET "$DNC/programs/$DNCP"; check "dnc: revision 2 is a draft from the machine, authored by the supervisor who asked, counted against revision 1: one line removed and one added" ".success and .data.currentRevisionId == $DNCR1 and (.data.revisions|length) == 2 and (.data.revisions[0] | .revision == 2 and .status == 0 and .source == 2 and .fromTransferId == $DNCT2 and .baseRevisionId == $DNCR1 and .diffAdded == 1 and .diffRemoved == 1 and .sha256 == \"$DNCSHA2\" and .changeNote == \"اصلاح پیشروی پشت ماشین\")"
+DNCR2=$(val '.data.revisions[0].id')
+as "$MSV_TOKEN" GET "$DNC/revisions/$DNCR2/diff"; check "dnc: the difference lists block 6 with the old and the new feed" ".success and .data.baseRevisionId == $DNCR1 and .data.added == 1 and .data.removed == 1 and (.data.lines|index(\"- 7 6 L Z-5 F300\")) != null and (.data.lines|index(\"+ 7 6 L Z-5 F250\")) != null"
+as "$MSV_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"submit\"}"; check "dnc: the supervisor (its author) submits revision 2" '.success and .data.status == 1'
+as "$MSV_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"approve\"}"; nomsg "dnc: who fetched the program back cannot approve it" "شخص دیگری"
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR2,\"action\":\"approve\"}"; check "dnc: engineering approves revision 2" '.success and .data.status == 2'
+as "$MOP_TOKEN" GET "$DNC/programs/$DNCP"; check "dnc: revision 2 is current and revision 1 is superseded" ".success and .data.currentRevisionId == $DNCR2 and ([.data.revisions[]|select(.id == $DNCR1)|.status][0]) == 3"
+as "$MOP_TOKEN" GET "$DNC/terminal?OperationId=$DNCOP&MachineId=$R1M"; check "dnc: the confirmation of revision 1 no longer opens the start: revision 2 must be sent and confirmed" '.success and .data.currentRevision == 2 and .data.canStart == false'
+DNCBAD=$(printf '%s' "$DNCPRG" | sed 's/5 L X+10 Y+10 R0 FMAX/5 L X+10 Y+10 B+45 R0 FMAX/' | base64 -w0)
+as "$ENG_TOKEN" POST $DNC/revisions "{\"programId\":$DNCP,\"fileName\":\"j10.h\",\"contentBase64\":\"$DNCBAD\"}"; check "dnc: a revision with a B axis for the three-axis machine has exactly one error (AXIS on line 6) and may not be submitted" '.success and .data.revision == 3 and .data.errorCount == 1 and .data.findings[0].code == "AXIS" and .data.findings[0].line == 6 and .data.allowedActions == ["withdraw"]'
+DNCR3=$(val .data.id)
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR3,\"action\":\"submit\"}"; nomsg "dnc: the revision with an error is not submitted" "خطای بررسی"
+as "$ENG_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR3,\"action\":\"withdraw\"}"; check "dnc: the author withdraws revision 3" '.success and .data.status == 5'
+as "$MOP_TOKEN" GET "$DNC/revisions/$DNCR2/content"; if [ "$CODE" = "200" ] && [ "$(sha256sum "$B" | cut -d' ' -f1 | tr 'a-f' 'A-F')" = "$DNCSHA2" ]; then ok "dnc: the operator downloads revision 2 with exactly its stored bytes"; else bad "dnc: the operator downloads revision 2 with exactly its stored bytes (HTTP $CODE)"; fi
+as "$FM_TOKEN" GET "$FAU?EntityType=MfNcRevision&EntityId=$DNCR1&PageSize=0"; check "dnc: the submission, the approval and the supersession of revision 1 are in the audit trail" '.success and ([.data.data[]|select(.action == "Modified")]|length) == 3'
+# --- P2 part D: the planning seat MF-DISPATCH and the shop-floor overview (read-only; nothing of the plan is written to an order or an operation).
+# The plan counts exactly the released and started orders the order list shows; the step finished above (DNCOP) is in no queue; the seat's run reports the same late-risk count as the plan.
+as "$MOP_TOKEN" GET "$MF/dispatch/plan"; nomsg "mf-dispatch: an operator does not read the plan" "شما مجوز این کار را ندارید."
+as "$PLAN_TOKEN" GET "$MF/dispatch/plan?HorizonDays=61"; nomsg "mf-dispatch: a horizon over 60 days is refused" "افق برنامه بین ۱ و ۶۰ روز است."
+as "$PLAN_TOKEN" GET "$MF/orders?Status=1&PageSize=1"; check "mf-dispatch: the order list answers the count of released orders" '.success and (.data.totalItems|type) == "number"'; MFDN1=$(val '.data.totalItems')
+as "$PLAN_TOKEN" GET "$MF/orders?Status=2&PageSize=1"; check "mf-dispatch: the order list answers the count of started orders" '.success and (.data.totalItems|type) == "number"'; MFDN2=$(val '.data.totalItems')
+as "$PLAN_TOKEN" GET "$MF/dispatch/plan"; check "mf-dispatch: the plan counts the $((MFDN1 + MFDN2)) released and started orders, has no finished step in a queue and says it only proposes" ".success and .data.horizonDays == 10 and .data.openOrders == $((MFDN1 + MFDN2)) and $((MFDN1 + MFDN2)) > 0 and ([.data.centers[].queue[]|select(.operationId == $DNCOP)]|length) == 0 and (.data.method|contains(\"فقط پیشنهاد\"))"
+MFDLR=$(val '.data.lateRiskOperations')
+as "$MSV_TOKEN" GET "$MF/dispatch/floor"; check "mf-dispatch: the shop-floor overview has the four readings in order and is not a remote view" '.success and ([.data.tiles[].key]) == ["running","alarms","utilisation","late"] and .data.remote == false'
+airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: the first run of the day succeeded, reports the late-risk count of the plan and leaves at least the plan note" ".success and .data.status == 2 and .data.seatCode == \"MF-DISPATCH\" and (.data.outputs|contains(\"lateRisk=$MFDLR;\")) and (.data.outputs|test(\"notes=[1-9]\"))"
+airun MF-DISPATCH "$TODAY"; check "mf-dispatch seat: a second run of the same day leaves no new note" '.success and .data.status == 2 and (.data.outputs|endswith("notes=0"))'
+as "$PLAN_TOKEN" GET remote/status; check "remote access: switched off on the CI server and the caller is local" '.success and .data.enabled == false and .data.remote == false and .data.readOnly == false and .data.allowed == true'
+TOKEN=$ADMIN_TOKEN
 
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.

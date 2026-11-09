@@ -122,10 +122,10 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------ catalogue and identity
 
         [TestMethod]
-        public void Catalogue_Has_The_Nine_Seats_With_Valid_Schedules()
+        public void Catalogue_Has_The_Ten_Seats_With_Valid_Schedules()
         {
             CollectionAssert.AreEqual(
-                new[] { "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "FIN-ANOMALY", "OFFICE-DRAFT", "OPS-DATA", "AUDIT" },
+                new[] { "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "FIN-ANOMALY", "OFFICE-DRAFT", "OPS-DATA", "AUDIT", "MF-DISPATCH" },
                 AiSeatCatalog.All.Select(s => s.Code).ToArray());
             foreach (AiSeatDefinition s in AiSeatCatalog.All)
             {

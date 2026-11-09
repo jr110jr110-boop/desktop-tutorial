@@ -338,6 +338,9 @@ namespace WebApi
             loggerFactory
                 .AddDbLogger(serviceProvider: app.ApplicationServices, minLevel: LogLevel.Warning);
 
+            // P2 part D (review M1): with Remote:Enabled the open internet is refused here, before HSTS, the HTTPS redirect, Swagger and CORS answer anything
+            app.UseRemoteNetworkGate();
+
             if (!env.IsDevelopment())
             {
                 app.UseHsts();
@@ -392,6 +395,8 @@ namespace WebApi
             app.UseCors(CorsPolicyName);
             app.UseRateLimiter();
             app.UseAuthentication();
+            // P2 part D: outside the company network only the company VPN is served, only the roles allowed remotely, read-only by default (Remote:* settings; off by default)
+            app.UseRemoteAccessGate();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>

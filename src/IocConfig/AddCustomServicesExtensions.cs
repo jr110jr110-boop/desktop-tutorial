@@ -237,6 +237,15 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Production.IMfMaintenanceService, Services.NasbNiro.Production.MfMaintenanceService>();
             services.AddScoped<Services.NasbNiro.Production.IMfDashboardService, Services.NasbNiro.Production.MfDashboardService>();
             services.AddHostedService<Services.NasbNiro.Production.ProductionHostedService>();
+            // production P2 part A: DNC (program library, transfers to the machines, runs)
+            services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfNcLinkFactory, Services.NasbNiro.Production.Dnc.MfNcLinkFactory>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfDncService, Services.NasbNiro.Production.Dnc.MfDncService>();
+            services.AddSingleton<Services.NasbNiro.Production.Dnc.IMfModbusReader, Services.NasbNiro.Production.Dnc.ModbusTcpReader>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfMonitorService, Services.NasbNiro.Production.Dnc.MfMonitorService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfChecklistService, Services.NasbNiro.Production.Dnc.MfChecklistService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IHrEventService, Services.NasbNiro.Production.Dnc.HrEventService>();
+            services.AddScoped<Services.NasbNiro.Production.Dnc.IMfCameraService, Services.NasbNiro.Production.Dnc.MfCameraService>();
+            services.AddHostedService<Services.NasbNiro.Production.Dnc.MfDncHostedService>();
             // sales (release S1 part A)
             services.AddScoped<Services.NasbNiro.Sales.ISlCrmService, Services.NasbNiro.Sales.SlCrmService>();
             services.AddScoped<Services.NasbNiro.Sales.ISlPipelineService, Services.NasbNiro.Sales.SlPipelineService>();
@@ -282,6 +291,9 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.OpsData.OpsDataSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.AuditSeat.AuditSeatJob>();
+            // production P2 part D: the planning seat and its read-only plan
+            services.AddScoped<Services.NasbNiro.Production.Dispatch.IMfDispatchService, Services.NasbNiro.Production.Dispatch.MfDispatchService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Production.Dispatch.MfDispatchSeatJob>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusRunService, Services.NasbNiro.AuditSeat.AusRunService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusFindingService, Services.NasbNiro.AuditSeat.AusFindingService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusReportService, Services.NasbNiro.AuditSeat.AusReportService>();
