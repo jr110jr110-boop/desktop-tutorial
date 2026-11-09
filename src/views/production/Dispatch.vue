@@ -28,7 +28,11 @@ async function load() {
 }
 onMounted(load);
 watch(horizon, load);
-watch(wc, (v) => router.replace({ query: v ? { wc: String(v) } : {} }));
+watch(wc, (v) => {
+  if (String(v ?? "") !== String(route.query.wc ?? "")) router.replace({ query: v ? { wc: String(v) } : {} });
+});
+// a link to another centre from this page (a proposal) changes the filter too
+watch(() => route.query.wc, (q) => (wc.value = q ? Number(q) : null));
 
 const centers = computed(() => (plan.value?.centers || []).filter((c: any) => (wc.value ? c.workCenterId === wc.value : c.queue.length > 0 || c.demandHours > 0)));
 const suggestions = computed(() => (plan.value?.suggestions || []).filter((s: any) => !wc.value || s.workCenterId === wc.value));
@@ -98,7 +102,7 @@ const kindText: Record<string, string> = { bottleneck: "گلوگاه", "late-ris
           <span v-if="c.measuredRunPercent !== null">کارکرد واقعی ۷ روز: {{ fa(c.measuredRunPercent) }}٪</span>
           <span v-if="c.machines.length">ماشین‌ها: {{ c.machines.join("، ") }}</span>
         </div>
-        <div class="dp-track" aria-hidden="true"><span :style="{ width: Math.min(100, (c.loadPercent || 0) / 1.5) + '%' }" /><i /></div>
+        <div class="dp-track" aria-hidden="true"><span :style="{ width: (c.loadPercent === null && c.demandHours > 0 ? 100 : Math.min(100, (c.loadPercent || 0) / 1.5)) + '%' }" /><i /></div>
 
         <p v-if="!c.queue.length" class="dp-muted">کاری در صف این مرکز نیست.</p>
         <div v-else class="dp-tablewrap">

@@ -8,9 +8,13 @@ const d = ref<any>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
 let timer: any = null;
+let busy = false;
 
 async function load() {
-  const [data, err] = await getFloor();
+  // one request at a time, and none while the tab is hidden (a wall screen must not pile requests up)
+  if (busy || document.hidden) return;
+  busy = true;
+  const [data, err] = await getFloor().finally(() => (busy = false));
   loading.value = false;
   if (err) {
     error.value = typeof err === "string" ? err : err?.message || "اطلاعات کارگاه دریافت نشد.";
@@ -26,19 +30,26 @@ async function load() {
 onMounted(() => {
   load();
   timer = setInterval(load, 30000);
+  document.addEventListener("visibilitychange", onVisible);
 });
-onBeforeUnmount(() => clearInterval(timer));
+function onVisible() {
+  if (!document.hidden) load();
+}
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  document.removeEventListener("visibilitychange", onVisible);
+});
 
 // machine state: 0 off, 1 idle, 2 running, 3 alarm, 4 offline, null never seen
 const stateText: Record<string, string> = { "0": "خاموش", "1": "آماده، بیکار", "2": "در حال کار", "3": "آلارم", "4": "بدون ارتباط", null: "هنوز دیده نشده" };
 const lamp = (s: number | null) => (s === 2 ? "green" : s === 1 ? "amber" : s === 3 ? "red" : "dark");
 const machines = computed(() => (d.value?.live?.machines || []).filter((m: any) => m.source !== 0));
-const unmonitored = computed(() => (d.value?.live?.machines || []).filter((m: any) => m.source === 0));
 const fa = (n: number | null | undefined) => (n === null || n === undefined ? "—" : Number(n).toLocaleString("fa-IR", { maximumFractionDigits: 1 }));
 const since = (min: number) => (min < 60 ? fa(min) + " دقیقه" : fa(Math.floor(min / 60)) + " ساعت" + (min % 60 ? " و " + fa(min % 60) + " دقیقه" : ""));
 const levelText: Record<string, string> = { bottleneck: "گلوگاه", busy: "پربار", normal: "عادی", idle: "بی‌کار" };
 const kindText: Record<string, string> = { bottleneck: "گلوگاه", "late-risk": "خطر تأخیر", "machine-down": "ماشین متوقف", "machine-idle": "ماشین بیکار", program: "برنامه CNC", kit: "مواد" };
-const loadWidth = (c: any) => Math.min(100, Math.max(2, Number(c.loadPercent || 0) / 1.5)) + "%";
+// the bar holds 150 %; the tick marks 100 %. A centre with work and no capacity at all is drawn full.
+const loadWidth = (c: any) => (c.loadPercent === null && c.demandHours > 0 ? 100 : Math.min(100, Math.max(2, Number(c.loadPercent || 0) / 1.5))) + "%";
 </script>
 
 <template>
@@ -98,7 +109,6 @@ const loadWidth = (c: any) => Math.min(100, Math.max(2, Number(c.loadPercent || 
               </div>
             </li>
           </ul>
-          <p v-if="unmonitored.length && machines.length" class="fl-muted fl-note">بدون پایش: {{ unmonitored.map((m: any) => m.machineTitle).join("، ") }}</p>
         </section>
 
         <section aria-labelledby="fl-s" class="fl-panel fl-advice">
