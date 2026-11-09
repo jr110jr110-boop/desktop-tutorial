@@ -664,6 +664,9 @@ const routes: Array<RouteRecordRaw> = [
   // staff performance events: open to every signed-in user (an employee sees only his own approved events; the API filters)
   { path: "/production/monitor", name: "MfMonitor", component: () => import("@/views/production/Monitor.vue"), meta: { roles: ProductionRoles.readers } },
   { path: "/production/staff-events", name: "MfStaffEvents", component: () => import("@/views/production/StaffEvents.vue") },
+  // production P2 part D: the shop-floor overview (home of production) and the plan of the planning seat MF-DISPATCH (read-only; /production/dispatch?wc= opens one work centre)
+  { path: "/production/floor", name: "MfFloor", component: () => import("@/views/production/Floor.vue"), meta: { roles: ProductionRoles.readers } },
+  { path: "/production/dispatch", name: "MfAiDispatch", component: () => import("@/views/production/Dispatch.vue"), meta: { roles: ProductionRoles.readers } },
 
   // Sales (فروش). meta.roles = who may open the page (the API checks every call again). The extra paths are the links the API writes into inbox items and CEO alerts:
   // /sales/bid-decisions[/:id] (id = the INQUIRY id), /sales/proposals/:id, /sales/orders/:id, /sales/inquiries, /sales/proposals; pages read route.params.id.
