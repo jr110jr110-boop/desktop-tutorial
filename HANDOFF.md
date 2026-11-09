@@ -110,6 +110,8 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 
 ## 7ج. صف کار سشن اصلی: ادغام تولید P2 (از سشن جانبی، 1405/08/18، به دستور کاربر)
 
+> **انجام شد** در `innco-net10-build` 92d50bac (مایگریشن `ProductionDnc`) و رفع P9 در a10cc49f. کار باقی‌مانده تولید در بخش 7د است.
+
 کاربر خواسته است کار سشن جانبی تولید (DNC هم‌تراز با الکسیو، پایش زنده، چک‌لیست، کارکنان، دوربین، صندلی هوش مصنوعی تولید `MF-DISPATCH`، نمای کارگاه، دسترسی امن از بیرون) در برنامه اصلی گنجانده شود. **کار سرور و CI با سشن اصلی است.**
 
 **شاخه‌ها**
@@ -141,6 +143,26 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 - تنها مورد شکست یک آزمون Package 9 است (`A_Major_Finding_Alerts_The_Owner…`). به‌تنهایی سبز است.
 - روی خود `innco-net10-build` (08033e6) هم در اجرای کامل یک آزمون دیگر P9 شکست خورد (`A_Second_Run_Sees_The_Same_Findings…`): ۱۴۳۱ از ۱۴۳۲.
 - یعنی آزمون‌های P9 زیر بار اجرای کامل زمان‌حساس‌اند. این از کار تولید نیست، ولی بهتر است سشن اصلی پایدارش کند (انتظار اجرای صف‌شده ممیزی).
+
+## 7د. صف کار سشن اصلی: تولید P2 بخش E، فرایند ماشین‌کاری محافظت‌شده (از سشن جانبی، 1405/08/18، به دستور کاربر)
+
+کاربر خواسته است نرم‌افزار همه کار اپراتور روی ماشین را از راه اتصال به خود ماشین پایش کند و اگر فرایند رعایت نشود اجازه ادامه ندهد؛ دوربین فقط نظارت کلی؛ موقعیت اضطراری فقط با مدیر تولید، یک بار و با دلیل نوشته. **کار سرور و CI با سشن اصلی است.**
+
+**شاخه‌ها**
+- بک‌اند: `innco-dnc` (5192d216). آخرین `innco-net10-build` (2c5c525a) در آن ادغام شده و تعارضی نمانده است.
+- فرانت: `innco-front-dnc` (6989f5c2). آخرین `innco-front` در آن ادغام شده است.
+- جزئیات: بخش «بخش E» در `docs/dnc-merge-note.md` روی `innco-dnc`.
+
+**گام‌ها به ترتیب**
+1. [ ] وقتی CI بیکار است، روی `innco-net10-build`: `git merge origin/innco-dnc`.
+2. [ ] مایگریشن تازه محلی با نام `ProductionGuardE` (مایگریشن `ProductionDnc` دست نخورد). ساخت آزمایشی در سشن جانبی فقط افزودنی بود: ۷ `CreateTable` (`MfMachineActivities`، `MfGateOverrides`، `MfPostProcessors`، `MfNcAttachments`، `MfCamTools`، `MfMeasurements`، `MfMeasureStations`)، ۴۲ `AddColumn` روی `MfMachineMonitors`، `MfNcRevisions`، `MfNcRuns`، `MfChecklistItems` و `MfChecklistAnswers` (همه nullable یا با پیش‌فرض)، ۱۵ ایندکس، ۲ کلید خارجی.
+3. [ ] CI کامل سبز (هر دو SQL و نصب ×۳). آزمون دود:
+   - پیش از submit نسخه ۱ و ۲ DNC، مدارک CAM (پست‌پروسسور دونفره، شبیه‌سازی، فهرست ابزار) می‌گیرد؛ شمار ردپای نسخه ۱ از ۳ به ۶ رفت.
+   - بلوک تازه `guard:` پس از بخش mf-dispatch. یک پایش و یک آزمون اتصال به نشانی بی‌پاسخ 10.255.255.1 دارد (حداکثر حدود ۱۰ ثانیه هر کدام).
+4. [ ] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc` و بسته `.github/ci-frontend-dist`. مسیرهای تازه `/production/guard` و `/production/dnc/posts`. `vue-tsc` در sandbox جانبی برای کمبود حافظه کامل نشد؛ لطفاً اجرا کنید.
+5. [ ] بسته نصب: `Dnc:RequireCamEvidence` نوشته نشود یا `true` باشد؛ هیچ رمزی در بسته نباشد (رمز PLC کنترلر فقط `Dnc:Credentials:<key>:Password` روی سرور).
+
+**آزمون واحد در سشن جانبی:** اجرای کامل پیش از ادغام ۱۴۹۹ از ۱۵۰۲ (یک مورد بخش E که رفع شد، دو مورد P9 زمان‌حساس که a10cc49f رفع کرده). پس از ادغام: آزمون‌های Guard (۱۳)، DNC، Monitor، ShopExtras، Dispatch، AiSeat، P9 و مجوز کنترلرها ۱۴۶ از ۱۴۶.
 
 ## 8. در انتظار کاربر / شرکت
 
