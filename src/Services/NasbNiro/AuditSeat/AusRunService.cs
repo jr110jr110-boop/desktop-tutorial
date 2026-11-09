@@ -153,7 +153,7 @@ namespace Services.NasbNiro.AuditSeat
 
         private sealed class RunTally
         {
-            public int Created, Recurrences, Accepted, Suppressed, Backlog, Escalated;
+            public int Created, Systemic, Recurrences, Accepted, Suppressed, Backlog, Escalated;
             public readonly List<AusFinding> Majors = new List<AusFinding>();
             public readonly List<AusFinding> Escalations = new List<AusFinding>();
         }
@@ -241,7 +241,8 @@ namespace Services.NasbNiro.AuditSeat
                     AusFindingFlow.ApplyRecheck(f, !still, now, run.Id, 0, still ? "بازبینی خودکار: انحراف هنوز دیده می‌شود." : "بازبینی خودکار: انحراف دیده نشد.", _uow);
                     if (still) recheckFailed++; else rechecked++;
                 }
-                tally.Recurrences = await _uow.Set<AusFinding>().CountAsync(f => f.RunId == run.Id && f.RecurrenceOfId != null, ct);
+                tally.Recurrences = await _uow.Set<AusFinding>().CountAsync(f => f.RunId == run.Id && f.RecurrenceOfId != null && f.ObjectType != "Systemic", ct);   // a systemic finding is linked to its objects but it is no recurrence
+                tally.Systemic = await _uow.Set<AusFinding>().CountAsync(f => f.RunId == run.Id && f.ObjectType == "Systemic", ct);
                 await _uow.SaveChangesAsync(ct);
             }
             catch (OperationCanceledException) { fatal = "اجرا لغو شد."; }
@@ -254,7 +255,7 @@ namespace Services.NasbNiro.AuditSeat
                     run.Status = fatal != null ? AusRunStatus.Failed : (failed > 0 ? AusRunStatus.Partial : AusRunStatus.Ok);
                     run.FinishedAt = DateTimeOffset.Now; run.RulesRun = results.Count(r => r.Status != "disabled"); run.RulesFailed = failed; run.Hits = hits; run.NewFindings = tally.Created; run.Recurrences = tally.Recurrences; run.Rechecked = rechecked; run.RecheckFailed = recheckFailed;
                     run.ResultsJson = JsonSerializer.Serialize(results.Select(r => new AusRunRuleDto { Code = r.Code, Status = r.Status, Hits = r.Hits, New = r.New, Ms = r.Ms, Accepted = r.Accepted, Backlog = r.Backlog, Suppressed = r.Suppressed }));
-                    run.Message = fatal ?? $"{run.RulesRun} قاعده اجرا شد؛ {hits} انحراف دیده شد، {tally.Created} یافته‌ی تازه، {tally.Recurrences} تکرار، {tally.Accepted} پذیرفته‌شده‌ی موقت، {tally.Suppressed} بسته/باطل‌شده‌ی نادیده، {failed} قاعده ناقص.";
+                    run.Message = fatal ?? $"{run.RulesRun} قاعده اجرا شد؛ {hits} انحراف دیده شد، {tally.Created} یافته‌ی تازه (شامل {tally.Systemic} فراگیر)، {tally.Recurrences} تکرار، {tally.Accepted} پذیرفته‌شده‌ی موقت، {tally.Suppressed} بسته/باطل‌شده‌ی نادیده، {failed} قاعده ناقص.";
                     run.ModifyDate = run.FinishedAt.Value;
                     DetachPending();
                     await _uow.SaveChangesAsync(CancellationToken.None);
@@ -550,7 +551,10 @@ namespace Services.NasbNiro.AuditSeat
         {
             if (!CanRead) return Bad<AusRunDto>(QualityText.NotAllowed);
             AusRun r = await _uow.Set<AusRun>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
-            return r == null ? QualityText.NotFound<AusRunDto>("اجرا پیدا نشد.") : ResponseDtoHelper.Ok(ToDto(r));
+            if (r == null) return QualityText.NotFound<AusRunDto>("اجرا پیدا نشد.");
+            AusRunDto d = ToDto(r);
+            d.Systemic = await _uow.Set<AusFinding>().CountAsync(f => f.RunId == r.Id && f.ObjectType == "Systemic", ct);
+            return ResponseDtoHelper.Ok(d);
         }
 
         public async Task<ResponseDto<List<AusRuleDto>>> GetRulesAsync(CancellationToken ct)

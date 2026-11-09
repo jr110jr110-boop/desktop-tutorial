@@ -74,7 +74,9 @@ namespace MsTests
         {
             AppHost host = NewHost();
             SelfDecided(host, 3);
-            await PackageP9AuditSeatTests.RunNow(host, PackageP9AuditSeatTests.Qa1);
+            var first = await PackageP9AuditSeatTests.RunNow(host, PackageP9AuditSeatTests.Qa1);
+            Assert.AreEqual(0, first.Data.Recurrences, "nothing was closed before, and a systemic finding is no recurrence");
+            Assert.AreEqual(1, first.Data.Systemic);
             List<AusFinding> all = Findings(host, "AUD-MC-002");
             Assert.AreEqual(3, all.Count(f => f.ObjectType != "Systemic"));
             AusFinding sys = all.Single(f => f.ObjectType == "Systemic");
@@ -150,6 +152,25 @@ namespace MsTests
             Assert.IsTrue(own.Success, own.Message);
             var longAction = await host.As(PackageP9AuditSeatTests.Owner, p => p.GetRequiredService<IAusFindingService>().ProposeActionAsync(new AusActionDto { FindingId = id, RootCause = new string('x', 5000), Correction = "اصلاح کافی است", CorrectiveAction = "اقدام اصلاحی کافی" }, Ct));
             Assert.IsFalse(longAction.Success);
+        }
+
+        [TestMethod]
+        public async Task A_Role_That_Only_Owns_Findings_Sees_Exactly_Its_Own_And_Never_Those_Of_Others()
+        {
+            AppHost host = NewHost();
+            int mine = PackageP9AuditSeatTests.SeedFinding(host, AusFindingStatus.Open, owner: 313);       // the WAREHOUSE user owns this one
+            int others = PackageP9AuditSeatTests.SeedFinding(host, AusFindingStatus.Open, owner: 308);
+            var list = await host.As(PackageP9AuditSeatTests.Stranger, p => p.GetRequiredService<IAusFindingService>().GetAsync(new AusFindingQuery(), Ct));
+            Assert.IsTrue(list.Success);
+            CollectionAssert.AreEqual(new[] { mine }, list.Data.Select(x => x.Id).ToArray());
+            Assert.IsFalse((await host.As(PackageP9AuditSeatTests.Stranger, p => p.GetRequiredService<IAusFindingService>().GetOneAsync(others, Ct))).Success, "the detail of another owner's finding is refused");
+            Assert.IsTrue((await host.As(PackageP9AuditSeatTests.Stranger, p => p.GetRequiredService<IAusFindingService>().GetOneAsync(mine, Ct))).Success);
+            var none = PackageP9AuditSeatTests.NewHost();
+            PackageP9AuditSeatTests.SeedFinding(none, AusFindingStatus.Open, owner: 308);
+            var empty = await none.As(PackageP9AuditSeatTests.Stranger, p => p.GetRequiredService<IAusFindingService>().GetAsync(new AusFindingQuery(), Ct));
+            Assert.AreEqual(0, empty.Data.Count, "an owner role without own findings sees an empty list");
+            var nobody = AppHost.Principal(399, "p9.nobody", "SALES");
+            Assert.IsFalse((await none.As(nobody, p => p.GetRequiredService<IAusFindingService>().GetAsync(new AusFindingQuery(), Ct))).Success, "a role outside the audit roles is refused");
         }
     }
 }
