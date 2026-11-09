@@ -412,7 +412,7 @@ namespace DataLayer.Migrations
                 table: "AusFindings",
                 columns: new[] { "RuleCode", "ObjectKey" },
                 unique: true,
-                filter: "[Deleted] = 0 AND [Status] NOT IN (6, 7)");
+                filter: "[Deleted] = 0 AND [Status] <> 6 AND [Status] <> 7");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AusFindings_Status_Severity",

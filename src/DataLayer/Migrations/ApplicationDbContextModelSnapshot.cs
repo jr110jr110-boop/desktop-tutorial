@@ -3834,7 +3834,7 @@ namespace DataLayer.Migrations
 
                     b.HasIndex("RuleCode", "ObjectKey")
                         .IsUnique()
-                        .HasFilter("[Deleted] = 0 AND [Status] NOT IN (6, 7)");
+                        .HasFilter("[Deleted] = 0 AND [Status] <> 6 AND [Status] <> 7");
 
                     b.HasIndex("Status", "Severity");
 

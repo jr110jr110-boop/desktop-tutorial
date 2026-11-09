@@ -77,7 +77,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.AuditSeat
                 b.HasIndex(x => new { x.Year, x.Sequence }).IsUnique();
                 b.HasIndex(x => x.Number).IsUnique();
                 // one open finding per rule and object (Closed = 6 and Voided = 7 are history); a recurrence is a new row that refers to the closed one
-                b.HasIndex(x => new { x.RuleCode, x.ObjectKey }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] NOT IN (6, 7)");
+                b.HasIndex(x => new { x.RuleCode, x.ObjectKey }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] <> 6 AND [Status] <> 7");
                 b.HasIndex(x => new { x.Status, x.Severity });
                 b.HasIndex(x => x.DueDate);
                 b.HasIndex(x => x.ProcessCode);
