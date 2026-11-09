@@ -188,7 +188,8 @@ namespace Services.NasbNiro.Integrity
 
         private async Task<AuditChainRun> RunAsync(IntegrityRunKind kind, bool manual, int? userId, CancellationToken ct)
         {
-            if (!await OneAtATime.WaitAsync(0, ct)) return null;
+            // a run that has just ended (its row already saved) may still be sending its alerts: wait a moment for the gate instead of refusing at once; a long full pass still refuses
+            if (!await OneAtATime.WaitAsync(TimeSpan.FromSeconds(30), ct)) return null;
             try
             {
                 var run = new AuditChainRun { Kind = kind, Manual = manual, RequestedByUserId = userId, StartedAt = DateTimeOffset.Now };
@@ -251,6 +252,8 @@ namespace Services.NasbNiro.Integrity
                     return;
                 }
 
+                // Package G (fix round 1, M1): the first run after the update takes the state of the newly covered record types as its starting point (once; later changes are checked normally)
+                await RecordDriftBaseline.RunOnceAsync(_uow, _user?.UserId, ct);
                 // H1: the chain is sound; now the records themselves
                 RecordDriftFinding drift = await RecordDrift.FindFirstAsync(_uow, ct);
                 if (drift != null)

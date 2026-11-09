@@ -53,6 +53,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string DrawingRevision { get; set; }
         public int? DrawingRevisionId { get; set; }
         public int? CharacteristicListId { get; set; }
+
+        /// <summary>Package G: the Persian note of an acceptance made in the legacy mode (empty otherwise).</summary>
+        public string LegacyNote { get; set; }
         public Guid? AttachmentDocumentId { get; set; }
         public string Note { get; set; }
         public List<QcMeasurementDto> Measurements { get; set; } = new List<QcMeasurementDto>();

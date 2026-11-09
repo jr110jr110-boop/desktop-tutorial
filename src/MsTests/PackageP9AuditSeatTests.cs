@@ -236,6 +236,7 @@ namespace MsTests
             await RunNow(host, Qa1);
             int count = host.Read(u => u.Set<AusFinding>().Count());
             var second = await RunNow(host, Qa1);
+            Assert.IsTrue(second.Success, "second run: " + second.Message);
             Assert.AreEqual(0, second.Data.NewFindings);
             Assert.AreEqual(count, host.Read(u => u.Set<AusFinding>().Count()));
             Assert.AreEqual(2, host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-INT-002").SeenCount));

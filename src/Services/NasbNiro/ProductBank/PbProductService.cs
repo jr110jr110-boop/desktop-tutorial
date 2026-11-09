@@ -26,6 +26,9 @@ namespace Services.NasbNiro.ProductBank
         Task<ResponseDto<PbWbsTemplateDto>> ApproveTemplateAsync(int id, CancellationToken ct);
 
         Task<ResponseDto<PbBaselineDto>> InstantiateAsync(PbInstantiateDto dto, CancellationToken ct);
+
+        /// <summary>Package G: the baseline of an adopted legacy project (the adoption workflow has its own three-person review; the readiness gate and the plan lock do not apply to a project that is already running).</summary>
+        Task<ResponseDto<PbBaselineDto>> InstantiateAdoptedAsync(PbInstantiateDto dto, int bomHeaderId, Func<PbBaselineDto, CancellationToken, Task> inTransaction, CancellationToken ct);
         Task<ResponseDto<PbBaselineDto>> GetBaselineAsync(int workOrderId, CancellationToken ct);
         Task<ResponseDto<PbBaselineDto>> GenerateWbsAsync(PbGenerateWbsDto dto, CancellationToken ct);
 
@@ -313,9 +316,12 @@ namespace Services.NasbNiro.ProductBank
             return r;
         }
 
-        private async Task<ResponseDto<PbBaselineDto>> InstantiateCoreAsync(PbInstantiateDto dto, CancellationToken ct)
+        /// <summary>Package G: the baseline of an adopted project. <paramref name="inTransaction"/> runs INSIDE the same database transaction after the baseline exists (it must load what it changes itself: with the retrying execution strategy it runs again), so the adoption record and the baseline are saved together or not at all.</summary>
+        public Task<ResponseDto<PbBaselineDto>> InstantiateAdoptedAsync(PbInstantiateDto dto, int bomHeaderId, Func<PbBaselineDto, CancellationToken, Task> inTransaction, CancellationToken ct) => InstantiateCoreAsync(dto, ct, bomHeaderId, inTransaction);
+
+        private async Task<ResponseDto<PbBaselineDto>> InstantiateCoreAsync(PbInstantiateDto dto, CancellationToken ct, int? adoptedBomId = null, Func<PbBaselineDto, CancellationToken, Task> inTransaction = null)
         {
-            if (!InRole(PbRoles.Requesters)) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
+            if (adoptedBomId == null && !InRole(PbRoles.Requesters)) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.NotAllowed);
             if (dto == null || dto.WorkOrderId <= 0 || dto.ProductId <= 0) return ResponseDtoHelper.BadRequest<PbBaselineDto>(PbMessages.InvalidData);
             WorkOrder wo = await Uow.Set<WorkOrder>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == dto.WorkOrderId && !w.Deleted, ct);
             if (wo == null) return ResponseDtoHelper.NotFound<PbBaselineDto>("دستور کار پیدا نشد.");
@@ -325,16 +331,16 @@ namespace Services.NasbNiro.ProductBank
                 return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این دستور کار قبلا پایه‌ریزی از بانک محصول انجام شده است؛ تغییرات را از راه انحراف ثبت کنید.");
             // R1c: once the contract has a current baseline the plan is locked and a product enters it only through an approved change request
             PcChangeRequest cr = null;
-            if (await PcPlanLock.IsLockedAsync(Uow, wo.ContractId, ct))
+            if (adoptedBomId == null && await PcPlanLock.IsLockedAsync(Uow, wo.ContractId, ct))
             {
                 var gate = await LockedPlanRequestAsync(dto.ChangeRequestId, wo, null, ct);
                 if (gate.Error != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(gate.Error);
                 cr = gate.Cr;
             }
-            PbBomHeader bomHead = await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == product.Id && h.Status == PbBomStatus.Released).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
+            PbBomHeader bomHead = await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => !h.Deleted && h.ProductId == product.Id && h.Status == PbBomStatus.Released && (adoptedBomId == null || h.Id == adoptedBomId.Value)).OrderByDescending(h => h.Revision).FirstOrDefaultAsync(ct);
             if (bomHead == null) return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این محصول BOM منتشرشده (Released) وجود ندارد.");
             // PB8: the engineering readiness gate (hard checklist items); an exception approved by the PMO and the CEO lets it pass
-            if (_readiness != null)
+            if (_readiness != null && adoptedBomId == null)
             {
                 global::Services.NasbNiro.OpsData.ReadinessGateResult ready = await _readiness.GateForBaselineAsync(wo.Id, product.Id, ct);
                 if (ready.Refusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(ready.Refusal);
@@ -365,9 +371,12 @@ namespace Services.NasbNiro.ProductBank
                         Uow.Set<PbProjectRouting>().Add(pr);
                     }
                     await Uow.SaveChangesAsync(ct);
-                    string wbsNote = await GeneratePcWbsAsync(baseline.Id, ct);
+                    string wbsNote;
+                    if (adoptedBomId == null) wbsNote = await GeneratePcWbsAsync(baseline.Id, ct);
+                    else wbsNote = await LinkAdoptedBaselineAsync(baseline, wo, product, ct);
                     PbBaselineDto result = await BaselineDtoAsync(baseline.Id, ct);
                     result.WbsNote = wbsNote;
+                    if (inTransaction != null) await inTransaction(result, ct);
                     return ResponseDtoHelper.Ok(result);
                 }, r => r.Success, ct);
             }
@@ -375,6 +384,39 @@ namespace Services.NasbNiro.ProductBank
             {
                 return ResponseDtoHelper.BadRequest<PbBaselineDto>("برای این دستور کار همزمان پایه‌ریزی دیگری انجام شد.");
             }
+        }
+
+        /// <summary>
+        /// Package G (fix round 1, H2): the baseline of an ADOPTED running project is linked to the plan that already exists; no WBS node or activity is generated, the locked plan is not edited and no earned-value figure moves.
+        /// When the work order already has a product node in the project WBS the baseline points at it (a mapping). When the contract has a plan but the work order has no node to map to, a draft PC change request
+        /// (the project's normal change path, decided by the PMO) asks for the link and names the baseline. A contract without any plan gets no generated plan either: the normal «ساخت WBS» action does it with its own gates.
+        /// </summary>
+        private async Task<string> LinkAdoptedBaselineAsync(PbProjectBaseline baseline, WorkOrder wo, PbProduct product, CancellationToken ct)
+        {
+            PcWbsNode node = await Uow.Set<PcWbsNode>().AsNoTracking().Where(n => n.ContractId == wo.ContractId && n.WorkOrderId == wo.Id && n.NodeType == PcWbsNodeType.Product && !n.Deleted).OrderBy(n => n.Id).FirstOrDefaultAsync(ct);
+            if (node != null)
+            {
+                baseline.PcProductNodeId = node.Id;
+                await Uow.SaveChangesAsync(ct);
+                return $"پایه‌ریزی به گرهٔ موجود {node.Code} در WBS پروژه نگاشت شد؛ WBS و برنامهٔ زمانی تغییر نکرد و هیچ عدد ارزش کسب‌شده دست نخورد.";
+            }
+            bool contractHasPlan = await Uow.Set<PcWbsNode>().AnyAsync(n => n.ContractId == wo.ContractId && !n.Deleted, ct) || await Uow.Set<PcActivity>().AnyAsync(a => a.ContractId == wo.ContractId && !a.Deleted, ct);
+            if (!contractHasPlan && !await PcPlanLock.IsLockedAsync(Uow, wo.ContractId, ct))
+                return "این قرارداد هنوز برنامهٔ زمانی ندارد؛ برای ساخت WBS از روی قالب محصول، پس از آماده شدن برنامه «ساخت WBS» را بزنید (چیزی ساخته نشد).";
+            DateTimeOffset now = DateTimeOffset.Now;
+            var cr = new PcChangeRequest
+            {
+                ContractId = wo.ContractId, Origin = PcChangeOrigin.InternalRequest, Type = PcChangeType.Method, RequesterUserId = User.UserId, Status = PcChangeStatus.Draft, ScenarioJson = "[]",
+                Description = $"پذیرش پیکربندی پروژهٔ در جریان: پایه‌ریزی (baseline) دستور کار {wo.Code} از BOM منتشرشدهٔ محصول {product.Code} ساخته شد. برای دستور کار گرهٔ محصول در WBS موجود نیست؛ لطفاً پیوند پایه‌ریزی با WBS و برنامهٔ زمانی موجود را از مسیر تغییر تعیین کنید.",
+                Reason = "پذیرش پیکربندی موجود (گذار به کنترل پیکربندی)؛ برنامهٔ قفل‌شده بدون تصمیم PMO ویرایش نمی‌شود و ارزش کسب‌شده دست نمی‌خورد.",
+                CreateDate = now, ModifyDate = now, CreatorUserId = User.UserId, ModifierUserId = User.UserId,
+            };
+            cr.Number = await InventoryNumbers.NextNumberAsync(Uow, PcNumbers.ChangeRequest, "CR", DateTime.Today, ct);
+            Uow.Set<PcChangeRequest>().Add(cr);
+            await Uow.SaveChangesAsync(ct);
+            baseline.ChangeRequestId = cr.Id;
+            await Uow.SaveChangesAsync(ct);
+            return $"برای دستور کار گرهٔ محصول در WBS نبود؛ WBS ساخته و برنامه ویرایش نشد. درخواست تغییر {cr.Number} (پیش‌نویس) برای تعیین تکلیف پیوند با برنامه ثبت شد.";
         }
 
         /// <summary>

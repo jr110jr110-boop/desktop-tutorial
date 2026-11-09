@@ -103,6 +103,9 @@ namespace Services.NasbNiro.AuditSeat
             c.ByProcess = open.GroupBy(f => f.ProcessCode).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).Select(g => new AusCountDto { Key = g.Key, Title = AusProcesses.TitleOf(g.Key), Count = g.Count() }).ToList();
             c.ByStatus = open.GroupBy(f => f.Status).OrderBy(g => (int)g.Key).Select(g => new AusCountDto { Key = g.Key.ToString(), Title = AusRules.StatusText(g.Key), Count = g.Count() }).ToList();
             c.TopRules = created.GroupBy(f => f.RuleCode).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).Take(10).Select(g => new AusCountDto { Key = g.Key, Title = AusCatalog.Find(g.Key)?.Title ?? g.Key, Count = g.Count() }).ToList();
+            // Package G (fix round 1, H1): the legacy exemptions that were used, counted per kind (the findings of the three legacy rules are aggregated per object, so the CEO sees a handful)
+            var legacyKinds = await _uow.Set<global::Entities.Model.NasbNiro.GoLive.GlLegacyUse>().AsNoTracking().Where(u => !u.Deleted).GroupBy(u => u.Kind).Select(g => new { g.Key, N = g.Count() }).ToListAsync(ct);
+            c.LegacyUses = legacyKinds.OrderBy(x => (int)x.Key).Select(x => new AusCountDto { Key = x.Key.ToString(), Title = global::Services.NasbNiro.GoLive.GoLiveOverviewService.KindText(x.Key), Count = x.N }).ToList();
             DateTime todayDay = today;
             List<int?> ownerIds = open.Where(f => f.Severity == AusSeverity.Major).OrderBy(f => f.DueDate).Take(20).Select(f => f.OwnerUserId).ToList();
             Dictionary<int, string> names = await AusNames.LoadAsync(_uow, ownerIds, ct);

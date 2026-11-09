@@ -19,6 +19,9 @@ namespace Services.NasbNiro.ProjectControl
         public string Title;
         public string RevisionCode;
         public PcDocStatus RevisionStatus;
+
+        /// <summary>Package G: when the revision in force was released (null when it was never recorded); a revision released before the cut-over is legacy.</summary>
+        public DateTimeOffset? ReleasedAt;
         public PcDocLinkKind Via;
     }
 
@@ -43,7 +46,7 @@ namespace Services.NasbNiro.ProjectControl
             await FillAsync(uow, found.Values.ToList(), ct);
             return found.Values.Where(f => f.Number != null && f.Released != null)
                 .OrderBy(f => f.Number, StringComparer.Ordinal)
-                .Select(f => new PartDrawing { DeliverableId = f.Deliverable.Id, RevisionId = f.Released.Id, Number = f.Number, Title = f.Title, RevisionCode = f.Released.Code, RevisionStatus = f.Released.Status, Via = f.Via })
+                .Select(f => new PartDrawing { DeliverableId = f.Deliverable.Id, RevisionId = f.Released.Id, Number = f.Number, Title = f.Title, RevisionCode = f.Released.Code, RevisionStatus = f.Released.Status, ReleasedAt = f.Released.ReleasedAt, Via = f.Via })
                 .ToList();
         }
 

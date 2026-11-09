@@ -34,11 +34,20 @@ namespace MsTests
     {
         private static readonly IPAddress ClientIp = IPAddress.Parse("10.9.8.7");
 
+        /// <summary>Files that a test registers under a document id; the fake document store serves them (Package G print tests).</summary>
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte[]> Files = new System.Collections.Concurrent.ConcurrentDictionary<Guid, byte[]>();
+
         private sealed class FakeDocuments : IDocumentService
         {
             public Task<Document> GetDocumentByIdAsync(Guid documentId) => throw new NotSupportedException();
             public Task<Guid> UploadDocumentAsync(UploadFileDto uploadFileDto) => Task.FromResult(Guid.NewGuid());
-            public Task<ResponseDocumentDto> DownloadDocumentAsync(Guid documentId) => throw new NotSupportedException();
+            public Task<ResponseDocumentDto> DownloadDocumentAsync(Guid documentId)
+            {
+                if (!Files.TryGetValue(documentId, out byte[] bytes)) throw new NotSupportedException();
+                string path = System.IO.Path.GetTempFileName();
+                System.IO.File.WriteAllBytes(path, bytes);
+                return Task.FromResult(new ResponseDocumentDto { FileStream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, 4096, System.IO.FileOptions.DeleteOnClose), Name = "f.pdf" });
+            }
             public Task<bool> DeleteDocumentAsync(Guid image) => Task.FromResult(true);
             public Task<bool> UpdateDocumentAsync(UpdateDocumentDto updateDocumentDto) => Task.FromResult(true);
             public Task<ResponseDto<bool>> UpdateDocumentByUserAsync(UpdateDocumentDto updateDocumentDto) => throw new NotSupportedException();

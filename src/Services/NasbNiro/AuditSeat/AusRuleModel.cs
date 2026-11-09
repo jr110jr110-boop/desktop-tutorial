@@ -274,6 +274,7 @@ namespace Services.NasbNiro.AuditSeat
             list.AddRange(EngineeringRules());
             list.AddRange(ProjectRules());
             list.AddRange(SupportRules());
+            list.AddRange(GoLiveRules());
             return list;
         });
 

@@ -648,6 +648,10 @@ namespace Services.NasbNiro.Quality
                     r.Status = ReleaseNoteStatus.Released; r.ReleasedAt = now; r.ReleasedByUserId = Me;
                     r.CertificateOfConformityNumber = "CoC-" + r.Number;
                     r.ChecksSnapshot = JsonSerializer.Serialize(checks);
+                    // Package G: a release that passed PCA_MATCH as «legacy» is registered (a Persian note on the check, an observation of the AUDIT seat)
+                    ReleaseCheckDto pcaCheck = checks.FirstOrDefault(c => c.Code == "PCA_MATCH");
+                    if (pcaCheck != null && pcaCheck.Detail != null && pcaCheck.Detail.Contains(global::Services.NasbNiro.GoLive.GlText.PcaLegacy))
+                        await global::Services.NasbNiro.GoLive.GlLegacyRegister.NoteAsync(_uow, global::Entities.Model.NasbNiro.GoLive.GlLegacyKind.PcaNotApplicable, "ReleaseNote:" + r.Number, wo.Id, null, null, r.Number, pcaCheck.Detail, Me, cancellationToken);
                     // Package B (H10): the as-built record of every released unit, issued in the same transaction as the release (immutable; a correction is a new version)
                     await AsBuiltBuilder.IssueAsync(_uow, r, wo, "ترخیص " + r.Number, now, Me, cancellationToken);
                     break;

@@ -289,6 +289,7 @@ namespace Services.NasbNiro.ProjectControl
                 catch (DbUpdateException) { return Bad<PcRevisionDto>("هم‌زمان بازنگری دیگری از این سند منتشر شد؛ صفحه را تازه کنید."); }
                 await NoticesAsync(d, r, ct);
                 await _uow.SaveChangesAsync(ct);
+                await global::Services.NasbNiro.GoLive.PoDrawingCitation.SyncAlertsAsync(_uow, _notify, d.Id, ct);   // Package G: open purchase orders that cite the superseded revision
                 return await RevisionResultAsync(r, ct);
             }
 
