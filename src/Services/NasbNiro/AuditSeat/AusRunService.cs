@@ -97,7 +97,10 @@ namespace Services.NasbNiro.AuditSeat
             // a run that died with its process is written off; a live one blocks a second run
             List<AusRun> running = await _uow.Set<AusRun>().Where(r => !r.Deleted && r.Status == AusRunStatus.Running).ToListAsync(ct);
             foreach (AusRun old in running.Where(r => now - r.StartedAt > StaleAfter)) { old.Status = AusRunStatus.Failed; old.FinishedAt = now; old.Message = "اجرا پایان نیافت و ناتمام ثبت شد."; old.ModifyDate = now; }
-            if (running.Any(r => now - r.StartedAt <= StaleAfter) || Gate.CurrentCount == 0)
+            // no live run row but the gate still held: a run that has just ended is releasing it; wait for that a moment instead of refusing
+            bool live = running.Any(r => now - r.StartedAt <= StaleAfter);
+            if (!live && Gate.CurrentCount == 0 && await Gate.WaitAsync(TimeSpan.FromSeconds(30), ct)) Gate.Release();
+            if (live || Gate.CurrentCount == 0)
             {
                 if (_uow.Set<AusRun>().Local.Any(r => r.Status == AusRunStatus.Failed && r.FinishedAt == now)) await _uow.SaveChangesAsync(ct);
                 return Bad<AusRunDto>("اجرای دیگری از ممیزی در جریان است؛ پس از پایان آن دوباره تلاش کنید.");
@@ -179,6 +182,7 @@ namespace Services.NasbNiro.AuditSeat
             var tally = new RunTally();
             int hits = 0, failed = 0, rechecked = 0, recheckFailed = 0;
             string fatal = null;
+            AusRunStatus final = AusRunStatus.Failed;
             try
             {
                 Dictionary<string, AusRuleState> states = await _uow.Set<AusRuleState>().Where(s => !s.Deleted).ToDictionaryAsync(s => s.RuleCode, ct);
@@ -252,7 +256,8 @@ namespace Services.NasbNiro.AuditSeat
                 // the run row always ends, also after a cancellation or an exception (a "Running" row would block the next on-demand run)
                 try
                 {
-                    run.Status = fatal != null ? AusRunStatus.Failed : (failed > 0 ? AusRunStatus.Partial : AusRunStatus.Ok);
+                    // the result is set now but the row stays Running until the alerts are out (below): a reader that sees the run ended also sees its alerts, and the next on-demand run is not refused by the gate this run still holds
+                    final = fatal != null ? AusRunStatus.Failed : (failed > 0 ? AusRunStatus.Partial : AusRunStatus.Ok);
                     run.FinishedAt = DateTimeOffset.Now; run.RulesRun = results.Count(r => r.Status != "disabled"); run.RulesFailed = failed; run.Hits = hits; run.NewFindings = tally.Created; run.Recurrences = tally.Recurrences; run.Rechecked = rechecked; run.RecheckFailed = recheckFailed;
                     run.ResultsJson = JsonSerializer.Serialize(results.Select(r => new AusRunRuleDto { Code = r.Code, Status = r.Status, Hits = r.Hits, New = r.New, Ms = r.Ms, Accepted = r.Accepted, Backlog = r.Backlog, Suppressed = r.Suppressed }));
                     run.Message = fatal ?? $"{run.RulesRun} قاعده اجرا شد؛ {hits} انحراف دیده شد، {tally.Created} یافته‌ی تازه (شامل {tally.Systemic} فراگیر)، {tally.Recurrences} تکرار، {tally.Accepted} پذیرفته‌شده‌ی موقت، {tally.Suppressed} بسته/باطل‌شده‌ی نادیده، {failed} قاعده ناقص.";
@@ -263,7 +268,12 @@ namespace Services.NasbNiro.AuditSeat
                 catch (Exception) { /* the next on-demand run writes off a Running row older than three hours */ }
             }
 
-            await AlertAsync(run, tally, ct);
+            try { await AlertAsync(run, tally, ct); }
+            finally
+            {
+                try { run.Status = final; run.ModifyDate = DateTimeOffset.Now; await _uow.SaveChangesAsync(CancellationToken.None); }
+                catch (Exception) { /* the next on-demand run writes off a Running row older than three hours */ }
+            }
             return ToDto(run);
         }
 
