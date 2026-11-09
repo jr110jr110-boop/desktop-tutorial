@@ -40,6 +40,7 @@ namespace Services.NasbNiro.Ai
         public const string OfficeDraft = "OFFICE-DRAFT";
         public const string OpsData = "OPS-DATA";
         public const string Audit = "AUDIT";
+        public const string MfDispatch = "MF-DISPATCH";
 
         /// <summary>The user the evaluation runs as (it is not a seat).</summary>
         public const string Eval = "EVAL";
@@ -76,6 +77,8 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = AiSeatCodes.OpsData, Title = "کنترل داده‌ی عملیاتی (انبار، تولید، کیفیت، مالی)", Roles = new[] { "WAREHOUSE" }, Schedule = "daily 06:15", OutputKind = "OpsNotes", UsesModel = false },
             // the internal auditor (package 9): rule-based, read-only role AUDITOR; it writes its own findings and runs only and approves or closes nothing
             new AiSeatDefinition { Code = AiSeatCodes.Audit, Title = "ممیز داخلی هوشمند (ISO 19011)", Roles = new[] { "AUDITOR" }, Schedule = "daily 05:30", OutputKind = "AuditFindings", UsesModel = false },
+            // production P2 part D: the planning seat; rule-based, read-only (PLANNING reads production and approves nothing there); it leaves the dispatch plan, bottleneck and late-risk notes
+            new AiSeatDefinition { Code = AiSeatCodes.MfDispatch, Title = "برنامه‌ریز هوشمند تولید (اولویت کارها و گلوگاه)", Roles = new[] { "PLANNING" }, Schedule = "poll 60", OutputKind = "ProductionDispatch", UsesModel = false },
         };
 
         /// <summary>The evaluation user: it reads like the CEO (★), it is not a seat and has no row in AiSeats.</summary>

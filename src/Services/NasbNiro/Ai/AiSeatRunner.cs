@@ -333,6 +333,8 @@ namespace Services.NasbNiro.Ai
                 // OpsData:Jobs=false switches the daily data-control seat off on its own (the other seats follow Ai:Jobs)
                 if (s.Code == AiSeatCodes.OpsData && string.Equals(_configuration?["OpsData:Jobs"], "false", StringComparison.OrdinalIgnoreCase)) continue;
                 if (s.Code == AiSeatCodes.Audit && string.Equals(_configuration?["Audit:Jobs"], "false", StringComparison.OrdinalIgnoreCase)) continue;
+                // Production:Jobs=false switches the production planning seat off together with the other production jobs
+                if (s.Code == AiSeatCodes.MfDispatch && string.Equals(_configuration?["Production:Jobs"], "false", StringComparison.OrdinalIgnoreCase)) continue;
                 AiSchedule schedule = AiSchedule.Parse(s.Schedule);
                 if (schedule == null || !schedule.IsDue(now, s.LastAttempt, s.LastSuccess, Minutes(AiConfigKeys.RetryMinutes, DefaultRetryMinutes))) continue;
                 if (IsBackedOff(s.LastStatus, s.LastError, s.LastAttempt, now, Minutes(AiConfigKeys.SkipBackoffMinutes, DefaultSkipBackoffMinutes))) continue;

@@ -291,6 +291,9 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.OpsData.OpsDataSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.AuditSeat.AuditSeatJob>();
+            // production P2 part D: the planning seat and its read-only plan
+            services.AddScoped<Services.NasbNiro.Production.Dispatch.IMfDispatchService, Services.NasbNiro.Production.Dispatch.MfDispatchService>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Production.Dispatch.MfDispatchSeatJob>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusRunService, Services.NasbNiro.AuditSeat.AusRunService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusFindingService, Services.NasbNiro.AuditSeat.AusFindingService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusReportService, Services.NasbNiro.AuditSeat.AusReportService>();
