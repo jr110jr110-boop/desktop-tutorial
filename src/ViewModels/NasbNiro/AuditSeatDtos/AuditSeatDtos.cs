@@ -389,6 +389,9 @@ namespace ViewModels.NasbNiro.AuditSeatDtos
         public List<AusAcceptanceDto> Accepted { get; set; } = new List<AusAcceptanceDto>();
         public int BacklogOpen { get; set; }
         public int SystemicOpen { get; set; }
+
+        /// <summary>Package G: legacy exemptions used so far, per kind.</summary>
+        public List<AusCountDto> LegacyUses { get; set; } = new List<AusCountDto>();
     }
 
     public class AusAcceptanceProposeDto

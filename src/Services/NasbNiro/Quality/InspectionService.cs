@@ -101,7 +101,7 @@ namespace Services.NasbNiro.Quality
                 ItemId = r.ItemId, ItemCode = r.Item?.Code, ItemTitle = r.Item?.Title, LotId = r.LotId, SerialNumber = r.SerialNumber, Quantity = r.Quantity,
                 RecordDate = r.RecordDate, Result = r.Result, SelfInspection = r.SelfInspection, InspectorName = names.Name(r.InspectorUserId),
                 NcrId = r.NcrId, NcrNumber = r.Ncr?.Number, Operation = r.Operation, DrawingNumber = r.DrawingNumber, DrawingRevision = r.DrawingRevision,
-                DrawingRevisionId = r.DrawingRevisionId, CharacteristicListId = r.CharacteristicListId,
+                DrawingRevisionId = r.DrawingRevisionId, CharacteristicListId = r.CharacteristicListId, LegacyNote = r.LegacyNote,
                 AttachmentDocumentId = r.AttachmentDocumentId, Note = r.Note,
                 Measurements = r.Measurements.OrderBy(m => m.Id).Select(m => new QcMeasurementDto
                 {
@@ -159,6 +159,13 @@ namespace Services.NasbNiro.Quality
             PickOutcome pick = await CharacteristicPicker.BuildAsync(_uow, dto.ItemId, dto.Type, dto.OperationSequence, recordQuantity, dto.Result,
                 input.Select(m => new PickInput { CharacteristicId = m.CharacteristicId, Name = Clean(m.Characteristic), Measured = m.Measured, EquipmentId = m.EquipmentId }).ToList(), cancellationToken);
             if (pick.Error != null) return Bad<QcRecordDto>(pick.Error);
+            // Package G: the legacy mode (a drawing revision released before the cut-over, no list) accepts only with the evidence of the decision written in the note or attached
+            if (pick.Legacy)
+            {
+                int evidenceMin = (int)(await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[global::Services.NasbNiro.GoLive.GlSettingKeys.LegacyReasonMinChars];
+                if ((Clean(dto.Note)?.Length ?? 0) < evidenceMin && !dto.AttachmentDocumentId.HasValue)
+                    return Bad<QcRecordDto>($"این قطعه نقشه منتشرشده پیش از آغاز کنترل دارد و فهرست مشخصه ندارد؛ قبول فقط با مدرک تصمیم ممکن است: در توضیحات دست‌کم {evidenceMin} نویسه (روش و مبنای تصمیم) بنویسید یا مدرک را پیوست کنید.");
+            }
             List<QcMeasurement> measurements = pick.Measurements;
             string equipmentProblem = await CheckEquipmentAsync(measurements.Where(m => m.EquipmentId.HasValue).Select(m => m.EquipmentId.Value), date, cancellationToken);
             if (equipmentProblem != null) return Bad<QcRecordDto>(equipmentProblem);
@@ -176,12 +183,14 @@ namespace Services.NasbNiro.Quality
                 // Package B: the drawing number and revision come from the EDMS resolver; typed text is kept only for a part that has no drawing (legacy)
                 DrawingNumber = pick.Resolved != null && pick.Resolved.HasDrawing ? pick.Resolved.DrawingNumber : Clean(dto.DrawingNumber),
                 DrawingRevision = pick.Resolved != null && pick.Resolved.HasDrawing ? pick.Resolved.DrawingRevision : Clean(dto.DrawingRevision),
-                DrawingRevisionId = pick.Resolved?.DrawingRevisionId, CharacteristicListId = pick.Governed ? pick.Resolved.ListId : null, InspectorUserId = Me,
+                DrawingRevisionId = pick.Resolved?.DrawingRevisionId, CharacteristicListId = pick.Governed ? pick.Resolved.ListId : null, LegacyNote = pick.Legacy ? pick.LegacyNote : null, InspectorUserId = Me,
                 SelfInspection = !_user.IsInRole(QualityRoles.Inspectors), RecordDate = date, Result = dto.Result,
                 AttachmentDocumentId = dto.AttachmentDocumentId, Note = Clean(dto.Note), Measurements = measurements,
                 CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<QcRecord>().Add(record);
+            if (pick.Legacy)
+                await global::Services.NasbNiro.GoLive.GlLegacyRegister.NoteAsync(_uow, global::Entities.Model.NasbNiro.GoLive.GlLegacyKind.QcAcceptWithoutList, "QcRecord:" + record.Number, dto.WorkOrderId, dto.ItemId, pick.Resolved?.DrawingRevisionId, record.Number, pick.LegacyNote, Me, cancellationToken);
             NonConformance drafted = null;
             if (opensNcr)
             {

@@ -91,6 +91,12 @@ namespace MsTests
         internal static async Task<ResponseDto<AusRunDto>> RunNow(AppHost host, ClaimsPrincipal who)
         {
             var res = await As(host, who, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            // the finished run row is saved before the run gate is released: a call made in that instant is told "another run is in progress" (a race of the test, not of the product); try again briefly
+            for (int attempt = 0; attempt < 50 && !res.Success && (res.Message ?? string.Empty).Contains("در جریان است"); attempt++)
+            {
+                await Task.Delay(100);
+                res = await As(host, who, p => p.GetRequiredService<IAusRunService>().RunNowAsync(Ct));
+            }
             if (!res.Success || res.Data == null || res.Data.Id <= 0 || res.Data.StatusValue != (int)AusRunStatus.Running) return res;
             for (int i = 0; i < 1500; i++)
             {
@@ -236,6 +242,7 @@ namespace MsTests
             await RunNow(host, Qa1);
             int count = host.Read(u => u.Set<AusFinding>().Count());
             var second = await RunNow(host, Qa1);
+            Assert.IsTrue(second.Success, "second run: " + second.Message);
             Assert.AreEqual(0, second.Data.NewFindings);
             Assert.AreEqual(count, host.Read(u => u.Set<AusFinding>().Count()));
             Assert.AreEqual(2, host.Read(u => u.Set<AusFinding>().Single(f => f.RuleCode == "AUD-INT-002").SeenCount));

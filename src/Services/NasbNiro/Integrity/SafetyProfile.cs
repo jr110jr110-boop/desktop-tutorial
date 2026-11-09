@@ -95,6 +95,7 @@ namespace Services.NasbNiro.Integrity
             Register(ModuleSpecs());
             Register(EngChangeSpecs());
             Register(AuditSeatSpecs());
+            Register(GoLiveSpecs());   // Package G
         }
 
         /// <summary>Adds the specs of a module (once; a spec with the same store and key replaces the earlier one). Package 8 adds its gate keys with one call.</summary>

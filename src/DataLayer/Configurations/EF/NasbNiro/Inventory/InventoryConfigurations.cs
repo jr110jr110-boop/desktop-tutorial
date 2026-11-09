@@ -43,6 +43,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddCeoConfigurations();
             builder.AddProductBankConfigurations();
             builder.AddDesignControlConfigurations();   // Package A1
+            builder.AddGoLiveConfigurations();   // Package G
             builder.AddGenealogyConfigurations();
             builder.AddProjectBalanceConfigurations();
             builder.AddPb6Configurations();

@@ -393,7 +393,7 @@ namespace Services.NasbNiro.ProjectControl
                 Lines = lines.OrderBy(l => l.Id).Select(l => new PcTransmittalLineDto
                 {
                     Id = l.Id, DeliverableId = l.DeliverableId, DocumentNumber = docs.FirstOrDefault(d => d.Id == l.DeliverableId)?.DocumentNumber, Title = docs.FirstOrDefault(d => d.Id == l.DeliverableId)?.Title,
-                    Revision = l.Revision, RevisionId = l.RevisionId, Purpose = l.Purpose, ResponseCode = l.ResponseCode, ResponseDate = l.ResponseDate, ResponseNote = l.ResponseNote,
+                    Revision = l.Revision, RevisionId = l.RevisionId, LegacyFreeText = l.LegacyFreeText, Purpose = l.Purpose, ResponseCode = l.ResponseCode, ResponseDate = l.ResponseDate, ResponseNote = l.ResponseNote,
                 }).ToList(),
             };
         }
@@ -438,6 +438,8 @@ namespace Services.NasbNiro.ProjectControl
             List<PcEngineeringDeliverable> docs = await _uow.Set<PcEngineeringDeliverable>().Where(d => ids.Contains(d.Id) && d.ContractId == dto.ContractId && !d.Deleted).ToListAsync(cancellationToken);
             if (docs.Count != ids.Count) return Bad<PcTransmittalDto>("سندی متعلق به این قرارداد نیست.");
             bool requireRevision = (await PcSettingKeys.LoadAsync(_uow, cancellationToken))[PcSettingKeys.EdmsRequireRevision] >= 1m;
+            // Package G: a line with no EDMS revision record (legacy free text) is flagged on the line and shown in Persian
+            bool glFlagFreeText = (await QualitySettingKeys.LoadAsync(_uow, cancellationToken))[global::Services.NasbNiro.GoLive.GlSettingKeys.TransmittalRevisionFromEdms] >= 1m;
             List<int> revIds = dto.Lines.Where(l => l.RevisionId.HasValue).Select(l => l.RevisionId.Value).ToList();
             Dictionary<int, PcDocumentRevision> revisions = revIds.Count == 0 ? new Dictionary<int, PcDocumentRevision>() : (await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => revIds.Contains(r.Id) && !r.Deleted).ToListAsync(cancellationToken)).ToDictionary(r => r.Id);
             HashSet<int> withRevisions = ids.Count == 0 ? new HashSet<int>() : (await _uow.Set<PcDocumentRevision>().AsNoTracking().Where(r => !r.Deleted && ids.Contains(r.DeliverableId)).Select(r => r.DeliverableId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
@@ -482,7 +484,7 @@ namespace Services.NasbNiro.ProjectControl
                     else if (requireRevision) return Bad<PcTransmittalDto>("بازنگری سند " + d.DocumentNumber + " را از فهرست بازنگری‌ها انتخاب کنید (متن آزاد پذیرفته نمی‌شود).");
                     else if (withRevisions.Contains(d.Id)) return Bad<PcTransmittalDto>("سند " + d.DocumentNumber + " بازنگری ثبت‌شده دارد؛ بازنگری را انتخاب کنید.");
                 }
-                t.Lines.Add(new PcTransmittalLine { DeliverableId = d.Id, Revision = revision, RevisionId = revisionId, Purpose = l.Purpose });
+                t.Lines.Add(new PcTransmittalLine { DeliverableId = d.Id, Revision = revision, RevisionId = revisionId, Purpose = l.Purpose, LegacyFreeText = dto.Direction == PcTransmittalDirection.Outgoing && revisionId == null && glFlagFreeText });
                 if (dto.Direction == PcTransmittalDirection.Outgoing)
                 {
                     d.Revision = revision; d.LastTransmittalNumber = t.Number; d.LastTransmittalDate = date; d.IssuedByUserId = Me;

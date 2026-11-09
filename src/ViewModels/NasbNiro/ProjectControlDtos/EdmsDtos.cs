@@ -346,6 +346,11 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int PrintedByUserId { get; set; }
         public string PrintedByName { get; set; }
         public string StampText { get; set; }
+
+        /// <summary>Package G: the release date (Shamsi) and the fixed texts of the stamp of the controlled printed copy (header and footer).</summary>
+        public string ReleasedAtText { get; set; }
+        public string StampHeader { get; set; }
+        public string StampFooter { get; set; }
         public Guid DocumentId { get; set; }
         public string FileName { get; set; }
     }

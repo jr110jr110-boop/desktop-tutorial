@@ -429,6 +429,21 @@ namespace Entities.Model.NasbNiro.Procurement
         public decimal ReceivedQuantity { get; set; }
         public decimal InvoicedQuantity { get; set; }
         public DateTime? LastReceiptDate { get; set; }
+
+        // ---- Package G (ISO 9001 8.4.3): the drawing and revision the supplier is asked to make or supply to. Resolved by the EDMS resolver on the server (never typed); null when the item has no released drawing.
+        /// <summary>The drawing (EDMS document) cited, and its revision in force when the line was saved / approved / released.</summary>
+        public int? DrawingDeliverableId { get; set; }
+        public int? DrawingRevisionId { get; set; }
+        public string DrawingNumber { get; set; }
+        public string DrawingRevision { get; set; }
+        public DateTimeOffset? DrawingCitedAt { get; set; }
+
+        /// <summary>The supplier confirmed that he works to this (newer) revision of the drawing while the order was open; recorded by the buyer with the reference of the confirmation.</summary>
+        public int? SupplierConfirmedRevisionId { get; set; }
+        public string SupplierConfirmedRevision { get; set; }
+        public DateTimeOffset? SupplierConfirmedAt { get; set; }
+        public int? SupplierConfirmedByUserId { get; set; }
+        public string SupplierConfirmedRef { get; set; }
     }
 
     /// <summary>تایید انجام خدمت: acceptance of a service or subcontract line by QC or the requesting unit (not the buyer).</summary>
