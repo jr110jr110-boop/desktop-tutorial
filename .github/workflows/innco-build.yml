@@ -255,6 +255,8 @@ jobs:
           git config user.email "innco-ci@users.noreply.github.com"
           git checkout --orphan innco-ci-smoke-${{ matrix.tag }}
           git rm -rqf --cached .
+          # GitHub refuses a file over 100 MB: a program log above 40 MB is kept compressed (the scenario output itself is small)
+          for f in smoke-output/*.log; do if [ -f "$f" ] && [ "$(stat -c %s "$f")" -gt 41943040 ]; then gzip -9 "$f"; fi; done
           git add -f smoke-output
           git commit -q -m "Smoke results (SQL Server ${{ matrix.tag }}) for ${{ github.sha }}"
           git push -f origin innco-ci-smoke-${{ matrix.tag }}
