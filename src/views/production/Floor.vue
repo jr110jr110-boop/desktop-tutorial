@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, type StyleValue } from "vue";
 import { getFloor } from "@/api/DispatchAPIs";
 
 // Production release P2 part D: the shop-floor overview. One look answers "which machines run, what is wrong, what should happen next". Every machine is drawn as its own stack light
@@ -45,6 +45,8 @@ const stateText: Record<string, string> = { "0": "خاموش", "1": "آماده�
 const lamp = (s: number | null) => (s === 2 ? "green" : s === 1 ? "amber" : s === 3 ? "red" : "dark");
 const machines = computed(() => (d.value?.live?.machines || []).filter((m: any) => m.source !== 0));
 const fa = (n: number | null | undefined) => (n === null || n === undefined ? "—" : Number(n).toLocaleString("fa-IR", { maximumFractionDigits: 1 }));
+// a CSS custom property is not in the StyleValue type; the ring percentage goes through this helper
+const ring = (p: number | null | undefined): StyleValue => ({ "--p": (p || 0) + "%" } as unknown as StyleValue);
 const since = (min: number) => (min < 60 ? fa(min) + " دقیقه" : fa(Math.floor(min / 60)) + " ساعت" + (min % 60 ? " و " + fa(min % 60) + " دقیقه" : ""));
 const levelText: Record<string, string> = { bottleneck: "گلوگاه", busy: "پربار", normal: "عادی", idle: "بی‌کار" };
 const kindText: Record<string, string> = { bottleneck: "گلوگاه", "late-risk": "خطر تأخیر", "machine-down": "ماشین متوقف", "machine-idle": "ماشین بیکار", program: "برنامه CNC", kit: "مواد" };
@@ -104,7 +106,7 @@ const loadWidth = (c: any) => (c.loadPercent === null && c.demandHours > 0 ? 100
                 <div v-if="m.lastRunProgram" class="fl-mprog">برنامه {{ m.lastRunProgram }}<span v-if="m.lastRunRevision"> نسخه {{ fa(m.lastRunRevision) }}</span></div>
                 <div v-if="m.mismatchText" class="fl-mwarn">{{ m.mismatchText }}</div>
               </div>
-              <div :style="{ '--p': (m.todayRunPercent || 0) + '%' }" class="fl-ring" title="سهم کار واقعی از امروز">
+              <div :style="ring(m.todayRunPercent)" class="fl-ring" title="سهم کار واقعی از امروز">
                 <span>{{ m.todayRunPercent === null || m.todayRunPercent === undefined ? "—" : fa(m.todayRunPercent) + "٪" }}</span>
               </div>
             </li>
