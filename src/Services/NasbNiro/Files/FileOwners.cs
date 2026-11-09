@@ -50,6 +50,7 @@ namespace Services.NasbNiro.Files
             ["DocumentRevisionRecord"] = Quality.QualityRoles.Readers, ["Audit"] = Quality.QualityRoles.Readers, ["ManagementReview"] = Quality.QualityRoles.Readers,
             ["MeasuringEquipment"] = Quality.QualityRoles.Readers, ["CalibrationEvent"] = Quality.QualityRoles.Readers, ["Qualification"] = Quality.QualityRoles.Readers,
             ["Pqr"] = Quality.QualityRoles.Readers, ["ItpActivity"] = Quality.QualityRoles.Readers,
+            ["SpQualEquipment"] = Quality.QualityRoles.Readers, ["SpRun"] = Quality.QualityRoles.Readers, ["SpSupplierApproval"] = Quality.QualityRoles.Readers,
 
             // project control
             ["PcContractTerms"] = ProjectControl.ProjectControlRoles.Readers, ["PcGuaranteeEvent"] = ProjectControl.ProjectControlRoles.Readers,

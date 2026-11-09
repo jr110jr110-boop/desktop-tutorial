@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -130,6 +130,7 @@ namespace Services.NasbNiro.Production
                 ScheduleNote = head.ScheduleNote, ScheduledAtText = head.ScheduledAtText, BomId = o.BomId, ActivityId = o.ActivityId, SerialsPlanned = o.SerialsPlanned, KitRequestId = o.KitRequestId,
                 KitOverrideReason = o.KitOverrideReason, ReleaseOverride = o.ReleaseOverride, ReleaseOverrideReason = o.ReleaseOverrideReason, ShortageText = o.ShortageText,
                 ReleasedAtText = MfText.Stamp(o.ReleasedAt), ProductionReceiptId = o.ProductionReceiptId, CancelReason = o.CancelReason, Note = o.Note, RowVersion = MfConcurrency.Text(o.RowVersion),
+                ComponentSource = o.ComponentSource, ComponentNote = o.ComponentNote,
             };
             if (o.ReplacesOrderId.HasValue)
                 dto.ReplacesOrderNumber = await _uow.Set<MfProductionOrder>().AsNoTracking().Where(x => x.Id == o.ReplacesOrderId.Value).Select(x => x.Number).FirstOrDefaultAsync(ct);
@@ -228,7 +229,14 @@ namespace Services.NasbNiro.Production
             Dictionary<int, InventoryItem> items = await _uow.Set<InventoryItem>().Where(i => itemIds.Contains(i.Id) && !i.Deleted && i.IsActive).ToDictionaryAsync(i => i.Id, ct);
             if (items.Count != itemIds.Count) return Bad<OrderDto>("کالای یکی از اقلام پیدا نشد یا غیرفعال است.");
             if (order.ItemId.HasValue && itemIds.Contains(order.ItemId.Value)) return Bad<OrderDto>("کالای خروجی نمی‌تواند خودش قلم مصرفی باشد.");
+            // Package A2 (single BOM master): the components come from the project baseline; a different list needs an approved deviation (the baseline changes first) or an approved engineering change order
+            InventoryItem outputItem = order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct) : null;
+            string changeProblem = await MfBaselineDrafting.ChangeProblemAsync(_uow, order, outputItem, dto.Components.GroupBy(c => c.ItemId).Select(g => (g.Key, g.Sum(c => c.Quantity))).ToList(), DateTime.Today, ct);
+            if (changeProblem != null) return Bad<OrderDto>(changeProblem);
 
+            // Package A2: the planned serials of an order under an engineering change order do not move the order across the effectivity point
+            string serialProblem = await global::Services.NasbNiro.EngChange.EcGate.SerialsChangeProblemAsync(_uow, order, outputItem, Clean(dto.SerialsPlanned), DateTime.Today, ct);
+            if (serialProblem != null) return Bad<OrderDto>(serialProblem);
             List<MfOrderComponent> existing = await _uow.Set<MfOrderComponent>().Where(c => c.OrderId == order.Id).ToListAsync(ct);
             _uow.Set<MfOrderComponent>().RemoveRange(existing);
             foreach (var g in dto.Components.GroupBy(c => c.ItemId))
@@ -261,6 +269,7 @@ namespace Services.NasbNiro.Production
             string routingMessage;
             bool routingOk = false;
             InventoryItem item = order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct) : null;
+            global::Services.NasbNiro.EngChange.EcOrderVerdict ecVerdict = await global::Services.NasbNiro.EngChange.EcGate.OrderVerdictAsync(_uow, order, item, DateTime.Today, ct);   // Package A2: effectivity of the approved engineering change orders
             if (item == null) routingMessage = "کالای دستور تولید مشخص نیست.";
             else if (chain.Count == 0) routingMessage = "دستور هنوز عملیاتی ندارد؛ پس از تأیید مسیر ساخت، «به‌روزرسانی مسیر» را بزنید.";
             else
@@ -268,7 +277,12 @@ namespace Services.NasbNiro.Production
                 MfResolvedRouting routing = await MfRouting.ResolveAsync(_uow, item, ct);
                 routingOk = routing.Revision != null;
                 routingMessage = routingOk ? $"مسیر ساخت بازنگری {routing.Revision.Revision} تأیید شده است." : routing.Message;
-                if (routingOk && order.RoutingRevisionId != routing.Revision.Id)
+                if (routingOk && order.RoutingRevisionId != routing.Revision.Id && ecVerdict.StaleRoutingAllowed)
+                {
+                    // Package A2: the order is before the effectivity point of the engineering change order: it keeps the older revision it was drafted from
+                    routingMessage = $"مسیر ساخت بازنگری {routing.Revision.Revision} جاری است ولی این دستور پیش از نقطه اجرای دستور تغییر مهندسی است و بازنگری قدیم را نگه می‌دارد.";
+                }
+                else if (routingOk && order.RoutingRevisionId != routing.Revision.Id)
                 {
                     // the operations were copied from an older revision: the order must follow the current approved one before it is released
                     routingOk = false;
@@ -276,6 +290,8 @@ namespace Services.NasbNiro.Production
                 }
             }
             result.Checks.Add(new ReleaseCheckDto { Code = "routing", Title = "مسیر ساخت تأییدشده", Passed = routingOk, Message = routingMessage });
+            if (ecVerdict.Problem != null || ecVerdict.Orders.Count > 0)   // the check appears only when an engineering change order concerns this order
+                result.Checks.Add(new ReleaseCheckDto { Code = "engchange", Title = "تغییر مهندسی و نقطه اجرا (ECO)", Passed = ecVerdict.Problem == null, Message = ecVerdict.Problem ?? "دستور تغییر مهندسی تاییدشده‌ای که این دستور را مردود کند وجود ندارد." });
 
             // 2. work centres exist, are active and not retired
             var problems = new List<string>();
@@ -574,12 +590,28 @@ namespace Services.NasbNiro.Production
                     if (!_user.IsInRole(ProductionRoles.Supervisors)) return Bad<OrderDto>(MfText.NotAllowed);
                     notes = await _flow.ApplyAsync(order, ops, ct);
                     break;
+                case "refresh-components":
+                    {
+                        // Package A2: the components are taken again from the master (the project baseline with its approved deviations; the legacy process only when there is no baseline)
+                        if (!_user.IsInRole(ProductionRoles.Planners)) return Bad<OrderDto>(MfText.NotAllowed);
+                        if (order.Status != MfOrderStatus.Draft) return Bad<OrderDto>("اقلام فقط برای دستور پیش‌نویس به‌روزرسانی می‌شود.");
+                        InventoryItem outItem = order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct) : null;
+                        MfBaselineDrafting.Expected expected = await MfBaselineDrafting.ExpectedAsync(_uow, order.WorkOrderId, order.ProcessId, outItem, order.Quantity, ct);
+                        _uow.Set<MfOrderComponent>().RemoveRange(await _uow.Set<MfOrderComponent>().Where(c => c.OrderId == order.Id).ToListAsync(ct));
+                        foreach (MfBaselineDrafting.ComponentLine l in expected.Lines) order.Components.Add(new MfOrderComponent { ItemId = l.ItemId, Quantity = l.Quantity, Unit = l.Unit });
+                        order.ComponentSource = expected.Source; order.ComponentNote = expected.Note;
+                        order.EditedByUserId = Me;
+                        if (expected.Warning != null) notes.Add(expected.Warning);
+                        break;
+                    }
                 case "refresh-routing":
                     {
                         if (!_user.IsInRole(ProductionRoles.Planners)) return Bad<OrderDto>(MfText.NotAllowed);
                         if (order.Status != MfOrderStatus.Draft) return Bad<OrderDto>("مسیر فقط برای دستور پیش‌نویس به‌روزرسانی می‌شود.");
                         InventoryItem item = order.ItemId.HasValue ? await _uow.Set<InventoryItem>().AsNoTracking().FirstOrDefaultAsync(i => i.Id == order.ItemId.Value, ct) : null;
                         if (item == null) return Bad<OrderDto>("کالای دستور تولید مشخص نیست.");
+                        string ecRefresh = await global::Services.NasbNiro.EngChange.EcGate.RefreshRoutingProblemAsync(_uow, order, item, DateTime.Today, ct);   // Package A2
+                        if (ecRefresh != null) return Bad<OrderDto>(ecRefresh);
                         MfResolvedRouting routing = await MfRouting.ResolveAsync(_uow, item, ct);
                         if (routing.Revision == null) return Bad<OrderDto>(routing.Message);
                         _uow.Set<MfOperation>().RemoveRange(ops);
@@ -645,6 +677,8 @@ namespace Services.NasbNiro.Production
                 if (!_user.IsInRole(ProductionRoles.Supervisor)) return Bad<OperationDto>("رد کردن یک مرحله فقط با سرپرست کارگاه است.");
                 if (reason == null) return Bad<OperationDto>("دلیل رد کردن مرحله را بنویسید.");
                 if (op.Status != MfOperationStatus.Waiting && op.Status != MfOperationStatus.Ready) return Bad<OperationDto>("فقط مرحله‌ای که کار روی آن شروع نشده رد می‌شود.");
+                string spSkip = await global::Services.NasbNiro.Quality.SpecialProcessGate.SkipProblemAsync(_uow, op, ct);
+                if (spSkip != null) return Bad<OperationDto>(spSkip);
                 op.Status = MfOperationStatus.Skipped;
                 op.SkipReason = reason;
             }
@@ -677,6 +711,9 @@ namespace Services.NasbNiro.Production
                     ? inspections.Where(q => !order.ItemId.HasValue || q.ItemId == order.ItemId.Value).Sum(q => q.AcceptedQuantity)
                     : op.PurchaseOrderLineId.HasValue ? await _uow.Set<ServiceAcceptance>().AsNoTracking().Where(a => !a.Deleted && a.PurchaseOrderLineId == op.PurchaseOrderLineId.Value).SumAsync(a => a.Quantity, ct) : 0;
                 if (accepted <= 0) return Bad<OperationDto>("پذیرش کیفیت کالای برگشتی لازم است: بازرسی ورودی سند برگشت با مقدار قبول‌شده، یا گواهی پذیرش خدمت سفارش خرید.");
+                // Package C (H7): a subcontracted special process comes back with the supplier's evidence and the supplier approved for the process
+                string spOutside = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, Math.Min(accepted, MfQuantityRules.Expected(loaded.All, op, order.Quantity)), 0m, ct);
+                if (spOutside != null) return Bad<OperationDto>(spOutside);
                 op.GoodQty = Math.Min(accepted, MfQuantityRules.Expected(loaded.All, op, order.Quantity));   // R1p D7: at most what the step before handed over
                 op.FinishedAt = now;
                 op.StartedAt ??= now;
@@ -703,6 +740,9 @@ namespace Services.NasbNiro.Production
                     return Bad<OperationDto>("برای این عملیات عملیات دوباره‌کاری ساخته شده است؛ ارفاق یا ضایعات روی عملیات دوباره‌کاری ثبت می‌شود.");
                 if (concession)
                 {
+                    // Fix round 1 (M2): a concession does not replace the process evidence of a flagged step: the passed, QA-reviewed run is needed here too
+                    string spConcession = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, op.GoodQty + op.ScrapQty, op.ScrapQty, ct);
+                    if (spConcession != null) return Bad<OperationDto>(spConcession);
                     op.AcceptedByConcession = true;
                     op.Status = MfOperationStatus.Done;
                     op.FinishedAt ??= now;
@@ -788,6 +828,12 @@ namespace Services.NasbNiro.Production
             List<int> workers = await _uow.Set<MfTimeBooking>().AsNoTracking().Where(b => !b.Deleted && b.OperationId == op.Id).Select(b => b.EmployeeId).Distinct().ToListAsync(ct);
             if (workers.Count > 0 && await _uow.Set<FnEmployee>().AsNoTracking().AnyAsync(e => workers.Contains(e.Id) && e.UserId == Me, ct))
                 return Bad<OperationDto>(MfText.SameUser + " (بازرس نمی‌تواند روی کار خودش تصمیم بگیرد)");
+            // Package C (H7): the acceptance of a finished special process step needs the run evidence (the same gate and message as the finish)
+            if (dto.Result == QcResult.Accept && op.FinishedAt.HasValue)
+            {
+                string spAccept = await global::Services.NasbNiro.Quality.SpecialProcessGate.FinishProblemAsync(_uow, order, op, op.GoodQty + op.ScrapQty, op.ScrapQty, ct);
+                if (spAccept != null) return Bad<OperationDto>(spAccept);
+            }
 
             ItpActivity activity = null;
             if (op.InspectionRequirement == MfInspectionRequirement.ItpPoint)
@@ -889,7 +935,7 @@ namespace Services.NasbNiro.Production
             {
                 OrderId = order.Id, Sequence = origin.Sequence, OperationTemplateId = origin.OperationTemplateId, Title = "دوباره‌کاری: " + origin.Title, WorkCenterId = origin.WorkCenterId,
                 Status = MfOperationStatus.Waiting, InspectionRequirement = origin.InspectionRequirement == MfInspectionRequirement.None ? MfInspectionRequirement.Qc : origin.InspectionRequirement,
-                ItpTestType = origin.ItpTestType, IsRework = true, ReworkOfOperationId = origin.Id, NcrId = ncrId, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
+                ItpTestType = origin.ItpTestType, IsSpecialProcess = origin.IsSpecialProcess, SpecialProcessTypeId = origin.SpecialProcessTypeId, IsWelding = origin.IsWelding, WpsId = origin.WpsId, IsRework = true, ReworkOfOperationId = origin.Id, NcrId = ncrId, CreateDate = now, ModifyDate = now, CreatorUserId = Me, ModifierUserId = Me,
             };
             _uow.Set<MfOperation>().Add(rework);
             return rework;

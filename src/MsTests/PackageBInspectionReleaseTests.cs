@@ -45,7 +45,7 @@ namespace MsTests
                 foreach (int id in new[] { 31, 32, 33, 34, 35, 41, 42, 43 }) AppHost.Add(u, new User { Id = id, UserName = "pkb.user" + id, Email = "pkb.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
-            return host;
+            return host.WithoutDesignControl(); // Package A1: these tests are about the lists and the release; the design gates have their own tests
         }
 
         private static CharLine L(int id, string no, string name, decimal nominal, decimal plus, decimal minus, CharClass cls = CharClass.Critical, int sample = 100, EquipmentType inst = EquipmentType.Other) =>

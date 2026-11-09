@@ -837,13 +837,18 @@ namespace Services.NasbNiro.ProductBank
                     target.IsRemoved = true; target.ChangedByChangeId = c.Id; Stamp(target, false);
                     DropDescendants(lines, target, c.Id);
                     {
-                        PbProjectBomLine added = AddProjectLine(b, c, target.SortOrder + 1, c.NewQty ?? target.Qty, target.ItemNumber, count, target.ParentLineId);
+                        PbProjectBomLine added = AddProjectLine(b, c, target.SortOrder + 1, c.NewQty ?? target.Qty, target.ItemNumber, count, target.ParentLineId, target.AssemblyPartNumber);
                         PbProjectBomLine up = target.ParentLineId.HasValue ? lines.FirstOrDefault(x => x.Id == target.ParentLineId.Value) : null;
                         if (up != null && up.Qty > 0) added.TotalQty = added.Qty * (up.TotalQty / up.Qty);
                     }
                     break;
                 case PbChangeKind.Add:
-                    AddProjectLine(b, c, (lines.Count == 0 ? 0 : lines.Max(l => l.SortOrder)) + 1, c.NewQty.Value, null, count, null);
+                    {
+                        // the line belongs to the top assembly of the baseline (the assembly part number of the lines that have no parent line); drafting finds it there
+                        string top = lines.Where(l => !l.ParentLineId.HasValue && l.AssemblyPartNumber != null).OrderBy(l => l.SortOrder).Select(l => l.AssemblyPartNumber).FirstOrDefault()
+                            ?? await Uow.Set<PbBomHeader>().AsNoTracking().Where(h => h.Id == b.BomHeaderId).Select(h => h.AssemblyPartNumber).FirstOrDefaultAsync(ct);
+                        AddProjectLine(b, c, (lines.Count == 0 ? 0 : lines.Max(l => l.SortOrder)) + 1, c.NewQty.Value, null, count, null, top);
+                    }
                     break;
             }
             RefreshTotals(lines, count);
@@ -880,11 +885,11 @@ namespace Services.NasbNiro.ProductBank
                 if (totals.TryGetValue(l.Id, out decimal t) && l.TotalQty != t) { l.TotalQty = t; Stamp(l, false); }
         }
 
-        private PbProjectBomLine AddProjectLine(PbProjectBaseline b, PbProjectBomChange c, int sort, decimal qty, int? itemNumber, int count, int? parentLineId)
+        private PbProjectBomLine AddProjectLine(PbProjectBaseline b, PbProjectBomChange c, int sort, decimal qty, int? itemNumber, int count, int? parentLineId, string assemblyPartNumber)
         {
             var l = new PbProjectBomLine
             {
-                BaselineId = b.Id, SortOrder = sort, ItemNumber = itemNumber, AssemblyPartNumber = null, PartNumber = c.PartNumber, PartName = c.PartName ?? c.PartNumber, Qty = qty, TotalQty = qty * count,
+                BaselineId = b.Id, SortOrder = sort, ItemNumber = itemNumber, AssemblyPartNumber = assemblyPartNumber, PartNumber = c.PartNumber, PartName = c.PartName ?? c.PartNumber, Qty = qty, TotalQty = qty * count,
                 Unit = c.Unit ?? "عدد", Material = c.Material, MakeOrBuy = c.MakeOrBuy ?? PbMakeOrBuy.Make, ChangedByChangeId = c.Id, ParentLineId = parentLineId,
             };
             Stamp(l, true);

@@ -77,7 +77,7 @@ namespace Services.NasbNiro.Production
                     ReworkOfOperationId = o.ReworkOfOperationId, SkipReason = o.SkipReason, StartedAtText = MfText.Stamp(o.StartedAt), FinishedAtText = MfText.Stamp(o.FinishedAt), Note = o.Note,
                     RunningBookings = b?.Running ?? 0, HoursBooked = b?.Hours ?? 0,
                     ExpectedQty = MfQuantityRules.Expected(chainRows.Where(x => x.OrderId == o.OrderId), o, orderRows.First(x => x.Id == o.OrderId).Quantity),
-                    IsWelding = o.IsWelding, WpsId = o.WpsId, WpsNumber = o.WpsId.HasValue && wpsNumbers.TryGetValue(o.WpsId.Value, out string wn) ? wn : null, WeldLogId = o.WeldLogId,
+                    IsSpecialProcess = o.IsSpecialProcess, SpecialProcessTypeId = o.SpecialProcessTypeId, IsWelding = o.IsWelding, WpsId = o.WpsId, WpsNumber = o.WpsId.HasValue && wpsNumbers.TryGetValue(o.WpsId.Value, out string wn) ? wn : null, WeldLogId = o.WeldLogId,
                     AcceptedByConcession = o.AcceptedByConcession, AcceptanceStale = o.QcAccepted && !MfTerminalRules.AcceptanceStillHolds(o),
                     MachineRequired = o.WorkCenterId.HasValue && machineRequired.Contains(o.WorkCenterId.Value),
                 };

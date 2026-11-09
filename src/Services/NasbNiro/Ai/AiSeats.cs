@@ -39,6 +39,7 @@ namespace Services.NasbNiro.Ai
         public const string FinAnomaly = "FIN-ANOMALY";
         public const string OfficeDraft = "OFFICE-DRAFT";
         public const string OpsData = "OPS-DATA";
+        public const string Audit = "AUDIT";
 
         /// <summary>The user the evaluation runs as (it is not a seat).</summary>
         public const string Eval = "EVAL";
@@ -73,6 +74,8 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = AiSeatCodes.OfficeDraft, Title = "پیش‌نویس پاسخ نامه و خلاصه‌ی صورت‌جلسه", Roles = new[] { "SECRETARIAT" }, Schedule = "poll 15", OutputKind = "OfficeNotes", UsesModel = true },
             // rule-based like FIN-ANOMALY: it reads through the services of the units (read roles of the warehouse only) and writes notes; it never approves and never edits data
             new AiSeatDefinition { Code = AiSeatCodes.OpsData, Title = "کنترل داده‌ی عملیاتی (انبار، تولید، کیفیت، مالی)", Roles = new[] { "WAREHOUSE" }, Schedule = "daily 06:15", OutputKind = "OpsNotes", UsesModel = false },
+            // the internal auditor (package 9): rule-based, read-only role AUDITOR; it writes its own findings and runs only and approves or closes nothing
+            new AiSeatDefinition { Code = AiSeatCodes.Audit, Title = "ممیز داخلی هوشمند (ISO 19011)", Roles = new[] { "AUDITOR" }, Schedule = "daily 05:30", OutputKind = "AuditFindings", UsesModel = false },
         };
 
         /// <summary>The evaluation user: it reads like the CEO (★), it is not a seat and has no row in AiSeats.</summary>

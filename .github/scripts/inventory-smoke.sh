@@ -1252,6 +1252,97 @@ call POST quality/records "{\"type\":1,\"workOrderId\":$WO2,\"operation\":\"Casi
 as "$QC_TOKEN" GET "quality/itps/by-work-order/$WO2"; check "ITP of work order 2 was drafted by the system when the first record was saved" '.success and .data.autoDrafted == true and .data.status == 0 and (.data.activities|length) == 6'
 ITP2=$(val .data.id)
 
+# --- Package A1 (design and development control, ISO 9001 8.3): the helpers that give the chains below REAL design data (no gate is switched off for them).
+# Since A1 the release of a product BOM and the release of a part drawing (a design output) need a closed, ACCEPTED design verification (setting Design.VerificationRequired, strict default 1),
+# and the project start needs the readiness item RD-DESIGN (approved plan, inputs declared complete, accepted verification). Every request is checked; the ids are read right after their request.
+PKA1PB=product-bank # the helpers run long before $PB (the supplier) is re-pointed to the product bank, so they never use $PB (fix round 1, H1)
+# pka1_input PRODUCTID KIND [REVISION] : the JSON of one design input (every kind carries what it needs: a standard its edition, a previous design its reference, a customer specification its document and revision).
+pka1_input() { jq -nc --argjson p "$1" --argjson k "$2" --argjson r "${3:-0}" '{productId:$p,productRevision:$r,kind:$k,statement:("الزام طراحی از نوع "+($k|tostring)),source:"قرارداد بند ۳",acceptanceCriterion:"آزمون مطابق بند ۳ قبول"} + (if $k == 4 then {standardEdition:"ASME 2019"} else {} end) + (if $k == 5 then {previousDesignRef:"DP-1403-001"} else {} end) + (if $k == 6 then {refText:"مشخصات فنی مشتری",refRevisionText:"B"} else {} end)'; }
+# pka1_design PRODUCTID TAG [REVISION] : engineering prepares the design plan of the revision (default 00) and submits it, QA (a second person) approves it, engineering records one input of each of the seven kinds, QA declares the inputs complete. Sets PKA1PLAN.
+pka1_design() {
+  local p=$1 t=$2 rv=${3:-0} k plan st
+  st=$(jq -nc --argjson u "$ENGID" --arg s "$(dd 0)" --arg e "$(dd 30)" '[[1,"ENGINEERING"],[2,"ENGINEER"],[3,"ENGINEERING"],[4,"QA"],[5,"QA"],[6,"ENGINEERING"]] | map({kind:.[0],responsibleRole:.[1],responsibleUserId:$u,plannedStart:$s,plannedEnd:$e})')
+  as "$ENG_TOKEN" POST $PKA1PB/design/plans "$(jq -nc --argjson p "$p" --argjson st "$st" --argjson rv "$rv" '{productId:$p,productRevision:$rv,title:"برنامه طراحی",scope:"طراحی و تایید محصول",validationRequired:true,stages:$st}')"; check "pka1 $t: engineering prepares the design plan of revision $rv" '.success and .data.status == 0'; plan=$(val .data.id)
+  as "$ENG_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"submit\"}"; check "pka1 $t: the plan is submitted" '.success and .data.status == 1'
+  as "$QA_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"approve\"}"; check "pka1 $t: QA, a second person, approves the plan" '.success and .data.status == 2'
+  for k in 1 2 3 4 5 6 7; do
+    as "$ENG_TOKEN" POST $PKA1PB/design/inputs "$(pka1_input "$p" "$k" "$rv")"; check "pka1 $t: the design input of kind $k is recorded" '.success and .data.id > 0'
+  done
+  as "$QA_TOKEN" POST $PKA1PB/design/plans/action "{\"id\":$plan,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; check "pka1 $t: QA declares the design inputs complete" '.success and .data.inputsCompleteByUserId > 0'
+  PKA1PLAN=$plan
+}
+# pka1_verify KIND ID PLAN TAG : the closed, accepted design verification of one output under the approved plan PLAN (KIND bom: the BOM header id, KIND drawing: the drawing revision id). Engineering plans and holds
+# it, QA judges every input against the output (QA and the second PMO user are independent: neither made the output), the second PMO user closes it as accepted. Sets PKA1REV (the review id).
+pka1_verify() {
+  local kind=$1 id=$2 plan=$3 t=$4 out rid rows
+  [ -n "${PKA1PMO2:-}" ] || PKA1PMO2=$(uid "$PMO2_TOKEN")
+  if [ "$kind" = bom ]; then out="{\"kind\":2,\"bomHeaderId\":$id}"; else out="{\"kind\":1,\"revisionId\":$id}"; fi
+  as "$ENG_TOKEN" POST $PKA1PB/design/reviews "{\"planId\":$plan,\"type\":2,\"title\":\"تایید طراحی $t\",\"outputs\":[$out],\"participants\":[{\"userId\":$QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1PMO2,\"roleText\":\"PMO\"}]}"; check "pka1 $t: engineering plans the design verification (QA and the second PMO user take part)" '.success and .data.status == 0'; rid=$(val .data.id)
+  as "$ENG_TOKEN" POST $PKA1PB/design/reviews/action "{\"id\":$rid,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; check "pka1 $t: the meeting is recorded with its minutes" '.success and .data.status == 1'
+  rows=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"اندازه‌گیری و آزمون مطابق معیار",evidenceRef:"QR-1"}]' "$B")
+  as "$QA_TOKEN" POST $PKA1PB/design/reviews/traces "{\"reviewId\":$rid,\"rows\":$rows}"; check "pka1 $t: QA judges every input against the output as passed, with its evidence" '.success'
+  as "$PMO2_TOKEN" POST $PKA1PB/design/reviews/action "{\"id\":$rid,\"action\":\"close\",\"outcome\":1}"; check "pka1 $t: the second PMO user closes the verification as accepted" '.success and .data.status == 2 and .data.outcome == 1'
+  PKA1REV=$rid
+}
+# pka1_umbrella : the part drawings are verified under the plan of ONE product whose draft BOM lists the parts (a drawing must belong to the BOM tree of the plan product: fix round 1, M5). Sets PKA1UMB (its plan id) once.
+pka1_umbrella() {
+  local up
+  [ -z "${PKA1UMB:-}" ] || return 0
+  as "$ENG_TOKEN" POST $PKA1PB/products '{"code":"77.10.00.000.2","title":"محصول چتری نقشه‌های قطعات","platform":"T"}'; check "pka1: the product that holds the design plan of the part drawings is saved" '.success and .data.id > 0'; up=$(val .data.id)
+  PKA1UMBPROD=$up; PKA1UMBLINES='[{"isHeading":true,"partName":"قطعات"}]'; PKA1UMBBOM=""
+  pka1_design "$up" "drawings"; PKA1UMB=$PKA1PLAN
+}
+# pka1_part ITEMID : the part is added as a line of the draft BOM of that product (the line carries the item code), so its drawing belongs to the product structure.
+pka1_part() {
+  local code n
+  pka1_umbrella
+  as "$ADMIN_TOKEN" GET "inventory/items/$1"; check "pka1 part: the item $1 is read" '.success and (.data.code|length) > 0'; code=$(val .data.code)
+  n=$(jq -r 'length' <<<"$PKA1UMBLINES")
+  PKA1UMBLINES=$(jq -c --arg c "$code" --argjson n "$n" '. + [{itemNumber:$n,partNumber:$c,partName:("قطعه "+$c),qty:1,unit:"عدد",material:"St37",makeOrBuy:1,netWeight:1,grossWeight:1,parentIndex:0}]' <<<"$PKA1UMBLINES")
+  if [ -z "$PKA1UMBBOM" ]; then
+    as "$ENG_TOKEN" POST $PKA1PB/boms "{\"productId\":$PKA1UMBPROD,\"assemblyPartNumber\":\"77.10.00.000.2\",\"title\":\"ساختار نقشه‌های قطعات\",\"lines\":$PKA1UMBLINES}"; check "pka1 part: the draft BOM of the product lists the part $code" '.success and .data.status == 0'; PKA1UMBBOM=$(val .data.id)
+  else
+    as "$ENG_TOKEN" POST $PKA1PB/boms "{\"id\":$PKA1UMBBOM,\"assemblyPartNumber\":\"77.10.00.000.2\",\"lines\":$PKA1UMBLINES}"; check "pka1 part: the draft BOM lists the part $code" '.success and .data.status == 0'
+  fi
+}
+
+# --- Package A2 (fix round 2): a REAL engineering change request and order for a change that the A2 gates demand an order for (a new MES routing revision, a new version of a released characteristic list).
+# eco_make KIND TARGETID PART TAG : request (class I) raised by engineering and decided by a second engineering manager, the order with its effectivity (from yesterday: every existing order is at or after the point),
+# the named revision, the computed impact, a disposition for every impacted item (change to the new revision where the list allows it), sent, approved by QA and by the second engineering manager. Sets ECX_ORDER.
+ECP=eng-change
+ECX_READY=""
+eco_users() {
+  [ -z "$ECX_READY" ] || return 0
+  local keep=$TOKEN; TOKEN=$ADMIN_TOKEN
+  user2 ecx.eng1.ci 4 'Ci#Ecx1Eng-User-2026' 09120005211 0012345731
+  user2 ecx.eng2.ci 4 'Ci#Ecx2Eng-User-2026' 09120005212 0012345732
+  user2 ecx.qa1.ci 14 'Ci#Ecx1Qa-User-2026' 09120005213 0012345733
+  TOKEN=$keep
+  ECX1=$(login ecx.eng1.ci 'Ci#Ecx1Eng-User-2026'); ECX2=$(login ecx.eng2.ci 'Ci#Ecx2Eng-User-2026'); ECXQ=$(login ecx.qa1.ci 'Ci#Ecx1Qa-User-2026')
+  [ -n "$ECX1" ] && [ -n "$ECX2" ] && [ -n "$ECXQ" ] && ok "eco: login of the two engineering managers and the QA user of the change orders" || bad "eco: login of the two engineering managers and the QA user of the change orders"
+  ECX1ID=$(uid "$ECX1")
+  ECX_READY=1
+}
+eco_make() {
+  local kind=$1 tid=$2 part=$3 t=$4 req oid rows row ROWS
+  eco_users
+  as "$ECX1" POST $ECP/requests "{\"title\":\"تغییر $t\",\"reason\":\"نسخه جدید لازم است و باید با دستور تغییر مهندسی بگذرد\",\"classification\":1,\"urgency\":1,\"targets\":[{\"kind\":2,\"partNumber\":\"$part\"}]}"; check "eco $t: the change request is saved" '.success and .data.status == 0'; req=$(val .data.id)
+  as "$ECX1" POST $ECP/requests/action "{\"id\":$req,\"action\":\"submit\"}"; check "eco $t: the request is sent" '.success and .data.status == 1'
+  as "$ECX2" POST $ECP/requests/action "{\"id\":$req,\"action\":\"approve\"}"; check "eco $t: the second engineering manager approves the request" '.success and .data.status == 2'
+  as "$ECX1" POST $ECP/orders "{\"requestId\":$req,\"title\":\"ECO $t\",\"effectiveFromDate\":\"$(dd -1)\",\"effectivityNote\":\"از دیروز\"}"; check "eco $t: the order is made with its effectivity" '.success and .data.status == 0'; oid=$(val .data.id)
+  as "$ECX1" POST $ECP/orders/changes "{\"orderId\":$oid,\"kind\":$kind,\"targetId\":$tid,\"action\":1,\"note\":\"$t\"}"; check "eco $t: the new revision is named in the order" '.success and (.data.changes|length) == 1'
+  as "$ECX1" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"refresh-impact\"}"; check "eco $t: the impact is computed" '.success and .data.impact.hashOk == true'
+  rows=$(jq -c '[.data.dispositions[] | select(.stale | not) | {k:.impactKey, d:(if (.allowed|index(6)) then 6 elif (.allowed|index(1)) then 1 else .allowed[0] end)}]' "$B")
+  mapfile -t ROWS < <(jq -c '.[]' <<<"$rows")
+  for row in "${ROWS[@]}"; do
+    as "$ECX1" POST $ECP/orders/dispositions "{\"orderId\":$oid,\"impactKey\":$(jq -c .k <<<"$row"),\"disposition\":$(jq -r .d <<<"$row"),\"ownerUserId\":$ECX1ID,\"dueDate\":\"$(dd 10)\",\"note\":\"تکلیف تغییر $t\"}"; check "eco $t: a disposition is set for an impacted item" '.success'
+  done
+  as "$ECX1" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"submit\"}"; check "eco $t: the order is sent for approval" '.success and .data.status == 1'
+  as "$ECXQ" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"approve-qa\"}"; check "eco $t: QA approves" '.success and .data.status == 1'
+  as "$ECX2" POST $ECP/orders/action "{\"id\":$oid,\"action\":\"approve-engineering\"}"; check "eco $t: the second engineering manager approves: the order is approved" '.success and .data.status == 2'
+  ECX_ORDER=$oid
+}
+
 # --- Package B (inspection and release integrity): the drawing, the released characteristic list and the «بدون نقشه» flag that the quality records, the incoming inspections and the shop floor now rest on
 # pkb_drawing ITEMID DOCNUMBER LINES : the whole chain for ONE part: the document controller registers the drawing (contract of the quality section), a revision with a file, the drawing is linked to the part, engineering
 # prepares the characteristic list (LINES is the JSON array of lines), QA approves it (maker-checker), then the revision goes through review (PMO), approval (engineering manager) and release (PMO): the release also releases the list.
@@ -1271,6 +1362,8 @@ pkb_drawing() {
   as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"submit\"}"; check "package b: the revision of $num goes under review" '.success and .data.status == 2'
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"review\",\"note\":\"checked\"}"; check "package b: the PMO reviews $num" '.success and .data.status == 2'
   as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"approve\"}"; check "package b: the engineering manager approves $num" '.success and .data.status == 3'
+  if [ -n "${PKA1PROBE:-}" ]; then as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"release\"}"; nomsg "$PKA1PROBE" "خروجی طراحی (نقشه قطعه)"; fi
+  pka1_part "$item"; pka1_verify drawing "$rev" "$PKA1UMB" "$num" # A1: the part drawing is a design output: its release needs a closed, accepted design verification
   as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$rev,\"action\":\"release\"}"; check "package b: the PMO releases $num" '.success and .data.status == 4'
   PKBREV=$rev
   as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBLIST"; check "package b: releasing the drawing released its list in the same step (the list of $num is Released)" '.success and .data.status == 3 and .data.revisionInForce == true'
@@ -1294,7 +1387,7 @@ pkb_line() { jq -nc --arg no "$1" --arg name "$2" --argjson n "$3" --argjson p "
 # the lists of the smoke are minor characteristics that an acceptance does not demand: a minor line below the company minimum sampling (10 percent) is refused, so the minimum is lowered for this run by the two-person route (the strict default 10 is registered on the safety profile)
 safety_set Quality Pkb.Char.SamplePercent.Minor 0; check "package b: the minimum sampling of a minor characteristic is lowered to 0 for the smoke run (second person approves)" '.success and .data.status == "Approved"'
 # the bolt (used by the quality section below) gets a released drawing with its characteristic list: the bore and the thread that the records below measure (minor, not sampled: an acceptance does not demand them)
-pkb_drawing "$BOLT" "PKB-DWG-BOLT" "$( { pkb_line 1 Bore 100 0.05 0.05 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )"; PKBBOLTLIST=$PKBLIST; PKBBOLTREV=$PKBREV
+PKA1PROBE="pka1 gate: the approved drawing of the bolt (a design output) is not released while no closed, accepted design verification covers it"; pkb_drawing "$BOLT" "PKB-DWG-BOLT" "$( { pkb_line 1 Bore 100 0.05 0.05 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )"; PKBBOLTLIST=$PKBLIST; PKBBOLTREV=$PKBREV; PKA1PROBE=""
 # --- B. calibration and measuring equipment
 as "$QC_TOKEN" GET quality/calibration/intervals; check "default calibration intervals seeded with their source" '.success and (.data|length) >= 5 and ([.data[]|.source]|all(. != null))'
 as "$WH_TOKEN" POST quality/equipment '{"name":"Caliper","type":1}'; no "warehouse user cannot register measuring equipment"
@@ -1622,7 +1715,7 @@ addmonths() { # addmonths YYYY-MM-DD N: the same day N months later, the last da
   printf '%04d-%02d-%02d' $y $m $((10#$d))
 }
 wqual() { # wqual PERSON NUMBER METHOD ISSUED-DAYS-AGO
-  as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$1,\"kind\":1,\"method\":\"$3\",\"scheme\":1,\"scope\":\"P-1 plate\",\"certificateNumber\":\"$2\",\"issuedDate\":\"$(dd -$4)\",\"certificateDocumentId\":\"$DOCID\"}"; val .data.id; }
+  as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$1,\"kind\":1,\"method\":\"$3\",\"scheme\":1,\"scope\":\"P-1 plate\",\"rangePNos\":\"P-1\",\"certificateNumber\":\"$2\",\"issuedDate\":\"$(dd -$4)\",\"certificateDocumentId\":\"$DOCID\"}"; val .data.id; }
 WP1=$(wperson "Welder One" W-001 W11); QW1=$(wqual $WP1 WQ-1 GTAW 30)
 WP2=$(wperson "Welder Two" W-002 W12); QW2=$(wqual $WP2 WQ-2 GTAW 300)
 WP3=$(wperson "Welder Three" W-003 W13); QW3=$(wqual $WP3 WQ-3 GTAW 300)
@@ -1649,7 +1742,7 @@ call GET "quality/qualifications?PersonId=$WP7"; LAPSE7=$(val '.data.data[0].lap
 check "r1q D15: the continuity of welder seven ended on the day of his certificate (issued 187 days ago) plus six months, which is in the last 3 to 6 days" ".success and .data.data[0].state == 3 and (.data.data[0].lapsesOn[0:10]) == \"$(addmonths "$(dd -187)" 6)\" and (.data.data[0].lapsesOn[0:10]) >= \"$(dd -6)\" and (.data.data[0].lapsesOn[0:10]) <= \"$(dd -3)\""
 weld "$LAPSE7" J-17 $QW7; nomsg "r1q D15: a weld log dated on the last valid day is refused today, because the certificate is also checked on the day of entry" "امروز قابل استفاده نیست"
 weld "$(dd -2)" J-18 $QW1; check "r1q D15: a weld log dated two days back by a welder who is valid on that day and today is accepted" ".success and (.data.weldDate[0:10]) == \"$(dd -2)\""
-as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WP2,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"certificateNumber\":\"WQ-2R\",\"issuedDate\":\"$(dd -5)\",\"renewsQualificationId\":$QW2}"; check "re-test registered as renewal" '.success and .data.renewsQualificationId != null'
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WP2,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"rangePNos\":\"P-1\",\"certificateNumber\":\"WQ-2R\",\"issuedDate\":\"$(dd -5)\",\"renewsQualificationId\":$QW2}"; check "re-test registered as renewal" '.success and .data.renewsQualificationId != null'
 QW2N=$(val .data.id)
 weld "$D0" J-14 $QW2N; check "renewed qualification can weld" '.success'
 weld "$D0" J-15 $QW2; check "old certificate is superseded and cannot be used" '.success == false'
@@ -1668,7 +1761,15 @@ call GET "quality/qualifications/continuity?Days=30"; check "r1q L19: ... so he 
 call GET "quality/weld-logs?WorkOrderId=$WO2"; check "weld logs of work order 2: 4 accepted (J-1, J-14, J-18 and J-20 of welder eight; r1q D15 replaced the three old chain welds by one dated two days back)" '(.data.data|length) == 4'
 
 # --- G. material certificates (EN 10204) and traceability
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$LOT,\"type\":2,\"number\":\"MTC-3.1-9\",\"issuer\":\"Mill A\",\"documentId\":\"$DOCID\",\"summary\":\"26NiCrMoV14-5 chemistry and mechanicals OK\"}"; check "warehouse registers the certificate of the lot (pending)" '.success and .data.result == 0 and .data.heatNumber == "H-7781"'
+# Package C: a 3.1 certificate is judged against an approved material specification (heat number = the lot, chemistry and mechanical rows inside the limits, the manufacturer signatory named).
+# Engineering writes the specification of S355J2 / EN 10025-2, QA (not the author) approves it; certx HEAT is the structured part of a good 3.1 certificate of that grade.
+as "$ENG_TOKEN" POST quality/material-specs '{"grade":"S355J2","standard":"EN 10025-2","title":"S355J2 structural plate","requiredCertificateType":2,"limits":[{"kind":1,"name":"C","unit":"%","max":0.2,"required":true},{"kind":1,"name":"Mn","unit":"%","max":1.6,"required":true},{"kind":2,"name":"Yield","unit":"MPa","min":355,"required":true},{"kind":2,"name":"Tensile","unit":"MPa","min":470,"max":630,"required":true}]}'; check "package c: engineering drafts the S355J2 material specification" '.success and .data.status == 0 and .data.version == 1'
+MSPEC0=$(val .data.id)
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"submit\"}"; check "package c: the specification is submitted" '.success and .data.status == 1'
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"approve\"}"; no "package c: the author of a specification cannot approve it"
+as "$QA_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC0,\"action\":\"approve\"}"; check "package c: QA approves the specification (maker-checker)" '.success and .data.status == 2'
+certx() { printf '"certHeatNumber":"%s","grade":"S355J2","standard":"EN 10025-2","manufacturerSignatory":"Mill authorised signatory","values":[{"kind":1,"name":"C","unit":"%%","value":0.18},{"kind":1,"name":"Mn","unit":"%%","value":1.4},{"kind":2,"name":"Yield","unit":"MPa","value":380},{"kind":2,"name":"Tensile","unit":"MPa","value":510}]' "$1"; }
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$LOT,\"type\":2,\"number\":\"MTC-3.1-9\",\"issuer\":\"Mill A\",$(certx H-7781),\"documentId\":\"$DOCID\",\"summary\":\"26NiCrMoV14-5 chemistry and mechanicals OK\"}"; check "warehouse registers the certificate of the lot (pending)" '.success and .data.result == 0 and .data.heatNumber == "H-7781"'
 CERT1=$(val .data.id)
 as "$WH_TOKEN" POST quality/certificates/verify "{\"id\":$CERT1,\"accept\":true}"; no "warehouse cannot verify a certificate (QC only)"
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$CERT1,\"accept\":false}"; no "rejection needs a reason"
@@ -1691,7 +1792,7 @@ as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuant
 as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":1,\"number\":\"MTC-2.2-77\",\"documentId\":\"$DOCID\"}"; C22=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C22,\"accept\":true}"
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31,\"acceptedQuantity\":20,\"rejectedQuantity\":0}"; check "a 2.2 certificate does not satisfy a 3.1 requirement" '.success == false'
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":2,\"number\":\"MTC-3.1-77\",\"documentId\":\"$DOCID\"}"; C31=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOT,\"type\":2,\"number\":\"MTC-3.1-77\",$(certx HT-3100),\"documentId\":\"$DOCID\"}"; C31=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31,\"accept\":true}"
 # R1q D16 and review M12: an incoming inspection that rests on measured values names the instrument of every value (calibrated today); whether it is "measured" follows from those values, never from
 # a flag of the client; and a QC inspector records it only with a valid inspector qualification once the company keeps that register
@@ -1705,7 +1806,7 @@ call POST inventory/documents "{\"type\":1,\"documentDate\":\"$D0\",\"warehouseI
 call POST "inventory/documents/$PRC2/confirm"; check "receipt of the second lot of the 3.1 plate into quarantine" '.success'
 call GET "inventory/quality/inspections?Status=0"; QI31B=$(jq -r ".data.data[]|select(.itemId==$PL31)|.id" "$B")
 call GET "inventory/stock/lots?ItemId=$PL31"; PL31LOTB=$(jq -r '.data.data[]|select(.heatNumber=="HT-3101")|.id' "$B")
-as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-3.1-78\",\"documentId\":\"$DOCID\"}"; C31B=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-3.1-78\",$(certx HT-3101),\"documentId\":\"$DOCID\"}"; C31B=$(val .data.id)
 as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$C31B,\"accept\":true}"; check "the 3.1 certificate of the second lot is verified" '.success and .data.result == 1'
 as "$QC_TOKEN" POST inventory/quality/inspections "{\"id\":$QI31B,\"acceptedQuantity\":10,\"rejectedQuantity\":0,\"measured\":true}"; check "r1q M12: the old \"measured\" flag alone proves nothing and demands nothing: no measurement lines, no instrument, recorded as it is" ".success and .data.status == 1 and ((.data.equipmentIds // [])|length) == 0 and ((.data.measurements // [])|length) == 0"
 
@@ -6037,12 +6138,27 @@ as "$PLAN_TOKEN" POST $PC/terms "{\"contractId\":$MFCT,\"currencyCode\":\"IRR\",
 pcreview $MFCT # R1c (H8): the review of the contract is accepted before its WBS and purchase requests
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$MFWO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "mes: equipment project code is built from the type, size and option" '.success and (.data.equipmentProjectCode|startswith("PU15026"))'
 call POST Assemblies "{\"title\":\"Pump casing\",\"code\":\"MF-ASM-1\",\"workOrderId\":$MFWO,\"assemblerDuration\":1}"; MFASM=$(val .data.id)
+# Package A2 (single BOM master): the legacy Bom / EquipmentBom are read only. The older chains below (mes, sales, the genealogy chain of pb4) still build a few legacy BOM rows or edit a legacy-sourced component of
+# their orders, so the transition switch (a safety-profile setting: request + second person) is lifted ONLY around those calls (legacy_open ... legacy_close) and is on for everything else; the PKA2 block checks the freeze.
+# The two helpers keep the last response body, so a check that follows the calls still reads its own response.
+legacy_open() {
+  cp "$B" "$B.keep"
+  safety_set ProductBank EngChange.LegacyBomFrozen false; check "pka2 setup: the legacy BOM freeze is lifted for one older chain step (two-person change)" '.success and .data.status == "Approved"'
+  cp "$B.keep" "$B"
+}
+legacy_close() {
+  cp "$B" "$B.keep"
+  safety_set ProductBank EngChange.LegacyBomFrozen true; check "pka2 setup: the legacy BOM freeze is back on right after that step (two-person change)" '.success and .data.status == "Approved"'
+  cp "$B.keep" "$B"
+}
 mfbom() { # mfbom POSITION COUNT TITLE : echoes nothing, sets MFBOM
+  legacy_open
   call POST Boms "{\"positionNumber\":$1,\"title\":\"$3\",\"count\":$2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$MFASM}"
   MFBOM=$(val .data.id)
 }
 mfproc() { # mfproc BOMID EXITCODE ENTERCODE TITLE
   call POST Processes "{\"exitCommodityCode\":\"$2\",\"enterCommodityCode\":\"$3\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"$4\",\"bomId\":$1}"
+  legacy_close
 }
 mfbom 1 5 "قطعه الف"; mfproc "$MFBOM" "77.10.00.001.1" "MF-NO-STOCK-CODE" "ساخت قطعه الف"; check "mes: make process of item A (5 units)" '.success and .data.id > 0'
 MFPRA=$(val .data.id); MFPRABOM=$(val .data.bomId)
@@ -6092,7 +6208,9 @@ call POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: the PMO cannot rele
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDB}"; nomsg "mes: order B cannot be released without its approved drawing" "صدور ممکن نیست"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage is not released by the shop supervisor" "فقط با مدیر تولید"
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC}"; nomsg "mes: a shortage needs a written reason even for the production manager" "دلیل را بنویسید"
+legacy_open
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the production manager edits the components of order C" '.success and (.data.components|length) == 1'
+legacy_close
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; nomsg "mes: whoever edited the components cannot release the order (maker-checker)" "تفکیک وظایف"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"x\"}"; nomsg "mes: the shop supervisor still cannot release with a shortage" "فقط با مدیر تولید"
 
@@ -6104,9 +6222,10 @@ ibx "$MSV_TOKEN" "mf:order:$MFORDB"; check "mes: and its release gate is closed"
 # --- a newer approved routing revision (same content): the draft order must follow it before it is released
 call POST $MF/routings "{\"itemId\":$MFPA}"; check "mes: a new revision of item A is opened as a draft" '.success and .data.status == 0'
 MFREVA3=$(val .data.id)
+eco_make 4 "$MFREVA3" "77.10.00.001.1" "mes routing A"   # A2: the second approved routing of an item needs an approved engineering change order that names it (real request, impact, dispositions, ENG + QA)
 as "$MPM_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-production\"}"; check "mes: production approves the new revision of item A" '.success and .data.status == 0'
 as "$ENG_TOKEN" POST $MF/routings/action "{\"id\":$MFREVA3,\"action\":\"approve-engineering\"}"; check "mes: engineering approves the new revision of item A: approved, content matches" '.success and .data.status == 1 and .data.contentMatches == true'
-call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: only the routing check fails (the operations come from the old revision) and it cannot be overridden" ".success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.passed == false)]|length) == 1 and ([.data.checks[]|select(.code == \"routing\")][0] | .passed == false and (.message|contains(\"refresh-routing\")))"
+call GET "$MF/orders/$MFORDA/release-check"; check "mes: release check of A: only the routing check fails (the operations come from the old revision; the approved change names the routing revision, not this order, so no engineering change check is listed) and it cannot be overridden" ".success and .data.canRelease == false and .data.canReleaseWithOverride == false and ([.data.checks[]|select(.passed == false)|.code]|sort) == [\"routing\"] and ([.data.checks[]|select(.code == \"routing\")][0] | .passed == false and (.message|contains(\"refresh-routing\")))"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: order A cannot be released while it follows a superseded routing revision" "به‌روزرسانی مسیر"
 as "$PLAN_TOKEN" POST $MF/orders/action "{\"id\":$MFORDA,\"action\":\"refresh-routing\"}"; check "mes: refreshing the routing moves draft order A to the new revision with three fresh operations" ".success and .data.status == 0 and .data.routingRevisionId == $MFREVA3 and (.data.operations|length) == 3 and ([.data.operations[].sequence]) == [10,20,30]"
 MFOPA10=$(val '.data.operations[0].id'); MFOPA20=$(val '.data.operations[1].id'); MFOPA30=$(val '.data.operations[2].id')
@@ -6128,7 +6247,9 @@ as "$FM_TOKEN" GET "$FAU?EntityType=MfProductionOrder&EntityId=$MFORDA&PageSize=
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$MFORDA}"; nomsg "mes: an order is released once" "صادر می‌شود"
 
 # --- release of C by the manager with a shortage: kit is a draft material request
+legacy_open
 as "$MSV_TOKEN" POST $MF/orders/components "{\"orderId\":$MFORDC,\"components\":[{\"itemId\":$MFCMP,\"quantity\":2}]}"; check "mes: the supervisor edits the components (same list) of order C" '.success'
+legacy_close
 as "$MPM_TOKEN" POST $MF/orders/release "{\"id\":$MFORDC,\"overrideReason\":\"ماده مصرفی در مسیر تأمین است\"}"; check "mes: the production manager releases C with the shortage and a reason: override recorded, kit drafted, operation waits for the kit" '.success and .data.status == 1 and .data.releaseOverride == true and .data.releaseOverrideReason == "ماده مصرفی در مسیر تأمین است" and (.data.shortageText|length) > 0 and .data.kitRequestId > 0 and (.data.kitNumber|startswith("MR")) and .data.kitIssued == false and ([.data.operations[].status]) == [0]'
 as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\"}"; nomsg "mes: starting without the complete kit needs a reason" "دلیل"
 as "$MSV_TOKEN" POST $MF/orders/action "{\"id\":$MFORDC,\"action\":\"kit-override\",\"reason\":\"شروع با تأیید سرپرست\"}"; check "mes: the supervisor lets C start without the issued kit (reason kept), the operation is ready" '.success and .data.kitOverrideReason == "شروع با تأیید سرپرست" and ([.data.operations[].status]) == [1]'
@@ -6921,12 +7042,14 @@ call POST Equipments '{"code":"SL-EQ-PUMP","title":"Process Pump (sales template
 SLEQ=$(val .data.id)
 call POST EquipmentAssemblies "{\"equipmentId\":$SLEQ,\"assemblerDuration\":1,\"code\":\"SL-ASM-1\",\"title\":\"مجموعه پمپ\"}"; check "sales: setup: assembly of the template" '.success and .data.id > 0'
 SLASM=$(val .data.id)
+legacy_open
 call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":1,\"title\":\"پروانه\",\"count\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":1}"; check "sales: setup: BOM line 1 (2 impellers per pump)" '.success and .data.id > 0'
 SLBOM1=$(val .data.id)
 call POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":2,\"title\":\"مکانیکال سیل\",\"count\":4,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":2}"; check "sales: setup: BOM line 2 (4 seals per pump)" '.success and .data.id > 0'
 SLBOM2=$(val .data.id)
 call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.001.1\",\"enterCommodityCode\":\"77.30.00.001.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید پروانه\",\"equipmentBomId\":$SLBOM1}"; check "sales: setup: purchase process of BOM line 1 (exit code = impeller)" '.success and .data.id > 0'
 call POST EquipmentProcess "{\"exitCommodityCode\":\"77.30.00.002.1\",\"enterCommodityCode\":\"77.30.00.002.1\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":1,\"programPrice\":0,\"title\":\"خرید مکانیکال سیل\",\"equipmentBomId\":$SLBOM2}"; check "sales: setup: purchase process of BOM line 2 (exit code = seal)" '.success and .data.id > 0'
+legacy_close
 
 # --- inquiries: validation, then inquiry I1 (two pumps for customer A), received on a fixed day so that the Persian date is exact
 as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"\",\"quantity\":1}"; nomsg "sales: an inquiry needs a title" "عنوان استعلام"
@@ -8031,10 +8154,10 @@ print("%04d/%02d/%02d" % (jy, jm, jd))
 PYJ
 }
 
-AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true"
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true"
 as "$CEO_TOKEN" GET $AI/admin/seats
-check "ai seats: the CEO reads exactly the eight seats (PB8: OPS-DATA is the eighth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
-check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 8'
+check "ai seats: the CEO reads exactly the nine seats (PB8: OPS-DATA is the eighth, P9: AUDIT the ninth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 9'
 as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
 as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
 as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
@@ -10938,6 +11061,7 @@ as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":2}"; check "pb1: QC ch
 as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":3}"; check "pb1: manufacturing (construction) checks" '.success'
 as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":4}"; nomsg "pb1: with the setting on, the engineer who checked cannot also approve" "افراد متفاوت"
 as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$PBB0,\"step\":4}"; check "pb1: the PMO approves: five different people signed, the revision is Approved" '.success and .data.status == 2 and ([.data.signatures[]|select(.done)|.userId]|unique|length) == 5'
+pka1_design "$PBPROD" "pb1 product"; pka1_verify bom "$PBB0" "$PKA1PLAN" "pb1 BOM" # A1: the BOM is released only after a closed, accepted design verification (real data, the gate stays on)
 as "$ENG_TOKEN" POST $PB/boms/release "{\"id\":$PBB0}"; no "pb1: the preparer does not release"
 as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PBB0}"; check "pb1: the second PMO user releases revision 00" '.success and .data.status == 3 and .data.canNewRevision == true and .data.canEdit == false and .data.canRelease == false'
 as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB0,\"assemblyPartNumber\":\"88.11.00.000.2\",\"lines\":$BOMLINES}"; nomsg "pb1: a released revision is read-only" "پیش‌نویس"
@@ -10953,7 +11077,7 @@ as "$ENG_TOKEN" POST $PB/boms "{\"id\":$PBB1,\"assemblyPartNumber\":\"88.11.00.0
 as "$ENG_TOKEN" GET "$PB/boms/diff?from=$PBB0&to=$PBB1"; check "pb1: the diff says exactly: added 88.11.01.004.2, removed 88.11.01.003.2, changed 88.11.01.002.2 (qty 2 -> 4), one line unchanged" '.success and ([.data.added[].partNumber]) == ["88.11.01.004.2"] and ([.data.removed[].partNumber]) == ["88.11.01.003.2"] and ([.data.changed[].partNumber]) == ["88.11.01.002.2"] and ([.data.changed[0].fields[]|select(.old=="2" and .new=="4")]|length) == 1 and .data.unchanged == 1'
 as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=88.11.01.002.2"; check "pb1: where-used finds the part in both revisions of the BOM (qty 2 in 00, 4 in 01)" '.success and (.data.rows|length) == 2 and ([.data.rows[].qty]|sort) == [2,4]'
 as "$ENG_TOKEN" GET "$PB/boms?ProductId=$PBPROD&PageSize=0"; check "pb1: the list shows both revisions, newest first" '.success and (.data.data|length) == 2 and .data.data[0].revision == 1'
-as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8)" '.success and (.data.data|length) == 8'
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbBomHeader&PageSize=0"; check "pb1: the BOM header changes of this product are in the audit trail (create, submit, 4 signatures, release, new revision, edit = 8; the headers of other chains, e.g. the A1 umbrella BOM, are not counted)" ".success and ([.data.data[]|select(.entityId == $PBB0 or .entityId == $PBB1)]|length) == 8"
 as "$PLAN_TOKEN" POST $PB/coding/settings '{"key":"BomSignatures:DistinctReviewers","value":"true"}'; check "pb1: the setting is set to its default (on) again" '.success'
 
 # --- mapping of legacy codes: imported draft, approved by engineering who is not the proposer
@@ -10997,6 +11121,7 @@ safety_set ProductBank DemoData:Enabled true; check "pb1: the PMO turns the demo
 as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the FY seed: 88 BOM lines, 7 OPC routings, 350 template nodes, mapping drafts suggested from the item lists" '.success and .data.alreadyInstalled == false and .data.bomLines == 88 and .data.routings == 7 and .data.templateNodes == 350 and .data.mappings == 6 and .data.items == 213 and .data.stages == 39'
 PBFYPROD=$(val .data.productId); PBFYBOM=$(val .data.bomId)
 as "$ADMIN_TOKEN" POST $PB/seed-fy; check "pb1: the seed runs once: the second call changes nothing" '.success and .data.alreadyInstalled == true and .data.productId == '$PBFYPROD
+pka1_design "$PBFYPROD" "fy product"; pka1_verify bom "$PBFYBOM" "$PKA1PLAN" "fy BOM" # A1: the BOM released from paper is verified too (its project start needs the readiness item RD-DESIGN)
 as "$ENG_TOKEN" GET "$PB/boms/$PBFYBOM"; check "pb1: FY BOM revision 00 is Released from paper, with no signature person recorded and the paper note" '.success and .data.code == "16.11.00.000.2-BOM" and .data.status == 3 and .data.importedSigned == true and ([.data.signatures[]|select(.userId != null and .step != 0)]|length) == 0 and ([.data.signatures[]|select(.done)]|length) == 5 and (.data.paperSignatureNote|length) > 0'
 as "$ENG_TOKEN" GET "$PB/boms/where-used?partNumber=16.11.01.001.2"; check "pb1: where-used finds the FY wheel case in FY BOM 00 only" '.success and (.data.rows|length) == 1 and .data.rows[0].bomCode == "16.11.00.000.2-BOM" and .data.rows[0].revision == 0'
 as "$ENG_TOKEN" GET "$PB/routings?productId=$PBFYPROD"; check "pb1: the seven FY charts are approved" '.success and ([.data[]|select(.status == 2 and .productId == '$PBFYPROD')]|length) == 7'
@@ -11357,8 +11482,10 @@ PB4WO=$(val .data.id)
 as "$PLAN_TOKEN" POST $PC/work-order-info "{\"workOrderId\":$PB4WO,\"contractId\":$MFCT,\"typeCode\":\"PU\",\"sizeCode\":\"150\",\"optionCode\":\"26\"}"; check "pb4 chain: its project code is built" '.success'
 call POST Assemblies "{\"title\":\"Genealogy casing\",\"code\":\"PB4-ASM-1\",\"workOrderId\":$PB4WO,\"assemblerDuration\":1}"; PB4ASM=$(val .data.id)
 item PB4PART "{\"code\":\"77.10.00.040.1\",\"title\":\"قطعه آزمون شجره\",\"unit\":\"عدد\",\"trackingMode\":1,\"requiresIncomingInspection\":false}" "pb4 chain: finished lot item"
+legacy_open
 call POST Boms "{\"positionNumber\":1,\"title\":\"قطعه آزمون شجره\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"assemblyId\":$PB4ASM}"; PB4BOM=$(val .data.id)
 call POST Processes "{\"exitCommodityCode\":\"77.10.00.040.1\",\"enterCommodityCode\":\"$C_RAW\",\"mapDuration\":1,\"masterDuration\":1,\"processDuration\":1,\"weightPercent\":10,\"type\":5,\"sort\":1,\"programPrice\":0,\"title\":\"ساخت قطعه آزمون شجره\",\"bomId\":$PB4BOM}"; check "pb4 chain: the make process consumes the raw material and makes the part" '.success and .data.id > 0'
+legacy_close
 call POST inventory/trace/templates "{\"itemId\":$PB4PART,\"sequence\":10,\"title\":\"تراشکاری شجره\"}"; PB4T=$(val .data.id)
 call POST $MF/operation-standards "{\"operationTemplateId\":$PB4T,\"workCenterId\":$MFWC1,\"setupHours\":0.5,\"runHoursPerUnit\":0.25}"; check "pb4 chain: the standard of the step" '.success'
 mfroute "$PB4PART" "pb4 part"
@@ -11370,7 +11497,9 @@ as "$QC_TOKEN" GET "quality/itps/by-work-order/$PB4WO"; check "pb4 chain: the wo
 PB4ITP=$(val .data.id)
 as "$QC_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"submit\"}"; check "pb4 chain: QC submits the ITP to the client" '.success and .data.status == 1'
 as "$QA_TOKEN" POST quality/itps/action "{\"id\":$PB4ITP,\"action\":\"client-approve\",\"reference\":\"CL-PB4-1\"}"; check "pb4 chain: the QA manager records the client approval of the ITP" '.success and .data.status == 2 and .data.clientApprovalReference == "CL-PB4-1"'
+legacy_open
 as "$MPM_TOKEN" POST $MF/orders/components "{\"orderId\":$PB4ORD,\"components\":[{\"itemId\":$RAW,\"quantity\":2}]}"; check "pb4 chain: the components of the order are 2 of the raw material" '.success and (.data.components|length) == 1 and .data.components[0].quantity == 2'
+legacy_close
 pkb_nodraw_order "$PB4ORD"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PB4ORD}"; check "pb4 chain: the order is released with a kit (a draft material request)" '.success and .data.status == 1 and .data.kitRequestId > 0'
 PB4KIT=$(val .data.kitRequestId)
@@ -11618,6 +11747,7 @@ as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":1}"; check "pb8 read
 as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":2}"; check "pb8 ready: BOM check by QC" '.success'
 as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":3}"; check "pb8 ready: BOM check by manufacturing" '.success'
 as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$PB8B,\"step\":4}"; check "pb8 ready: BOM approval by the PMO (four different signers, CEO decision D13)" '.success and .data.status == 2'
+pka1_design "$PB8PROD" "pb8 product"; PKA1PLANPB8=$PKA1PLAN; pka1_verify bom "$PB8B" "$PKA1PLAN" "pb8 BOM" # A1: the same for the readiness test product
 as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PB8B}"; check "pb8 ready: the BOM is released" '.success and .data.status == 3'
 as "$ENG_TOKEN" POST $PB/templates/import-mspdi "{\"productId\":$PB8PROD,\"title\":\"قالب آمادگی\",\"xml\":\"$PBXML\"}"; check "pb8 ready: the WBS template is imported" '.success and .data.isApproved == false'
 PB8TPL=$(val .data.id)
@@ -11679,14 +11809,14 @@ as "$WH_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequire
 as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"DaysToClose","value":"1","reason":"این تنظیم در پروفایل نیست"}'; no "pbd: a setting that is not in the profile cannot be requested"
 as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"پایان دوره گذار سامانه مدارک"}'; check "pbd: the request waits for a second person" '.success and .data.status == "Pending" and .data.oldValue == "0" and .data.newValue == "1" and .data.weakening == false'
 PBD_CID=$(val '.data.id')
-as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"درخواست دوم برای همان تنظیم"}'; nomsg "pbd: one open request per setting" "در انتظار"
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"درخواست دوم برای همان تنظیم"}'; nomsg "pbd: one open request per setting" "یک درخواست باز"
 as "$ADMIN_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true,\"note\":\"خودم تایید می‌کنم\"}"; nomsg "pbd: the requester cannot approve his own request" "تفکیک وظایف"
 as "$WH_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true}"; no "pbd: the storekeeper cannot approve"
 as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":false}"; nomsg "pbd: a rejection needs a note" "دلیل"
 as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true,\"note\":\"تایید نفر دوم\"}"; check "pbd: the second person approves: the change is applied with both names and the reason" '.success and .data.status == "Approved" and .data.requestedByName != .data.decidedByName and (.data.decidedByName|length) > 0 and (.data.reason|length) > 0'
 as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PBD_CID,\"approve\":true}"; no "pbd: a decided request cannot be decided again"
 as "$ADMIN_TOKEN" GET safety/profile; check "pbd: the profile shows the new value and no deviation for the revision requirement" '.success and ([.data[]|select(.store == "ProjectControl" and .key == "EdmsRequireRevision")][0]|.current == "1" and .deviates == false and .strict == "1")'
-as "$FM_TOKEN" GET "finance/audit?EntityType=SafetySettingChange&PageSize=0"; check "pbd: the request and its approval are in the audit chain: one Added entry (named by the setting) and one Modified entry of the request, both with the user" ".success and ([.data.data[]|select(.action == \"Added\" and (.userName|length) > 0 and (.summary|endswith(\"EdmsRequireRevision\")))]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and .entityId == $PBD_CID and (.userName|length) > 0)]|length) == 1"
+as "$FM_TOKEN" GET "finance/audit?EntityType=SafetySettingChange&PageSize=0"; check "pbd: the request and its approval are in the audit chain: one Added entry (named by the setting) and one Modified entry of the request, both with the user" ".success and ([.data.data[]|select(.action == \"Added\" and .entityId == $PBD_CID and (.userName|length) > 0 and (.summary|endswith(\"EdmsRequireRevision\")))]|length) == 1 and ([.data.data[]|select(.action == \"Modified\" and .entityId == $PBD_CID and (.userName|length) > 0)]|length) == 1"
 as "$ADMIN_TOKEN" GET "safety/changes?Status=Approved&PageSize=0"; check "pbd: the approved request is listed" ".success and ([.data.data[]|select(.id == $PBD_CID)]|length) == 1"
 safety_set ProjectControl EdmsRequireRevision 0; check "pbd: the setting is put back to its default (0) with a second person" '.success and .data.status == "Approved" and .data.weakening == true'
 as "$ADMIN_TOKEN" POST safety/changes '{"store":"ProjectControl","key":"EdmsRequireRevision","value":"1","reason":"درخواستی که لغو می‌شود"}'; check "pbd: a request to cancel" '.success and .data.status == "Pending"'
@@ -11704,6 +11834,8 @@ as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBO
 as "$ENG_TOKEN" POST quality/characteristics/lists "$(jq -nc --argjson r "$PKBBOLTREV" --argjson l "$( { pkb_line 1 Bore 100 0.06 0.06 mm; pkb_line 2 Thread 24 0.1 0.1 mm; } | jq -sc . )" '{revisionId:$r,reason:"اصلاح تلرانس قطر پس از بازبینی",items:$l}')"; check "pkb: the new version 2 is a draft that supersedes nothing yet" '.success and .data.version == 2 and .data.status == 0 and .data.supersedesListId != null'
 PKBV2=$(val .data.id)
 as "$ENG_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"submit\"}"; check "pkb: engineering submits version 2" '.success and .data.status == 1'
+as "$ADMIN_TOKEN" GET "inventory/items/$BOLT"; check "pkb: the bolt is read for the engineering change order" '.success and (.data.code|length) > 0'; PKBBOLTCODE=$(val .data.code)
+eco_make 5 "$PKBV2" "$PKBBOLTCODE" "pkb list v2"   # A2: a new version of the list of a released drawing needs an approved engineering change order that names it
 as "$QA_TOKEN" POST quality/characteristics/lists/action "{\"id\":$PKBV2,\"action\":\"approve\"}"; check "pkb: the QA manager approves version 2; the drawing is in force, so the list is released at once and version 1 is superseded" '.success and .data.status == 3'
 as "$QC_TOKEN" GET "quality/characteristics/lists/$PKBBOLTLIST"; check "pkb: version 1 is Superseded and kept (never deleted)" '.success and .data.status == 4 and (.data.items|length) == 2'
 as "$QC_TOKEN" GET "quality/characteristics/for-item/$BOLT"; check "pkb: the part answers with its drawing and the released lines of version 2 (the bore tolerance is 0.06)" '.success and .data.hasDrawing == true and .data.hasReleasedList == true and (.data.lines|length) == 2 and ([.data.lines[]|select(.name == "Bore")][0].tolPlus) == 0.06'
@@ -11758,9 +11890,693 @@ as "$QC_TOKEN" GET "quality/as-built/$PKBAB"; check "pkb: version 1 is Supersede
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "pkb: the physical configuration audit is a release check and passes for a work order without a project BOM baseline" '.success and ([.data.checks[]|select(.code == "PCA_MATCH")|.passed][0]) == true'
 as "$QC_TOKEN" GET "quality/work-orders/$WO1/data-book"; check "pkb: the data book has section 12 with the current as-built record (the re-issued version)" '.success and ([.data.sections[]|select(.no == 12)|.entries|length][0]) == 1'
 
+# --- PKC (Package C: special processes and material verification). Exact checks; every request is checked, no check sits between a request and the reads of its answer. The settings stay at their strict defaults
+# (nothing here weakens a gate): a flagged step cannot finish without a qualified, reviewed run, a welder works only inside the range of the WPS, a 3.1 certificate is accepted only when the server judged it Pass.
+# The EDMS procedure of the process: a released revision of a document of its own.
+pkc_procedure() { # pkc_procedure NUMBER : sets PKCDOC (deliverable) and PKCREV (released revision)
+  local fid
+  as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"$1\",\"title\":\"روش اجرایی $1\",\"discipline\":\"Mechanical\",\"documentType\":\"Procedure\"}"; check "pkc: the document controller registers the procedure $1" '.success and .data.id > 0'; PKCDOC=$(val .data.id)
+  as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKCDOC}"; check "pkc: the first revision of $1 is a draft" '.success and .data.code == "00" and .data.status == 1'; PKCREV=$(val .data.id)
+  upload_as "$ADMIN_TOKEN" "pkc-$1"; fid=$UPLOADED
+  as "$DCC_TOKEN" POST edms/revisions/files "{\"revisionId\":$PKCREV,\"documentId\":\"$fid\",\"fileName\":\"$1-00.pdf\",\"title\":\"$1\"}"; check "pkc: the file is added to the revision of $1" '.success'
+  as "$DCC_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"submit\"}"; check "pkc: the revision of $1 goes under review" '.success and .data.status == 2'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"review\",\"note\":\"checked\"}"; check "pkc: the PMO reviews $1" '.success'
+  as "$ENG_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"approve\"}"; check "pkc: the engineering manager approves $1" '.success and .data.status == 3'
+  as "$ADMIN_TOKEN" POST edms/revisions/action "{\"id\":$PKCREV,\"action\":\"release\"}"; check "pkc: the PMO releases $1" '.success and .data.status == 4'
+}
+# the master list: six seeded types, editable; the heat treatment gets its limits from engineering (the system invents none)
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc: the six seeded special process types are listed (heat treatment, nitriding, coating, brazing, plating, NDT)" '.success and (.data|length) == 6 and ([.data[]|.code]|sort) == ["BRZ","COAT","HT","NDT","NIT","PLT"] and ([.data[]|select(.code == "NDT")][0].existingControl == true)'
+PKCHTJ=$(jq -c '.data[]|select(.code == "HT")' "$B"); PKCHT=$(jq -r '.id' <<< "$PKCHTJ")
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc: the seeded heat treatment carries no invented limits (no minimum or maximum on any parameter)" '.success and ([.data[]|select(.code == "HT")][0].parameters|all(.min == null and .max == null))'
+as "$WH_TOKEN" POST quality/special-processes/types "$PKCHTJ"; no "pkc: the storekeeper cannot edit the list of special processes"
+pkc_procedure "PKC-PRC-HT"
+PKCTYPE=$(jq -c --argjson p "$PKCDOC" '{id:.id,code:.code,title:.title,description:.description,requiresMachine:.requiresMachine,requiresSurvey:.requiresSurvey,requiredInstrumentClass:.requiredInstrumentClass,procedureDeliverableId:$p,existingControl:.existingControl,isActive:true,rowVersion:.rowVersion,parameters:(.parameters|map({id:.id,sortOrder:.sortOrder,name:.name,unit:.unit,min:(if .name == "دمای نگهداری" then 800 elif .name == "زمان نگهداری" then 60 else null end),max:(if .name == "دمای نگهداری" then 900 elif .name == "زمان نگهداری" then 240 elif .name == "نرخ گرمایش" then 200 elif .name == "نرخ سرمایش" then 100 else null end),required:true}))}' <<< "$PKCHTJ")
+as "$QA_TOKEN" POST quality/special-processes/types "$PKCTYPE"; check "pkc: QA gives the heat treatment its limits (800 to 900 C, 60 to 240 min) and its procedure document" ".success and .data.procedureDeliverableId == $PKCDOC and ([.data.parameters[]|select(.name == \"دمای نگهداری\")][0] | .min == 800 and .max == 900 and .required == true)"
+# the people and the equipment of the process
+PKCP=$(wperson "PKC Operator" P-901 PKC1)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$PKCP,\"kind\":5,\"method\":\"HT\",\"scope\":\"heat treatment\",\"certificateNumber\":\"OP-HT-1\",\"issuedDate\":\"$(dd -60)\",\"expiryDate\":\"$(dd 300)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: the furnace operator holds a special process operator qualification for HT" '.success and .data.kind == 5 and .data.method == "HT"'
+as "$QC_TOKEN" POST quality/equipment '{"name":"Thermocouple PKC","type":4,"serialNumber":"TC-PKC-1"}'; check "pkc: a temperature instrument is registered" '.success and .data.id > 0'; PKCTC=$(val .data.id)
+as "$QC_TOKEN" POST quality/equipment/calibration "{\"equipmentId\":$PKCTC,\"eventDate\":\"$(dd -30)\",\"labName\":\"Lab A\",\"labAccredited\":true,\"certificateNumber\":\"CAL-PKC-1\",\"certificateDocumentId\":\"$DOCID\",\"traceabilityStatement\":\"Traceable to national standard\",\"asFoundPass\":true,\"asLeftPass\":true}"; check "pkc: the temperature instrument is calibrated" '.success'
+call POST Machine '{"title":"کوره آزمون PKC"}'; check "pkc: the test furnace is registered" '.success and .data > 0'; PKCM=$(val .data)
+# the qualification of the process: written by QC, approved by QA (not by the author)
+PKCQJ="{\"typeId\":$PKCHT,\"title\":\"عملیات حرارتی قطعه PKC\",\"procedureDeliverableId\":$PKCDOC,\"procedureRevisionId\":$PKCREV,\"validFrom\":\"$(dd -30)\",\"validTo\":\"$(dd 300)\",\"limits\":[{\"name\":\"دمای نگهداری\",\"unit\":\"C\",\"min\":820,\"max\":880,\"required\":true},{\"name\":\"زمان نگهداری\",\"unit\":\"min\",\"min\":90,\"max\":180,\"required\":true},{\"name\":\"نرخ گرمایش\",\"unit\":\"C/h\",\"max\":150,\"required\":true},{\"name\":\"نرخ سرمایش\",\"unit\":\"C/h\",\"max\":80,\"required\":true}],\"equipments\":[{\"kind\":1,\"machineId\":$PKCM,\"surveyKind\":1,\"surveyDate\":\"$(dd -40)\",\"surveyDueDate\":\"$(dd 160)\"},{\"kind\":2,\"equipmentId\":$PKCTC}],\"operatorPersonIds\":[$PKCP]}"
+as "$QC_TOKEN" POST quality/special-processes/qualifications "$(jq -c '.limits[0].max = 950' <<< "$PKCQJ")"; nomsg "pkc: a qualification limit wider than the master list (950 above 900 C) is refused" "بیشتر"
+as "$QC_TOKEN" POST quality/special-processes/qualifications "$PKCQJ"; check "pkc: QC drafts the qualification of the heat treatment (limits copied inside the master, furnace with a temperature survey, thermocouple, operator)" '.success and .data.status == 0 and .data.number != null and (.data.limits|length) == 4 and (.data.equipments|length) == 2 and (.data.operators|length) == 1 and .data.procedureInForce == true'
+PKCQ=$(val .data.id)
+as "$QC_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"submit\"}"; check "pkc: the qualification is submitted" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"approve\"}"; no "pkc: QC (the author) cannot approve the qualification; only QA approves"
+as "$QA_TOKEN" POST quality/special-processes/qualifications/action "{\"id\":$PKCQ,\"action\":\"approve\"}"; check "pkc: QA approves the qualification (maker-checker)" '.success and .data.status == 2 and .data.approvedByName != null'
+as "$QA_TOKEN" GET "quality/special-processes/qualifications?ExpiringInDays=400"; check "pkc: the qualification is on the expiry list of the next 400 days and not on the 30 day alert list" ".success and (.data.data|map(.id)|index($PKCQ)) != null"
+as "$QA_TOKEN" GET "quality/special-processes/qualifications?ExpiringInDays=30"; check "pkc: ... the 30 day alert list does not hold it (it ends in 300 days)" ".success and ((.data.data|map(.id)|index($PKCQ)) == null)"
+# the step: a standard flagged as a special process (the heat treatment) on the manual station, an order, the terminal
+item PKCPART "{\"code\":\"77.10.00.031.1\",\"title\":\"قطعه عملیات حرارتی PKC\",\"unit\":\"عدد\",\"trackingMode\":0,\"requiresIncomingInspection\":false}" "pkc: the part that goes through heat treatment"
+call POST inventory/trace/templates "{\"itemId\":$PKCPART,\"sequence\":10,\"title\":\"عملیات حرارتی PKC\"}"; check "pkc: the operation template of the heat treatment step is saved" '.success and .data.id > 0'; PKCTPL=$(val .data.id)
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isSpecialProcess\":true}"; nomsg "pkc: the special process flag without a type is refused" "فرایند ویژه"
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isWelding\":true,\"wpsId\":$R1WPS,\"isSpecialProcess\":true,\"specialProcessTypeId\":$PKCHT}"; nomsg "pkc: a step is either a welding step or a special process step, never both" "فرایند ویژه"
+call POST $MF/operation-standards "{\"operationTemplateId\":$PKCTPL,\"workCenterId\":$R1WW,\"setupHours\":0.5,\"runHoursPerUnit\":1,\"isSpecialProcess\":true,\"specialProcessTypeId\":$PKCHT}"; check "pkc: the standard of the heat treatment step is saved flagged with its type" ".success and .data.isSpecialProcess == true and .data.specialProcessTypeId == $PKCHT and .data.specialProcessTypeTitle != null"
+mfroute "$PKCPART" "pkc part"
+r1draft 7 2 "77.10.00.031.1" "قطعه عملیات حرارتی PKC"; PKCO=$R1O; PKCN=$R1N
+call GET "$MF/orders/$PKCO"; check "pkc: the drafted order carries the flag and the type on its step" ".success and (.data.operations|length) == 1 and (.data.operations[0] | .isSpecialProcess == true and .specialProcessTypeId == $PKCHT)"
+PKCOP=$(val '.data.operations[0].id')
+pkb_nodraw_order "$PKCO"
+as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$PKCO}"; check "pkc: the order is released: the heat treatment step is ready" '.success and .data.status == 1 and ([.data.operations[].status]) == [1]'
+welderlink "$PKCP"; check "pkc: the personnel file of the terminal user is tied to the qualification record of the furnace operator" ".success and .data.qualifiedPersonId == $PKCP"
+as "$MWD_TOKEN" POST $MF/terminal/start "{\"operationId\":$PKCOP,\"kind\":2}"; check "pkc: the operator starts the step" '.success and .data.status == 2 and .data.myRunning == true'
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish without a run record of the process (the gate names the step)" '.success == false and (.message|contains("بدون ثبت اجرای فرایند"))'
+as "$QA_TOKEN" GET "quality/special-processes/gate?operationId=$PKCOP"; check "pkc: the gate endpoint says the same: it applies and is not ready" '.success and .data.applies == true and .data.ready == false and .data.problem != null and (.data.runs|length) == 0'
+RUNJ="{\"operationId\":$PKCOP,\"qualificationId\":$PKCQ,\"quantity\":2,\"operatorPersonId\":$PKCP,\"machineId\":$PKCM,\"startedAt\":\"$(dd -1)T08:00:00\",\"endedAt\":\"$(dd -1)T11:00:00\",\"chartDocumentId\":\"$DOCID\",\"chartFileName\":\"chart.pdf\",\"instrumentIds\":[$PKCTC],\"values\":[{\"name\":\"دمای نگهداری\",\"value\":850},{\"name\":\"زمان نگهداری\",\"value\":120},{\"name\":\"نرخ گرمایش\",\"value\":100},{\"name\":\"نرخ سرمایش\",\"value\":60}]}"
+as "$WH_TOKEN" POST quality/special-processes/runs "$RUNJ"; no "pkc: the storekeeper cannot record a run"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c 'del(.values[1])' <<< "$RUNJ")"; nomsg "pkc: a run with a missing required parameter (hold time) is refused" "مقدار پارامتر الزامی ثبت نشده"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c 'del(.instrumentIds)' <<< "$RUNJ")"; nomsg "pkc: a run without a calibrated temperature instrument is refused" "ابزار اندازه‌گیری"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c '.operatorPersonId = '"$WP1" <<< "$RUNJ")"; nomsg "pkc: a run by an operator who is not on the qualification is refused" "جزو اپراتورهای"
+as "$QC_TOKEN" POST quality/special-processes/runs "$(jq -c '.values[0].value = 950 | .quantity = 1' <<< "$RUNJ")"; check "pkc: a run with the temperature above the qualified limit is recorded as Fail and opens an NCR on its own" '.success and .data.result == 2 and .data.ncrId > 0 and (.data.ncrNumber|startswith("NCR-"))'
+PKCFAIL=$(val .data.id)
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish while a failed run has an open NCR" '.success == false and (.message|contains("مردود شده است"))'
+as "$QC_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCFAIL,\"action\":\"void\"}"; no "pkc: voiding a run needs a reason"
+as "$QA_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCFAIL,\"action\":\"void\",\"note\":\"ثبت اشتباه کوره؛ اجرای تازه ثبت می‌شود\"}"; check "pkc: the failed run is voided with its reason (never deleted)" '.success and .data.status == 1'
+as "$QC_TOKEN" POST quality/special-processes/runs "$RUNJ"; check "pkc: the good run of both pieces is recorded as Pass, waiting for the second person" '.success and .data.result == 1 and .data.reviewStatus == 0 and .data.quantity == 2'
+PKCRUN=$(val .data.id)
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: the step does not finish while the run is not reviewed" '.success == false and (.message|contains("هنوز توسط QA بازبینی نشده"))'
+as "$QC_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; nomsg "pkc: the person who recorded the run cannot review it" "تفکیک وظایف"
+as "$WH_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; no "pkc: the storekeeper cannot review a run"
+as "$QC2_TOKEN" POST quality/special-processes/runs/action "{\"id\":$PKCRUN,\"action\":\"review\"}"; check "pkc: a second QC person reviews and approves the run" '.success and .data.reviewStatus == 1 and .data.reviewedByName != null'
+as "$QA_TOKEN" GET "quality/special-processes/gate?operationId=$PKCOP"; check "pkc: the gate is ready now: one passed and reviewed run covers the two pieces (the voided run does not count)" '.success and .data.applies == true and .data.ready == true and .data.problem == null'
+as "$MWD_TOKEN" POST $MF/terminal/finish "{\"operationId\":$PKCOP,\"goodQty\":2}"; check "pkc: with the reviewed run the step finishes: done with 2 good pieces" '.success and .data.status == 4 and .data.goodQty == 2'
+as "$QA_TOKEN" GET "quality/special-processes/runs/$PKCRUN"; check "pkc: the run record (printable) names the qualification, the furnace, the operator, the instrument and the values" ".success and .data.qualificationId == $PKCQ and .data.machineId == $PKCM and .data.operatorPersonId == $PKCP and (.data.instruments|length) == 1 and (.data.values|length) == 4 and ([.data.values[]|select(.name == \"دمای نگهداری\")][0].pass == true) and .data.orderNumber == \"$PKCN\""
+welderlink "$WP1"; check "pkc: the personnel file of the terminal user is tied back to its earlier qualification record" ".success and .data.qualifiedPersonId == $WP1"
+# supplier approval for a subcontracted special process: written by commercial, approved by QA
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals "{\"providerId\":$PRV,\"typeId\":$PKCHT,\"validFrom\":\"$(dd -10)\",\"validTo\":\"$(dd 355)\",\"accreditationNumber\":\"ACC-PKC-1\",\"auditDate\":\"$(dd -15)\"}"; check "pkc: commercial registers the approval of a supplier for heat treatment (pending)" '.success and .data.status == 0'
+PKCSA=$(val .data.id)
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA,\"action\":\"approve\"}"; no "pkc: the person who registered the supplier approval cannot approve it"
+as "$QA_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA,\"action\":\"approve\"}"; check "pkc: QA approves the supplier for the process" '.success and .data.status == 1 and .data.approvedByName != null'
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals "{\"providerId\":$PRV,\"typeId\":$PKCHT,\"validFrom\":\"$(dd -10)\",\"validTo\":\"$(dd 355)\",\"accreditationNumber\":\"ACC-PKC-2\",\"evidenceDocumentId\":\"$DOCID\"}"; check "pkc fix: a renewal of the live approval is accepted as a pending version beside it (the current approval is not voided)" '.success and .data.status == 0 and .data.id != '$PKCSA
+PKCSA2=$(val .data.id)
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals "{\"providerId\":$PRV,\"typeId\":$PKCHT,\"validFrom\":\"$(dd -10)\",\"validTo\":\"$(dd 355)\",\"accreditationNumber\":\"ACC-PKC-3\"}"; nomsg "pkc fix: a second pending approval of the same supplier and process is refused" "در انتظار تصمیم"
+as "$COM_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA2,\"action\":\"approve\"}"; no "pkc fix: the person who registered the renewal cannot approve it"
+as "$QA_TOKEN" POST quality/special-processes/supplier-approvals/action "{\"id\":$PKCSA2,\"action\":\"approve\"}"; check "pkc fix: QA approves the renewal" '.success and .data.status == 1'
+as "$QA_TOKEN" GET "quality/special-processes/supplier-approvals?ProviderId=$PRV&TypeId=$PKCHT&PageSize=0"; check "pkc fix: the earlier approval is Superseded (kept, never voided or deleted) and the renewal is the only Approved one" ".success and ((.data.data // .data)|length) == 2 and ([(.data.data // .data)[]|select(.id == $PKCSA)][0].status == 4) and ([(.data.data // .data)[]|select(.id == $PKCSA2)][0].status == 1)"
+# the welder works only inside the range of the WPS (P-1): a welder qualified for P-3 only, and one whose range was never entered
+WPKR=$(wperson "Welder Range" W-901 W91)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WPKR,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"scope\":\"P-3 plate\",\"rangePNos\":\"P-3\",\"certificateNumber\":\"WQ-R1\",\"issuedDate\":\"$(dd -10)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: the welder is qualified for P-3 only" '.success and .data.rangePNos == "P-3"'
+PKCWQ=$(val .data.id)
+weld "$D0" J-R1 $PKCWQ; check "pkc: a weld log on a WPS of P-1 for a welder qualified for P-3 only is refused with the mismatch list" '.success == false and (.message|contains("دامنه صلاحیت")) and (.message|contains("خارج از دامنه جوشکار (P-3)"))'
+WPKN=$(wperson "Welder NoRange" W-902 W92)
+as "$QA_TOKEN" POST quality/qualifications "{\"personId\":$WPKN,\"kind\":1,\"method\":\"GTAW\",\"scheme\":1,\"scope\":\"plate\",\"certificateNumber\":\"WQ-R2\",\"issuedDate\":\"$(dd -10)\",\"certificateDocumentId\":\"$DOCID\"}"; check "pkc: a welder whose range was never entered is registered" '.success and .data.rangePNos == null'
+PKCWQN=$(val .data.id)
+weld "$D0" J-R2 $PKCWQN; check "pkc: ... and a booking for him is refused: the WPS states a P-No that his certificate does not" '.success == false and (.message|contains("ثبت نشده است"))'
+# the material specification and the structured EN 10204 certificate (the specification S355J2 was approved in section G)
+as "$ENG_TOKEN" GET "quality/material-specs/required/$PL31"; check "pkc: the certificate type of the plate is derived from the item and its approved specification: 3.1" '.success and .data.type == 2'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-1\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-9999\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a certificate with another heat number than the lot is judged Fail by the server and says so" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("شماره ذوب گواهی (HT-9999)")) and (.data.evaluationText|contains("HT-3101"))'
+PKCC1=$(val .data.id)
+as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$PKCC1,\"accept\":true}"; nomsg "pkc: a certificate judged Fail cannot be accepted" "پذیرفته نمی‌شود"
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-2\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.35},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a chemistry value above the limit (C 0.35 above 0.20) is judged Fail and the row is named" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("خارج از حد مشخصات")) and ([.data.values[]|select(.name == "C")][0].status == 2) and ([.data.values[]|select(.name == "Mn")][0].status == 1)'
+PKCC2=$(val .data.id)
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-3\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380}]}"; check "pkc: a certificate with required values missing is judged Fail and names them" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("مقدار الزامی ثبت نشده"))'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-4\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a 3.1 certificate without the manufacturer's authorised signatory is judged Fail" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("نماینده مجاز سازنده"))'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":3,\"number\":\"MTC-PKC-5\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc: a 3.2 certificate without the inspector's organisation and identity is judged Fail" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("سازمان بازرس"))'
+as "$QA_TOKEN" GET "quality/material-specs/certificate-sheet/$PKCC2"; check "pkc: the verification sheet data (printable) lists the problem and says the receipt is not acceptable" '.success and .data.receiptAcceptable == false and (.data.problems|length) == 2 and .data.spec.grade == "S355J2" and .data.certificate.number == "MTC-PKC-2"'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-6\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc fix: a certificate with the right grade but no standard is judged Fail: no approved specification matches a blank standard (exact match)" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("S355J2")) and (.data.evaluationText|contains("مشخصات ماده تاییدشده‌ای نیست")) and .data.specId == null'
+as "$WH_TOKEN" POST quality/certificates "{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-7\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S275JR\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"; check "pkc fix: a certificate of a grade without an approved specification (S275JR) is judged Fail" '.success and .data.evaluation == 2 and (.data.evaluationText|contains("S275JR")) and (.data.evaluationText|contains("مشخصات ماده تاییدشده‌ای نیست")) and .data.specId == null'
+PKCCBODY="{\"lotId\":$PL31LOTB,\"type\":2,\"number\":\"MTC-PKC-8\",\"documentId\":\"$DOCID\",\"certHeatNumber\":\"HT-3101\",\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"manufacturerSignatory\":\"Mill authorised signatory\",\"values\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"value\":0.18},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"value\":1.4},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"value\":380},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"value\":510}]}"
+as "$WH_TOKEN" POST quality/certificates "$PKCCBODY"; check "pkc fix: a complete certificate of the required grade and standard is judged Pass" '.success and .data.evaluation == 1'
+PKCC8=$(val .data.id)
+as "$QC_TOKEN" POST quality/certificates "$(jq -c --argjson id "$PKCC8" '.id = $id | .values[2].value = 381' <<< "$PKCCBODY")"; check "pkc fix: a QC user corrects a yield value of the pending certificate (he is now an editor of its values)" '.success and ([.data.values[]|select(.name == "Yield")][0].value == 381)'
+as "$QC_TOKEN" POST quality/certificates/verify "{\"id\":$PKCC8,\"accept\":true}"; nomsg "pkc fix: the QC user who edited the values cannot verify the certificate" "تفکیک وظایف"
+as "$WH_TOKEN" POST quality/certificates "$(jq -c '.documentId = "00000000-0000-0000-0000-000000000099" | .number = "MTC-PKC-9"' <<< "$PKCCBODY")"; nomsg "pkc fix: a certificate file that is not in the documents store is refused" "پیدا نشد"
+# the specification is versioned: a new version replaces the approved one only after the second person approves it
+as "$ENG_TOKEN" POST quality/material-specs "{\"newVersionOfId\":$MSPEC0,\"grade\":\"S355J2\",\"standard\":\"EN 10025-2\",\"title\":\"S355J2 structural plate\",\"requiredCertificateType\":2,\"reason\":\"tightened carbon limit\",\"limits\":[{\"kind\":1,\"name\":\"C\",\"unit\":\"%\",\"max\":0.22,\"required\":true},{\"kind\":1,\"name\":\"Mn\",\"unit\":\"%\",\"max\":1.6,\"required\":true},{\"kind\":2,\"name\":\"Yield\",\"unit\":\"MPa\",\"min\":355,\"required\":true},{\"kind\":2,\"name\":\"Tensile\",\"unit\":\"MPa\",\"min\":470,\"max\":630,\"required\":true}]}"; check "pkc: engineering drafts version 2 of the specification; version 1 stays approved until it is approved" '.success and .data.version == 2 and .data.status == 0 and .data.supersedesId != null'
+MSPEC1=$(val .data.id)
+as "$ENG_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC1,\"action\":\"submit\"}"; check "pkc: version 2 is submitted" '.success and .data.status == 1'
+as "$QA_TOKEN" POST quality/material-specs/action "{\"id\":$MSPEC1,\"action\":\"approve\"}"; check "pkc: QA approves version 2" '.success and .data.status == 2'
+as "$QA_TOKEN" GET "quality/material-specs/$MSPEC0"; check "pkc: version 1 is superseded, kept with its hash (never deleted)" '.success and .data.status == 3 and .data.contentHash != null'
+# a safety switch is registered: weakening the certificate gate waits for a second person
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"Quality","key":"Pkc.Certificate.Enforce","value":"0","reason":"آزمون خودکار: درخواست سست کردن گیت گواهی"}'; check "pkc: the request to switch the certificate gate off is Pending (a registered safety switch)" '.success and .data.status == "Pending"'
+PKCSW=$(val '.data.id')
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PKCSW,\"approve\":false,\"note\":\"رد می‌شود؛ گیت باید روشن بماند\"}"; check "pkc: the second person rejects it and the gate stays on" '.success'
+
+# --- Package C fix round 1: a change that weakens a process type needs a second person; the code of a used type and the existing-control flag are fixed
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc fix: the list of process types is read before the change" '.success and (.data|length) == 6'
+PKCHTJ2=$(jq -c '.data[]|select(.code == "HT")' "$B")
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.requiresSurvey = false' <<< "$PKCHTJ2")"; nomsg "pkc fix: removing the temperature survey requirement without a reason is refused" "دلیل"
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.requiresSurvey = false | .reason = "آزمون: کوره بدون بررسی دما"' <<< "$PKCHTJ2")"; check "pkc fix: the weakening is only a request: the type still requires the survey and shows the change waiting for a second person" '.success and .data.requiresSurvey == true and .data.pendingChangeId > 0 and (.data.pendingSummary|contains("TUS")) and .data.pendingReason != null'
+PKCCHG=$(val .data.pendingChangeId)
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.title = "عملیات حرارتی ویرایش‌شده"' <<< "$PKCHTJ2")"; nomsg "pkc fix: no other change of the type is saved while one waits" "منتظر تصمیم"
+as "$QA_TOKEN" POST quality/special-processes/types/change-action "{\"id\":$PKCCHG,\"action\":\"approve\"}"; nomsg "pkc fix: the requester cannot approve his own weakening" "تفکیک وظایف"
+as "$WH_TOKEN" POST quality/special-processes/types/change-action "{\"id\":$PKCCHG,\"action\":\"approve\"}"; no "pkc fix: the storekeeper cannot decide a change of a process type"
+as "$PMO2_TOKEN" POST quality/special-processes/types/change-action "{\"id\":$PKCCHG,\"action\":\"reject\"}"; nomsg "pkc fix: a rejection needs a reason" "دلیل رد"
+as "$PMO2_TOKEN" POST quality/special-processes/types/change-action "{\"id\":$PKCCHG,\"action\":\"reject\",\"note\":\"رد می‌شود؛ بررسی دما لازم است\"}"; check "pkc fix: the second person rejects it: the type is unchanged and nothing waits any more" '.success and .data.requiresSurvey == true and .data.pendingChangeId == null'
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc fix: the type list is read again (new row version)" '.success and ([.data[]|select(.code == "HT")][0].requiresSurvey == true)'
+PKCHTJ2=$(jq -c '.data[]|select(.code == "HT")' "$B")
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.requiresSurvey = false | .reason = "آزمون: کوره بدون بررسی دما"' <<< "$PKCHTJ2")"; check "pkc fix: the weakening is requested again" '.success and .data.requiresSurvey == true and .data.pendingChangeId > 0'
+PKCCHG=$(val .data.pendingChangeId)
+as "$PMO2_TOKEN" POST quality/special-processes/types/change-action "{\"id\":$PKCCHG,\"action\":\"approve\"}"; check "pkc fix: the second person approves it and only now the survey requirement is gone" '.success and .data.requiresSurvey == false and .data.pendingChangeId == null'
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc fix: the type list is read after the approval" '.success and ([.data[]|select(.code == "HT")][0].requiresSurvey == false)'
+PKCHTJ2=$(jq -c '.data[]|select(.code == "HT")' "$B")
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.requiresSurvey = true' <<< "$PKCHTJ2")"; check "pkc fix: a strengthening (the survey required again) applies at once without a second person" '.success and .data.requiresSurvey == true and .data.pendingChangeId == null'
+as "$QA_TOKEN" GET quality/special-processes/types; check "pkc fix: the type list is read after the restore" '.success and ([.data[]|select(.code == "HT")][0].requiresSurvey == true)'
+PKCHTJ2=$(jq -c '.data[]|select(.code == "HT")' "$B")
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.code = "HT2"' <<< "$PKCHTJ2")"; nomsg "pkc fix: the code of a process type that qualifications and runs use cannot be changed" "تغییر نمی‌کند"
+as "$QA_TOKEN" POST quality/special-processes/types "$(jq -c '.existingControl = true' <<< "$PKCHTJ2")"; nomsg "pkc fix: the existing-control flag cannot be switched on from the API" "کنترل با صلاحیت پرسنلی موجود"
+as "$QA_TOKEN" POST quality/special-processes/types '{"code":"PKCNEW","title":"فرایند آزمون","existingControl":true,"requiresMachine":false,"isActive":true,"parameters":[]}'; nomsg "pkc fix: a new process type cannot be created with the existing-control flag" "کنترل با صلاحیت پرسنلی موجود"
+
+# --- Package C fix round 1: the five safety switches. Every change is a request that a second person decides; the value changes only when he approves. Weakening (a gate off, the alert days under 30) and strengthening both wait.
+pkc_safety_flag() { # pkc_safety_flag KEY : off is requested (Pending, still on), the requester cannot decide, the second person approves (off), then it is restored (Pending, approved, on)
+  local key=$1 sid
+  as "$ADMIN_TOKEN" POST safety/changes "{\"store\":\"Quality\",\"key\":\"$key\",\"value\":\"0\",\"reason\":\"آزمون خودکار: درخواست سست کردن کنترل\"}"; check "pkc safety: the request to switch $key off is Pending (not applied by the requester)" '.success and .data.status == "Pending" and .data.newValue == "0"'
+  sid=$(val '.data.id')
+  as "$QA_TOKEN" GET quality/settings; check "pkc safety: $key is still on while the request waits" "([.data[]|select(.key == \"$key\")|.value][0] == 1)"
+  as "$ADMIN_TOKEN" POST safety/changes/decide "{\"id\":${sid:-0},\"approve\":true,\"note\":\"خودتایید\"}"; no "pkc safety: the requester cannot approve his own request for $key"
+  as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":${sid:-0},\"approve\":true,\"note\":\"تایید خودکار آزمون\"}"; check "pkc safety: the second person approves: $key is off" '.success and .data.status == "Approved" and .data.newValue == "0"'
+  as "$QA_TOKEN" GET quality/settings; check "pkc safety: $key reads 0 after the approval" "([.data[]|select(.key == \"$key\")|.value][0] == 0)"
+  safety_set Quality "$key" 1; check "pkc safety: $key is restored to 1 with the second person" '.success and .data.status == "Approved" and .data.newValue == "1"'
+  as "$QA_TOKEN" GET quality/settings; check "pkc safety: $key reads 1 again" "([.data[]|select(.key == \"$key\")|.value][0] == 1)"
+}
+pkc_safety_flag Pkc.SpecialProcess.Enforce
+pkc_safety_flag Pkc.SpecialProcess.SubcontractEvidence
+pkc_safety_flag Pkc.Weld.RangeEnforce
+pkc_safety_flag Pkc.Certificate.Enforce
+as "$ADMIN_TOKEN" POST safety/changes '{"store":"Quality","key":"Pkc.Qualification.ExpiryAlertDays","value":"20","reason":"آزمون خودکار: کمتر کردن روزهای اطلاع"}'; check "pkc safety: the alert days 30 to 20 (weaker) is Pending" '.success and .data.status == "Pending" and .data.newValue == "20"'
+PKCSW=$(val '.data.id')
+as "$QA_TOKEN" GET quality/settings; check "pkc safety: the alert days are still 30 while the request waits" '([.data[]|select(.key == "Pkc.Qualification.ExpiryAlertDays")|.value][0] == 30)'
+as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":$PKCSW,\"approve\":false,\"note\":\"رد می‌شود؛ حداقل ۳۰ روز\"}"; check "pkc safety: the second person rejects the 20 days" '.success and .data.status == "Rejected"'
+SAFETY_REQ="$ADMIN_TOKEN" safety_set Quality Pkc.Qualification.ExpiryAlertDays 60; check "pkc safety: the alert days 30 to 60 (stricter) are approved by the second person" '.success and .data.status == "Approved" and .data.newValue == "60"'
+as "$QA_TOKEN" GET quality/settings; check "pkc safety: the alert days read 60" '([.data[]|select(.key == "Pkc.Qualification.ExpiryAlertDays")|.value][0] == 60)'
+safety_set Quality Pkc.Qualification.ExpiryAlertDays 30; check "pkc safety: the alert days are back at 30" '.success and .data.status == "Approved" and .data.newValue == "30"'
+as "$QA_TOKEN" GET quality/settings; check "pkc safety: the alert days read 30 again" '([.data[]|select(.key == "Pkc.Qualification.ExpiryAlertDays")|.value][0] == 30)'
+
+# --- PKA1 (Package A1: design and development control, ISO 9001 8.3 / ISO 10007 6.5). Exact checks; every request is checked and no check sits between a request and the reads of its answer. The block has its own users, products and work order.
+# The settings stay at their strict defaults; the one weakening here (the minimum reason length) is made through the two-person route and put back at once. The BOM release, the drawing release and the project start of the older chains
+# above already ran under the same gates with real data (pka1_design / pka1_verify), so the gates were never switched off for them.
+TOKEN=$ADMIN_TOKEN
+user2 pka1.mk.ci 8 'Ci#Pka1Mk-User-2026' 09120000083 0012345683; check "pka1 setup: the design engineer (role ENGINEER) is registered" '.success and .data.id > 0'
+user2 pka1.mg.ci 4 'Ci#Pka1Mg-User-2026' 09120000084 0012345684; check "pka1 setup: the engineering manager (role ENGINEERING) is registered" '.success and .data.id > 0'
+user2 pka1.qa.ci 14 'Ci#Pka1Qa-User-2026' 09120000085 0012345685; check "pka1 setup: the first QA manager is registered" '.success and .data.id > 0'
+user2 pka1.qb.ci 14 'Ci#Pka1Qb-User-2026' 09120000086 0012345686; check "pka1 setup: the second QA manager is registered" '.success and .data.id > 0'
+PKA1MK_TOKEN=$(login pka1.mk.ci 'Ci#Pka1Mk-User-2026'); PKA1MG_TOKEN=$(login pka1.mg.ci 'Ci#Pka1Mg-User-2026'); PKA1QA_TOKEN=$(login pka1.qa.ci 'Ci#Pka1Qa-User-2026'); PKA1QB_TOKEN=$(login pka1.qb.ci 'Ci#Pka1Qb-User-2026')
+[ -n "$PKA1MK_TOKEN" ] && [ -n "$PKA1MG_TOKEN" ] && [ -n "$PKA1QA_TOKEN" ] && [ -n "$PKA1QB_TOKEN" ] && ok "pka1 setup: the four design users sign in" || bad "pka1 setup: the four design users sign in"
+PKA1MKID=$(uid "$PKA1MK_TOKEN"); PKA1MGID=$(uid "$PKA1MG_TOKEN"); PKA1QAID=$(uid "$PKA1QA_TOKEN"); PKA1QBID=$(uid "$PKA1QB_TOKEN")
+[ -n "$PKA1MKID" ] && [ -n "$PKA1MGID" ] && [ -n "$PKA1QAID" ] && [ -n "$PKA1QBID" ] && ok "pka1 setup: the ids of the four design users are resolved" || bad "pka1 setup: the ids of the four design users are resolved"
+
+# --- the settings, the strict profile and the two-person route
+as "$PKA1QA_TOKEN" GET quality/settings; check "pka1 settings: the four design settings start at their strict values (verification on, validation on, one independent participant, 15 characters)" '.success and ([.data[]|select(.key=="Design.VerificationRequired")|.value][0]) == 1 and ([.data[]|select(.key=="Design.ValidationRequired")|.value][0]) == 1 and ([.data[]|select(.key=="Design.MinIndependentReviewers")|.value][0]) == 1 and ([.data[]|select(.key=="Design.ReasonMinChars")|.value][0]) == 15'
+as "$ADMIN_TOKEN" GET safety/profile; check "pka1 safety: exactly five design settings are on the safety profile, none deviates, and the readiness item RD-DESIGN has its two switches (Enabled, Hard)" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))]|length) == 5 and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")))|select(.deviates == false and .current == .strict)]|length) == 5 and ([.data[]|select(.store == "Quality" and (.key|startswith("OpsReady.RD-DESIGN.")))]|length) == 2'
+as "$PKA1QA_TOKEN" POST quality/settings '{"key":"Design.VerificationRequired","value":0}'; no "pka1 safety: the verification gate cannot be switched off through the ordinary settings page"
+safety_set Quality Design.ReasonMinChars 5; check "pka1 safety: a shorter minimum reason is a weakening that waits for a second person and is then applied" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "15" and .data.newValue == "5"'
+as "$ADMIN_TOKEN" GET safety/deviations; check "pka1 safety: the deviation list shows the minimum reason as a weaker value (5 against the strict 15)" '.success and ([.data.items[]|select(.store == "Quality" and .key == "Design.ReasonMinChars")][0]|.deviates == true and .weaker == true and .current == "5" and .strict == "15")'
+safety_set Quality Design.ReasonMinChars 15; check "pka1 safety: the minimum reason is put back to the strict 15 with a second person" '.success and .data.status == "Approved" and .data.newValue == "15"'
+as "$ADMIN_TOKEN" GET safety/profile; check "pka1 safety: no design setting deviates any more" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")) and .deviates == true)]|length) == 0'
+
+# --- the product, its BOM (approved by four different people, not yet released) and the gate that refuses its release
+as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.100.2","title":"محصول آزمون کنترل طراحی","platform":"T"}'; check "pka1 setup: the product of the design control scenario is saved" '.success and .data.code == "77.10.00.100.2"'; PKA1PROD=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.101.2","title":"محصول آزمون معافیت از صحه‌گذاری","platform":"T"}'; check "pka1 setup: the second product (validation waived) is saved" '.success and .data.code == "77.10.00.101.2"'; PKA1PRODB=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms "{\"productId\":$PKA1PROD,\"assemblyPartNumber\":\"77.10.00.100.2\",\"title\":\"BOM آزمون کنترل طراحی\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"77.10.01.100.2\",\"partName\":\"Plate\",\"qty\":1,\"unit\":\"عدد\",\"material\":\"WCB\",\"makeOrBuy\":1,\"netWeight\":10,\"grossWeight\":12}]}"; check "pka1 setup: BOM revision 00 is a draft" '.success and .data.status == 0 and .data.revision == 0'; PKA1BOM=$(val .data.id)
+as "$ENG_TOKEN" POST $PB/boms/submit "{\"id\":$PKA1BOM}"; check "pka1 setup: the BOM is submitted and its content hash is fixed" '.success and .data.status == 1 and (.data.contentHash|length) == 64'
+as "$ENG2_TOKEN" POST $PB/boms/sign "{\"id\":$PKA1BOM,\"step\":1}"; check "pka1 setup: BOM check by a second engineer" '.success'
+as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$PKA1BOM,\"step\":2}"; check "pka1 setup: BOM check by QC" '.success'
+as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$PKA1BOM,\"step\":3}"; check "pka1 setup: BOM check by manufacturing" '.success'
+as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$PKA1BOM,\"step\":4}"; check "pka1 setup: BOM approval by the PMO (four different people signed)" '.success and .data.status == 2'
+as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA1BOM}"; nomsg "pka1 gate: the approved BOM is not released while no closed, accepted design verification covers it" "منتشر نمی‌شود"
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the gate status names exactly two gaps: no verification review and no approved design plan" '.success and .data.required == true and .data.passed == false and (.data.missing|length) == 2 and (.data.reviews|length) == 0'
+
+# --- the design plan: who prepares, who approves (never the preparer), what a plan needs
+PKA1ST=$(jq -nc --argjson u "$PKA1MGID" --arg s "$(dd 0)" --arg e "$(dd 30)" '[[1,"ENGINEERING"],[2,"ENGINEER"],[3,"ENGINEERING"],[4,"QA"],[5,"QA"],[6,"ENGINEERING"]] | map({kind:.[0],responsibleRole:.[1],responsibleUserId:$u,plannedStart:$s,plannedEnd:$e})')
+PKA1STBAD=$(jq -nc --argjson u "$PKA1MGID" --arg s "$(dd 30)" --arg e "$(dd 0)" '[[1,"ENGINEERING"],[2,"ENGINEER"],[3,"ENGINEERING"],[4,"QA"],[5,"QA"],[6,"ENGINEERING"]] | map({kind:.[0],responsibleRole:.[1],responsibleUserId:$u,plannedStart:$s,plannedEnd:$e})')
+as "$WH_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PROD" --argjson st "$PKA1ST" '{productId:$p,productRevision:0,title:"برنامه طراحی",stages:$st}')"; no "pka1 plan: the storekeeper cannot prepare a design plan"
+as "$PKA1MG_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PROD" --argjson st "$PKA1STBAD" '{productId:$p,productRevision:0,title:"برنامه طراحی",stages:$st}')"; nomsg "pka1 plan: an end date before the start date is refused" "تاریخ پایان برنامه‌ای از تاریخ شروع زودتر است"
+as "$PKA1MG_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PROD" --argjson st "$PKA1ST" '{productId:$p,productRevision:0,title:"برنامه طراحی",validationRequired:false,stages:$st}')"; nomsg "pka1 plan: waiving the validation needs a written reason" "برای معاف کردن محصول از صحه‌گذاری طراحی دلیل"
+as "$PKA1MG_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PROD" --argjson st "$PKA1ST" '{productId:$p,productRevision:0,title:"برنامه طراحی آزمون",scope:"طراحی و تایید BOM محصول آزمون",stages:$st}')"; check "pka1 plan: the engineering manager prepares plan version 1 of revision 00: a draft with the six stages and a DP number" '.success and .data.status == 0 and .data.version == 1 and .data.productRevision == 0 and .data.validationRequired == true and (.data.stages|length) == 6 and (.data.number|startswith("DP"))'; PKA1PLAN=$(val .data.id)
+as "$PKA1MG_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PROD" --argjson st "$PKA1ST" '{productId:$p,productRevision:0,title:"برنامه دوم",stages:$st}')"; nomsg "pka1 plan: a second plan for the same product revision is refused while one is in progress" "نسخه جدید"
+as "$PKA1MK_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"submit\"}"; nomsg "pka1 plan: only the preparer submits his draft" "فقط تهیه‌کننده"
+as "$PKA1MG_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"submit\"}"; check "pka1 plan: the preparer submits the plan" '.success and .data.status == 1'
+as "$PKA1MG_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"approve\"}"; nomsg "pka1 plan: the preparer never approves his own plan (segregation of duties)" "تفکیک وظایف"
+as "$PKA1MK_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"approve\"}"; no "pka1 plan: a design engineer (not engineering manager, not QA) cannot approve a plan"
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"approve\"}"; check "pka1 plan: the first QA manager approves; his name is kept" ".success and .data.status == 2 and .data.approvedByUserId == $PKA1QAID and .data.preparedByUserId == $PKA1MGID"
+as "$PKA1MK_TOKEN" GET "$PB/design/plans?ProductId=$PKA1PROD"; check "pka1 plan: the plan list of the product holds exactly this plan" ".success and (.data.data|length) == 1 and .data.data[0].id == $PKA1PLAN and .data.data[0].status == 2"
+
+# --- the design inputs: source, criterion and what each kind needs; a conflict stops the design until a second person resolves it; the declaration of completeness is a second person's
+as "$WH_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1)"; no "pka1 inputs: the storekeeper cannot write design inputs"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1 | jq -c '.source=""')"; nomsg "pka1 inputs: an input without a source is refused" "منبع ورودی را بنویسید"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 4 | jq -c 'del(.standardEdition)')"; nomsg "pka1 inputs: a standard without its edition is refused" "ویرایش (سال انتشار)"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 6 | jq -c 'del(.refText,.refRevisionText)')"; nomsg "pka1 inputs: a customer specification without its document and revision is refused" "برای مشخصات مشتری"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1)"; check "pka1 inputs: the functional input is recorded (valid, DI number)" '.success and .data.status == 0 and .data.kind == 1 and (.data.code|startswith("DI"))'; PKA1IN1=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 2)"; check "pka1 inputs: the performance input is recorded" '.success and .data.status == 0 and .data.kind == 2'; PKA1IN2=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 3)"; check "pka1 inputs: the statutory input is recorded" '.success and .data.status == 0 and .data.kind == 3'; PKA1IN3=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 4)"; check "pka1 inputs: the standard input is recorded with its edition" '.success and .data.status == 0 and .data.kind == 4 and .data.standardEdition == "ASME 2019"'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 5)"; check "pka1 inputs: the previous-design input is recorded with its reference" '.success and .data.status == 0 and .data.kind == 5 and .data.previousDesignRef == "DP-1403-001"'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 6)"; check "pka1 inputs: the customer-specification input is recorded with its document and revision" '.success and .data.status == 0 and .data.kind == 6 and .data.refRevisionText == "B"'
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; nomsg "pka1 inputs: completeness cannot be declared while a kind is neither recorded nor declared not applicable" "نه ورودی ثبت شده"
+as "$PKA1MG_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; nomsg "pka1 inputs: the preparer of the plan cannot declare the inputs complete (a second person does)" "نفر دوم"
+as "$PKA1QB_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1IN1,\"action\":\"conflict\",\"withInputId\":$PKA1IN2,\"note\":\"الزام کارکردی و عملکردی با هم ناسازگارند\"}"; check "pka1 inputs: the second QA manager marks input 1 as in conflict with input 2" ".success and .data.status == 1 and .data.conflictWithInputId == $PKA1IN2 and .data.conflictMarkedByUserId == $PKA1QBID"
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; nomsg "pka1 inputs: a conflict stops the declaration until it is resolved" "تا رفع تعارض"
+as "$PKA1QB_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1IN1,\"action\":\"resolve\",\"note\":\"الزام کارکردی با فشار کاری عملکردی هماهنگ شد\"}"; nomsg "pka1 inputs: the person who marked the conflict cannot resolve it" "تفکیک وظایف"
+as "$PKA1QA_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1IN1,\"action\":\"resolve\",\"note\":\"الزام کارکردی با فشار کاری عملکردی هماهنگ شد\"}"; check "pka1 inputs: a second person resolves it; both names are kept" ".success and .data.status == 0 and .data.conflictResolvedByUserId == $PKA1QAID and .data.conflictMarkedByUserId == $PKA1QBID"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 7)"; check "pka1 inputs: the potential-failure-consequence input is recorded: all seven kinds exist" '.success and .data.status == 0 and .data.kind == 7'; PKA1IN7=$(val .data.id)
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"منابع قرارداد و استانداردها بررسی شد\"}"; check "pka1 inputs: the first QA manager declares the inputs complete (the preparer was another person)" ".success and .data.inputsCompleteByUserId == $PKA1QAID and (.data.missingKinds|length) == 0 and .data.conflictCount == 0"
+as "$PKA1MG_TOKEN" GET "$PB/design/plans/$PKA1PLAN"; check "pka1 stages: the plan is read back with its six stages" '.success and (.data.stages|length) == 6'; PKA1STG1=$(jq -r '.data.stages[]|select(.kind == 1)|.id' "$B"); PKA1STG2=$(jq -r '.data.stages[]|select(.kind == 2)|.id' "$B")
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLAN,\"stageId\":$PKA1STG1,\"action\":\"start\"}"; check "pka1 stages: the inputs stage is started" '.success and ([.data.stages[]|select(.kind == 1)][0].status) == 1'
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLAN,\"stageId\":$PKA1STG1,\"action\":\"complete\"}"; check "pka1 stages: the inputs stage is completed (the declaration is valid)" '.success and ([.data.stages[]|select(.kind == 1)][0].status) == 2'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1 | jq -c '.statement="الزام کارکردی تکمیلی: قطعه باید در دمای محیط کار کند"')"; check "pka1 inputs: a late functional input is recorded after the declaration" '.success and .data.status == 0 and .data.kind == 1'; PKA1INLATE=$(val .data.id)
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLAN,\"stageId\":$PKA1STG2,\"action\":\"start\"}"; nomsg "pka1 stages: the design stage does not start on a stale declaration (an input came after it)" "طراحی شروع نمی‌شود"
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"ورودی تکمیلی نیز بررسی شد\"}"; check "pka1 inputs: the declaration is made again after the late input" ".success and .data.inputsCompleteByUserId == $PKA1QAID"
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLAN,\"stageId\":$PKA1STG2,\"action\":\"start\"}"; check "pka1 stages: with a fresh declaration the design stage starts" '.success and ([.data.stages[]|select(.kind == 2)][0].status) == 1'
+
+# --- the verification review of the BOM: independent participants, judged criteria, findings closed by another person, closing by someone who did not make the output
+as "$PKA1MK_TOKEN" POST $PB/design/reviews "{\"planId\":$PKA1PLAN,\"type\":2,\"title\":\"تایید طراحی BOM آزمون\",\"outputs\":[{\"kind\":2,\"bomHeaderId\":$PKA1BOM}],\"participants\":[{\"userId\":$ENGID,\"roleText\":\"تهیه‌کننده BOM\"}]}"; check "pka1 review: the verification is planned with the BOM as its output and the eight live inputs; the BOM's own preparer is no independent participant" '.success and .data.status == 0 and .data.type == 2 and (.data.number|startswith("DR")) and (.data.inputs|length) == 8 and (.data.outputs|length) == 1 and .data.independentCount == 0'; PKA1REV=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; nomsg "pka1 review: the meeting cannot be recorded without an independent participant" "شرکت‌کننده مستقل"
+as "$PKA1MK_TOKEN" POST $PB/design/reviews "{\"id\":$PKA1REV,\"planId\":$PKA1PLAN,\"type\":2,\"title\":\"تایید طراحی BOM آزمون\",\"outputs\":[{\"kind\":2,\"bomHeaderId\":$PKA1BOM}],\"participants\":[{\"userId\":$PKA1QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1QBID,\"roleText\":\"QA\"}]}"; check "pka1 review: the creator changes the participants to the two QA managers: two independent participants" '.success and .data.status == 0 and .data.independentCount == 2 and (.data.participants|length) == 2'
+as "$WH_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; no "pka1 review: the storekeeper cannot record the meeting"
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"hold\",\"minutes\":\"کوتاه\"}"; nomsg "pka1 review: the minutes must have the minimum length" "صورتجلسه دست‌کم"
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و موارد بررسی شد\"}"; check "pka1 review: the meeting is recorded with its minutes" '.success and .data.status == 1 and (.data.participants|map(select(.independent))|length) == 2'
+PKA1ROWS=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"اندازه‌گیری و آزمون مطابق معیار",evidenceRef:"QR-1"}]' "$B")
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"close\",\"outcome\":1}"; nomsg "pka1 review: nothing is judged yet, so the review cannot close as accepted" "بسته نمی‌شود"
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1REV,\"rows\":$PKA1ROWS}"; nomsg "pka1 review: only a participant judges the criteria" "فقط شرکت‌کنندگان"
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1REV,\"rows\":$(echo "$PKA1ROWS" | jq -c '.[0].result = 2')}"; check "pka1 review: the first QA manager judges one criterion as failed and the others as passed" '.success'
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"close\",\"outcome\":1}"; nomsg "pka1 review: a failed criterion blocks the accepted closing" "بسته نمی‌شود"
+as "$PKA1MG_TOKEN" GET "$PB/design/reviews/$PKA1REV/matrix"; check "pka1 review: the matrix has eight input rows and exactly one input that is not covered" '.success and (.data.rows|length) == 8 and (.data.uncovered|length) == 1'
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1REV,\"rows\":$PKA1ROWS}"; check "pka1 review: the criterion is judged again as passed, with its evidence" '.success'
+as "$PKA1MG_TOKEN" GET "$PB/design/reviews/$PKA1REV/matrix"; check "pka1 review: the matrix now covers every input" '.success and (.data.rows|length) == 8 and (.data.uncovered|length) == 0'
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/findings "{\"reviewId\":$PKA1REV,\"description\":\"ضخامت ورق باید در نقشه با تلرانس نوشته شود\",\"ownerUserId\":$PKA1MKID,\"dueDate\":\"$(dd 10)\"}"; check "pka1 review: a finding is raised with an owner and a due date" '.success and (.data.findings|length) == 1 and .data.findings[0].status == 0'; PKA1FIND=$(val '.data.findings[0].id')
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"close\",\"outcome\":1}"; nomsg "pka1 review: an open finding blocks the accepted closing" "یافته هنوز بسته نشده"
+as "$PKA1QB_TOKEN" POST $PB/design/reviews/findings/action "{\"id\":$PKA1FIND,\"action\":\"done\",\"note\":\"تلرانس در نقشه نوشته شد\"}"; nomsg "pka1 review: only the owner declares his finding done" "انجام یافته را مالک"
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/findings/action "{\"id\":$PKA1FIND,\"action\":\"done\",\"note\":\"تلرانس در نقشه نوشته شد\"}"; check "pka1 review: the owner declares the finding done" '.success and .data.findings[0].status == 1'
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/findings/action "{\"id\":$PKA1FIND,\"action\":\"close\",\"note\":\"بررسی شد\"}"; no "pka1 review: the owner cannot close his own finding"
+as "$PKA1QB_TOKEN" POST $PB/design/reviews/findings/action "{\"id\":$PKA1FIND,\"action\":\"close\",\"note\":\"اقدام بررسی و تایید شد\"}"; check "pka1 review: another person closes the finding" ".success and .data.findings[0].status == 2 and .data.findings[0].closedByUserId == $PKA1QBID"
+as "$ENG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"close\",\"outcome\":1}"; nomsg "pka1 review: the preparer of the BOM cannot close the review of his own output" "تهیه‌کننده هیچ‌یک"
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"close\",\"outcome\":1}"; check "pka1 review: the engineering manager closes the verification as accepted" ".success and .data.status == 2 and .data.outcome == 1 and .data.closedByUserId == $PKA1MGID"
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the BOM is covered by the closed, accepted verification" '.success and .data.required == true and .data.passed == true and (.data.missing|length) == 0 and (.data.reviews|length) == 1'
+as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$PKA1BOM}"; check "pka1 gate: the BOM is released now" '.success and .data.status == 3'
+as "$PKA1MG_TOKEN" GET "$PB/design/plans/dossier/$PKA1PROD"; check "pka1 dossier: the product dossier shows the plan, the review, no open finding, no conflict and the released BOM as verified" '.success and .data.verificationRequired == true and (.data.plans|length) == 1 and (.data.reviews|length) == 1 and .data.openFindings == 0 and .data.conflictCount == 0 and (.data.boms|length) == 1 and .data.boms[0].verification.passed == true'
+
+# --- the readiness item RD-DESIGN of a project start (hard): it follows the design record, a stale declaration and a voided verification reopen it
+call POST Contracts '{"code":"PKA1-CT-01","title":"قرارداد آزمون کنترل طراحی","status":1,"employer":"کارفرمای آزمون"}'; check "pka1 readiness: the test contract is created" '.success and .data.id > 0'; PKA1CT=$(val .data.id)
+call POST Equipments '{"code":"PKA1-EQ-T","title":"Test unit PKA1"}'; check "pka1 readiness: the test equipment is created" '.success and .data.id > 0'; PKA1EQ=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$PKA1CT,\"equipmentId\":$PKA1EQ,\"count\":1}"; check "pka1 readiness: the equipment is attached to the contract" '.success'
+call POST WorkOrders "{\"contractId\":$PKA1CT,\"equipmentId\":$PKA1EQ,\"code\":\"PKA1-WO-1\",\"title\":\"Unit PKA1\",\"description\":\"x\",\"count\":1}"; check "pka1 readiness: the work order is created" '.success and .data.id > 0'; PKA1WO=$(val .data.id)
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: with the plan, the declared inputs and the accepted verification the design item is OK (and hard)" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "OK")'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "{\"id\":$PKA1IN3,\"productId\":$PKA1PROD,\"productRevision\":0,\"kind\":3,\"statement\":\"الزام قانونی اصلاح‌شده: مطابق آیین‌نامه ایمنی جدید\",\"source\":\"قرارداد بند ۳\",\"acceptanceCriterion\":\"آزمون مطابق بند ۳ قبول\"}"; check "pka1 inputs: an input that a review refers to is replaced, not edited: the new one points back to the old" ".success and .data.id != $PKA1IN3 and .data.supersedesInputId == $PKA1IN3 and .data.status == 0"; PKA1IN3N=$(val .data.id)
+as "$PKA1MK_TOKEN" GET "$PB/design/inputs/$PKA1IN3"; check "pka1 inputs: the replaced input stays as history (Superseded)" '.success and .data.status == 2 and .data.usedByReview == true'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the replacement came after the declaration, so the design item is missing again" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
+as "$PKA1QA_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLAN,\"action\":\"inputs-complete\",\"note\":\"الزام قانونی اصلاح‌شده نیز بررسی شد\"}"; check "pka1 inputs: the declaration is made again after the replacement" ".success and .data.inputsCompleteByUserId == $PKA1QAID"
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the declaration alone does not restore the design item: the verification no longer covers the replacing input (still Missing, hard)" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the BOM is no longer covered after the input was replaced: exactly one gap, the stale text, and the old review is still listed" '.success and .data.passed == false and (.data.missing|length) == 1 and (.data.missing[0]|startswith("تصدیق طراحی پس از تغییر ورودی‌ها باید تکرار/تکمیل شود")) and (.data.reviews|length) == 1'
+as "$PKA1MK_TOKEN" POST $PB/design/reviews "{\"planId\":$PKA1PLAN,\"type\":2,\"title\":\"تصدیق تکمیلی ورودی جایگزین\",\"inputIds\":[$PKA1IN3N],\"outputs\":[{\"kind\":2,\"bomHeaderId\":$PKA1BOM}],\"participants\":[{\"userId\":$PKA1QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1QBID,\"roleText\":\"QA\"},{\"userId\":$PKA1MGID,\"roleText\":\"ENGINEERING\"}]}"; check "pka1 review: a supplementary verification is planned for the replacing input alone" '.success and .data.status == 0 and (.data.inputs|length) == 1'; PKA1REV2=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"hold\",\"minutes\":\"جلسه برگزار شد و ورودی جایگزین بررسی شد\"}"; check "pka1 review: the supplementary meeting is recorded" '.success and .data.status == 1'
+PKA1ROWS2=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"اندازه‌گیری و آزمون مطابق معیار",evidenceRef:"QR-2"}]' "$B")
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1REV2,\"rows\":$PKA1ROWS2}"; check "pka1 review: QA judges the replacing input as passed" '.success'
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"close\",\"outcome\":1}"; check "pka1 review: the engineering manager closes the supplementary verification as accepted" '.success and .data.status == 2 and .data.outcome == 1'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the two reviews together cover the BOM again" '.success and .data.passed == true and (.data.missing|length) == 0 and (.data.reviews|length) == 2'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the design item is OK again after the supplementary verification" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "OK")'
+as "$PKA1MG_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; no "pka1 review: the engineering manager cannot void a closed review (only QA)"
+as "$PKA1QB_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; check "pka1 review: the QA manager voids the closed review with a reason; it is kept, never deleted" '.success and .data.status == 3'
+as "$PKA1QB_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1REV2,\"action\":\"void\",\"note\":\"ابطال برای آزمون: بازبینی دوباره لازم است\"}"; check "pka1 review: the QA manager voids the supplementary review too" '.success and .data.status == 3'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/bom/$PKA1BOM"; check "pka1 gate: the voided review no longer covers the BOM: exactly one gap, no verification review" '.success and .data.passed == false and (.data.missing|length) == 1 and (.data.reviews|length) == 0'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 readiness: the design item is missing again (hard) after the verification was voided" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == true and .status == "Missing")'
+
+# --- the waiver of the validation: a reason, QA only; the Excel register of the inputs (template, preview, one bad row stops all, commit, export)
+as "$PKA1MK_TOKEN" POST $PB/design/plans "$(jq -nc --argjson p "$PKA1PRODB" --argjson st "$PKA1ST" '{productId:$p,productRevision:0,title:"برنامه طراحی معافیت",validationRequired:false,validationWaiverReason:"محصول مشتری مستقیم ندارد و آزمون میدانی ندارد",stages:$st}')"; check "pka1 waiver: the design engineer prepares a plan that waives the validation, with the reason" '.success and .data.status == 0 and .data.validationRequired == false'; PKA1PLANB=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLANB,\"action\":\"submit\"}"; check "pka1 waiver: the waiving plan is submitted" '.success and .data.status == 1'
+as "$PKA1MG_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLANB,\"action\":\"approve\"}"; nomsg "pka1 waiver: the engineering manager cannot approve a plan that waives the validation" "فقط QA تایید می‌کند"
+as "$PKA1QB_TOKEN" POST $PB/design/plans/action "{\"id\":$PKA1PLANB,\"action\":\"approve\"}"; check "pka1 waiver: the QA manager approves it" '.success and .data.status == 2'
+as "$PKA1MG_TOKEN" GET "$PB/design/plans/$PKA1PLANB"; check "pka1 waiver: the plan is read back with its six stages" '.success and (.data.stages|length) == 6'; PKA1STGV=$(jq -r '.data.stages[]|select(.kind == 5)|.id' "$B")
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLANB,\"stageId\":$PKA1STGV,\"action\":\"not-required\"}"; check "pka1 waiver: the validation stage is marked not required (only in a plan that waives it)" '.success and ([.data.stages[]|select(.kind == 5)][0].status) == 3'
+as "$PKA1MG_TOKEN" POST $PB/design/plans/stage-action "{\"planId\":$PKA1PLAN,\"stageId\":$PKA1STG2,\"action\":\"not-required\"}"; nomsg "pka1 waiver: a stage of a plan that does not waive the validation cannot be marked not required" "فقط مرحله صحه‌گذاری"
+python3 - "$OUT/pka1-bad.xlsx" '[["نوع ورودی","الزام","منبع","معیار پذیرش","ویرایش استاندارد","طراحی قبلی","مرجع مشخصات مشتری","بازنگری مرجع","پیامد خرابی"],["الزام کارکردی","فشار کاری ۱۰ بار","قرارداد بند ۳","آزمون فشار ۱۵ بار بدون نشتی","","","","",""],["نوع ناشناخته","الزام دوم","قرارداد بند ۴","آزمون","","","","",""]]' <<'PY'
+import sys, json, zipfile
+rows = json.loads(sys.argv[2])
+def col(i): return chr(65 + i)
+def esc(s): return s.replace("&", "&amp;").replace("<", "&lt;")
+sheet = "".join('<row r="%d">%s</row>' % (r + 1, "".join('<c r="%s%d" t="inlineStr"><is><t>%s</t></is></c>' % (col(c), r + 1, esc(v)) for c, v in enumerate(row))) for r, row in enumerate(rows))
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+    z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    z.writestr("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Inputs" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    z.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+    z.writestr("xl/worksheets/sheet1.xml", '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + sheet + '</sheetData></worksheet>')
+PY
+python3 - "$OUT/pka1-good.xlsx" '[["نوع ورودی","الزام","منبع","معیار پذیرش","ویرایش استاندارد","طراحی قبلی","مرجع مشخصات مشتری","بازنگری مرجع","پیامد خرابی"],["الزام کارکردی","فشار کاری ۱۰ بار","قرارداد بند ۳","آزمون فشار ۱۵ بار بدون نشتی","","","","","نشتی سیال"],["استاندارد و آیین‌نامه","ساخت مطابق استاندارد جوشکاری","قرارداد بند ۵","گزارش بازرسی جوش","AWS D1.1 2020","","","",""]]' <<'PY'
+import sys, json, zipfile
+rows = json.loads(sys.argv[2])
+def col(i): return chr(65 + i)
+def esc(s): return s.replace("&", "&amp;").replace("<", "&lt;")
+sheet = "".join('<row r="%d">%s</row>' % (r + 1, "".join('<c r="%s%d" t="inlineStr"><is><t>%s</t></is></c>' % (col(c), r + 1, esc(v)) for c, v in enumerate(row))) for r, row in enumerate(rows))
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+    z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    z.writestr("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Inputs" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    z.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+    z.writestr("xl/worksheets/sheet1.xml", '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + sheet + '</sheetData></worksheet>')
+PY
+[ -s "$OUT/pka1-bad.xlsx" ] && [ -s "$OUT/pka1-good.xlsx" ] && ok "pka1 excel: setup: the two small .xlsx files (one with a bad row, one good) were generated" || bad "pka1 excel: setup: the two small .xlsx files (one with a bad row, one good) were generated"
+CODE=$(curl -s -o "$OUT/pka1-template.xlsx" -w '%{http_code}' "$API/$PB/design/inputs/template" -H "Authorization: Bearer $PKA1MK_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pka1-template.xlsx")" = "PK" ] && ok "pka1 excel: the template of the inputs comes as a real xlsx file" || bad "pka1 excel: the template of the inputs comes as a real xlsx file"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$PB/design/inputs/import" -H "Authorization: Bearer $PKA1MK_TOKEN" -F "ProductId=$PKA1PRODB" -F "ProductRevision=0" -F "Preview=true" -F "file=@$OUT/pka1-bad.xlsx"); check "pka1 excel: the preview of the file with a bad row shows two rows, one valid and one error, and creates nothing" '.success and .data.preview == true and .data.rowCount == 2 and .data.validRows == 1 and .data.errorRows == 1 and .data.created == 0'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$PB/design/inputs/import" -H "Authorization: Bearer $PKA1MK_TOKEN" -F "ProductId=$PKA1PRODB" -F "ProductRevision=0" -F "Preview=false" -F "file=@$OUT/pka1-bad.xlsx"); check "pka1 excel: committing the file with a bad row creates no input at all (one bad row stops all) and says so" '.success and .data.preview == false and .data.created == 0 and .data.errorRows == 1 and (.data.warnings|length) == 1'
+as "$PKA1MK_TOKEN" GET "$PB/design/inputs?ProductId=$PKA1PRODB&ProductRevision=0"; check "pka1 excel: the register of the second product is still empty" '.success and (.data|length) == 0'
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$PB/design/inputs/import" -H "Authorization: Bearer $WH_TOKEN" -F "ProductId=$PKA1PRODB" -F "ProductRevision=0" -F "Preview=false" -F "file=@$OUT/pka1-good.xlsx"); no "pka1 excel: the storekeeper cannot import design inputs"
+CODE=$(curl -s -o "$B" -w '%{http_code}' -X POST "$API/$PB/design/inputs/import" -H "Authorization: Bearer $PKA1MK_TOKEN" -F "ProductId=$PKA1PRODB" -F "ProductRevision=0" -F "Preview=false" -F "file=@$OUT/pka1-good.xlsx"); check "pka1 excel: the good file creates exactly two inputs" '.success and .data.created == 2 and .data.errorRows == 0 and .data.validRows == 2'
+as "$PKA1MK_TOKEN" GET "$PB/design/inputs?ProductId=$PKA1PRODB&ProductRevision=0"; check "pka1 excel: the register holds the two imported inputs (a functional and a standard one with its edition)" '.success and (.data|length) == 2 and ([.data[]|select(.kind == 4)][0].standardEdition) == "AWS D1.1 2020" and ([.data[]|select(.kind == 1)][0].failureConsequence) == "نشتی سیال"'
+CODE=$(curl -s -o "$OUT/pka1-export.xlsx" -w '%{http_code}' "$API/$PB/design/inputs/export?productId=$PKA1PRODB&revision=0" -H "Authorization: Bearer $PKA1MK_TOKEN"); [ "$CODE" = "200" ] && [ "$(head -c 2 "$OUT/pka1-export.xlsx")" = "PK" ] && ok "pka1 excel: the register is exported as a real xlsx file" || bad "pka1 excel: the register is exported as a real xlsx file"
+
+# --- the functional configuration audit (FCA_MATCH) of the work order PB8WO: its project BOM was verified at its release (pka1_verify), the validation is still missing
+as "$QC_TOKEN" GET "quality/work-orders/$PB8WO/release-checks"; check "pka1 fca: the release check FCA_MATCH fails while the validation of the project BOM is missing, and says so" '.success and ([.data.checks[]|select(.code == "FCA_MATCH")][0]|.passed == false and (.detail|contains("صحه‌گذاری طراحی (Validation)"))) and .data.canRelease == false'
+as "$PKA1MK_TOKEN" POST $PB/design/reviews "{\"planId\":$PKA1PLANPB8,\"type\":3,\"title\":\"صحه‌گذاری طراحی BOM آمادگی\",\"outputs\":[{\"kind\":2,\"bomHeaderId\":$PB8B}],\"participants\":[{\"userId\":$PKA1QAID,\"roleText\":\"QA\"},{\"userId\":$PKA1QBID,\"roleText\":\"QA\"}]}"; check "pka1 fca: the validation of the project BOM judges only the functional, performance and customer inputs" '.success and .data.type == 3 and .data.status == 0 and (.data.inputs|length) == 3 and (.data.outputs|length) == 1'; PKA1VAL=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1VAL,\"action\":\"hold\",\"minutes\":\"جلسه صحه‌گذاری برگزار شد و نمونه دیده شد\"}"; check "pka1 fca: the validation meeting is recorded" '.success and .data.status == 1'
+PKA1VROWS=$(jq -c '[.data.inputs[] as $i | .data.outputs[] as $o | {inputId:$i.inputId,outputId:$o.id,result:1,evidence:"آزمون عملکرد روی نمونه مطابق معیار",evidenceRef:"T-1"}]' "$B")
+as "$PKA1QA_TOKEN" POST $PB/design/reviews/traces "{\"reviewId\":$PKA1VAL,\"rows\":$PKA1VROWS}"; check "pka1 fca: the first QA manager judges the three criteria as passed" '.success'
+as "$PMO2_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1VAL,\"action\":\"close\",\"outcome\":1}"; nomsg "pka1 fca: the validation does not close without its method, its evidence and the customer's acceptance" "روش و مدرک صحه‌گذاری"
+as "$PKA1MK_TOKEN" POST $PB/design/reviews/validation "{\"reviewId\":$PKA1VAL,\"method\":1,\"evidence\":\"گزارش آزمون عملکرد شماره T-1 روی نمونه\",\"customerAcceptanceNotApplicable\":true,\"customerAcceptanceNote\":\"این محصول مشتری مستقیم ندارد (آزمون)\"}"; check "pka1 fca: the method (test), the evidence and the 'no customer' note are recorded" '.success and .data.validationMethod == 1 and .data.customerAcceptanceNotApplicable == true'
+as "$PMO2_TOKEN" POST $PB/design/reviews/action "{\"id\":$PKA1VAL,\"action\":\"close\",\"outcome\":1}"; check "pka1 fca: the second PMO user closes the validation as accepted" '.success and .data.status == 2 and .data.outcome == 1'
+as "$QC_TOKEN" GET "quality/work-orders/$PB8WO/release-checks"; check "pka1 fca: FCA_MATCH passes: the project BOM has an accepted verification and an accepted validation" '.success and ([.data.checks[]|select(.code == "FCA_MATCH")][0]|.passed == true and .detail == "-")'
+as "$QC_TOKEN" GET "quality/work-orders/$PB8WO/data-book"; check "pka1 fca: the data book has section 13 with exactly the two design reviews (not mandatory entries)" '.success and ([.data.sections[]|select(.no == 13)|.entries|length][0]) == 2 and ([.data.sections[]|select(.no == 13)|.entries[]|select(.mandatory == true)]|length) == 0'
+as "$QC_TOKEN" GET "quality/work-orders/$WO1/release-checks"; check "pka1 fca: a work order without a project BOM baseline passes FCA_MATCH as not applicable" '.success and ([.data.checks[]|select(.code == "FCA_MATCH")][0]|.passed == true and (.detail|startswith("اعمال نمی")))'
+
+# --- the audit chain holds every design record: who, what, when
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignPlan&EntityId=$PKA1PLAN&PageSize=0"; check "pka1 audit: the plan has exactly one Added entry in the chain, with the user, and every entry names its user" '.success and ([.data.data[]|select(.action == "Added" and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignReview&EntityId=$PKA1REV&PageSize=0"; check "pka1 audit: the voided review has exactly one Added entry in the chain and every entry names its user" '.success and ([.data.data[]|select(.action == "Added" and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignInput&EntityId=$PKA1IN3&PageSize=0"; check "pka1 audit: the replaced input has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=PbDesignFinding&EntityId=$PKA1FIND&PageSize=0"; check "pka1 audit: the finding has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET finance/audit/verify; check "pka1 audit: the whole hash chain still fits after the design records" '.success and .data.ok == true'
+
+# --- PKA1 fix round 1: a drawing stays a design output after its link is removed (a second person, with a reason), the cut-over day and the adoption of an existing design, and the bounded texts
+as "$DCC_TOKEN" POST projectcontrol/mdr "{\"contractId\":$QCT,\"documentNumber\":\"PKA1-DWG-S\",\"title\":\"نقشه آزمون پیوند\",\"discipline\":\"Mechanical\",\"documentType\":\"Drawing\"}"; check "pka1 sticky: the document controller registers a drawing" '.success and .data.id > 0'; PKA1SDOC=$(val .data.id)
+as "$DCC_TOKEN" POST edms/revisions "{\"deliverableId\":$PKA1SDOC}"; check "pka1 sticky: the first revision of the drawing is a draft" '.success and .data.code == "00" and .data.status == 1'; PKA1SREV=$(val .data.id)
+as "$DCC_TOKEN" POST edms/links "{\"deliverableId\":$PKA1SDOC,\"kind\":3,\"partNumber\":\"PKA1-SX-001\"}"; check "pka1 sticky: the drawing is linked to a part number (that makes it a design output)" '.success and .data.id > 0'; PKA1SL=$(val .data.id)
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/drawing/$PKA1SREV"; check "pka1 sticky: the drawing gate is required and not passed" '.success and .data.required == true and .data.passed == false'
+as "$DCC_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"پیوند اشتباه ثبت شده بود و اصلاح می‌شود\"}"; no "pka1 sticky: the document controller cannot remove the link of a design drawing (ENGINEERING or QA only)"
+as "$QA_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"کوتاه\"}"; nomsg "pka1 sticky: the reason of removing a design link has the minimum length" "دست‌کم"
+as "$QA_TOKEN" POST edms/links/void "{\"id\":$PKA1SL,\"reason\":\"پیوند اشتباه ثبت شده بود و اصلاح می‌شود\"}"; check "pka1 sticky: a second person (QA, not the maker of the link) removes the link with a reason; it is kept as history" '.success'
+as "$DCC_TOKEN" GET "edms/links?DeliverableId=$PKA1SDOC"; check "pka1 sticky: the drawing has no live link now" '.success and (.data|length) == 0'
+as "$ENG_TOKEN" GET "$PB/design/plans/gate/drawing/$PKA1SREV"; check "pka1 sticky: removing the link did not clear the design-output status: the gate is still required and not passed" '.success and .data.required == true and .data.passed == false'
+# --- the cut-over day: a BOM released before it is legacy (soft note) until two people adopt its design
+safety_set Quality Design.ControlStartDate 14990101; check "pka1 cutover: moving the start day of the design control later is a weakening, applied with a second person" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "0" and .data.newValue == "14990101"'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 cutover: the released BOM is now legacy: the design item shows a note, no longer hard" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.hard == false and .status == "Missing")'
+as "$PKA1MK_TOKEN" GET "$PB/design/adoptions?ProductId=$PKA1PROD"; check "pka1 cutover: the legacy list holds the released BOM with no adoption asked yet" ".success and ([.data[]|select(.bomHeaderId == $PKA1BOM)]|length) == 1 and ([.data[]|select(.bomHeaderId == $PKA1BOM)][0]|.legacy == true and .adoptionId == null)"
+as "$PKA1MK_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"طراحی سال‌ها در بهره‌برداری است\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; no "pka1 cutover: only ENGINEERING asks for the adoption (the design engineer cannot)"
+as "$ENG_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"کوتاه\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; nomsg "pka1 cutover: the reason of the adoption has the minimum length" "دست‌کم"
+as "$ENG_TOKEN" POST $PB/design/adoptions "{\"bomHeaderId\":$PKA1BOM,\"reason\":\"طراحی سال‌ها در بهره‌برداری است\",\"evidenceRef\":\"گزارش بهره‌برداری ۱۴۰۳\"}"; check "pka1 cutover: engineering asks for the adoption of the existing design with its reason and evidence" '.success and .data.status == 0'; PKA1ADID=$(val .data.adoptionId)
+as "$ENG_TOKEN" POST $PB/design/adoptions/action "{\"id\":$PKA1ADID,\"action\":\"accept\",\"note\":\"پذیرفته شد\"}"; no "pka1 cutover: the person who asked cannot accept his own adoption"
+as "$QA_TOKEN" POST $PB/design/adoptions/action "{\"id\":$PKA1ADID,\"action\":\"accept\",\"note\":\"مدرک بهره‌برداری بررسی و پذیرفته شد\"}"; check "pka1 cutover: QA, a second person, accepts the adoption" '.success and .data.status == 1'
+as "$PLAN_TOKEN" GET "$OPS/readiness?workOrderId=$PKA1WO&productId=$PKA1PROD"; check "pka1 cutover: the adopted design makes the design item OK again" '.success and ([.data.items[]|select(.code == "RD-DESIGN")][0]|.status == "OK")'
+safety_set Quality Design.ControlStartDate 0; check "pka1 cutover: the start day is put back to the recorded day with a second person" '.success and .data.status == "Approved" and .data.newValue == "0"'
+as "$ADMIN_TOKEN" GET safety/profile; check "pka1 cutover: no design setting deviates after the restore" '.success and ([.data[]|select(.store == "Quality" and (.key|startswith("Design.")) and .deviates == true)]|length) == 0'
+# --- every text is bounded by its column; a conflict is not voided by one person
+PKA1LONG=$(printf 'x%.0s' $(seq 1 1001))
+as "$PKA1MK_TOKEN" POST $PB/design/inputs "$(pka1_input "$PKA1PROD" 1 | jq -c '.statement = "الزام آزمون تعارض و طول متن"')"; check "pka1 limits: one more input is recorded for the conflict and length checks" '.success and .data.id > 0'; PKA1INX=$(val .data.id)
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"conflict\",\"note\":\"$PKA1LONG\"}"; nomsg "pka1 limits: a conflict note over 1000 characters is refused" "بیش از 1000 نویسه"
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"conflict\",\"note\":\"با الزام دیگر ناسازگار است و باید بررسی شود\"}"; check "pka1 limits: the input is marked as in conflict" '.success and .data.status == 1'
+as "$PKA1MK_TOKEN" POST $PB/design/inputs/action "{\"id\":$PKA1INX,\"action\":\"void\",\"note\":\"می‌خواهم ورودی را کنار بگذارم بدون رفع تعارض\"}"; nomsg "pka1 limits: a conflicting input is not voided by one person" "باطل نمی‌شود"
+# =====================================================================================================================================================================
+# --- PKA2 (Package A2: engineering change request and order, computed impact, dispositions, effectivity, gates on release and obsolete, single BOM master). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
+# Own users (ENGINEERING x2, QA x2) and own part numbers (77.10.05.080.1 to 77.10.05.083.1); the BOM signers are the existing QC, construction and PMO users. The settings stay at their strict defaults.
+ECP=eng-change
+user2 pka2.eng1.ci 4 'Ci#Pka2Eng1-User-2026' 09120005201 0012345721
+user2 pka2.eng2.ci 4 'Ci#Pka2Eng2-User-2026' 09120005202 0012345722
+user2 pka2.qa1.ci 14 'Ci#Pka2Qa1-User-2026' 09120005203 0012345723
+user2 pka2.qa2.ci 14 'Ci#Pka2Qa2-User-2026' 09120005204 0012345724
+PKA2E1=$(login pka2.eng1.ci 'Ci#Pka2Eng1-User-2026'); PKA2E2=$(login pka2.eng2.ci 'Ci#Pka2Eng2-User-2026'); PKA2QA1=$(login pka2.qa1.ci 'Ci#Pka2Qa1-User-2026'); PKA2QA2=$(login pka2.qa2.ci 'Ci#Pka2Qa2-User-2026')
+[ -n "$PKA2E1" ] && [ -n "$PKA2E2" ] && [ -n "$PKA2QA1" ] && [ -n "$PKA2QA2" ] && ok "pka2: login of the two engineering and the two QA users" || bad "pka2: login of the two engineering and the two QA users"
+PKA2E1ID=$(uid "$PKA2E1"); TOKEN=$ADMIN_TOKEN
+PKA2PA="77.10.05.080.1"; PKA2PB="77.10.05.081.1"
+pka2_lines() { # pka2_lines QTY2 : the lines of the assembly 77.10.05.080.1
+  echo "[{\"itemNumber\":1,\"partNumber\":\"77.10.05.082.1\",\"partName\":\"Shaft\",\"qty\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":2,\"grossWeight\":3},{\"itemNumber\":2,\"partNumber\":\"77.10.05.083.1\",\"partName\":\"Sleeve\",\"qty\":$1,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":2,\"grossWeight\":3}]"
+}
+pka2_sign() { # pka2_sign BOMID LABEL : submit and the four signatures (always four different people)
+  as "$PKA2E1" POST $PB/boms/submit "{\"id\":$1}"; check "pka2: $2 is submitted" '.success and .data.status == 1'
+  as "$PKA2E2" POST $PB/boms/sign "{\"id\":$1,\"step\":1}"; check "pka2: $2 is checked" '.success'
+  as "$QC_TOKEN" POST $PB/boms/sign "{\"id\":$1,\"step\":2}"; check "pka2: $2 is QC checked" '.success'
+  as "$PROD_TOKEN" POST $PB/boms/sign "{\"id\":$1,\"step\":3}"; check "pka2: $2 is manufacturing checked" '.success'
+  as "$ADMIN_TOKEN" POST $PB/boms/sign "{\"id\":$1,\"step\":4}"; check "pka2: $2 is approved by the fourth person" '.success and .data.status == 2'
+}
+# pka2_release_bom BOMID REVISION : the one place where the PKA2 block releases a BOM (as the PMO). Merged with A1: the three BOMs of the scenario belong to ONE product (PKA2PROD, saved with them), which has an approved
+# design plan and complete inputs for revision 00 and for revision 01 (made once each); every BOM gets ONE closed, accepted design verification (the BOM is the product BOM of the plan revision), then the release (its answer is the last request).
+PKA2PROD=""; PKA2PLAN0=""; PKA2PLAN1=""; PKA2VERIFIED=","
+pka2_product() { # pka2_product : the product of the scenario and the plan of revision 00 (once)
+  [ -z "$PKA2PROD" ] || return 0
+  as "$ENG_TOKEN" POST $PB/products '{"code":"77.10.00.200.2","title":"محصول آزمون تغییر مهندسی","platform":"T"}'; check "pka2 design: the product that holds the design plans of the change scenario is saved" '.success and .data.id > 0'
+  PKA2PROD=$(val .data.id)
+  pka1_design "$PKA2PROD" "pka2 rev 00" 0; PKA2PLAN0=$PKA1PLAN
+}
+pka2_release_bom() {
+  local plan
+  if [ "$2" = "1" ]; then
+    if [ -z "$PKA2PLAN1" ]; then pka1_design "$PKA2PROD" "pka2 rev 01" 1; PKA2PLAN1=$PKA1PLAN; fi
+    plan=$PKA2PLAN1
+  else plan=$PKA2PLAN0; fi
+  case "$PKA2VERIFIED" in *",$1,"*) ;; *) pka1_verify bom "$1" "$plan" "pka2 BOM $1"; PKA2VERIFIED="$PKA2VERIFIED$1,";; esac
+  as "$PMO2_TOKEN" POST $PB/boms/release "{\"id\":$1}"
+}
+# a first revision needs no engineering change order
+pka2_product
+as "$PKA2E1" POST $PB/boms "{\"productId\":$PKA2PROD,\"assemblyPartNumber\":\"$PKA2PA\",\"title\":\"BOM A2 مجموعه الف\",\"lines\":$(pka2_lines 2)}"; check "pka2: BOM of the assembly A, revision 00, is saved as a draft" '.success and .data.revision == 0 and .data.status == 0'
+PKA2A0=$(val .data.id)
+pka2_sign "$PKA2A0" "BOM A revision 00"
+pka2_release_bom $PKA2A0 0; check "pka2: the first revision is released without an engineering change order" '.success and .data.status == 3'
+as "$PKA2E1" POST $PB/boms "{\"productId\":$PKA2PROD,\"assemblyPartNumber\":\"$PKA2PB\",\"title\":\"BOM A2 مجموعه ب\",\"lines\":[{\"itemNumber\":1,\"partNumber\":\"$PKA2PA\",\"partName\":\"Assembly A\",\"qty\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"makeOrBuy\":1,\"netWeight\":9,\"grossWeight\":10}]}"; check "pka2: BOM of the assembly B (uses A twice) is saved" '.success and .data.status == 0'
+PKA2B0=$(val .data.id)
+pka2_sign "$PKA2B0" "BOM B revision 00"
+pka2_release_bom $PKA2B0 0; check "pka2: BOM B revision 00 is released" '.success and .data.status == 3'
+
+# --- the change request: raised by engineering, decided by an engineering manager who is not the originator
+as "$PKA2E1" POST $ECP/requests "{\"title\":\"افزایش تعداد غلاف\",\"reason\":\"کوتاه\",\"classification\":1,\"urgency\":2,\"targets\":[{\"kind\":2,\"partNumber\":\"$PKA2PA\"}]}"; nomsg "pka2: a request needs a real reason (at least ten characters)" "دلیل"
+as "$PKA2E1" POST $ECP/requests "{\"title\":\"افزایش تعداد غلاف\",\"reason\":\"خرابی مکرر غلاف در آزمون هیدرواستاتیک\",\"classification\":1,\"urgency\":2,\"targets\":[{\"kind\":2,\"partNumber\":\"$PKA2PA\"}]}"; check "pka2: the request is saved as a draft (class I, urgent)" '.success and .data.status == 0 and .data.classification == 1 and .data.urgency == 2 and (.data.targets|length) == 1'
+PKA2R=$(val .data.id)
+as "$PKA2E1" POST $ECP/requests/action "{\"id\":$PKA2R,\"action\":\"submit\"}"; check "pka2: the request is sent for the decision of engineering" '.success and .data.status == 1'
+as "$PKA2E1" POST $ECP/requests/action "{\"id\":$PKA2R,\"action\":\"approve\"}"; nomsg "pka2: the originator does not approve his own request" "درخواست"
+as "$PKA2QA1" POST $ECP/requests/action "{\"id\":$PKA2R,\"action\":\"approve\"}"; no "pka2: QA is not the engineering approver of a request"
+as "$PKA2E2" POST $ECP/requests/action "{\"id\":$PKA2R,\"action\":\"approve\"}"; check "pka2: the second engineering manager approves the request" '.success and .data.status == 2 and .data.canCreateOrder == true'
+
+# --- the order from the approved request
+as "$PKA2E1" POST $ECP/orders "{\"requestId\":$PKA2R,\"title\":\"ECO افزایش تعداد غلاف\"}"; check "pka2: the order is made from the approved request (draft)" '.success and .data.status == 0 and .data.requestId > 0 and (.data.changes|length) == 0'
+PKA2O=$(val .data.id)
+as "$PKA2E1" POST $ECP/orders "{\"requestId\":$PKA2R,\"title\":\"دوباره\"}"; no "pka2: one live order per request"
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"submit\"}"; nomsg "pka2: an order without a named revision cannot be sent" "بازنگری"
+as "$PKA2E1" POST $ECP/orders/new-revision "{\"orderId\":$PKA2O,\"kind\":1,\"sourceId\":$PKA2A0,\"note\":\"افزایش تعداد غلاف\"}"; check "pka2: the draft of revision 01 of BOM A is made from the order and named in it (old 00, new 01)" '.success and (.data.changes|length) == 1 and .data.changes[0].oldRevision == 0 and .data.changes[0].newRevision == 1 and .data.changes[0].kind == 1'
+PKA2A1=$(val '.data.changes[0].targetId')
+as "$PKA2E1" POST $PB/boms "{\"id\":$PKA2A1,\"assemblyPartNumber\":\"$PKA2PA\",\"changeReason\":\"افزایش تعداد غلاف\",\"lines\":$(pka2_lines 3)}"; check "pka2: revision 01 is edited (the sleeve goes from 2 to 3)" '.success and .data.revision == 1 and .data.status == 0'
+# the gate: the revision is signed by four people but cannot be released while no APPROVED order names it
+pka2_sign "$PKA2A1" "BOM A revision 01"
+pka2_release_bom $PKA2A1 1; nomsg "pka2: gate - revision 01 of a released BOM is not released without an approved engineering change order" "دستور تغییر مهندسی تاییدشده"
+as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check says an order is required and there is none" '.success and .data.required == true and .data.ok == false'
+
+# --- the computed impact: never typed, one list per category, a fingerprint
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"submit\"}"; nomsg "pka2: the order cannot be sent before the impact is computed" "تحلیل اثر"
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"refresh-impact\"}"; check "pka2: the impact is computed: exactly one impacted item, the BOM of B (where-used), eight lists shown, fingerprint of 64 characters that matches" '.success and (.data.impact.items|length) == 1 and .data.impact.items[0].category == 1 and .data.impact.items[0].partNumber == "77.10.05.081.1" and (.data.impact.counts|length) == 8 and ([.data.impact.counts[]|select(.category == 1)|.count][0]) == 1 and ([.data.impact.counts[]|select(.category != 1)|.count]|add) == 0 and (.data.impact.sha256|length) == 64 and .data.impact.hashOk == true'
+PKA2KEY=$(val '.data.impact.items[0].key'); PKA2SHA=$(val '.data.impact.sha256')
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"refresh-impact\"}"; check "pka2: computing it again on the same data gives the same fingerprint" ".success and .data.impact.sha256 == \"$PKA2SHA\" and (.data.dispositions|length) == 1"
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"submit\"}"; nomsg "pka2: every impacted item needs a disposition before the order is sent" "تکلیف"
+as "$PKA2E1" POST $ECP/orders/dispositions "{\"orderId\":$PKA2O,\"impactKey\":\"$PKA2KEY\",\"disposition\":4}"; no "pka2: a disposition that does not fit the list (return to supplier for a where-used BOM) is refused"
+as "$PKA2E1" POST $ECP/orders/dispositions "{\"orderId\":$PKA2O,\"impactKey\":\"$PKA2KEY\",\"disposition\":6,\"ownerUserId\":$PKA2E1ID,\"dueDate\":\"$(dd 10)\",\"note\":\"BOM مجموعه ب به بازنگری جدید\"}"; check "pka2: the where-used BOM gets the disposition «change to the new revision» with an owner and a due date" '.success and ([.data.dispositions[]|select(.disposition == 6)]|length) == 1'
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"submit\"}"; nomsg "pka2: the effectivity (order number, serial or date) must be stated before the order is sent" "نقطه اثر"
+as "$PKA2E1" POST $ECP/orders "{\"id\":$PKA2O,\"title\":\"ECO افزایش تعداد غلاف\",\"effectiveFromSerial\":\"SN-PKA2-0100\",\"effectiveFromOrderNumber\":\"PO-MF-PKA2-0500\",\"effectivityNote\":\"از سریال ۱۰۰ و از دستور تولید ۵۰۰\"}"; check "pka2: the effectivity is stated: from serial SN-PKA2-0100 / production order PO-MF-PKA2-0500" '.success and .data.effectivity == "از دستور تولید PO-MF-PKA2-0500 / از شماره سریال SN-PKA2-0100"'
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"submit\"}"; check "pka2: the order is sent for approval and its content is fixed by a hash" '.success and .data.status == 1 and (.data.contentSha256|length) == 64'
+as "$PKA2E1" POST $ECP/orders "{\"id\":$PKA2O,\"title\":\"تغییر پس از ارسال\"}"; no "pka2: a sent order is not edited"
+
+# --- approval: ENGINEERING and QA, two different people, neither the originator
+as "$PKA2E1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"approve-engineering\"}"; nomsg "pka2: the creator and originator do not approve" "تایید"
+as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"approve-qa\"}"; no "pka2: the engineering manager does not give the QA approval (role)"
+as "$PKA2QA1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"approve-engineering\"}"; no "pka2: QA does not give the engineering approval (role)"
+as "$PMO2_TOKEN" GET "$ECP/orders/$PKA2O"; check "pka2: before the approvals nobody has signed and no task exists" '.success and .data.engineeringApprovedByName == null and .data.qaApprovedByName == null and (.data.tasks|length) == 0'
+as "$PKA2QA1" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"approve-qa\"}"; check "pka2: QA approves (the order still waits for engineering)" '.success and .data.status == 1 and .data.qaApprovedByName != null'
+as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"approve-engineering\"}"; check "pka2: the engineering manager gives the second, different approval: the order is approved and one task exists" '.success and .data.status == 2 and (.data.tasks|length) == 1 and .data.tasks[0].status == 0 and .data.tasks[0].disposition == 6'
+PKA2T=$(val '.data.tasks[0].id')
+ibx "$ADMIN_TOKEN" "ec:eco:info:$PKA2O"; check "pka2: the PMO is told (informed, not an approver)" '.success and (.data.data|length) == 1'
+ibx "$CEO_TOKEN" "ec:eco:info:$PKA2O"; check "pka2: the CEO is told" '.success and (.data.data|length) == 1'
+
+# --- the gate opens only for the approved order; the revision is released
+as "$PKA2E1" GET "$ECP/gate-check?kind=1&targetId=$PKA2A1&action=1"; check "pka2: the gate check now finds the approved order" '.success and .data.ok == true and .data.orderNumber != null'
+pka2_release_bom $PKA2A1 1; check "pka2: revision 01 is released because an approved order names it" '.success and .data.status == 3'
+
+# --- tasks and closing: done by the owner, verified by QA (not the doer), closed only when all are verified
+as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"close\"}"; nomsg "pka2: the order does not close while a task is open" "تکلیف"
+as "$PKA2QA1" POST $ECP/tasks/action "{\"id\":$PKA2T,\"action\":\"done\",\"note\":\"x\"}"; no "pka2: only the owner (or the engineering manager) marks a task done"
+as "$PKA2E1" POST $ECP/tasks/action "{\"id\":$PKA2T,\"action\":\"done\",\"note\":\"BOM مجموعه ب به بازنگری جدید رفت\"}"; check "pka2: the owner marks the task done" '.success and .data.tasks[0].status == 1'
+as "$PKA2E1" POST $ECP/tasks/action "{\"id\":$PKA2T,\"action\":\"verify\"}"; no "pka2: the owner does not verify his own task (QA does)"
+as "$PKA2QA2" POST $ECP/tasks/action "{\"id\":$PKA2T,\"action\":\"verify\"}"; check "pka2: QA verifies the task" '.success and .data.tasks[0].status == 2'
+as "$PKA2E2" POST $ECP/orders/action "{\"id\":$PKA2O,\"action\":\"close\"}"; check "pka2: the order closes: every task verified and the named revision released" '.success and .data.status == 4'
+as "$PKA2E1" GET "$ECP/history?partNumber=$PKA2PA"; check "pka2: the change history of the part lists the request and the order" '.success and (.data|length) == 2 and ([.data[].kind]|sort) == ["ECO","ECR"]'
+
+# --- obsolete needs an order and an in-use check
+as "$PMO2_TOKEN" POST $PB/boms/obsolete "{\"id\":$PKA2A0,\"note\":\"کنار گذاشتن بازنگری قدیم\"}"; nomsg "pka2: gate - a BOM is not made obsolete without an approved engineering change order that names it" "دستور تغییر مهندسی"
+
+# --- single BOM master: the legacy BOM is read only
+as "$ADMIN_TOKEN" POST Boms "{\"assemblyId\":$MFASM,\"positionNumber\":9,\"title\":\"BOM قدیمی\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":9}"; nomsg "pka2: the legacy BOM is read only (points to the BOM of the product bank)" "بانک محصول"
+as "$ADMIN_TOKEN" POST EquipmentBoms "{\"equipmentAssemblyId\":$SLASM,\"positionNumber\":9,\"title\":\"BOM تجهیزات قدیمی\",\"count\":1,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":9}"; nomsg "pka2: the legacy equipment BOM is read only too" "بانک محصول"
+as "$ADMIN_TOKEN" PUT Boms "{\"id\":$MFBOM,\"assemblyId\":$MFASM,\"positionNumber\":9,\"title\":\"BOM قدیمی\",\"count\":2,\"unit\":\"عدد\",\"material\":\"CS\",\"standard\":\"ASTM\",\"diagonal\":\"1\",\"length\":\"1\",\"width\":\"1\",\"height\":\"1\",\"notWetWeight\":1,\"wetWeight\":1,\"sort\":9}"; nomsg "pka2: editing a legacy BOM is refused as well" "بانک محصول"
+as "$MPM_TOKEN" GET "$MF/orders/$MFORDC"; check "pka2: an order of a project without a baseline says in Persian that its components came from the legacy BOM (read only fallback)" '.success and .data.componentSource == "LEGACY" and (.data.componentNote|contains("BOM قدیمی"))'
+
+# --- P9 (Package 9: the AI internal auditor, CEO decisions D11 and D12). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
+# The AUDIT seat checks 57 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
+# Own user: p9.dual.ci holds QA and PMO (a person who tries to give both proposals). The owner of the process-audit finding is the existing QA user pka2.qa1.ci. The restore test of this server was never made (pbd above),
+# which is the exact known finding AUD-INT-002 of the first run. The background job of the seat is switched off in CI (Audit__Jobs); the runs here are on demand.
+TOKEN=$ADMIN_TOKEN
+user2 p9.dual.ci 14,1 'Ci#P9Dual-User-2026' 09120009201 0012349201
+check "p9: the user who holds QA and PMO is registered (the QA role at once, the PMO role waits for the second PMO user)" '.success and .data.id > 0 and ([.data.roles[]?.name]|index("QA")) != null'
+approve_grants p9.dual.ci
+P9DUAL=$(login p9.dual.ci 'Ci#P9Dual-User-2026'); [ -n "$P9DUAL" ] && ok "p9: login of the user who holds QA and PMO" || bad "p9: login of the user who holds QA and PMO"
+P9AUDID=$(uid "$AUD_TOKEN"); P9OWNID=$(uid "$PKA2QA1"); P9QAID=$(uid "$QA_TOKEN"); TOKEN=$ADMIN_TOKEN
+p9_step() { # p9_step TOKEN FINDINGID STEP [REFUSE true|false] [NOTE] : one step of the closure chain (qa, pmo, ceo)
+  local refuse=${4:-false} note=${5:-"یادداشت کافی برای این مرحله"}
+  as "$1" POST audit/findings/step "{\"findingId\":$2,\"step\":\"$3\",\"refuse\":$refuse,\"note\":\"$note\"}"
+}
+p9_action() { # p9_action TOKEN FINDINGID : root cause, correction and corrective action (the answer stays in $B)
+  as "$1" POST audit/findings/action "{\"findingId\":$2,\"rootCause\":\"ریشه‌ی علت: رویه اجرا نشده بود\",\"correction\":\"اصلاح همان مورد انجام شد\",\"correctiveAction\":\"اقدام برای جلوگیری از تکرار تعریف شد\"}"
+}
+
+P9RUNID=0
+p9_run() { # p9_run TOKEN : the on-demand run is queued; the run row is polled (bounded, 150 x 2 s) until it ended; the final answer of GET audit/runs/ID stays in $B for the check that follows
+  as "$1" POST audit/runs '{}'; P9RUNID=$(jq -r '.data.id // 0' "$B"); [ "$P9RUNID" != "0" ] || return 0
+  local i
+  for i in $(seq 1 150); do
+    as "$1" GET audit/runs/$P9RUNID
+    case "$(jq -r '.data.statusValue // 0' "$B")" in 1|2|3) break ;; esac
+    sleep 2
+  done
+}
+
+# --- the catalogue (read only), who may read, and the auditor who only reads
+as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 57 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 57 and ([.data[]|select(.enabled)]|length) == 57 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
+P9CLAUSES=$(jq '[.data[]|"\(.standard)|\(.clause)"]|unique|length' "$B")
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 57 of 57 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 57 and .data.rulesTotal == 57 and .data.lastRunAtText == null'
+as "$WH_TOKEN" GET audit/rules; no "p9 role: the storekeeper does not read the catalogue"
+as "$WH_TOKEN" GET audit/findings; no "p9 role: the storekeeper does not read the findings"
+as "$WH_TOKEN" POST audit/runs '{}'; no "p9 role: the storekeeper does not start a run"
+as "$AUD_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"x\",\"probability\":1,\"impact\":1}"; no "p9 auditor: the auditor writes nothing outside the audit module (a project risk is refused)"
+
+# --- the audit programme (ISO 19011 5.x): prepared and sent by PMO, approved by QA (another person), never by its preparer
+as "$ADMIN_TOKEN" POST audit/programs/default/1450 '{}'; check "p9 programme: the default programme of the year 1450 is a draft with one automatic daily row and one audit row for each of the 15 processes" '.success and .data.statusValue == 0 and .data.year == 1450 and .data.version == 1 and (.data.items|length) == 30 and ([.data.items[]|select(.frequency == 0)]|length) == 15'
+P9PG=$(val .data.id)
+as "$QA_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; nomsg "p9 programme: a draft that was not sent cannot be approved" "هنوز ارسال نشده"
+as "$ADMIN_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"submit\"}"; check "p9 programme: the PMO preparer sends the programme to the QA manager" '.success and .data.submittedAtText != null and .data.statusValue == 0'
+as "$ADMIN_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; no "p9 programme: the PMO preparer does not approve his own programme (the approval is the QA manager's)"
+as "$QA_TOKEN" POST audit/programs/action "{\"id\":$P9PG,\"action\":\"approve\"}"; check "p9 programme: the QA manager approves it and the content is sealed with a SHA-256" '.success and .data.statusValue == 1 and (.data.contentSha256|length) == 64 and (.data.decidedByName|contains("qa.ci"))'
+as "$P9DUAL" POST audit/programs/default/1451 '{}'; check "p9 programme: a person with PMO and QA roles prepares the draft of the next year" '.success and .data.statusValue == 0 and .data.year == 1451'
+P9PG2=$(val .data.id)
+as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"submit\"}"; check "p9 programme: ... and sends it" '.success and .data.submittedAtText != null'
+as "$P9DUAL" POST audit/programs/action "{\"id\":$P9PG2,\"action\":\"approve\"}"; no "p9 programme: ... but he cannot approve the programme he prepared, although he holds the QA role (maker-checker)"
+as "$AUD_TOKEN" GET audit/programs; check "p9 programme: the auditor reads exactly the two programmes" '.success and (.data|length) == 2'
+
+# --- the accepted deviation (CEO decision on EdmsRequireRevision): QA proposes, PMO agrees, the CEO accepts (three different people); until its expiry date the rule reports the deviation as accepted, without a finding
+P9ACCKEY="SafetySetting|0|ProjectControl|EdmsRequireRevision"
+as "$ADMIN_TOKEN" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 30)\"}"; no "p9 accept: only QA proposes an accepted deviation (the PMO manager does not)"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"کوتاه\",\"expiresOn\":\"$(dd 30)\"}"; nomsg "p9 accept: the reason must be written (at least 15 characters)" "دلیل پذیرش"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd -1)\"}"; nomsg "p9 accept: the expiry date must be after today" "پس از امروز"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 400)\"}"; nomsg "p9 accept: an acceptance holds one year at most" "یک سال"
+as "$P9DUAL" POST audit/acceptances "{\"ruleCode\":\"AUD-INT-003\",\"objectKey\":\"$P9ACCKEY\",\"objectNumber\":\"EdmsRequireRevision\",\"reason\":\"دوره‌ی گذار سامانه‌ی مدارک تا پایان مهلت\",\"expiresOn\":\"$(dd 30)\"}"; check "p9 accept: the user with the QA role proposes the acceptance: waiting for PMO" '.success and .data.statusValue == 0 and .data.valid == false and .data.ruleCode == "AUD-INT-003"'
+P9ACC=$(val .data.id)
+as "$CEO_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"ceo\"}"; nomsg "p9 accept: the CEO step waits for the PMO step" "در نوبت نیست"
+as "$P9DUAL" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"pmo\"}"; nomsg "p9 accept: the proposer, although he holds the PMO role, does not agree to his own proposal" "دو نفر متفاوت"
+as "$ADMIN_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"pmo\"}"; check "p9 accept: the PMO manager agrees: waiting for the CEO" '.success and .data.statusValue == 1 and .data.valid == false'
+as "$CEO_TOKEN" POST audit/acceptances/step "{\"acceptanceId\":$P9ACC,\"step\":\"ceo\"}"; check "p9 accept: the CEO, the third person, accepts: the deviation is accepted until the expiry date" '.success and .data.statusValue == 2 and .data.valid == true and .data.expiresOnText != null'
+as "$AUD_TOKEN" GET audit/acceptances; check "p9 accept: the auditor reads exactly this one acceptance" ".success and (.data|length) == 1 and .data[0].id == $P9ACC"
+
+# --- the first run: the known finding. The restore test of this server was never made, so the rule AUD-INT-002 reports it (major, due in 7 days); a project risk with a review date in the past is a second known finding (minor)
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -3)\"}"; check "p9 setup: a project risk with a review date three days in the past is saved" '.success and .data.id > 0 and (.data.number|startswith("RK"))'
+P9RK=$(val .data.id); P9RKN=$(val .data.number)
+safety_set Quality Audit.Rule.AUD-MR-002.Enabled 0; check "p9 switch: one rule is switched off (a security-relevant setting: the second PMO user approves)" '.success and .data.status == "Approved" and .data.newValue == "0"'
+as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 56 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 56'
+p9_run "$AUD_TOKEN"; check "p9 run 1: the auditor starts a run (queued, then polled to its end); the accepted deviation of AUD-INT-003 is counted as accepted: 56 rules ran, none failed, the disabled rule is listed as disabled, AUD-INT-002 and AUD-RK-001 each found exactly one object and created one finding, nothing is a recurrence" '.success and .data.rulesRun == 56 and .data.rulesFailed == 0 and .data.statusValue == 1 and .data.recurrences == 0 and ([.data.rules[]|select(.code == "AUD-MR-002")][0].status == "disabled") and ([.data.rules[]|select(.code == "AUD-INT-003")][0].accepted == 1) and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 1) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+P9RUN1=$P9RUNID
+safety_set Quality Audit.Rule.AUD-MR-002.Enabled 1; check "p9 switch: the rule is switched on again (two-person change)" '.success and .data.status == "Approved" and .data.newValue == "1"'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-INT-003&Limit=1000"; check "p9 accept: the accepted deviation EdmsRequireRevision is no finding (reported as accepted in the run and in the reports)" '.success and ([.data[]|select(.objectNumber == "EdmsRequireRevision")]|length) == 0'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-INT-002&Limit=1000"; check "p9 finding: the restore-test finding is exact: major, open, due in 7 days, clause A.8.13, owner role PMO, a number AF-yyyy-nnnn" ".success and (.data|length) == 1 and (.data[0]|.severityValue == 3 and .statusValue == 1 and .clause == \"A.8.13\" and .standard == \"ISO/IEC 27001:2022\" and .ownerRole == \"PMO\" and .processCode == \"INTEGRITY\" and (.dueDate|startswith(\"$(dd 7)\")) and (.number|test(\"^AF-[0-9]{4}-[0-9]{4}\$\")) and .recurrenceCount == 0)"
+P9FI=$(val '.data[0].id')
+as "$AUD_TOKEN" GET audit/findings/$P9FI; P9EV=$(jq -j '.data.evidenceJson' "$B"); P9EVH=$(printf '%s' "$P9EV" | sha256sum | cut -d' ' -f1)
+check "p9 finding: the evidence snapshot is JSON of the rule, the clause and the object RestoreTestResult 0, and its SHA-256 is the hash of exactly that text" ".success and .data.ruleCode == \"AUD-INT-002\" and .data.objectType == \"RestoreTestResult\" and .data.objectId == 0 and (.data.evidenceJson|fromjson|.rule == \"AUD-INT-002\" and .clause == \"A.8.13\" and .object.type == \"RestoreTestResult\") and .data.evidenceSha256 == \"$P9EVH\""
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 finding: the risk with the lapsed review date is exactly one minor open finding, due in 30 days, owner role PMO" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\")][0]|.severityValue == 2 and .statusValue == 1 and .ruleCode == \"AUD-RK-001\" and .ownerRole == \"PMO\" and (.dueDate|startswith(\"$(dd 30)\")))"
+P9F1=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\")|.id" "$B")
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the CEO has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$QA_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the QA manager has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$PMO2_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN1"; check "p9 alert: the PMO manager has exactly one consolidated immediate alert of the run that found the major finding" '.success and (.data.data|length) == 1'
+as "$AUD_TOKEN" GET audit/runs; check "p9 runs: the history holds exactly this one run, started by hand" '.success and (.data|length) == 1 and .data[0].rulesRun == 56'
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=0"; check "p9 chain: the finding has exactly one Added entry in the audit chain and every entry names its user" '.success and ([.data.data[]|select(.action == "Added" and (.userName|length) > 0)]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+
+# --- the closure chain on the rule finding (the risk): the owner role is PMO, so the PMO user who proposes the action is its actioner and can never close it
+p9_step "$QA_TOKEN" "$P9F1" qa; nomsg "p9 chain: QA cannot propose the closure while the action and its re-check are missing" "بازبینی خودکار"
+p9_action "$AUD_TOKEN" "$P9F1"; nomsg "p9 chain: the auditor is not the owner and does not propose the action" "فقط مسئول"
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: the PMO owner proposes the action but the automatic re-check runs the rule again, still sees the lapsed review date and sends the finding back to Open" '.success and .data.statusValue == 1 and (.message|contains("بازبینی خودکار رد شد"))'
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd 20)\"}"; check "p9 chain: the review date of the risk is corrected" '.success and .data.id > 0'
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: the second proposal passes the automatic re-check (the rule no longer sees the object): Rechecked, with a re-check hash" '.success and .data.statusValue == 3 and .data.recheckPassed == true and (.data.recheckSha256|length) == 64'
+p9_step "$ADMIN_TOKEN" "$P9F1" pmo; nomsg "p9 chain: the actioner (a PMO user) does not close it" "پیشنهاد داده است"
+p9_step "$AUD_TOKEN" "$P9F1" qa; no "p9 chain: the auditor, whose role only reads, cannot propose the closure"
+p9_step "$P9DUAL" "$P9F1" pmo; nomsg "p9 chain: the PMO proposal cannot come before the QA proposal" "QA"
+p9_step "$P9DUAL" "$P9F1" qa; check "p9 chain: the user with QA and PMO roles proposes the closure as QA" '.success and .data.statusValue == 4 and (.data.qaName|contains("p9.dual.ci"))'
+p9_step "$P9DUAL" "$P9F1" pmo; nomsg "p9 chain: the same person cannot give the PMO proposal too (two different people)" "دو نفر متفاوت"
+p9_step "$PMO2_TOKEN" "$P9F1" pmo true "رد آزمایشی: مدرک مرور ریسک پیوست نشده است"; check "p9 chain: PMO refuses with a reason: back to Open, the chain starts again" '.success and .data.statusValue == 1 and ([.data.events[].kind]|index("refused")) != null'
+p9_action "$ADMIN_TOKEN" "$P9F1"; check "p9 chain: after the refusal the action is proposed and re-checked again" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
+p9_step "$P9DUAL" "$P9F1" qa; check "p9 chain: QA proposes again" '.success and .data.statusValue == 4'
+p9_step "$PMO2_TOKEN" "$P9F1" pmo; check "p9 chain: the second PMO user, a different person, proposes as PMO" '.success and .data.statusValue == 5 and (.data.pmoName|contains("pmo2.ci"))'
+p9_step "$PMO2_TOKEN" "$P9F1" ceo; no "p9 chain: the final approval is for the CEO role only"
+p9_step "$P9DUAL" "$P9F1" ceo; no "p9 chain: a person who gave a proposal cannot approve as CEO (he has no CEO role)"
+p9_step "$CEO_TOKEN" "$P9F1" ceo; check "p9 chain: the CEO, the third person, approves: Closed, with three different names in the chain" '.success and .data.statusValue == 6 and ([.data.qaName,.data.pmoName,.data.ceoName]|unique|length) == 3 and (.data.ceoName|contains("ceo.ci")) and ([.data.events[].kind]|index("ceo")) != null'
+p9_step "$QA_TOKEN" "$P9F1" qa; nomsg "p9 chain: a closed finding takes no further step" "بسته یا ابطال"
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusFinding&EntityId=$P9F1&PageSize=0"; check "p9 chain: after the closure the finding still has exactly one Added entry, and every entry of its chain names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+
+# --- recurrence: the same object deviates again after its finding was closed; the new finding is linked and one level more severe (minor to major), due in 7 days, with an immediate alert
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -2)\"}"; check "p9 recurrence setup: the review date lapses again" '.success and .data.id > 0'
+p9_run "$QA_TOKEN"; check "p9 run 2: the QA manager starts a run: 57 rules ran, none failed, exactly one recurrence, the restore-test finding is seen again and not created twice" '.success and .data.rulesRun == 57 and .data.rulesFailed == 0 and .data.recurrences == 1 and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 0) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
+as "$AUD_TOKEN" GET "audit/findings?RuleCode=AUD-RK-001&Limit=1000"; check "p9 recurrence: two findings for the risk: the closed one and a new open major one that points to it, with the recurrence count 1, due in 7 days" ".success and ([.data[]|select(.objectNumber == \"$P9RKN\")]|length) == 2 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 6)]|length) == 1 and ([.data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)][0]|.severityValue == 3 and .recurrenceOfId == $P9F1 and .recurrenceCount == 1 and (.dueDate|startswith(\"$(dd 7)\")))"
+P9F1R=$(jq -r ".data[]|select(.objectNumber == \"$P9RKN\" and .statusValue == 1)|.id" "$B"); P9RUN2=$P9RUNID
+as "$CEO_TOKEN" GET "office/inbox?SourceKey=aus-run:$P9RUN2"; check "p9 recurrence: the CEO has exactly one consolidated immediate alert of the run that found the recurrence (major)" '.success and (.data.data|length) == 1'
+as "$AUD_TOKEN" GET audit/findings/$P9F1R; check "p9 recurrence: the detail lists the earlier finding as related and the evidence names the risk" ".success and (.data.related|map(.id)|index($P9F1)) != null and (.data.evidenceJson|contains(\"$P9RKN\"))"
+as "$PLAN_TOKEN" POST $P7RG/risks "{\"id\":$P9RK,\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd 25)\"}"; check "p9 recurrence: the review date is corrected again (so that this finding too can be closed by the chain)" '.success and .data.id > 0'
+
+# --- the process audit by human auditors (ISO 19011 6): plan, checklist from the catalogue, auditor is not the auditee, the finding goes into the same chain
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9AUDID}"; nomsg "p9 audit: the lead auditor cannot be the auditee (ISO 19011 5.4.4)" "یک نفر باشند"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9QAID,\"auditeeUserId\":$P9OWNID}"; nomsg "p9 audit: the lead auditor must hold the auditor role" "نقش ممیز"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"NOPE\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: an unknown process is refused"
+as "$WH_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; no "p9 audit: the storekeeper does not plan an audit"
+as "$QA_TOKEN" POST audit/process-audits "{\"processCode\":\"QUALITY\",\"plannedDate\":\"$(dd 2)\",\"leadAuditorUserId\":$P9AUDID,\"auditeeUserId\":$P9OWNID}"; check "p9 audit: the QA manager plans the audit of the process QUALITY: the checklist is the 4 rules of the process, nothing is checked yet" '.success and .data.statusValue == 0 and .data.checks == 4 and .data.nonConform == 0 and (.data.items|length) == 4 and ([.data.items[]|select(.result == 0)]|length) == 4 and (.data.number|startswith("PA-"))'
+P9PA=$(val .data.id); P9CK1=$(val '.data.items[0].id'); P9CK2=$(val '.data.items[1].id'); P9CK3=$(val '.data.items[2].id'); P9CK4=$(val '.data.items[3].id')
+as "$QA_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; nomsg "p9 audit: only the lead auditor starts the audit" "فقط ممیز ارشد"
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"start\"}"; check "p9 audit: the lead auditor starts it" '.success and .data.statusValue == 1'
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"نتیجه‌ی ممیزی که هنوز بندها بررسی نشده\"}"; nomsg "p9 audit: the audit does not complete while checklist items are unchecked" "فهرست بازبینی"
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK1,\"result\":2,\"note\":\"عدم انطباق\"}"; nomsg "p9 audit: a non-conformity is recorded with a finding, not as a bare result" "ثبت یافته"
+as "$QA_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9OWNID}"; nomsg "p9 audit: only the lead auditor enters the findings of the audit" "فقط ممیز ارشد"
+as "$AUD_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9AUDID}"; nomsg "p9 audit: the auditor cannot be the owner of his own finding" "یک نفر باشند"
+as "$AUD_TOKEN" POST audit/findings/manual "{\"auditId\":$P9PA,\"checkId\":$P9CK1,\"title\":\"رویه‌ی NCR اجرا نشده\",\"description\":\"در نمونه‌برداری، NCR بدون مهلت تصمیم دیده شد\",\"severity\":2,\"ownerUserId\":$P9OWNID}"; check "p9 audit: the auditor enters the finding: manual source, open, minor, due in 30 days, owner the auditee" ".success and .data.ruleCode == \"MANUAL\" and .data.statusValue == 1 and .data.severityValue == 2 and .data.ownerUserId == $P9OWNID and (.data.dueDate|startswith(\"$(dd 30)\")) and (.data.number|test(\"^AF-[0-9]{4}-[0-9]{4}\$\")) and .data.processCode == \"QUALITY\""
+P9FM=$(val .data.id)
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK2,\"result\":1}"; check "p9 audit: the second item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 1 and ([.data.items[]|select(.result == 2 and .findingId != null)]|length) == 1'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK3,\"result\":1}"; check "p9 audit: the third item is conform" '.success and ([.data.items[]|select(.result == 1)]|length) == 2'
+as "$AUD_TOKEN" POST audit/process-audits/checks "{\"checkId\":$P9CK4,\"result\":3}"; check "p9 audit: the fourth item does not apply" '.success and ([.data.items[]|select(.result == 0)]|length) == 0'
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"کوتاه\"}"; no "p9 audit: the summary of the result must be written (at least 20 characters)"
+as "$AUD_TOKEN" POST audit/process-audits/action "{\"id\":$P9PA,\"action\":\"complete\",\"summary\":\"چهار بند بررسی شد؛ یک عدم انطباق ثبت شد و پیگیری می‌شود\"}"; check "p9 audit: the audit completes: 4 items, 1 non-conformity" '.success and .data.statusValue == 2 and .data.nonConform == 1 and .data.checks == 4'
+
+# --- the closure chain on the manual finding: owner and re-check by a human auditor (the rule cannot re-check a human finding), refusals of the owner, of the missing re-check, of the same person twice
+p9_step "$QA_TOKEN" "$P9FM" qa; nomsg "p9 manual: QA cannot propose the closure of a finding whose action is missing" "بازبینی خودکار"
+p9_action "$QA_TOKEN" "$P9FM"; nomsg "p9 manual: only the owner proposes the action" "فقط مسئول"
+as "$PKA2QA1" POST audit/findings/action "{\"findingId\":$P9FM,\"rootCause\":\"کوتاه\",\"correction\":\"اصلاح همان مورد انجام شد\",\"correctiveAction\":\"اقدام برای جلوگیری از تکرار تعریف شد\"}"; nomsg "p9 manual: the root cause must be written (at least 10 characters)" "ریشه"
+p9_action "$PKA2QA1" "$P9FM"; check "p9 manual: the owner (who holds the QA role) proposes the action: ActionProposed, waiting for the auditor" '.success and .data.statusValue == 2 and .data.rootCause != null'
+p9_step "$QA_TOKEN" "$P9FM" qa; nomsg "p9 manual: the re-check is missing: QA cannot propose" "بازبینی خودکار"
+as "$PKA2QA1" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":true,\"note\":\"راستی‌آزمایی توسط خود مسئول\"}"; no "p9 manual: the owner cannot verify his own action (only an auditor)"
+as "$AUD_TOKEN" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":false,\"note\":\"اقدام کافی نیست؛ مدرک اجرا ندارد\"}"; check "p9 manual: the auditor finds the action insufficient: back to Open" '.success and .data.statusValue == 1'
+p9_action "$PKA2QA1" "$P9FM"; check "p9 manual: the owner proposes again" '.success and .data.statusValue == 2'
+as "$AUD_TOKEN" POST audit/findings/manual-recheck "{\"findingId\":$P9FM,\"passed\":true,\"note\":\"مدرک اجرا دیده شد و کافی است\"}"; check "p9 manual: the auditor verifies the action: Rechecked" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
+p9_step "$PKA2QA1" "$P9FM" qa; nomsg "p9 manual: the owner cannot propose the closure of his own finding even though he holds the QA role" "خودش آن را ببندد"
+p9_step "$PKA2QA2" "$P9FM" qa; check "p9 manual: another QA user proposes the closure" '.success and .data.statusValue == 4'
+p9_step "$PKA2QA2" "$P9FM" pmo; no "p9 manual: a QA user without the PMO role cannot give the PMO proposal"
+p9_step "$ADMIN_TOKEN" "$P9FM" pmo; check "p9 manual: the PMO manager proposes" '.success and .data.statusValue == 5'
+p9_step "$CEO_TOKEN" "$P9FM" ceo true "رد آزمایشی مدیرعامل: نیاز به مدرک بیشتر"; check "p9 manual: the CEO refuses with a reason: back to Open and the whole chain starts again" '.success and .data.statusValue == 1'
+as "$AUD_TOKEN" GET audit/findings/$P9FM; check "p9 manual: the refusal and its reason are in the history of the finding" '.success and ([.data.events[]|select(.kind == "refused")]|length) == 1 and ([.data.events[]|select(.kind == "refused")][0].note|contains("مدیرعامل"))'
+
+# --- the weekly report: counts agree with the status, the score covers the clauses of the catalogue, the report is stored once and sealed
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 57'
+P9OPEN=$(val .data.open); P9OVER=$(val .data.overdue)
+as "$WH_TOKEN" POST audit/reports '{"kind":2}'; no "p9 report: the storekeeper does not generate a report"
+as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: the weekly report goes to the CEO, PMO and QA and ends at the previous midnight (the closure and the recurrence of today are not in its period); its counts equal the status; every severity and status adds up; the score covers every clause of the catalogue; sealed with SHA-256" ".success and .data.kindValue == 2 and .data.recipients == \"CEO,PMO,QA\" and (.data.sha256|length) == 64 and .data.narrativeSource == \"template\" and (.data.narrative|length) > 20 and (.data.content|.open == $P9OPEN and .overdue == $P9OVER and .open == (.openMajor + .openMinor + .openObservation) and .newInPeriod == (.newMajor + .newMinor + .newObservation) and .closedInPeriod == 0 and .recurrences == 0 and ([.byStatus[].count]|add) == .open and ([.byProcess[].count]|add) == .open and .rulesTotal == 57 and .rulesEnabled == 57 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 57 and (.scores|map(.met + .["not"])|add) == 57)"
+P9REP=$(val .data.id); P9REPH=$(val .data.sha256)
+as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: asking again for the same week returns the stored report (same id and same hash): reports never change" ".success and .data.id == $P9REP and .data.sha256 == \"$P9REPH\""
+as "$PMO2_TOKEN" GET "audit/reports?kind=2"; check "p9 report: the PMO manager lists exactly one weekly report" ".success and (.data|length) == 1 and .data[0].id == $P9REP"
+as "$CEO_TOKEN" GET audit/reports/$P9REP; check "p9 report: the CEO reads it" ".success and .data.id == $P9REP"
+as "$QA_TOKEN" POST audit/reports '{"kind":1}'; check "p9 report: the daily digest goes to the CEO, PMO and QA too" '.success and .data.kindValue == 1 and .data.recipients == "CEO,PMO,QA" and (.data.sha256|length) == 64'
+as "$QA_TOKEN" POST audit/reports '{"kind":9}'; no "p9 report: an unknown kind is refused"
+
+# --- the audit chain holds the new records and still fits
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusReport&EntityId=$P9REP&PageSize=0"; check "p9 chain: the report has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET "finance/audit?EntityType=AusProgram&EntityId=$P9PG&PageSize=0"; check "p9 chain: the programme has exactly one Added entry and every entry names its user" '.success and ([.data.data[]|select(.action == "Added")]|length) == 1 and ([.data.data[]|select((.userName|length) == 0)]|length) == 0'
+as "$FM_TOKEN" GET finance/audit/verify; check "p9 chain: the whole hash chain still fits after the audit records" '.success and .data.ok == true'
+
 # --- P2 DNC (production release P2 part A): the CNC program library, two-person approval of a revision, the transfer to a machine through a folder link, the operator's confirmation on the control,
 # the start gate of the terminal, the record of the revision an operation ran by, and the program fetched back from the machine as a new revision with its difference.
-# Placed before the PB2 fix round on purpose: it uses its own order (BOM position 7 of item J on MF-R1, machine R1M) and no stock, and no later section starts an operation on R1M.
+# Placed before the PB2 fix round on purpose: it uses its own order (BOM position 8 of item J (position 7 is the PKC part) on MF-R1, machine R1M) and no stock, and no later section starts an operation on R1M.
 # The "machine" is a new folder of the CI runner that the API writes to (link kind 2, network folder): what arrives there is compared byte for byte.
 TOKEN=$ADMIN_TOKEN
 DNC=$MF/dnc
@@ -11788,7 +12604,7 @@ as "$MOP_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"
 as "$MPM_TOKEN" POST $DNC/revisions/action "{\"revisionId\":$DNCR1,\"action\":\"approve\"}"; check "dnc: the production manager approves revision 1" '.success and .data.status == 2 and .data.approvedByName != null'
 ibx "$MPM_TOKEN" "mf:nc-rev:$DNCR1"; check "dnc: the inbox item of revision 1 is closed by the approval" '.success and (.data.data|length) == 0'
 as "$MOP_TOKEN" GET "$DNC/programs/$DNCP"; check "dnc: the operator reads the program: revision 1 is current" ".success and .data.currentRevisionId == $DNCR1 and .data.currentRevision == 1 and (.data.revisions|length) == 1"
-r1draft 7 2 "77.10.00.010.1" "قطعه ماشینکاری R1 DNC"; DNCO=$R1O; DNCN=$R1N
+r1draft 8 2 "77.10.00.010.1" "قطعه ماشینکاری R1 DNC"; DNCO=$R1O; DNCN=$R1N
 pkb_nodraw_order "$DNCO"
 as "$MSV_TOKEN" POST $MF/orders/release "{\"id\":$DNCO}"; check "dnc: the order of 2 pieces of item J is released: step 10 ready" '.success and .data.status == 1 and .data.operations[0].status == 1'
 DNCOP=$(val '.data.operations[0].id')

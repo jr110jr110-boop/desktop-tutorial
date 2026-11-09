@@ -72,8 +72,18 @@ namespace MsTests
             return builder.Options;
         }
 
+        /// <summary>
+        /// Package 9: a host whose context uses the SQL Server provider with a dummy connection and the given interceptors (which swallow the connection and the commands): for tests that only have to see
+        /// that the queries of a service TRANSLATE to SQL Server. Nothing can be saved in such a host.
+        /// </summary>
+        public static AppHost SqlTranslationOnly(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) => new AppHost("p9sql_" + Guid.NewGuid().ToString("N"), null, interceptors);
+
+        public AppHost(string databaseName, IDictionary<string, string> settings) : this(databaseName, settings, null)
+        {
+        }
+
         /// <param name="settings">Extra configuration values (for example <c>Identity:AuditHmacKey</c>) that win over appsettings.json.</param>
-        public AppHost(string databaseName, IDictionary<string, string> settings)
+        private AppHost(string databaseName, IDictionary<string, string> settings, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] sqlInterceptors)
         {
             DatabaseName = databaseName;
             var services = new ServiceCollection();
@@ -128,18 +138,52 @@ namespace MsTests
 
             var siteSettings = services.GetSiteSettings();
             _siteSettings = siteSettings;
-            siteSettings.ActiveDatabase = ActiveDatabase.InMemoryDatabase;
+            bool sql = sqlInterceptors != null && sqlInterceptors.Length > 0;
+            siteSettings.ActiveDatabase = sql ? ActiveDatabase.SqlServer : ActiveDatabase.InMemoryDatabase;
+            if (sql) siteSettings.ConnectionStrings.SqlServer.ApplicationDbContextConnection = "Server=tcp:127.0.0.1,1;Database=p9translation;User Id=x;Password=x;Encrypt=False;Pooling=False;Connect Timeout=1";
             siteSettings.ConnectionStrings.LocalDb = new Localdb { InitialCatalog = databaseName };
             services.AddRequiredEfInternalServices(siteSettings);
             services.AddDbContextPool<ApplicationDbContext>((serviceProvider, optionsBuilder) =>
             {
                 optionsBuilder.SetDbContextOptions(siteSettings);
                 optionsBuilder.UseInternalServiceProvider(serviceProvider);
+                if (sql) optionsBuilder.AddInterceptors(sqlInterceptors);
             });
 
             Provider = services.BuildServiceProvider();
-            Provider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
+            if (!sql) Provider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
             Http = Provider.GetRequiredService<IHttpContextAccessor>();
+        }
+
+        /// <summary>
+        /// Package A1: the design verification gates (BOM and drawing release, readiness item, FCA) are ON by default (the strict production default). The legacy tests release BOMs and drawings without a design plan,
+        /// so they switch the gates off with this call (the same way WithoutReadinessGate switches the readiness gate off); the gates themselves are tested in PackageA1DesignControlTests.
+        /// </summary>
+        public AppHost WithoutDesignControl()
+        {
+            SetDesignControl(false);
+            return this;
+        }
+
+        /// <summary>Package A1: writes the two design control settings at their strict value (they are on by default; this call is only needed after WithoutDesignControl).</summary>
+        public AppHost WithDesignControl()
+        {
+            SetDesignControl(true);
+            return this;
+        }
+
+        private void SetDesignControl(bool on)
+        {
+            Write(uow =>
+            {
+                foreach (string key in new[] { Services.NasbNiro.ProductBank.DesignSettingKeys.VerificationRequired, Services.NasbNiro.ProductBank.DesignSettingKeys.ValidationRequired })
+                {
+                    Entities.Model.NasbNiro.Quality.QualitySetting row = uow.Set<Entities.Model.NasbNiro.Quality.QualitySetting>().FirstOrDefault(x => x.Key == key);
+                    if (row == null) Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = key, Value = on ? 1 : 0, Title = "design control (test)", Source = "test" });
+                    else row.Value = on ? 1 : 0;
+                }
+                uow.SaveChanges();
+            });
         }
 
         /// <summary>The EF model of the application database (which entity types and scalar properties exist).</summary>
@@ -195,7 +239,7 @@ namespace MsTests
                 Add(uow, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = Services.NasbNiro.OpsData.OpsReadinessCatalog.MasterSwitch, Value = 0, Title = "readiness gate off (test)", Source = "test" });
                 uow.SaveChanges();
             });
-            return this;
+            return this;   // fix round 1 (M4): the design control stays ON; a test that releases a BOM gives it design data (DesignTestData)
         }
 
         /// <summary>Reads with a new scope and no user.</summary>

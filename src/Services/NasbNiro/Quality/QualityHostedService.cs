@@ -57,6 +57,14 @@ namespace Services.NasbNiro.Quality
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { _logger?.LogWarning(ex, "Quality job (document revisions) failed; it will run again tomorrow."); }
+            try
+            {
+                using IServiceScope scope = _scopes.CreateScope();
+                int open = await scope.ServiceProvider.GetRequiredService<ISpecialProcessService>().ExpiryAlertsAsync(cancellationToken);
+                if (open > 0) _logger?.LogInformation("Quality job: {Open} special process qualification / supplier approval alert(s) are open", open);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Quality job (special process expiry) failed; it will run again tomorrow."); }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

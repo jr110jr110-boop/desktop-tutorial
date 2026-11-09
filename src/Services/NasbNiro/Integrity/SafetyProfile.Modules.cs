@@ -63,8 +63,16 @@ namespace Services.NasbNiro.Integrity
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbIncomingBulkSamples, Kind = SafetyKind.NumberAtLeast, Strict = "1", Min = 1, Max = 50, Title = "حداقل نمونه بازرسی ورودی هر بچ انبوه" });
             list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkbPcaBulkExtra, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 50, Title = "رواداری افزوده بر ضایعات BOM در ممیزی پیکربندی (درصد)" });
 
+            // Package C: the special process, welder range and certificate gates must stay on; an earlier expiry alert is the stricter one
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkcSpEnforce, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "پایان گام فرایند ویژه فقط با اجرای قبول و بازبینی‌شده تحت صلاحیت معتبر" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkcSpSubcontractEvidence, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "مدرک اجرای فرایند ویژه برون‌سپاری پیش از پذیرش QC" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkcWeldRange, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "کنترل دامنه صلاحیت جوشکار نسبت به WPS" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkcCertEnforce, Kind = SafetyKind.FlagMustBeOn, Strict = "1", Min = 0, Max = 1, Title = "سنجش مقادیر گواهی ماده با مشخصات و جلوگیری از پذیرش" });
+            list.Add(new SafetySettingSpec { Store = Q, Key = QualitySettingKeys.PkcQualExpiryAlertDays, Kind = SafetyKind.NumberAtLeast, Strict = "30", Min = 1, Max = 90, Title = "حداقل روزهای اطلاع پیش از انقضای صلاحیت فرایند ویژه" });
+
             // PB8: the gates of the operational data control and of the engineering readiness (the lists are the module's own catalogs, so a new rule is covered at once)
             list.AddRange(OpsSpecs());
+            list.AddRange(DesignSpecs());   // Package A1
             return list;
         }
 

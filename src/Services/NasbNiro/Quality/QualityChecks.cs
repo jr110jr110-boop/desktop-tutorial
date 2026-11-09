@@ -7,12 +7,69 @@ using DataLayer.Context;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Services.NasbNiro.Quality
 {
     /// <summary>Checks that several quality services share.</summary>
     internal static class QualityChecks
     {
+        /// <summary>
+        /// Fix round 1 (M5): runs several saves as one unit in a database transaction (SQL Server). It uses the execution strategy of the retrying provider, so the work may run again from the start and must load what it
+        /// changes itself. A result that is not a success rolls back. The in-memory database of the tests has no transactions, so the work simply runs.
+        /// </summary>
+        public static async Task<T> InTransactionAsync<T>(IUnitOfWork uow, Func<Task<T>> work, Func<T, bool> succeeded, CancellationToken ct)
+        {
+            if (!(uow is DbContext db) || !db.Database.IsRelational()) return await work();
+            IExecutionStrategy strategy = db.Database.CreateExecutionStrategy();
+            int attempt = 0;
+            return await strategy.ExecuteAsync<T>(async token =>
+            {
+                if (attempt++ > 0) db.ChangeTracker.Clear();
+                await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(token);
+                T result = await work();
+                if (succeeded(result)) await transaction.CommitAsync(token); else await transaction.RollbackAsync(token);
+                return result;
+            }, ct);
+        }
+
+        private static readonly string[] AllowedMimePrefixes = { "application/pdf", "image/", "application/vnd.openxmlformats-officedocument", "application/vnd.ms-excel", "application/msword", "text/csv", "text/plain" };
+
+        /// <summary>
+        /// Fix round 1 (M4): an attached file must exist in the documents store and be of an allowed type. The store keeps the extension (".pdf") of the file in its type column, older rows may hold a media type;
+        /// both are judged (the extension against the list of the attachments module). Null = fine or no file.
+        /// </summary>
+        public static async Task<string> FileProblemAsync(IUnitOfWork uow, Guid? id, string label, CancellationToken ct)
+        {
+            if (!id.HasValue) return null;
+            var row = await uow.Set<Entities.Model.Document>().AsNoTracking().Where(d => d.Id == id.Value).Select(d => new { d.MimType }).FirstOrDefaultAsync(ct);
+            if (row == null) return $"فایل {label} در مخزن اسناد پیدا نشد؛ ابتدا آن را بارگذاری کنید.";
+            string type = (row.MimType ?? string.Empty).Trim().ToLowerInvariant();
+            if (type.Length == 0) return null;
+            bool allowed = type.StartsWith(".") ? Attachments.AttachmentRules.AllowedExtensions.Contains(type) : AllowedMimePrefixes.Any(p => type.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+            return allowed ? null : $"نوع فایل {label} ({type}) مجاز نیست؛ pdf، تصویر یا فایل اداری بارگذاری کنید.";
+        }
+
+        /// <summary>
+        /// Fix round 1 (M1): the instruments of a RUN THAT IS OVER are judged by the state at the run: the calibration valid on the day of the run (not today). A calibration that ended after the run does not undo it.
+        /// Null = usable on that day.
+        /// </summary>
+        public static async Task<string> EquipmentOnDayAsync(IUnitOfWork uow, IEnumerable<int> equipmentIds, DateTime day, CancellationToken ct)
+        {
+            List<int> ids = (equipmentIds ?? Enumerable.Empty<int>()).Distinct().ToList();
+            if (ids.Count == 0) return null;
+            List<MeasuringEquipment> rows = await uow.Set<MeasuringEquipment>().AsNoTracking().Where(e => ids.Contains(e.Id) && !e.Deleted).ToListAsync(ct);
+            if (rows.Count != ids.Count) return "تجهیز اندازه‌گیری انتخاب‌شده پیدا نشد.";
+            foreach (MeasuringEquipment e in rows)
+            {
+                if (!e.RequiresCalibration) continue;
+                List<CalibrationEvent> events = await uow.Set<CalibrationEvent>().AsNoTracking().Where(x => x.EquipmentId == e.Id && !x.Deleted).ToListAsync(ct);
+                if (!CalibrationHistory.WasValidOn(events, day))
+                    return $"تجهیز اندازه‌گیری {e.Code} در تاریخ {(global::Services.NasbNiro.Finance.FiscalCalendars.Text(day))} کالیبراسیون معتبر نداشته است.";
+            }
+            return null;
+        }
+
         /// <summary>
         /// The instruments may be used for a record dated <paramref name="recordDate"/> that is entered today (R1q D15): the calibration must be valid
         /// on the day of entry and, for a back-dated record, on the record date as well. Null = usable, otherwise the Persian reason.

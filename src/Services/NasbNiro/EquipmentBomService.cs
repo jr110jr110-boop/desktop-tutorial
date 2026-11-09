@@ -68,6 +68,8 @@ namespace Services.NasbNiro
 
         public async EquipmentBomResult AddEquipmentBomAsync(AddEquipmentBomWithEqueipmentProccessDto addEquipmentBomDto, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ViewModels.NasbNiro.EquipmentBomDtos.ResponseEquipmentBomDto>(frozen);
             if (addEquipmentBomDto is null)
                 return ResponseDtoHelper
                     .BadRequest<ResponseEquipmentBomDto>(NasbNiroMessages.InvalidData);
@@ -133,6 +135,8 @@ namespace Services.NasbNiro
 
         public async EquipmentBomResult UpdateEquipmentBomAsync(UpdateEquipmentBomDto updateEquipmentBomDto, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ViewModels.NasbNiro.EquipmentBomDtos.ResponseEquipmentBomDto>(frozen);
             EquipmentBom equipmentBom = await this.GetEquipmentBomByIdAsync(
                 updateEquipmentBomDto.Id, cancellationToken);
 
@@ -164,6 +168,8 @@ namespace Services.NasbNiro
 
         public async EquipmentBomResult SetPredecessorAsync(UpdateEquipmentBomSetPredecessorDto dto, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ViewModels.NasbNiro.EquipmentBomDtos.ResponseEquipmentBomDto>(frozen);
             if (dto.EquipmentBomId == dto.PredecessorId)
                 return ResponseDtoHelper.BadRequest<ResponseEquipmentBomDto>(EquipmentBomMessages.PredecessorCanNotBeTheSameEquipmentBom);
 
@@ -218,6 +224,8 @@ namespace Services.NasbNiro
 
         public async EquipmentBomResult DeletePredecessorAsync(int equipmentBomId, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ViewModels.NasbNiro.EquipmentBomDtos.ResponseEquipmentBomDto>(frozen);
             EquipmentBom bomToUpdate = await _equipmentBoms.SingleOrDefaultAsync(
                 x => !x.Deleted && x.Id == equipmentBomId,
                 cancellationToken);
@@ -254,6 +262,8 @@ namespace Services.NasbNiro
 
         public async EquipmentBomResult DeleteEquipmentBomAsync(int equipmentBomId, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ViewModels.NasbNiro.EquipmentBomDtos.ResponseEquipmentBomDto>(frozen);
             EquipmentBom equipmentBom = await GetEquipmentBomByIdAsync
                 (equipmentBomId, cancellationToken, IncludeAllChildren: true);
 
@@ -306,6 +316,8 @@ namespace Services.NasbNiro
 
         public async DeleteEquipmentBomsResult DeleteEquipmentBomCollectionAsync(IEnumerable<int> equipmentBomIds, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<IEnumerable<DeleteEquipmentBomResultDto>>(frozen);
             if (equipmentBomIds is null)
                 return ResponseDtoHelper
                     .BadRequest<IEnumerable<DeleteEquipmentBomResultDto>>(NasbNiroMessages.InvalidData);

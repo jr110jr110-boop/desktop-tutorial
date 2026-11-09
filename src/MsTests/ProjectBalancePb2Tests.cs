@@ -111,6 +111,7 @@ namespace MsTests
                 var s = await Run(host, who, p => p.GetRequiredService<IPbBomService>().SignAsync(new PbSignDto { Id = saved.Data.Id, Step = step }, Ct));
                 Assert.IsTrue(s.Success, step + ": " + s.Message);
             }
+            await DesignTestData.VerifyBomAsync(host, saved.Data.Id);   // Package A1: the design control stays on; the BOM is verified before it is released
             var rel = await Run(host, AppHost.Principal(2, "pmo.two", "PMO"), p => p.GetRequiredService<IPbBomService>().ReleaseAsync(new PbBomActionDto { Id = saved.Data.Id }, Ct));
             Assert.IsTrue(rel.Success, rel.Message);
             return rel.Data;

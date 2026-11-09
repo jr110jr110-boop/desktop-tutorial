@@ -30,6 +30,16 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string RevokeReason { get; set; }
         public bool Superseded { get; set; }
         public int? RenewsQualificationId { get; set; }
+
+        // ----- Package C: the structured range of the welder
+        public string RangePNos { get; set; }
+        public string RangeGroupNos { get; set; }
+        public string RangeFNos { get; set; }
+        public string RangePositions { get; set; }
+        public decimal? RangeThicknessMin { get; set; }
+        public decimal? RangeThicknessMax { get; set; }
+        public decimal? RangeDiameterMin { get; set; }
+        public decimal? RangeDiameterMax { get; set; }
     }
 
     public class QualifiedPersonDto
@@ -94,6 +104,16 @@ namespace ViewModels.NasbNiro.QualityDtos
 
         /// <summary>A lapsed or expired qualification is renewed by a new test: the new row replaces the old one.</summary>
         public int? RenewsQualificationId { get; set; }
+
+        // ----- Package C: the structured range of the welder (compared with the WPS at the booking)
+        public string RangePNos { get; set; }
+        public string RangeGroupNos { get; set; }
+        public string RangeFNos { get; set; }
+        public string RangePositions { get; set; }
+        public decimal? RangeThicknessMin { get; set; }
+        public decimal? RangeThicknessMax { get; set; }
+        public decimal? RangeDiameterMin { get; set; }
+        public decimal? RangeDiameterMax { get; set; }
     }
 
     public class QualificationActionDto
@@ -149,6 +169,11 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Pwht { get; set; }
         public string ShieldingGas { get; set; }
         public string Note { get; set; }
+
+        /// <summary>Package C: group number of the base metal and the diameter range of the WPS.</summary>
+        public string BaseGroupNo { get; set; }
+        public decimal? DiameterMin { get; set; }
+        public decimal? DiameterMax { get; set; }
         public DateTimeOffset? QcApprovedAt { get; set; }
         public string QcApprovedByName { get; set; }
         public DateTimeOffset? EngineeringApprovedAt { get; set; }
@@ -179,6 +204,9 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Pwht { get; set; }
         public string ShieldingGas { get; set; }
         public string Note { get; set; }
+        public string BaseGroupNo { get; set; }
+        public decimal? DiameterMin { get; set; }
+        public decimal? DiameterMax { get; set; }
         public List<int> PqrIds { get; set; } = new List<int>();
     }
 

@@ -408,6 +408,44 @@ namespace ViewModels.NasbNiro.QualityDtos
         public List<AsBuiltNcrDto> Ncrs { get; set; } = new List<AsBuiltNcrDto>();
         public List<AsBuiltFaiDto> FirstArticles { get; set; } = new List<AsBuiltFaiDto>();
         public List<string> PcaFindings { get; set; } = new List<string>();
+
+        /// <summary>Package C: the special process runs of the work order (qualification, procedure revision, operator, machine, result, review) and the certificates of the lots built in.</summary>
+        public List<AsBuiltSpecialProcessDto> SpecialProcesses { get; set; } = new List<AsBuiltSpecialProcessDto>();
+        public List<AsBuiltCertificateDto> Certificates { get; set; } = new List<AsBuiltCertificateDto>();
+
+        /// <summary>Package A1: the design verification and validation reviews that covered the project BOM.</summary>
+        public List<AsBuiltDesignReviewDto> DesignReviews { get; set; } = new List<AsBuiltDesignReviewDto>();
+    }
+
+    public class AsBuiltSpecialProcessDto
+    {
+        public string RunNumber { get; set; }
+        public string ProcessType { get; set; }
+        public string QualificationNumber { get; set; }
+        public string ProcedureText { get; set; }
+        public string Step { get; set; }
+        public string SerialNumbers { get; set; }
+        public decimal Quantity { get; set; }
+        public string OperatorStamp { get; set; }
+        public string Machine { get; set; }
+        public string StartedAt { get; set; }
+        public string EndedAt { get; set; }
+        public string Supplier { get; set; }
+        public string CertificateNumber { get; set; }
+        public string Result { get; set; }
+        public string Review { get; set; }
+    }
+
+    public class AsBuiltCertificateDto
+    {
+        public string LotNumber { get; set; }
+        public string HeatNumber { get; set; }
+        public string Number { get; set; }
+        public string Type { get; set; }
+        public string Grade { get; set; }
+        public string Standard { get; set; }
+        public string Evaluation { get; set; }
+        public string Inspector { get; set; }
     }
 
     public class AsBuiltRoutingDto

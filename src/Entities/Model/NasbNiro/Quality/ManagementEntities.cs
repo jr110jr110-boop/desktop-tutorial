@@ -25,6 +25,36 @@ namespace Entities.Model.NasbNiro.Quality
         public int? VerifiedByUserId { get; set; }
         public DateTimeOffset? VerifiedAt { get; set; }
         public string VerificationNote { get; set; }
+
+        // ----- Package C: the structured certificate (EN 10204)
+
+        /// <summary>The heat (cast) number printed on the certificate; for type 3.1 and 3.2 it must equal the heat number of the lot.</summary>
+        public string HeatNumber { get; set; }
+
+        /// <summary>Material grade and standard as printed on the certificate (for example S355J2 / EN 10025-2).</summary>
+        public string Grade { get; set; }
+        public string Standard { get; set; }
+
+        /// <summary>The version of the material specification the values were judged against.</summary>
+        public int? SpecId { get; set; }
+
+        /// <summary>Type 3.2: the organisation of the inspector (a body independent of the manufacturer or the purchaser's representative) and the inspector.</summary>
+        public string InspectorOrganisation { get; set; }
+        public string InspectorName { get; set; }
+        public string InspectorStampNo { get; set; }
+
+        /// <summary>Type 3.1: the manufacturer's authorised representative who signed the certificate.</summary>
+        public string ManufacturerSignatory { get; set; }
+
+        /// <summary>The verdict the server computed from the values and the specification when the certificate was saved.</summary>
+        public CertRowStatus Evaluation { get; set; }
+        public string EvaluationText { get; set; }
+        public DateTimeOffset? EvaluatedAt { get; set; }
+
+        /// <summary>Fix round 1 (M6): the user ids (comma separated) who entered, edited or imported the values; none of them verifies the certificate.</summary>
+        public string EditorUserIds { get; set; }
+
+        public ICollection<CertificateValue> Values { get; set; } = new List<CertificateValue>();
     }
 
     public class Capa : BaseEntity

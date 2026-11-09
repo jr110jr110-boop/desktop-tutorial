@@ -112,7 +112,7 @@ namespace Services.NasbNiro.ProductBank
                 return ResponseDtoHelper.BadRequest<PbSettingDto>("جداکننده یک تا سه نشانه است (مثل - یا _) و حرف، عدد یا فاصله نیست.");
             if (def.Key == PbSettingKeys.MinSuggestConfidence && (!decimal.TryParse(value, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out decimal v) || v < 0 || v > 100))
                 return ResponseDtoHelper.BadRequest<PbSettingDto>("عددی بین صفر و صد وارد کنید.");
-            if ((def.Key == PbSettingKeys.DistinctReviewers || def.Key == PbSettingKeys.DemoData) && !PbSettingKeys.IsBool(value))
+            if ((def.Key == PbSettingKeys.DistinctReviewers || def.Key == PbSettingKeys.DemoData || def.Key == PbSettingKeys.LegacyBomFrozen) && !PbSettingKeys.IsBool(value))
                 return ResponseDtoHelper.BadRequest<PbSettingDto>("مقدار این تنظیم فقط true یا false است.");
             if (def.Key == PbSettingKeys.DemoData && !InRole(PbRoles.Admin)) return ResponseDtoHelper.BadRequest<PbSettingDto>(PbMessages.NotAllowed);
             PbSetting row = await Uow.Set<PbSetting>().FirstOrDefaultAsync(s => s.Key == def.Key, ct);

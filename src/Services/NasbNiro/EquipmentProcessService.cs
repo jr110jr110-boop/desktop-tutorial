@@ -61,6 +61,8 @@ namespace Services.NasbNiro
         public async ValueTask<ResponseDto<ResponseEquipmentProcessDto>> AddEquipmentProcessAsync
             (AddEquipmentProcessDto addEquipmentProcessDto, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM / process is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<ResponseEquipmentProcessDto>(frozen);
             if (addEquipmentProcessDto is null)
             {
                 return ResponseDtoHelper.BadRequest<ResponseEquipmentProcessDto>(NasbNiroMessages.InvalidData);
@@ -106,6 +108,8 @@ namespace Services.NasbNiro
         public async ValueTask<ResponseDto<EquipmentProcessUpdateResponseDto>> UpdateEquipmentProcessAsync
             (UpdateEquipmentProcessDto updateEquipmentProcessDto, CancellationToken cancellationToken)
         {
+            string frozen = await global::Services.NasbNiro.EngChange.EcLegacyFreeze.ProblemAsync(_unitOfWork, cancellationToken);   // Package A2: the legacy BOM / process is read only
+            if (frozen != null) return ResponseDtoHelper.BadRequest<EquipmentProcessUpdateResponseDto>(frozen);
             if (updateEquipmentProcessDto is null)
                 return ResponseDtoHelper
                     .BadRequest<EquipmentProcessUpdateResponseDto>(NasbNiroMessages.InvalidData);

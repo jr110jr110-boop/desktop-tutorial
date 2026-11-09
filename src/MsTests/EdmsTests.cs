@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Common.Results;
 using Entities.Identity;
 using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.EngChange;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
@@ -44,7 +45,7 @@ namespace MsTests
                 foreach (int id in new[] { 31, 32, 33, 34, 35, 36, 37, 38, 39 }) AppHost.Add(u, new User { Id = id, UserName = "p7b.user" + id, Email = "p7b.user" + id + "@example.com", IsActive = true });
                 u.SaveChanges();
             }, Seeder);
-            return host;
+            return host.WithoutDesignControl(); // Package A1: these tests are about the EDMS gates; the design verification gate has its own tests
         }
 
         private static int NewContract(AppHost host)
@@ -117,6 +118,17 @@ namespace MsTests
         private static async Task Release(AppHost host, int revisionId)
         {
             await EnsureEmptyList(host, revisionId);
+            // Package A2: a new revision of a drawing that was already released needs an approved engineering change order that names it
+            host.Write(u =>
+            {
+                string tag = Guid.NewGuid().ToString("N").Substring(0, 10);
+                var req = AppHost.Add(u, new EcRequest { Number = "ECR-T-" + tag, Title = "t", Reason = "test change", Status = EcrStatus.Approved, RequestedByUserId = 1 });
+                u.SaveChanges();
+                var eco = AppHost.Add(u, new EcOrder { Number = "ECO-T-" + tag, RequestId = req.Id, Title = "t", Status = EcoStatus.Approved, EffectiveFromDate = DateTime.Today });
+                u.SaveChanges();
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Drawing, Action = EcChangeAction.NewRevision, TargetId = revisionId, Reference = "test" });
+                u.SaveChanges();
+            });
             foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve"), (Pmo, "release") })
             {
                 var r = await Edms(host, step.Item1, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = step.Item2 }, default));
@@ -391,7 +403,9 @@ namespace MsTests
             int doc = NewDeliverable(host, NewContract(host));
             var link = await Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-400" }, default));
             Assert.IsFalse((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id }, default))).Success);
-            Assert.IsTrue((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "wrong part" }, default))).Success);
+            Assert.IsFalse((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "the part number was wrong here" }, default))).Success, "A1: the link of a design drawing is removed by ENGINEERING or QA, not the document controller");
+            Assert.IsFalse((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "wrong part" }, default))).Success, "A1: the reason has the minimum length");
+            Assert.IsTrue((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "the part number was wrong here" }, default))).Success);
             Assert.AreEqual(0, (await Edms(host, Pmo, s => s.GetLinksAsync(new PcDocLinkQuery { DeliverableId = doc }, default))).Data.Count);
             Assert.AreEqual(1, host.Read(u => u.Set<PcDocumentLink>().IgnoreQueryFilters().Count(l => l.Id == link.Data.Id && l.Deleted)));
         }
@@ -653,6 +667,57 @@ namespace MsTests
             Assert.IsTrue((await Gate(host, o.OrderId)).Passed);
         }
 
+        /// <summary>Releases a revision WITHOUT any engineering change order (the Release helper adds one on purpose); returns the answer of the release step.</summary>
+        private static async Task<ResponseDto<PcRevisionDto>> TryReleaseWithoutEco(AppHost host, int revisionId)
+        {
+            await EnsureEmptyList(host, revisionId);
+            foreach (var step in new[] { (Dcc, "submit"), (Reviewer, "review"), (Approver, "approve") })
+            {
+                var r = await Edms(host, step.Item1, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = step.Item2 }, default));
+                Assert.IsTrue(r.Success, step.Item2 + ": " + r.Message);
+            }
+            return await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = revisionId, Action = "release" }, default));
+        }
+
+        [TestMethod]
+        public async Task ASecondRevisionOfAPartDrawingNeedsAnApprovedEco_TheFirstDoesNot_AndUnlinkingDoesNotResetTheGate()
+        {
+            AppHost host = NewHost("a2_draw");
+            int contract = NewContract(host), doc = NewDeliverable(host, contract);
+            await Link(host, doc, "99.77.00.001.2");
+            PcRevisionDto first = await Draft(host, doc);
+            var firstRelease = await TryReleaseWithoutEco(host, first.Id);
+            Assert.IsTrue(firstRelease.Success, "the first revision of a part drawing needs no order: " + firstRelease.Message);
+
+            PcRevisionDto second = await Draft(host, doc);
+            var refused = await TryReleaseWithoutEco(host, second.Id);
+            Assert.IsFalse(refused.Success, "the second revision is not released without an approved engineering change order");
+            StringAssert.Contains(refused.Message, "دستور تغییر مهندسی");
+
+            // unlink the drawing from the part (history stays) and try again: still refused
+            host.Write(u =>
+            {
+                foreach (var l in u.Set<PcDocumentLink>().Where(x => x.DeliverableId == doc).ToList()) { l.Delete(); l.UnlinkReason = "برداشتن پیوند آزمون"; }
+                u.SaveChanges();
+            }, Seeder);
+            var again = await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = second.Id, Action = "release" }, default));
+            Assert.IsFalse(again.Success, "unlinking does not reset the gate");
+            StringAssert.Contains(again.Message, "دستور تغییر مهندسی");
+
+            // an approved order that names the revision opens it
+            host.Write(u =>
+            {
+                var req = AppHost.Add(u, new EcRequest { Number = "ECR-T-DRAW", Title = "t", Reason = "test change", Status = EcrStatus.Approved, RequestedByUserId = 1 });
+                u.SaveChanges();
+                var eco = AppHost.Add(u, new EcOrder { Number = "ECO-T-DRAW", RequestId = req.Id, Title = "t", Status = EcoStatus.Approved, EffectiveFromDate = DateTime.Today });
+                u.SaveChanges();
+                u.Set<EcOrderChange>().Add(new EcOrderChange { OrderId = eco.Id, Kind = EcChangeKind.Drawing, Action = EcChangeAction.NewRevision, TargetId = second.Id, Reference = "test" });
+                u.SaveChanges();
+            }, Seeder);
+            var ok = await Edms(host, Pmo, s => s.ActionAsync(new PcRevisionActionDto { Id = second.Id, Action = "release" }, default));
+            Assert.IsTrue(ok.Success, ok.Message);
+        }
+
         [TestMethod]
         public async Task ASecondReceiptReplacesTheCopyNobodyAcceptedAndPointsToIt()
         {
@@ -796,8 +861,9 @@ namespace MsTests
             int doc = NewDeliverable(host, NewContract(host));
             var link = await Edms(host, Dcc, s => s.SaveLinkAsync(new PcDocLinkSaveDto { DeliverableId = doc, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-LK" }, default));
             Assert.IsTrue((await Edms(host, Dcc, s => s.CheckOutAsync(new PcCheckOutDto { DeliverableId = doc }, default))).Success);
-            Assert.IsFalse((await Edms(host, Dcc2, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
-            Assert.IsTrue((await Edms(host, Dcc, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed" }, default))).Success);
+            Assert.IsFalse((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed for the part" }, default))).Success, "somebody else holds the check-out");
+            Assert.IsTrue((await Edms(host, Dcc, s => s.CheckInAsync(new PcCheckOutDto { DeliverableId = doc }, default))).Success);
+            Assert.IsTrue((await Edms(host, Approver, s => s.VoidLinkAsync(new PcDocLinkVoidDto { Id = link.Data.Id, Reason = "no longer needed for the part" }, default))).Success);
             PcRevisionDto r = await Draft(host, doc);
             int fileId = r.Files.Count > 0 ? r.Files[0].Id : (await Edms(host, Dcc, s => s.GetRevisionAsync(r.Id, default))).Data.Files[0].Id;
             Assert.IsTrue((await Edms(host, Dcc, s => s.RemoveFileAsync(new PcRevisionFileRemoveDto { FileId = fileId, Reason = "wrong file" }, default))).Success);

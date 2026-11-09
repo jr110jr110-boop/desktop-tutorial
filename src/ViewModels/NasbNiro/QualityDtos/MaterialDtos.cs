@@ -24,6 +24,21 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string VerifiedByName { get; set; }
         public DateTimeOffset? VerifiedAt { get; set; }
         public string VerificationNote { get; set; }
+
+        // ----- Package C: the structured certificate. HeatNumber above is the heat of the LOT; CertHeatNumber is the one printed on the certificate.
+        public string CertHeatNumber { get; set; }
+        public string Grade { get; set; }
+        public string Standard { get; set; }
+        public int? SpecId { get; set; }
+        public int? SpecVersion { get; set; }
+        public string InspectorOrganisation { get; set; }
+        public string InspectorName { get; set; }
+        public string InspectorStampNo { get; set; }
+        public string ManufacturerSignatory { get; set; }
+        public CertRowStatus Evaluation { get; set; }
+        public string EvaluationText { get; set; }
+        public DateTimeOffset? EvaluatedAt { get; set; }
+        public List<CertificateValueDto> Values { get; set; } = new List<CertificateValueDto>();
     }
 
     public class MaterialCertificateQuery : PaginationParams
@@ -43,6 +58,16 @@ namespace ViewModels.NasbNiro.QualityDtos
         public string Issuer { get; set; }
         public Guid? DocumentId { get; set; }
         public string Summary { get; set; }
+
+        // ----- Package C
+        public string CertHeatNumber { get; set; }
+        public string Grade { get; set; }
+        public string Standard { get; set; }
+        public string InspectorOrganisation { get; set; }
+        public string InspectorName { get; set; }
+        public string InspectorStampNo { get; set; }
+        public string ManufacturerSignatory { get; set; }
+        public List<SaveCertificateValueDto> Values { get; set; } = new List<SaveCertificateValueDto>();
     }
 
     public class VerifyCertificateDto

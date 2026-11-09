@@ -92,7 +92,7 @@ namespace Services.NasbNiro.Production
             {
                 Number = await InventoryNumbers.NextNumberAsync(uow, MfNumbers.ProductionOrder, "PO-MF", DateTime.Today, ct),
                 WorkOrderId = order.WorkOrderId, ContractId = order.ContractId, ProcessId = order.ProcessId, BomId = order.BomId, ActivityId = order.ActivityId, ItemId = order.ItemId,
-                Quantity = quantity, Unit = order.Unit, Status = MfOrderStatus.Draft, AutoDrafted = true, ReplacesOrderId = order.Id,
+                Quantity = quantity, Unit = order.Unit, Status = MfOrderStatus.Draft, AutoDrafted = true, ReplacesOrderId = order.Id, ComponentSource = order.ComponentSource, ComponentNote = order.ComponentNote,
                 SerialsPlanned = serials == null || serials.Count == 0 ? null : MfSerialRules.PerLine(serials),
                 Note = $"جایگزین {MfFlow.Num(quantity)} {order.Unit} ضایعات دستور تولید {order.Number}" + (ncr == null ? string.Empty : $" (گزارش عدم انطباق {ncr.Number})"),
                 CreateDate = now, ModifyDate = now, CreatorUserId = userId, ModifierUserId = userId,

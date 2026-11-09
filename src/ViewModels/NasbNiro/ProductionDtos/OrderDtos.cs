@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Quality;
@@ -88,6 +88,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? BomId { get; set; }
         public int? ActivityId { get; set; }
         public string SerialsPlanned { get; set; }
+
+        /// <summary>Package A2: where the components came from: BASELINE (the project BOM baseline), LEGACY (the old BOM, read only fallback) or empty (manual).</summary>
+        public string ComponentSource { get; set; }
+
+        public string ComponentNote { get; set; }
         public int? KitRequestId { get; set; }
         public string KitNumber { get; set; }
 
@@ -202,6 +207,11 @@ namespace ViewModels.NasbNiro.ProductionDtos
 
         public int? WpsId { get; set; }
         public string WpsNumber { get; set; }
+
+        /// <summary>Package C: a special process step (finished only with a passed, QA-reviewed run).</summary>
+        public bool IsSpecialProcess { get; set; }
+
+        public int? SpecialProcessTypeId { get; set; }
 
         /// <summary>R1p D12: the weld log the system drafted from the booking when the welding step finished.</summary>
         public int? WeldLogId { get; set; }

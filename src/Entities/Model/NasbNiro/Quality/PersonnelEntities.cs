@@ -55,6 +55,25 @@ namespace Entities.Model.NasbNiro.Quality
         public bool Superseded { get; set; }
 
         public int? RenewsQualificationId { get; set; }
+
+        // ----- Package C: the qualified range of a welder, structured so that it can be compared with the WPS (ASME IX QW-451 .. QW-461). Lists are separated by commas.
+
+        /// <summary>P-numbers the welder is qualified for ("1,8").</summary>
+        public string RangePNos { get; set; }
+
+        /// <summary>Group numbers (P-No groups) the welder is qualified for.</summary>
+        public string RangeGroupNos { get; set; }
+
+        /// <summary>Filler F-numbers the welder is qualified for.</summary>
+        public string RangeFNos { get; set; }
+
+        /// <summary>Positions the welder is qualified for ("1G,2G,3G").</summary>
+        public string RangePositions { get; set; }
+
+        public decimal? RangeThicknessMin { get; set; }
+        public decimal? RangeThicknessMax { get; set; }
+        public decimal? RangeDiameterMin { get; set; }
+        public decimal? RangeDiameterMax { get; set; }
     }
 
     public class Wps : BaseEntity
@@ -63,6 +82,13 @@ namespace Entities.Model.NasbNiro.Quality
         public string Revision { get; set; }
         public string Process { get; set; }
         public string BasePNo { get; set; }
+
+        /// <summary>Package C: the group number of the base metal (P-No group).</summary>
+        public string BaseGroupNo { get; set; }
+
+        /// <summary>Package C: the pipe or part diameter range (mm) the WPS is written for; empty = not limited by the WPS.</summary>
+        public decimal? DiameterMin { get; set; }
+        public decimal? DiameterMax { get; set; }
         public string FillerFNo { get; set; }
         public string FillerANo { get; set; }
         public decimal? ThicknessMin { get; set; }

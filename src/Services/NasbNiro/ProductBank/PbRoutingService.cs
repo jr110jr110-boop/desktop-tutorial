@@ -173,6 +173,8 @@ namespace Services.NasbNiro.ProductBank
                 r = await LoadAsync(dto.Id.Value, true, ct);
                 if (r == null) return ResponseDtoHelper.NotFound<PbOpcDto>(PbMessages.NotFound);
                 if (r.Status != PbRoutingStatus.Draft) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.OnlyDraft);
+                string frozenBy = await global::Services.NasbNiro.EngChange.EcGate.FrozenByOrderAsync(Uow, Entities.Model.NasbNiro.EngChange.EcChangeKind.Opc, r.Id, ct);   // Package A2: a revision named in an order in approval / approved is not edited
+                if (frozenBy != null) return ResponseDtoHelper.BadRequest<PbOpcDto>(frozenBy);
                 if (r.PreparedByUserId != User.UserId) return ResponseDtoHelper.BadRequest<PbOpcDto>("پیش‌نویس را فقط تهیه‌کننده آن ویرایش می‌کند.");
                 if (r.PartNumber != pn) return ResponseDtoHelper.BadRequest<PbOpcDto>("شماره قطعه یک نسخه تغییر نمی‌کند.");
                 Uow.Set<PbOpcStep>().RemoveRange(r.Steps);
@@ -284,6 +286,8 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ApproveRoles)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.NotAllowed);
             if (r.PreparedByUserId == User.UserId || r.CheckedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.SameUser);
             if (HashOf(r.Steps) != r.ContentHash) return ResponseDtoHelper.BadRequest<PbOpcDto>("مراحل بعد از ارسال تغییر کرده است.");
+            string ecProblem = await EngChange.EcGate.OpcApproveProblemAsync(Uow, r, ct);   // Package A2: a new revision of an approved OPC chart needs an approved ECO that names it
+            if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbOpcDto>(ecProblem);
             PbOpcRouting previous = await Uow.Set<PbOpcRouting>().FirstOrDefaultAsync(x => !x.Deleted && x.PartNumber == r.PartNumber && x.Status == PbRoutingStatus.Approved && x.Id != r.Id, ct);
             if (previous != null) { previous.Status = PbRoutingStatus.Superseded; Stamp(previous, false); }
             r.Status = PbRoutingStatus.Approved;
@@ -465,6 +469,12 @@ namespace Services.NasbNiro.ProductBank
                     await Uow.SaveChangesAsync(ct);
                     ResponseDto<RoutingRevisionDto> rev = await _mes.SaveRoutingAsync(new SaveRoutingRevisionDto { ItemId = item.Id, Note = "از چارت OPC " + routing.PartNumber + " نسخه " + PbText.Revision(routing.Revision) }, ct);
                     if (!rev.Success) return ResponseDtoHelper.BadRequest<PbPublishResultDto>(plan.PartNumber + ": " + rev.Message);
+                    if (rev.Data != null)
+                    {
+                        // Package A2: the revision written from this chart says so (server-set); its approval is covered by the gate of the chart itself
+                        MfRoutingRevision written = await Uow.Set<MfRoutingRevision>().FirstOrDefaultAsync(v => v.Id == rev.Data.Id, ct);
+                        if (written != null) { written.SourceOpcRoutingId = routing.Id; }
+                    }
                     done.Parts++;
                 }
                 routing.PublishedToMesAt = DateTimeOffset.Now;

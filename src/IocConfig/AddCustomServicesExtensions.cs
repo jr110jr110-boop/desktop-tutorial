@@ -212,7 +212,13 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Quality.ICapaService, Services.NasbNiro.Quality.CapaService>();
             services.AddScoped<Services.NasbNiro.Quality.IReleaseService, Services.NasbNiro.Quality.ReleaseService>();
             services.AddScoped<Services.NasbNiro.Quality.ICharacteristicService, Services.NasbNiro.Quality.CharacteristicService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignPlanService, Services.NasbNiro.ProductBank.DesignPlanService>();   // Package A1
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignInputService, Services.NasbNiro.ProductBank.DesignInputService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignReviewService, Services.NasbNiro.ProductBank.DesignReviewService>();
+            services.AddScoped<Services.NasbNiro.ProductBank.IDesignAdoptionService, Services.NasbNiro.ProductBank.DesignAdoptionService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
+            services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
+            services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();
             services.AddScoped<Services.NasbNiro.Quality.IFirstArticleService, Services.NasbNiro.Quality.FirstArticleService>();
             services.AddScoped<Services.NasbNiro.Quality.IAsBuiltService, Services.NasbNiro.Quality.AsBuiltService>();
             services.AddScoped<Services.NasbNiro.Quality.IDocumentControlService, Services.NasbNiro.Quality.DocumentControlService>();
@@ -284,6 +290,13 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.FinAnomalySeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.Ai.OfficeDraftSeatJob>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.OpsData.OpsDataSeatJob>();
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob, Services.NasbNiro.AuditSeat.AuditSeatJob>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusRunService, Services.NasbNiro.AuditSeat.AusRunService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusFindingService, Services.NasbNiro.AuditSeat.AusFindingService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusReportService, Services.NasbNiro.AuditSeat.AusReportService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusAcceptanceService, Services.NasbNiro.AuditSeat.AusAcceptanceService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusProgramService, Services.NasbNiro.AuditSeat.AusProgramService>();
+            services.AddScoped<Services.NasbNiro.AuditSeat.IAusAuditService, Services.NasbNiro.AuditSeat.AusAuditService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();
@@ -295,6 +308,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProductBank.IPbCodingService, Services.NasbNiro.ProductBank.PbCodingService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbBomService, Services.NasbNiro.ProductBank.PbBomService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbRoutingService, Services.NasbNiro.ProductBank.PbRoutingService>();
+            services.AddScoped<Services.NasbNiro.EngChange.IEngChangeService, Services.NasbNiro.EngChange.EngChangeService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbProductService, Services.NasbNiro.ProductBank.PbProductService>();
             services.AddScoped<Services.NasbNiro.ProductBank.IPbSeedService, Services.NasbNiro.ProductBank.PbSeedService>();
             services.AddScoped<Services.NasbNiro.Trace.ITraceCenterService, Services.NasbNiro.Trace.TraceCenterService>();

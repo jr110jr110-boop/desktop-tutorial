@@ -291,9 +291,15 @@ namespace Services.NasbNiro.Quality
                     if (IsAi) return Bad<CharListDto>("تایید فهرست مشخصه با انسان است؛ صندلی هوش مصنوعی آن را تایید نمی‌کند.");
                     if (l.Status != CharListStatus.Submitted) return Bad<CharListDto>("فقط فهرست ارسال‌شده تایید می‌شود.");
                     if (l.CreatorUserId == Me || Editors(l).Contains(Me)) return Bad<CharListDto>("تهیه‌کننده یا ویرایش‌کننده فهرست نمی‌تواند آن را تایید کند (تفکیک وظایف).");
+                    PcDocStatus revStatus = await _uow.Set<PcDocumentRevision>().Where(r => r.Id == l.RevisionId).Select(r => r.Status).FirstAsync(ct);
+                    if (InForce(revStatus))
+                    {
+                        // Package A2: a new version of the list of a drawing revision that is already in force is released at once by this approval, so it needs an approved engineering change order that names it
+                        string ecProblem = await global::Services.NasbNiro.EngChange.EcGate.CharListVersionProblemAsync(_uow, l.Id, l.RevisionId, l.Version, ct);
+                        if (ecProblem != null) return Bad<CharListDto>(ecProblem);
+                    }
                     l.ContentHash = CharacteristicRules.Hash(l.Items.OrderBy(i => i.RowNumber).Select(CharacteristicResolver.ToLine));
                     l.Status = CharListStatus.Approved; l.ApprovedByUserId = Me; l.ApprovedAt = now;
-                    PcDocStatus revStatus = await _uow.Set<PcDocumentRevision>().Where(r => r.Id == l.RevisionId).Select(r => r.Status).FirstAsync(ct);
                     if (InForce(revStatus)) await CharacteristicRelease.ReleaseAsync(_uow, l, now, ct);
                     break;
                 }

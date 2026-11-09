@@ -223,6 +223,13 @@ namespace Services.NasbNiro.Inventory
             {
                 string certificateProblem = await _material.CheckRequiredCertificateAsync(inspection.ItemId, inspection.LotId, cancellationToken);
                 if (certificateProblem != null) return ResponseDtoHelper.BadRequest<InspectionDto>(certificateProblem);
+                // Package C (H7): the return of a subcontracted special process is accepted with the supplier's certificate and chart, the supplier approved for the process
+                if (inspection.ReceiptDocumentId > 0)
+                {
+                    InventoryDocument receiptDoc = await _uow.Set<InventoryDocument>().AsNoTracking().FirstOrDefaultAsync(d => d.Id == inspection.ReceiptDocumentId, cancellationToken);
+                    string evidenceProblem = await global::Services.NasbNiro.Quality.SpecialProcessGate.ReceiptEvidenceProblemAsync(_uow, receiptDoc, cancellationToken);
+                    if (evidenceProblem != null) return ResponseDtoHelper.BadRequest<InspectionDto>(evidenceProblem);
+                }
             }
 
             // R1q D16 and review M12: whether the inspection is "measured" follows from the measured values on it, never from a flag of the client. Every value names the

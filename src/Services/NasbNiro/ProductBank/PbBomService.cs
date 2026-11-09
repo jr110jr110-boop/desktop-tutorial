@@ -234,6 +234,8 @@ namespace Services.NasbNiro.ProductBank
                 h = await LoadAsync(dto.Id.Value, true, ct);
                 if (h == null) return ResponseDtoHelper.NotFound<PbBomDto>(PbMessages.NotFound);
                 if (h.Status != PbBomStatus.Draft) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.OnlyDraft);
+                string frozenBy = await global::Services.NasbNiro.EngChange.EcGate.FrozenByOrderAsync(Uow, Entities.Model.NasbNiro.EngChange.EcChangeKind.Bom, h.Id, ct);   // Package A2: a revision named in an order in approval / approved is not edited
+                if (frozenBy != null) return ResponseDtoHelper.BadRequest<PbBomDto>(frozenBy);
                 if (h.PreparedByUserId != User.UserId) return ResponseDtoHelper.BadRequest<PbBomDto>("پیش‌نویس را فقط تهیه‌کننده آن ویرایش می‌کند.");
                 if (assembly != h.AssemblyPartNumber) return ResponseDtoHelper.BadRequest<PbBomDto>("شماره مجموعه یک نسخه تغییر نمی‌کند.");
                 Uow.Set<PbBomLine>().RemoveRange(h.Lines);
@@ -248,7 +250,7 @@ namespace Services.NasbNiro.ProductBank
                 Uow.Set<PbBomHeader>().Add(h);
                 Stamp(h, true);
             }
-            int? productId = dto.ProductId;
+            int? productId = dto.ProductId ?? h.ProductId;   // an edit that does not name the product keeps the product of the revision (a new revision inherits it; clearing it would detach the BOM from its design plan)
             if (!productId.HasValue)
                 productId = await Uow.Set<PbProduct>().Where(p => !p.Deleted && p.Code == assembly).Select(p => (int?)p.Id).FirstOrDefaultAsync(ct);
             else if (!await Uow.Set<PbProduct>().AnyAsync(p => p.Id == productId.Value && !p.Deleted, ct))
@@ -426,6 +428,13 @@ namespace Services.NasbNiro.ProductBank
         }
 
         /// <summary>A BOM that is sent for review or released may name only released child BOMs (a child that is still being changed would change the parent without a new revision).</summary>
+        /// <summary>Packages A1/A2: the problems of the release gates as one Persian message (null when there is none).</summary>
+        internal static string JoinProblems(params string[] problems)
+        {
+            var list = problems.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+            return list.Count == 0 ? null : string.Join(" همچنین: ", list);
+        }
+
         private async Task<string> ChildProblemAsync(IEnumerable<PbBomLine> lines, CancellationToken ct)
         {
             List<int> ids = lines.Where(l => !l.Deleted && l.ChildBomId.HasValue).Select(l => l.ChildBomId.Value).Distinct().ToList();
@@ -492,6 +501,9 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ReleaseRoles)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (h.PreparedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUser);
             if (HashOf(h.Lines) != h.ContentHash) return ResponseDtoHelper.BadRequest<PbBomDto>("محتوای BOM بعد از ارسال تغییر کرده است.");
+            // Packages A2 + A1 (one gate, one message): an approved ECO that names a new revision of a released BOM, then a closed and accepted design verification; both problems are reported together
+            string releaseProblem = JoinProblems(await EngChange.EcGate.BomReleaseProblemAsync(Uow, h, ct), await DesignGate.CheckReleaseAsync(Uow, h, null, null, ct));
+            if (releaseProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(releaseProblem);
             string childProblem = await ChildProblemAsync(h.Lines, ct);
             if (childProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(childProblem);
             if (await DistinctReviewersAsync(ct) && (h.CheckedByUserId == User.UserId || h.QcCheckedByUserId == User.UserId || h.ManufacturingCheckedByUserId == User.UserId || h.ApprovedByUserId == User.UserId)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUserReviewers);
@@ -521,6 +533,8 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(PbRoles.ReleaseRoles)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (h.Status != PbBomStatus.Released && h.Status != PbBomStatus.Superseded) return ResponseDtoHelper.BadRequest<PbBomDto>("فقط نسخه منتشرشده یا جایگزین‌شده منسوخ می‌شود.");
             if (PbText.Clean(dto.Note) == null) return ResponseDtoHelper.BadRequest<PbBomDto>("دلیل منسوخ کردن را بنویسید.");
+            string ecProblem = await EngChange.EcGate.BomObsoleteProblemAsync(Uow, h, ct);   // Package A2: an approved ECO that names it, and every open use has a disposition
+            if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbBomDto>(ecProblem);
             h.Status = PbBomStatus.Obsolete;
             h.ChangeReason = PbText.Clean(dto.Note);
             Stamp(h, false);

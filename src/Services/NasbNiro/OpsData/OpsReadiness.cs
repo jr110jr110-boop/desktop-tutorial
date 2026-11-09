@@ -18,12 +18,15 @@ namespace Services.NasbNiro.OpsData
         public const string Drawing = "RD-DRAWING";
         public const string Itp = "RD-ITP";
         public const string Spec = "RD-SPEC";
+        public const string Design = "RD-DESIGN";   // Package A1
         public const string Weight = "RS-WEIGHT";
         public const string Mdr = "RS-MDR";
         public const string ItpClient = "RS-ITPCLIENT";
         public const string Schedule = "RS-SCHEDULE";
         public const string LongLead = "RS-LONGLEAD";
         public const string Stage = "RS-STAGE";
+        /// <summary>Package A2: open engineering change orders (in approval or approved, not yet closed) that touch the parts of the project; soft, listed only when there are some.</summary>
+        public const string Eco = "RS-ECO";
     }
 
     public sealed class ReadinessDef
@@ -62,12 +65,14 @@ namespace Services.NasbNiro.OpsData
             new ReadinessDef { Code = ReadinessCodes.Drawing, Title = "نقشه‌ی منتشرشده (Released) در سامانه‌ی مدارک مهندسی برای هر قطعه‌ی ساخت", Owner = "DCC", Hard = true },
             new ReadinessDef { Code = ReadinessCodes.Itp, Title = "مشخصه‌های ITP برای هر عملیات بازرسی/کنترل کیفیت مسیر ساخت", Owner = "QC", Hard = true, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.Spec, Title = "مشخصه‌ی فنی / جنس برای هر قطعه‌ی خریدنی", Owner = "ENGINEERING", Hard = true },
+            new ReadinessDef { Code = ReadinessCodes.Design, Title = "کنترل طراحی: برنامه طراحی تاییدشده، کامل بودن ورودی‌ها و بازبینی تایید طراحی (Verification) پذیرفته برای BOM منتشرشده", Owner = "ENGINEERING", Hard = true },
             new ReadinessDef { Code = ReadinessCodes.Weight, Title = "وزن واحد کالاهای فلزی", Owner = "ENGINEERING", Hard = false },
             new ReadinessDef { Code = ReadinessCodes.Mdr, Title = "فهرست مدارک مهندسی قرارداد (MDR/MDL)", Owner = "DCC", Hard = false, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.ItpClient, Title = "ITP تأییدشده‌ی کارفرما", Owner = "QC", Hard = false, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.Schedule, Title = "خط پایه‌ی برنامه‌ی زمان‌بندی (تأییدشده)", Owner = "PLANNING", Hard = false, ProjectLevel = true },
             new ReadinessDef { Code = ReadinessCodes.LongLead, Title = "علامت‌گذاری اقلام با زمان تأمین طولانی (زمان تأمین کالا ثبت شده)", Owner = "PLANNING", Hard = false },
             new ReadinessDef { Code = ReadinessCodes.Stage, Title = "کد مرحله‌ی OPC برای هر مرحله‌ی قطعه‌ی ساخت", Owner = "ENGINEERING", Hard = false },
+            new ReadinessDef { Code = ReadinessCodes.Eco, Title = "دستور تغییر مهندسی (ECO) بازِ متاثر از این محصول", Owner = "ENGINEERING", Hard = false, ProjectLevel = true },
         };
 
         public static ReadinessDef Find(string code) => All.FirstOrDefault(d => string.Equals(d.Code, code, StringComparison.OrdinalIgnoreCase));
@@ -176,12 +181,20 @@ namespace Services.NasbNiro.OpsData
         public Dictionary<string, ReadinessRoutingFact> Routings { get; set; } = new Dictionary<string, ReadinessRoutingFact>();
         public string ProductLink { get; set; }
 
+        /// <summary>Package A1: the design control applies (Design.VerificationRequired) and what is missing of it for the released BOM (empty = complete).</summary>
+        public bool DesignRequired { get; set; }
+        public List<string> DesignProblems { get; set; } = new List<string>();
+
+        /// <summary>Fix round 1 (H6): the released BOM predates the design control and has no adoption; the item is then Soft with the note.</summary>
+        public bool DesignLegacy { get; set; }
+
         // project level (only with a work order)
         public int ItpActivities { get; set; }
         public int ItpActivitiesWithCharacteristics { get; set; }
         public bool ItpExists { get; set; }
         public bool ItpClientApproved { get; set; }
         public int MdrCount { get; set; }
+        public List<string> OpenEcos { get; set; } = new List<string>();
         public bool ScheduleBaselineApproved { get; set; }
     }
 
@@ -293,6 +306,12 @@ namespace Services.NasbNiro.OpsData
                         foreach (ReadinessPart p in buy.Where(p => !p.HasSpec)) off.Add(Off(PartText(p) + ": مشخصه‌ی فنی یا جنس ندارد.", f.ProductLink));
                         item = Make(d, s, buy.Count, off);
                         break;
+                    case ReadinessCodes.Design:
+                        if (!f.DesignRequired || !f.BomReleased) { item = Make(d, s, 0, off); item.Status = NotApplicable; break; }
+                        foreach (string problem in f.DesignProblems) off.Add(Off(problem, f.ProductLink));
+                        item = Make(d, s, Math.Max(1, off.Count), off);
+                        if (f.DesignLegacy && off.Count > 0) { item.Hard = false; item.Severity = "Soft"; }   // legacy, not design-verified: visible, not blocking
+                        break;
                     case ReadinessCodes.Weight:
                         foreach (ReadinessPart p in lines.Where(p => p.MetalWithoutWeight)) off.Add(Off(PartText(p) + ": وزن واحد کالا ثبت نشده است.", f.ProductLink));
                         item = Make(d, s, lines.Count(p => p.IsMetal), off);
@@ -317,6 +336,11 @@ namespace Services.NasbNiro.OpsData
                         foreach (ReadinessPart p in make.Where(p => f.Routings.TryGetValue(p.PartNumber, out ReadinessRoutingFact r) && r.StepsWithoutStage.Count > 0))
                             off.Add(Off(PartText(p) + ": مراحل بدون کد مرحله: " + string.Join("، ", f.Routings[p.PartNumber].StepsWithoutStage.Take(5)), f.ProductLink));
                         item = Make(d, s, make.Count, off);
+                        break;
+                    case ReadinessCodes.Eco:
+                        if (f.OpenEcos.Count == 0) continue;   // no open order touches the project: the item does not appear and the percentage does not move
+                        foreach (string eco in f.OpenEcos) off.Add(Off(eco, f.ProductLink));
+                        item = Make(d, s, f.OpenEcos.Count, off);
                         break;
                     default:
                         continue;
