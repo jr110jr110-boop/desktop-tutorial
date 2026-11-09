@@ -165,15 +165,24 @@ PMO 1، COMMERCIAL 2، FINANCIAL 3، ENGINEERING 4، QC 5، WAREHOUSE 6، ASSEMB
 - جزئیات: بخش «بخش E» در `docs/dnc-merge-note.md` روی `innco-dnc`.
 
 **گام‌ها به ترتیب**
-1. [ ] وقتی CI بیکار است، روی `innco-net10-build`: `git merge origin/innco-dnc`.
-2. [ ] مایگریشن تازه محلی با نام `ProductionGuardE` (مایگریشن `ProductionDnc` دست نخورد). ساخت آزمایشی در سشن جانبی فقط افزودنی بود: ۷ `CreateTable` (`MfMachineActivities`، `MfGateOverrides`، `MfPostProcessors`، `MfNcAttachments`، `MfCamTools`، `MfMeasurements`، `MfMeasureStations`)، ۴۲ `AddColumn` روی `MfMachineMonitors`، `MfNcRevisions`، `MfNcRuns`، `MfChecklistItems` و `MfChecklistAnswers` (همه nullable یا با پیش‌فرض)، ۱۵ ایندکس، ۲ کلید خارجی.
-3. [ ] CI کامل سبز (هر دو SQL و نصب ×۳). آزمون دود:
+1. [x] وقتی CI بیکار است، روی `innco-net10-build`: `git merge origin/innco-dnc`.
+2. [x] مایگریشن تازه محلی با نام `ProductionGuardE` (مایگریشن `ProductionDnc` دست نخورد). ساخت آزمایشی در سشن جانبی فقط افزودنی بود: ۷ `CreateTable` (`MfMachineActivities`، `MfGateOverrides`، `MfPostProcessors`، `MfNcAttachments`، `MfCamTools`، `MfMeasurements`، `MfMeasureStations`)، ۴۲ `AddColumn` روی `MfMachineMonitors`، `MfNcRevisions`، `MfNcRuns`، `MfChecklistItems` و `MfChecklistAnswers` (همه nullable یا با پیش‌فرض)، ۱۵ ایندکس، ۲ کلید خارجی.
+3. [x] CI کامل سبز (هر دو SQL و نصب ×۳). آزمون دود:
    - پیش از submit نسخه ۱ و ۲ DNC، مدارک CAM (پست‌پروسسور دونفره، شبیه‌سازی، فهرست ابزار) می‌گیرد؛ شمار ردپای نسخه ۱ از ۳ به ۶ رفت.
    - بلوک تازه `guard:` پس از بخش mf-dispatch. یک پایش و یک آزمون اتصال به نشانی بی‌پاسخ 10.255.255.1 دارد (حداکثر حدود ۱۰ ثانیه هر کدام).
-4. [ ] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc` و بسته `.github/ci-frontend-dist`. مسیرهای تازه `/production/guard` و `/production/dnc/posts`. `vue-tsc` در sandbox جانبی برای کمبود حافظه کامل نشد؛ لطفاً اجرا کنید.
-5. [ ] بسته نصب: `Dnc:RequireCamEvidence` نوشته نشود یا `true` باشد؛ هیچ رمزی در بسته نباشد (رمز PLC کنترلر فقط `Dnc:Credentials:<key>:Password` روی سرور).
+4. [x] فرانت: روی `innco-front`، `git merge origin/innco-front-dnc` و بسته `.github/ci-frontend-dist`. مسیرهای تازه `/production/guard` و `/production/dnc/posts`. `vue-tsc` در sandbox جانبی برای کمبود حافظه کامل نشد؛ لطفاً اجرا کنید.
+5. [x] بسته نصب: `Dnc:RequireCamEvidence` نوشته نشود یا `true` باشد؛ هیچ رمزی در بسته نباشد (رمز PLC کنترلر فقط `Dnc:Credentials:<key>:Password` روی سرور).
 
 **آزمون واحد در سشن جانبی (پس از ادغام cbc84e3b):** آزمون‌های Guard، DNC، Monitor، ShopExtras، Dispatch، AiSeat و مجوز کنترلرها ۱۱۸ از ۱۱۸. پیش‌تر: اجرای کامل پیش از ادغام ۱۴۹۹ از ۱۵۰۲ (یک مورد بخش E که رفع شد، دو مورد P9 زمان‌حساس که a10cc49f رفع کرده). پس از ادغام: آزمون‌های Guard (۱۳)، DNC، Monitor، ShopExtras، Dispatch، AiSeat، P9 و مجوز کنترلرها ۱۴۶ از ۱۴۶.
+
+**انجام شد در سشن اصلی (1405/08/19):**
+- ادغام: `innco-net10-build` b0cd4a8f (ادغام سریع ce55c4f6)، فرانت `innco-front` با `innco-front-dnc` 38d4d9be.
+- مایگریشن `ProductionGuardE`: دقیقاً ۷ جدول، ۴۲ ستون (۱۲ ستون non-null همه با پیش‌فرض)، ۱۵ ایندکس، ۲ کلید خارجی؛ هیچ Drop/Alter.
+- vue-tsc: همان ۵ خطای قدیمی.
+- بسته نصب: `Dnc:RequireCamEvidence` نوشته نمی‌شود (پیش‌فرض روشن)؛ بررسی نصب حالا اگر روی سرور غیر true باشد رد می‌کند.
+- آزمون واحد کامل: ۱۵۵۶ از ۱۵۵۶.
+- CI روی b0cd4a8f: دود ۷۷۱۳/۰ روی SQL 2022 و 2025 Express؛ نصب ۱۳۷/۰ در پنج مرحله. (انتشار نتیجه 2025 یک بار با 403 گذرای GitHub شکست خورد؛ خود دود ۰ خطا داشت؛ دوباره اجرا شد.)
+- بسته به‌روزرسانی PMIS_Update_b0cd4a8.zip به کاربر داده شد.
 
 ## 8. در انتظار کاربر / شرکت
 
