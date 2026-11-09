@@ -427,7 +427,7 @@ onMounted(async () => {
             <tr v-for="(l, i) in order.lines" :key="l.id || i">
               <td>{{ i + 1 }}</td>
               <td class="inv-ltr">{{ l.requestNumber }}</td>
-              <td><span class="inv-ltr">{{ l.itemCode }}</span> {{ l.itemTitle || l.description }}</td>
+              <td><span class="inv-ltr">{{ l.itemCode }}</span> {{ l.itemTitle || l.description }}<div v-if="l.drawingNumber" class="small inv-muted">نقشه <span class="inv-ltr">{{ l.drawingNumber }}</span> بازنگری <span class="inv-ltr">{{ l.drawingRevision }}</span><span v-if="l.drawingConfirmedRevision" class="inv-badge ok ms-1">تایید تامین‌کننده: {{ l.drawingConfirmedRevision }}</span></div></td>
               <td>{{ l.unit }}</td>
               <td><input v-model.number="l.quantity" :disabled="!canEdit" class="form-control form-control-sm" step="any" type="number" /></td>
               <td><input v-model.number="l.unitPrice" :disabled="!canEdit" class="form-control form-control-sm" type="number" /></td>

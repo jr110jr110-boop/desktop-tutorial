@@ -317,7 +317,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
@@ -466,6 +466,8 @@ const links = {
     { title: "اجراهای ممیز", routeName: "AuditRuns", disabled: !hasRole(AuditRoles.readers) },
     { title: "برنامه‌ی ممیزی", routeName: "AuditPrograms", disabled: !hasRole(AuditRoles.readers) },
     { title: "ممیزی فرایند", routeName: "AuditProcessAudits", disabled: !hasRole(AuditRoles.readers) },
+    { title: "گذار به کنترل (قدیمی‌ها)", routeName: "GoLive", disabled: !hasRole(GoLiveRoles.readers) },
+    { title: "صندوق تصمیم مدیرعامل", routeName: "CeoInbox", disabled: !hasRole(GoLiveRoles.ceoInbox) },
   ] as Links[],
   productBank: [
     { title: "بانک محصول", routeName: "ProductBankProducts" },

@@ -5,13 +5,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getShopDocuments, printControlledCopy } from "@/api/EdmsAPIs";
 import { http } from "@/api/ApiClient";
 import { downloadFile } from "@/api/InventoryAPIs";
+import { stampPdf } from "@/api/GoLiveAPIs";
 import { fail, jalali } from "@/composables/inventory";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 const props = defineProps<{ orderId: number; operationId?: number | null }>();
 const docs = ref<any[]>([]);
 const loaded = ref(false);
-const copy = ref<{ stamp: any; url: string; image: boolean } | null>(null);
+const copy = ref<{ stamp: any; url: string; image: boolean; stamped?: boolean } | null>(null);
 const canRaw = computed(() => hasRole(ProjectControlRoles.docReaders));
 
 async function load() {
@@ -38,7 +39,14 @@ async function controlledPrint(doc: any, file: any) {
   } catch {
     return fail("بارگیری فایل ممکن نشد.");
   }
-  copy.value = { stamp, url: URL.createObjectURL(blob), image: (blob.type || "").startsWith("image/") };
+  // Package G: a PDF gets the stamp on every page («نسخه کنترل‌شده» + number, revision, release date, print date and user; footer «نسخه کنترل‌نشده پس از چاپ»); other files keep the stamp of the page
+  let shown = blob;
+  let stamped = false;
+  if ((blob.type || "") === "application/pdf" && stamp.stampHeader) {
+    const out = await stampPdf(blob, stamp.stampHeader, stamp.stampFooter);
+    if (out) { shown = out; stamped = true; }
+  }
+  copy.value = { stamp, url: URL.createObjectURL(shown), image: (blob.type || "").startsWith("image/"), stamped };
 }
 
 function doPrint() {
@@ -80,7 +88,7 @@ watch(() => [props.orderId, props.operationId], load);
         <button class="btn btn-sm btn-primary" @click="doPrint">چاپ</button>
         <button class="btn btn-sm btn-secondary" @click="close">بستن</button>
       </div>
-      <div class="edms-stamp"><b>نسخه کنترل‌شده</b><span>{{ copy.stamp.stampText }}</span></div>
+      <div v-if="!copy.stamped" class="edms-stamp"><b>نسخه کنترل‌شده</b><span>{{ copy.stamp.stampText }}</span><small>{{ copy.stamp.stampFooter }}</small></div>
       <img v-if="copy.image" :src="copy.url" class="edms-file" alt="" />
       <iframe v-else :src="copy.url" class="edms-file"></iframe>
     </div>

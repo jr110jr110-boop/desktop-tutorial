@@ -136,7 +136,7 @@ watch(pcContractId, load);
           <thead><tr><th>سند</th><th>عنوان</th><th>ویرایش</th><th>منظور</th><th>پاسخ کارفرما</th><th></th></tr></thead>
           <tbody>
             <tr v-for="l in detail.lines" :key="l.id">
-              <td class="inv-ltr">{{ l.documentNumber }}</td><td>{{ l.title }}</td><td class="inv-ltr">{{ l.revision }}</td><td>{{ transmittalPurposes[l.purpose] }}</td>
+              <td class="inv-ltr">{{ l.documentNumber }}</td><td>{{ l.title }}</td><td class="inv-ltr">{{ l.revision }}<span v-if="l.legacyFreeText" class="inv-badge warn ms-1" title="این سند بازنگری ثبت‌شده در EDMS ندارد؛ بازنگری متن آزاد قدیمی است">متن آزاد قدیمی</span></td><td>{{ transmittalPurposes[l.purpose] }}</td>
               <td><b v-if="l.responseCode" class="inv-ltr">{{ l.responseCode }}</b> {{ jalali(l.responseDate) }} <span class="small inv-muted">{{ l.responseNote }}</span></td>
               <td><button v-if="can && detail.direction === 1 && l.purpose === 1 && !l.responseCode" class="btn btn-sm btn-outline-primary" @click="resp = { transmittalLineId: l.id, responseCode: codes[0]?.code, responseDate: today(), note: '' }">ثبت پاسخ</button></td>
             </tr>
