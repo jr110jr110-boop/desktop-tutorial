@@ -1071,6 +1071,11 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     Set-JsonSetting $settings @('Logging', 'LogLevel') ([pscustomobject]@{ Default = 'Warning'; System = 'Warning'; Microsoft = 'Warning' })
     if ($seedNeeded) { Set-JsonSetting $settings @('AdminUserSeed', 'Password') $seedPassword }
     else { Remove-JsonSetting $settings @('AdminUserSeed', 'Password') }   # an older installation kept the password of the first installation here
+    # Production P2: access from outside the company stays off and no machine folder is allowed until the administrator sets them (written once, a value the administrator set is kept);
+    # the loopback switch is for the tests only and never stays on a server. FTP and camera passwords go in Dnc:Credentials:<key> on the server by hand, never in the package.
+    if ($null -eq (Get-JsonSetting $settings @('Remote', 'Enabled'))) { Set-JsonSetting $settings @('Remote', 'Enabled') $false }
+    if ($null -eq (Get-JsonSetting $settings @('Dnc', 'FolderRoots'))) { Set-JsonSetting $settings @('Dnc', 'FolderRoots') '' }
+    Remove-JsonSetting $settings @('Dnc', 'AllowLoopback')
     Write-JsonSettings $settings $settingsPath
     Write-Ok 'Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.'
 
