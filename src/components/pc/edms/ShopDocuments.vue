@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getShopDocuments, printControlledCopy } from "@/api/EdmsAPIs";
 import { http } from "@/api/ApiClient";
 import { downloadFile } from "@/api/InventoryAPIs";
-import { stampPdf } from "@/api/GoLiveAPIs";
+import { preparePrint, stampPrint } from "@/api/GoLiveAPIs";
 import { fail, jalali } from "@/composables/inventory";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
@@ -29,24 +29,38 @@ function close() {
   document.body.classList.remove("edms-printing");
 }
 
+async function fetchBlob(documentId: string): Promise<Blob | null> {
+  try {
+    return (await http.get("Documents", { params: { DocumentId: documentId }, responseType: "blob" })).data;
+  } catch {
+    fail("بارگیری فایل ممکن نشد.");
+    return null;
+  }
+}
+
 async function controlledPrint(doc: any, file: any) {
-  // the print is logged by a POST (a GET never writes); the answer carries the stamp
+  const isPdf = /\.pdf$/i.test(file.fileName || "");
+  if (isPdf) {
+    // Package G (fix round 1): the server checks that the revision is in force, numbers the copy, records the print and stamps the stored file itself
+    const [prep, pe] = await preparePrint({ revisionId: doc.revisionId, documentId: file.documentId });
+    if (pe) return fail(pe);
+    const out = await stampPrint(prep.printId, prep.header, prep.footer, prep.controlled);
+    if (out) {
+      copy.value = { stamp: { stampText: prep.header, stampFooter: prep.footer }, url: URL.createObjectURL(out), image: false, stamped: true };
+      return;
+    }
+    // the server could not stamp this file: the HTML stamp of the prepared (already recorded) print over the file
+    const blob = await fetchBlob(file.documentId);
+    if (!blob) return;
+    copy.value = { stamp: { stampText: prep.header, stampFooter: prep.footer }, url: URL.createObjectURL(blob), image: false, stamped: false };
+    return;
+  }
+  // other files (images...): the stamp of the page, logged by a POST (a GET never writes)
   const [stamp, e] = await printControlledCopy(doc.revisionId, file.documentId);
   if (e) return fail(e);
-  let blob: Blob;
-  try {
-    blob = (await http.get("Documents", { params: { DocumentId: file.documentId }, responseType: "blob" })).data;
-  } catch {
-    return fail("بارگیری فایل ممکن نشد.");
-  }
-  // Package G: a PDF gets the stamp on every page («نسخه کنترل‌شده» + number, revision, release date, print date and user; footer «نسخه کنترل‌نشده پس از چاپ»); other files keep the stamp of the page
-  let shown = blob;
-  let stamped = false;
-  if ((blob.type || "") === "application/pdf" && stamp.stampHeader) {
-    const out = await stampPdf(blob, stamp.stampHeader, stamp.stampFooter);
-    if (out) { shown = out; stamped = true; }
-  }
-  copy.value = { stamp, url: URL.createObjectURL(shown), image: (blob.type || "").startsWith("image/"), stamped };
+  const blob = await fetchBlob(file.documentId);
+  if (!blob) return;
+  copy.value = { stamp, url: URL.createObjectURL(blob), image: (blob.type || "").startsWith("image/"), stamped: false };
 }
 
 function doPrint() {

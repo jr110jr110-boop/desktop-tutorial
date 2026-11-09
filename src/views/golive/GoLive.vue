@@ -3,13 +3,17 @@
 // «پذیرش مشخصه‌های نقشه موجود» (engineering writes the list, QA approves) and «پذیرش پیکربندی پروژه موجود» (preparer, one more engineer and one PMO person: three different people).
 // Also the pre-check of the transmittal revision setting and the open purchase order lines that cite a superseded drawing revision.
 import { onMounted, ref } from "vue";
-import { charAdoptionAction, configAdoptionAction, confirmPoLine, getCharAdoptions, getCharCandidates, getConfigAdoptions, getConfigCandidates, getGoLiveOverview, getRevisionPreCheck, getStalePoLines, requestCharAdoption, requestConfigAdoption } from "@/api/GoLiveAPIs";
-import { fail, ok } from "@/composables/inventory";
+import { charAdoptionAction, configAdoptionAction, confirmPoLine, getCharAdoptions, getCharCandidates, getConfigAdoptions, getConfigCandidates, getDriftRehearsal, getGoLiveOverview, getPoUncitedLines, getRevisionPreCheck, getStalePoLines, requestCharAdoption, requestConfigAdoption } from "@/api/GoLiveAPIs";
+import { fail, jalali, ok } from "@/composables/inventory";
 
 const overview = ref<any>(null);
 const charCandidates = ref<any[]>([]);
+const charPage = ref({ total: 0, pageNumber: 1, pageSize: 25, search: "" });
 const charAdoptions = ref<any[]>([]);
 const configCandidates = ref<any[]>([]);
+const configPage = ref({ total: 0, pageNumber: 1, pageSize: 25, search: "" });
+const uncited = ref<any>({ total: 0, items: [] });
+const rehearsal = ref<any>(null);
 const configAdoptions = ref<any[]>([]);
 const precheck = ref<any>(null);
 const stale = ref<any[]>([]);
@@ -23,11 +27,41 @@ const classes: Record<number, string> = { 1: "بحرانی", 2: "مهم", 3: "ع
 async function load() {
   const [o] = await getGoLiveOverview();
   overview.value = o;
-  charCandidates.value = (await getCharCandidates())[0] || [];
+  await loadChar();
   charAdoptions.value = (await getCharAdoptions())[0] || [];
-  configCandidates.value = (await getConfigCandidates())[0] || [];
+  await loadConfig();
   configAdoptions.value = (await getConfigAdoptions())[0] || [];
   stale.value = (await getStalePoLines())[0] || [];
+  uncited.value = (await getPoUncitedLines({ pageSize: 50 }))[0] || { total: 0, items: [] };
+}
+
+// the candidate lists are filtered and paged on the server (an old legacy drawing or work order is never cut off)
+async function loadChar() {
+  const q = charPage.value;
+  const [d] = await getCharCandidates({ search: q.search, pageNumber: q.pageNumber, pageSize: q.pageSize });
+  charCandidates.value = d?.items || [];
+  q.total = d?.total || 0;
+}
+async function loadConfig() {
+  const q = configPage.value;
+  const [d] = await getConfigCandidates({ search: q.search, pageNumber: q.pageNumber, pageSize: q.pageSize });
+  configCandidates.value = d?.items || [];
+  q.total = d?.total || 0;
+}
+function paged(page: { total: number; pageNumber: number; pageSize: number; search: string }, reload: () => Promise<void>, delta: number) {
+  const last = Math.max(1, Math.ceil(page.total / page.pageSize));
+  page.pageNumber = Math.min(last, Math.max(1, page.pageNumber + delta));
+  return reload();
+}
+function searched(page: { pageNumber: number }, reload: () => Promise<void>) {
+  page.pageNumber = 1;
+  return reload();
+}
+
+async function runRehearsal() {
+  const [r, error] = await getDriftRehearsal();
+  if (error) return fail(error);
+  rehearsal.value = r;
 }
 
 async function runPreCheck() {
@@ -105,14 +139,16 @@ onMounted(load);
 
     <div class="inv-card">
       <h2 class="h6">پذیرش مشخصه‌های نقشه موجود (مهندسی + QA)</h2>
+      <div class="d-flex gap-2 mb-2"><input v-model="charPage.search" class="form-control form-control-sm" placeholder="جست‌وجوی شماره یا عنوان نقشه" @keyup.enter="searched(charPage, loadChar)" /><button class="btn btn-sm btn-outline-secondary" @click="searched(charPage, loadChar)">جست‌وجو</button></div>
       <div class="table-responsive"><table class="table table-sm">
         <thead><tr><th>نقشه</th><th>بازنگری</th><th>تاریخ انتشار</th><th></th></tr></thead>
         <tbody>
           <tr v-if="!charCandidates.length"><td colspan="4" class="text-center inv-muted">نقشه قدیمی بدون فهرست مشخصه‌ای نیست.</td></tr>
-          <tr v-for="c in charCandidates" :key="c.revisionId"><td>{{ c.documentNumber }} <span class="inv-muted">{{ c.title }}</span></td><td>{{ c.revisionCode }}</td><td>{{ c.releasedAt ? new Date(c.releasedAt).toLocaleDateString("fa-IR") : "-" }}</td>
+          <tr v-for="c in charCandidates" :key="c.revisionId"><td>{{ c.documentNumber }} <span class="inv-muted">{{ c.title }}</span></td><td>{{ c.revisionCode }}</td><td>{{ c.releasedAt ? jalali(c.releasedAt) : "تاریخ ثبت نشده" }}</td>
             <td><span v-if="c.adoptionId" class="inv-badge warn">پذیرش در جریان</span><button v-else class="btn btn-sm btn-outline-primary" @click="charForm.revisionId = c.revisionId">پذیرش</button></td></tr>
         </tbody>
       </table></div>
+      <div class="d-flex gap-2 align-items-center mb-2 small"><button class="btn btn-sm btn-outline-secondary" :disabled="charPage.pageNumber <= 1" @click="paged(charPage, loadChar, -1)">قبلی</button><span>{{ charPage.total }} نقشه — صفحه {{ charPage.pageNumber }}</span><button class="btn btn-sm btn-outline-secondary" :disabled="charPage.pageNumber * charPage.pageSize >= charPage.total" @click="paged(charPage, loadChar, 1)">بعدی</button></div>
       <div v-if="charForm.revisionId" class="border rounded p-2 mb-2">
         <div class="row g-2">
           <div class="col-md-6"><input v-model="charForm.reason" class="form-control" placeholder="دلیل پذیرش (دست‌کم ۱۵ نویسه)" /></div>
@@ -138,14 +174,16 @@ onMounted(load);
 
     <div class="inv-card">
       <h2 class="h6">پذیرش پیکربندی پروژه موجود (مهندسی + مهندسی دوم + PMO)</h2>
+      <div class="d-flex gap-2 mb-2"><input v-model="configPage.search" class="form-control form-control-sm" placeholder="جست‌وجوی کد یا عنوان دستور کار" @keyup.enter="searched(configPage, loadConfig)" /><button class="btn btn-sm btn-outline-secondary" @click="searched(configPage, loadConfig)">جست‌وجو</button></div>
       <div class="table-responsive"><table class="table table-sm">
         <thead><tr><th>دستور کار</th><th>ایجاد</th><th>ردیف BOM قدیمی</th><th></th></tr></thead>
         <tbody>
           <tr v-if="!configCandidates.length"><td colspan="4" class="text-center inv-muted">دستور کار قدیمی بدون پایه‌ریزی نیست.</td></tr>
-          <tr v-for="c in configCandidates" :key="c.workOrderId"><td>{{ c.title }} ({{ c.workOrderId }})</td><td>{{ c.createdAt ? new Date(c.createdAt).toLocaleDateString("fa-IR") : "-" }}</td><td>{{ c.legacyLineCount }}</td>
+          <tr v-for="c in configCandidates" :key="c.workOrderId"><td>{{ c.code || c.workOrderId }} <span class="inv-muted">{{ c.title }}</span></td><td>{{ c.createdUnknown ? "تاریخ ثبت نشده" : jalali(c.createdAt) }}</td><td>{{ c.legacyLineCount }}</td>
             <td><span v-if="c.adoptionId" class="inv-badge warn">پذیرش در جریان</span><button v-else class="btn btn-sm btn-outline-primary" @click="configForm.workOrderId = c.workOrderId">پذیرش</button></td></tr>
         </tbody>
       </table></div>
+      <div class="d-flex gap-2 align-items-center mb-2 small"><button class="btn btn-sm btn-outline-secondary" :disabled="configPage.pageNumber <= 1" @click="paged(configPage, loadConfig, -1)">قبلی</button><span>{{ configPage.total }} دستور کار — صفحه {{ configPage.pageNumber }}</span><button class="btn btn-sm btn-outline-secondary" :disabled="configPage.pageNumber * configPage.pageSize >= configPage.total" @click="paged(configPage, loadConfig, 1)">بعدی</button></div>
       <div v-if="configForm.workOrderId" class="border rounded p-2 mb-2">
         <div class="row g-2">
           <div class="col-md-3"><input v-model.number="configForm.productId" type="number" class="form-control" placeholder="شناسه محصول بانک محصول" /></div>
@@ -170,7 +208,7 @@ onMounted(load);
         <thead><tr><th>نوع</th><th>شماره</th><th>یادداشت</th><th>کاربر</th><th>زمان</th></tr></thead>
         <tbody>
           <tr v-if="!overview?.uses?.length"><td colspan="5" class="text-center inv-muted">تا کنون معافیتی استفاده نشده است.</td></tr>
-          <tr v-for="u in overview?.uses || []" :key="u.id"><td>{{ u.kindText }}</td><td>{{ u.number }}</td><td>{{ u.note }}</td><td>{{ u.usedByName }}</td><td>{{ new Date(u.usedAt).toLocaleString("fa-IR") }}</td></tr>
+          <tr v-for="u in overview?.uses || []" :key="u.id"><td>{{ u.kindText }}</td><td>{{ u.number }}</td><td>{{ u.note }}</td><td>{{ u.usedByName }}</td><td>{{ jalali(u.usedAt, true) }}</td></tr>
         </tbody>
       </table></div>
     </div>
@@ -186,6 +224,26 @@ onMounted(load);
         </tbody>
       </table></div>
       <div v-if="confirmForm.lineId" class="d-flex gap-2"><input v-model="confirmForm.reference" class="form-control" placeholder="مرجع تایید تامین‌کننده (نامه، ایمیل)" /><button :disabled="busy" class="btn btn-primary" @click="confirmLine">ثبت</button></div>
+    </div>
+
+    <div class="inv-card">
+      <h2 class="h6">ردیف‌های باز سفارش‌های قدیمی که نقشه‌شان ارجاع داده نشده است ({{ uncited.total }})</h2>
+      <p class="small inv-muted">قطعه این ردیف‌ها نقشه منتشرشده دارد ولی ردیف به نقشه ارجاع ندارد؛ با اصلاح یا انتشار دوبارهٔ سفارش ارجاع ثبت می‌شود.</p>
+      <div class="table-responsive"><table class="table table-sm">
+        <thead><tr><th>سفارش</th><th>ردیف</th><th>کالا</th><th>نقشه‌ها</th></tr></thead>
+        <tbody>
+          <tr v-if="!uncited.items.length"><td colspan="4" class="text-center inv-muted">ردیف باز بدون ارجاع نقشه‌ای نیست.</td></tr>
+          <tr v-for="u in uncited.items" :key="u.lineId"><td>{{ u.orderNumber }}</td><td>{{ u.rowNumber }}</td><td class="inv-ltr">{{ u.itemCode }}</td><td class="inv-ltr small">{{ u.drawings }}</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="inv-card">
+      <h2 class="h6">تمرین پیش از به‌روزرسانی: نقطهٔ شروع سوابق رکوردهای تازه‌پوشش‌یافته</h2>
+      <p class="small inv-muted">این گزارش فقط می‌خواند و چیزی نمی‌نویسد. پیش از به‌روزرسانی روی رونوشت پایگاه داده سرور اجرا شود؛ نخستین بررسی یکپارچگی پس از به‌روزرسانی وضعیت فعلی این جدول‌ها را مبنا می‌گیرد.</p>
+      <button class="btn btn-sm btn-outline-secondary mb-2" @click="runRehearsal">اجرای تمرین</button>
+      <div v-if="rehearsal"><p>{{ rehearsal.baselineDue ? "نقطهٔ شروع هنوز گرفته نشده است." : "نقطهٔ شروع گرفته شده است." }} مجموع رکوردهای متفاوت: {{ rehearsal.totalDiffering }}</p>
+        <ul class="small"><li v-for="t in rehearsal.tables" :key="t.entityType">{{ t.label }}: {{ t.differing }} متفاوت، {{ t.presentAfterDelete }} پس از حذف، {{ t.missing }} گم‌شده</li></ul></div>
     </div>
 
     <div class="inv-card">

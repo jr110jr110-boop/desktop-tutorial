@@ -28,6 +28,7 @@ onMounted(load);
           <b>{{ g.title }}</b>
           <span><span class="inv-badge" :class="g.count ? 'warn' : 'ok'">{{ g.count }}</span><span v-if="g.oldestDays" class="inv-muted small ms-2">قدیمی‌ترین: {{ g.oldestDays }} روز</span></span>
         </div>
+        <p v-if="open[g.key] && g.count > g.items.length" class="small inv-muted mt-2 mb-0">{{ g.count }} مورد منتظر است؛ قدیمی‌ترین {{ g.items.length }} مورد نمایش داده می‌شود.</p>
         <table v-if="open[g.key] && g.items.length" class="table table-sm mt-2 mb-0">
           <thead><tr><th>مورد</th><th>شرح</th><th>سن (روز)</th><th></th></tr></thead>
           <tbody><tr v-for="i in g.items" :key="i.ref"><td>{{ i.title }}</td><td class="small inv-muted">{{ i.detail }}</td><td>{{ i.ageDays }}</td><td><RouterLink :to="i.route" class="btn btn-sm btn-outline-primary">باز کردن و تصمیم</RouterLink></td></tr></tbody>
