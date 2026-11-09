@@ -106,8 +106,10 @@ namespace MsTests
             await h.As(Pmo, async sp => { await PoDrawingCitation.SyncAlertsAsync(sp.GetRequiredService<IUnitOfWork>(), sp.GetRequiredService<Services.NasbNiro.Office.INotificationService>(), doc, Ct); return 0; });
             Assert.IsTrue(OpenAlerts(h, lineA) > 0, "alert for line A");
             Assert.IsTrue(OpenAlerts(h, lineB) > 0, "alert for line B");
-            var roles = h.Read(u => u.Set<OfInboxItem>().Where(i => i.SourceKey == PoDrawingCitation.Key(lineA)).Select(i => i.RecipientRole).ToList());
-            CollectionAssert.IsSubsetOf(new[] { "COMMERCIAL", "ENGINEERING" }, roles.Where(x => x != null).ToList(), "buyer and engineering are told");
+            var told = h.Read(u => u.Set<OfInboxItem>().Where(i => i.SourceKey == PoDrawingCitation.Key(lineA) && i.Status != OfInboxStatus.Done).Select(i => new { i.RecipientRole, i.RecipientUserId }).ToList());
+            Assert.AreEqual(1, told.Count(t => t.RecipientRole == "ENGINEERING"), "engineering is told");
+            Assert.AreEqual(1, told.Count(t => t.RecipientRole == null && t.RecipientUserId != null), "the buyer of the order is told once, by name");
+            Assert.AreEqual(0, told.Count(t => t.RecipientRole == "COMMERCIAL"), "no second item for the buyer through the commercial role");
             Assert.AreEqual(2, Rule(h, "AUD-PO-004").Count, "a P9 finding for each stale line");
 
             // refusals of the confirmation

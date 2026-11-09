@@ -12404,7 +12404,7 @@ as "$ADMIN_TOKEN" PUT Boms "{\"id\":$MFBOM,\"assemblyId\":$MFASM,\"positionNumbe
 as "$MPM_TOKEN" GET "$MF/orders/$MFORDC"; check "pka2: an order of a project without a baseline says in Persian that its components came from the legacy BOM (read only fallback)" '.success and .data.componentSource == "LEGACY" and (.data.componentNote|contains("BOM قدیمی"))'
 
 # --- P9 (Package 9: the AI internal auditor, CEO decisions D11 and D12). Exact checks; every request is checked and no check sits between a request and the reads of its answer.
-# The AUDIT seat checks 61 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
+# The AUDIT seat checks 62 rules over all the data; a finding closes only by a proposal of QA and of PMO (two different people) and the approval of the CEO (a third person), never by its owner, its actioner or an AI.
 # Own user: p9.dual.ci holds QA and PMO (a person who tries to give both proposals). The owner of the process-audit finding is the existing QA user pka2.qa1.ci. The restore test of this server was never made (pbd above),
 # which is the exact known finding AUD-INT-002 of the first run. The background job of the seat is switched off in CI (Audit__Jobs); the runs here are on demand.
 TOKEN=$ADMIN_TOKEN
@@ -12433,9 +12433,9 @@ p9_run() { # p9_run TOKEN : the on-demand run is queued; the run row is polled (
 }
 
 # --- the catalogue (read only), who may read, and the auditor who only reads
-as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 61 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 61 and ([.data[]|select(.enabled)]|length) == 61 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
+as "$AUD_TOKEN" GET audit/rules; check "p9 catalogue: 62 rules, all enabled; AUD-INT-002 names its standard, clause, process, default severity (major) and switch" '.success and (.data|length) == 62 and ([.data[]|select(.enabled)]|length) == 62 and ([.data[]|select(.code == "AUD-INT-002")][0]|.standard == "ISO/IEC 27001:2022" and .clause == "A.8.13" and .processCode == "INTEGRITY" and .severityValue == 3 and .settingKey == "Audit.Rule.AUD-INT-002.Enabled" and .ownerRole == "PMO")'
 P9CLAUSES=$(jq '[.data[]|"\(.standard)|\(.clause)"]|unique|length' "$B")
-as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 61 of 61 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 61 and .data.rulesTotal == 61 and .data.lastRunAtText == null'
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the auditor reads the status; the switch is on, 62 of 62 rules enabled, nothing has run yet" '.success and .data.enabled == true and .data.rulesEnabled == 62 and .data.rulesTotal == 62 and .data.lastRunAtText == null'
 as "$WH_TOKEN" GET audit/rules; no "p9 role: the storekeeper does not read the catalogue"
 as "$WH_TOKEN" GET audit/findings; check "p9 role: the storekeeper (an owner role, not a reader) sees only the findings he owns: he owns none, so the list is exactly empty" '.success and (.data|length) == 0'
 as "$WH_TOKEN" POST audit/runs '{}'; no "p9 role: the storekeeper does not start a run"
@@ -12472,7 +12472,7 @@ as "$AUD_TOKEN" GET audit/acceptances; check "p9 accept: the auditor reads exact
 as "$PLAN_TOKEN" POST $P7RG/risks "{\"contractId\":$P7CT,\"title\":\"ریسک مرور نشده‌ی ممیزی\",\"probability\":2,\"impact\":2,\"reviewDate\":\"$(dd -3)\"}"; check "p9 setup: a project risk with a review date three days in the past is saved" '.success and .data.id > 0 and (.data.number|startswith("RK"))'
 P9RK=$(val .data.id); P9RKN=$(val .data.number)
 safety_set Quality Audit.Rule.AUD-MR-002.Enabled 0; check "p9 switch: one rule is switched off (a security-relevant setting: the second PMO user approves)" '.success and .data.status == "Approved" and .data.newValue == "0"'
-as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 60 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 60'
+as "$AUD_TOKEN" GET audit/rules; check "p9 switch: the catalogue shows the rule off and 61 rules on" '.success and ([.data[]|select(.code == "AUD-MR-002")][0].enabled == false) and ([.data[]|select(.enabled)]|length) == 61'
 p9_run "$AUD_TOKEN"; check "p9 run 1: the auditor starts a run (queued, then polled to its end); the accepted deviation of AUD-INT-003 is counted as accepted: 61 rules ran, none failed, the disabled rule is listed as disabled, AUD-INT-002 and AUD-RK-001 each found exactly one object and created one finding, nothing is a recurrence (the two systemic findings of the first run are counted apart as systemic)" '.success and .data.rulesRun == 61 and .data.rulesFailed == 0 and .data.statusValue == 1 and .data.recurrences == 0 and .data.systemic == 2 and ([.data.rules[]|select(.code == "AUD-MR-002")][0].status == "disabled") and ([.data.rules[]|select(.code == "AUD-INT-003")][0].accepted == 1) and ([.data.rules[]|select(.code == "AUD-INT-002")][0]|.hits == 1 and .new == 1) and ([.data.rules[]|select(.code == "AUD-RK-001")][0]|.hits == 1 and .new == 1)'
 P9RUN1=$P9RUNID
 safety_set Quality Audit.Rule.AUD-MR-002.Enabled 1; check "p9 switch: the rule is switched on again (two-person change)" '.success and .data.status == "Approved" and .data.newValue == "1"'
@@ -12559,14 +12559,14 @@ p9_step "$CEO_TOKEN" "$P9FM" ceo true "رد آزمایشی مدیرعامل: ن�
 as "$AUD_TOKEN" GET audit/findings/$P9FM; check "p9 manual: the refusal and its reason are in the history of the finding" '.success and ([.data.events[]|select(.kind == "refused")]|length) == 1 and ([.data.events[]|select(.kind == "refused")][0].note|contains("مدیرعامل"))'
 
 # --- the weekly report: counts agree with the status, the score covers the clauses of the catalogue, the report is stored once and sealed
-as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 61'
+as "$AUD_TOKEN" GET audit/status; check "p9 status: the open findings of the status are counted by severity and by waiting step" '.success and .data.open == (.data.openMajor + .data.openMinor + .data.openObservation) and .data.waitingQa == 0 and .data.waitingPmo == 0 and .data.waitingCeo == 0 and .data.rulesEnabled == 62'
 P9OPEN=$(val .data.open); P9OVER=$(val .data.overdue)
 as "$WH_TOKEN" POST audit/reports '{"kind":2}'; no "p9 report: the storekeeper does not generate a report"
 as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: the weekly report goes to the CEO, PMO and QA, is a template text and is sealed with SHA-256" '.success and .data.kindValue == 2 and .data.recipients == "CEO,PMO,QA" and (.data.sha256|length) == 64 and .data.narrativeSource == "template" and (.data.narrative|length) > 20'
 check "p9 report: the period ends at the previous midnight (the closure and the recurrence of today are not in it): nothing new, nothing closed, no recurrence" '.success and (.data.content|.newInPeriod == 0 and .closedInPeriod == 0 and .recurrences == 0)'
 check "p9 report: the open count equals the status read just before (open and overdue)" ".success and (.data.content|.open == $P9OPEN and .overdue == $P9OVER)"
 check "p9 report: every severity and status adds up" '.success and (.data.content|.open == (.openMajor + .openMinor + .openObservation) and .newInPeriod == (.newMajor + .newMinor + .newObservation) and ([.byStatus[].count]|add) == .open and ([.byProcess[].count]|add) == .open)'
-check "p9 report: the score covers every clause of the catalogue and every one of the 61 rules" ".success and (.data.content|.rulesTotal == 61 and .rulesEnabled == 61 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 61 and (.scores|map(.met + .[\"not\"])|add) == 61)"
+check "p9 report: the score covers every clause of the catalogue and every one of the 62 rules" ".success and (.data.content|.rulesTotal == 62 and .rulesEnabled == 62 and (.scores|length) == $P9CLAUSES and (.scores|map(.rules)|add) == 62 and (.scores|map(.met + .[\"not\"])|add) == 62)"
 P9REP=$(val .data.id); P9REPH=$(val .data.sha256)
 as "$QA_TOKEN" POST audit/reports '{"kind":2}'; check "p9 report: asking again for the same week returns the stored report (same id and same hash): reports never change" ".success and .data.id == $P9REP and .data.sha256 == \"$P9REPH\""
 as "$PMO2_TOKEN" GET "audit/reports?kind=2"; check "p9 report: the PMO manager lists exactly one weekly report" ".success and (.data|length) == 1 and .data[0].id == $P9REP"
