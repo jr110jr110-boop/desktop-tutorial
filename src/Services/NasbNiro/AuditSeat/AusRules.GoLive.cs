@@ -64,6 +64,34 @@ namespace Services.NasbNiro.AuditSeat
                     return hits;
                 });
 
+            yield return Def("AUD-CO-004", "DESIGN", AusSeverity.Major, "نقشه‌ی قطعه پس از آغاز کنترل بدون فهرست مشخصه‌ی تاییدشده یا بدون تایید طراحی در جریان است (دور زدن دروازه‌های انتشار)", Iso9, "8.3.4 / 8.5.1", "برنامه بسته G (بستن راه پیوند پس از انتشار)",
+                "In-force PcDocumentRevision released at or after the cut-over instant, of a deliverable linked to a part (not a client document), with no approved or released characteristic list, or, when verification is required, no accepted design verification", false, async c =>
+                {
+                    DateTimeOffset start = await CutOver.StartAsync(c.Uow, c.Ct);
+                    if (start <= DateTimeOffset.MinValue) return new List<AusHit>();
+                    bool verification = await global::Services.NasbNiro.ProductBank.DesignGate.VerificationRequiredAsync(c.Uow, c.Ct);
+                    var rows = await c.BoundedAsync(
+                        from r in c.Scope(c.Uow.Set<Entities.Model.NasbNiro.ProjectControl.PcDocumentRevision>().AsNoTracking())
+                        join d in c.Uow.Set<Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable>().AsNoTracking() on r.DeliverableId equals d.Id
+                        where !r.Deleted && (r.Status == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.Released || r.Status == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.AsBuilt) && !r.ReceivedFromClient && !d.ReceivedFromClient
+                            && r.ReleasedAt != null && r.ReleasedAt >= start
+                            && c.Uow.Set<Entities.Model.NasbNiro.ProjectControl.PcDocumentLink>().Any(l => l.DeliverableId == d.Id && !l.Deleted && l.UnlinkReason == null
+                                && (l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.Item || l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.BomLine || l.Kind == Entities.Model.NasbNiro.ProjectControl.PcDocLinkKind.PartNumber))
+                        orderby r.Id select new { r.Id, r.Code, d.DocumentNumber, r.ReleasedByUserId, r.ReleasedAt });
+                    var hits = new List<AusHit>();
+                    foreach (var r in rows.Where(x => !c.FocusId.HasValue || x.Id == c.FocusId.Value))
+                    {
+                        var missing = new List<string>();
+                        if (await global::Services.NasbNiro.Quality.CharacteristicRelease.LinkProblemAsync(c.Uow, r.Id, c.Ct) != null) missing.Add("فهرست مشخصه‌ی تاییدشده");
+                        if (verification && !(await global::Services.NasbNiro.ProductBank.DesignGate.DrawingCoverageAsync(c.Uow, r.Id, "نقشه " + r.DocumentNumber, c.Ct)).Passed) missing.Add("تایید طراحی (Verification)");
+                        if (missing.Count == 0) continue;
+                        hits.Add(Hit("PcDocumentRevision", r.Id, r.DocumentNumber, $"نقشه‌ی قطعه {r.DocumentNumber} (بازنگری {r.Code}) پس از آغاز کنترل منتشر شده ولی {string.Join(" و ", missing)} ندارد.", owner: r.ReleasedByUserId, link: "/quality/characteristics")
+                            .On(r.ReleasedAt).Fact("revision", r.Code).Fact("missing", string.Join("+", missing)));
+                        if (hits.Count >= c.Max) break;
+                    }
+                    return hits;
+                });
+
             yield return Def("AUD-PO-004", "PROCUREMENT", AusSeverity.Major, "ردیف سفارش خرید باز به بازنگری منسوخ‌شده نقشه ارجاع دارد و تامین‌کننده بازنگری جدید را تایید نکرده است", Iso9, "8.4.3", "برنامه بسته G (ردیف سفارش خرید و بازنگری نقشه)",
                 "PurchaseOrderLine of an open order whose cited drawing revision is no longer the revision in force and with no supplier confirmation of the new one", false, async c =>
                 {

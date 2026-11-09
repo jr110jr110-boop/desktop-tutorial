@@ -63,6 +63,32 @@ namespace Services.NasbNiro.GoLive
     }
 
     /// <summary>
+    /// Package G: closes the way round the release gates. A drawing that is linked to no part can be released without a characteristic list (Package B) and without a design verification (Package A1); linking it to a part afterwards would make it a
+    /// released part drawing that never met either gate. So a link of a drawing to a part is checked like a release when the drawing already has a revision in force: a revision released at or after the cut-over instant needs both. A revision released
+    /// before the cut-over is legacy and may be linked (the legacy rules and the AUDIT observations apply to it). A client document is not a design output and is not checked, as in the release path.
+    /// </summary>
+    public static class GlLinkGate
+    {
+        public static async Task<string> ProblemAsync(IUnitOfWork uow, int deliverableId, CancellationToken ct)
+        {
+            Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable d = await uow.Set<Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == deliverableId && !x.Deleted, ct);
+            if (d == null || d.ReceivedFromClient) return null;
+            Entities.Model.NasbNiro.ProjectControl.PcDocumentRevision r = await uow.Set<Entities.Model.NasbNiro.ProjectControl.PcDocumentRevision>().AsNoTracking()
+                .Where(x => !x.Deleted && x.DeliverableId == deliverableId && (x.Status == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.Released || x.Status == Entities.Model.NasbNiro.ProjectControl.PcDocStatus.AsBuilt)).OrderByDescending(x => x.Sequence).FirstOrDefaultAsync(ct);
+            if (r == null || r.ReceivedFromClient) return null;   // nothing in force: the gates of the release apply when it is released
+            DateTimeOffset start = await CutOver.StartAsync(uow, ct);
+            if (start > DateTimeOffset.MinValue && (!r.ReleasedAt.HasValue || r.ReleasedAt.Value < start)) return null;   // legacy: released before the cut-over
+            var missing = new List<string>();
+            string list = await CharacteristicRelease.LinkProblemAsync(uow, r.Id, ct);
+            if (list != null) missing.Add(list);
+            string design = await DesignGate.LinkProblemAsync(uow, d, r, ct);
+            if (design != null) missing.Add(design);
+            if (missing.Count == 0) return null;
+            return $"پیوند نقشه {d.DocumentNumber} به قطعه ممکن نیست: بازنگری {r.Code} پس از آغاز کنترل ({CutOver.Text(start)}) و بدون گذراندن دروازه‌های انتشار منتشر شده است. کمبود: " + string.Join("؛ ", missing) + ".";
+        }
+    }
+
+    /// <summary>
     /// Package G: the register of legacy exemptions that were used (a Persian note and an observation of the AUDIT seat, never silent). One row per kind and object; the row is added to the caller's context and saved with the
     /// caller's own save.
     /// </summary>

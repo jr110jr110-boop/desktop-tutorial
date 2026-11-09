@@ -73,6 +73,24 @@ namespace MsTests
         }
 
         [TestMethod]
+        public void AUD_CO_004()
+        {
+            var h = Host();
+            Put(h, new GlActivation { StartAt = DateTimeOffset.Now });
+            // released after the cut-over, linked to a part, no list: a Major finding. Released before the cut-over (legacy), and a client document: nothing.
+            var d1 = Put(h, new PcEngineeringDeliverable { ContractId = 1, DocumentNumber = "DWG-CO41", Title = "t" });
+            var d2 = Put(h, new PcEngineeringDeliverable { ContractId = 1, DocumentNumber = "DWG-CO42", Title = "t" });
+            var d3 = Put(h, new PcEngineeringDeliverable { ContractId = 1, DocumentNumber = "DWG-CO43", Title = "t", ReceivedFromClient = true });
+            var r1 = Put(h, new PcDocumentRevision { DeliverableId = d1.Id, Code = "00", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(1) });
+            Put(h, new PcDocumentRevision { DeliverableId = d2.Id, Code = "00", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(-30) });
+            Put(h, new PcDocumentRevision { DeliverableId = d3.Id, Code = "00", Sequence = 1, Status = PcDocStatus.Released, ReleasedAt = DateTimeOffset.Now.AddDays(1) });
+            foreach (var d in new[] { d1, d2, d3 }) Put(h, new PcDocumentLink { DeliverableId = d.Id, Kind = PcDocLinkKind.PartNumber, PartNumber = "PN-" + d.Id });
+            Only(Run(h, "AUD-CO-004"), "PcDocumentRevision", r1.Id);
+            Assert.AreEqual(AusSeverity.Major, AusCatalog.Find("AUD-CO-004").Severity);
+            Assert.IsFalse(AusRecheckModeOf("AUD-CO-004"));
+        }
+
+        [TestMethod]
         public void AUD_PO_004()
         {
             var h = Host();

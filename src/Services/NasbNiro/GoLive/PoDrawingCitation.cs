@@ -127,7 +127,8 @@ namespace Services.NasbNiro.GoLive
                         Title = s.CurrentRevisionId == 0 ? $"نقشه {s.Line.DrawingNumber} در سفارش {s.OrderNumber} منسوخ شده است؛ سفارش را بازبینی کنید" : $"نقشه {s.Line.DrawingNumber} در سفارش {s.OrderNumber} بازنگری {s.Line.DrawingRevision} است ولی بازنگری {s.CurrentRevision} منتشر شده؛ ردیف را اصلاح یا تایید تامین‌کننده را ثبت کنید",
                         Link = "/procurement/orders/" + s.OrderId, Roles = "COMMERCIAL,ENGINEERING", Priority = Entities.Model.NasbNiro.Office.OfUrgency.Urgent, ReplaceRecipients = true,
                     };
-                    if (s.OrderCreatorUserId.HasValue && s.OrderCreatorUserId.Value > 0) req.UserIds.Add(s.OrderCreatorUserId.Value);
+                    // the buyer of the order is told once, by name; the commercial role is told only when the order has no known buyer (a role item and a personal item would reach the same person twice)
+                    if (s.OrderCreatorUserId.HasValue && s.OrderCreatorUserId.Value > 0) { req.UserIds.Add(s.OrderCreatorUserId.Value); req.Roles = "ENGINEERING"; }
                     await notify.NotifyAsync(req, ct);
                 }
                 IQueryable<PurchaseOrderLine> cited = uow.Set<PurchaseOrderLine>().AsNoTracking().Where(l => l.DrawingRevisionId != null);

@@ -225,6 +225,18 @@ namespace ViewModels.NasbNiro.GoLiveDtos
         public string Route { get; set; }
     }
 
+    /// <summary>The multipart form of the stamp call: the print made by prepare, and the two raw RGBA bands drawn by the browser (a uniquely named class: the API description needs one).</summary>
+    public class GlPrintStampForm
+    {
+        public int PrintId { get; set; }
+        public Microsoft.AspNetCore.Http.IFormFile HeaderRgba { get; set; }
+        public Microsoft.AspNetCore.Http.IFormFile FooterRgba { get; set; }
+        public int HeaderWidth { get; set; }
+        public int HeaderHeight { get; set; }
+        public int FooterWidth { get; set; }
+        public int FooterHeight { get; set; }
+    }
+
     public class GlPrintPrepareDto
     {
         public int RevisionId { get; set; }
