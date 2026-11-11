@@ -173,7 +173,8 @@ namespace Services.NasbNiro
         {
             assembly.WorkOrder = entity;
 
-            foreach (AssemblyEntity item in assembly.Children)
+            // FX1: the generated assemblies no longer carry copies in Children (null for a leaf)
+            foreach (AssemblyEntity item in assembly.Children ?? new List<AssemblyEntity>())
             {
                 SetWorkOrderToAssembly(item, entity);
             }
