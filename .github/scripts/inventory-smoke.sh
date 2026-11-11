@@ -13075,7 +13075,7 @@ as "$FX2PRE_TOKEN" GET "Accounts/my-pending-roles"
 check "fx2 b: his own request list names the PMO role and carries the Persian warning" ".success and (.data|length) == 1 and .data[0].role == \"PMO\" and .data[0].roleLabel == \"PMO\" and .data[0].warningText == \"$FX2WAIT\""
 as "$FX2M_TOKEN" GET "Accounts/my-pending-roles"; check "fx2 b: only the own requests are returned (another user sees none)" '.success and (.data|length) == 0'
 as "$FX2PRE_TOKEN" GET "$PC/reviews?ContractId=$FX2CT2&PageSize=0"
-check "fx2 b: before the approval CanSignPmo is false and the reason is that the role waits for the second person; the commercial slot shows neither a button nor a reason" ".success and ([.data.data[]|select(.id == $FX2RV2 and .canSignPmo == false and .signBlockedReasonPmo == \"$FX2WAIT\" and .canSignCommercial == false and .signBlockedReasonCommercial == null)]|length) == 1"
+check "fx2 b: before the approval he has no active role, so the review list is closed to him (HTTP 403); the warning bar of his own request list tells him why" '.success == false and .httpStatusCode == 403'
 as "$FX2PRE_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV2,\"action\":\"accept\",\"slot\":\"pmo\"}"; nomsg "fx2 b: and the action refuses with the very same reason" "$FX2WAIT"
 as "$ADMIN_TOKEN" GET "Accounts/get-all-users?PageSize=0&Contains=fx2.pmo.ci"
 check "fx2 b: the user list of the administrator shows the pending role of the user" ".success and ([.. | objects | select(.id? == $FX2PID and .pendingRolesText? == \"PMO\" and (.pendingRoles|length) == 1 and .pendingRoles[0] == \"PMO\")]|length) == 1"
