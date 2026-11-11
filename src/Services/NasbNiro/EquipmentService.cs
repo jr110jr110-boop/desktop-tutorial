@@ -356,7 +356,7 @@ namespace Services.NasbNiro
 
                     // PB3: the documents of the bank process reach the project process as LINKS to the same stored files (never byte copies), with the revision of the bank file noted,
                     // so a drawing is kept once, its hash is the same everywhere, and the project always points at the file the bank approved
-                    process.ProcessFiles = BankDocumentLinks.Build(documents, userId, DateTime.Now);
+                    process.ProcessFiles = userId > 0 ? BankDocumentLinks.Build(documents, userId, DateTime.Now) : new List<ProcessFile>(); // FX1 review: no user to stamp the links = no link rather than a foreign-key error
 
                     processes.Add(process);
                 }
@@ -508,8 +508,10 @@ namespace Services.NasbNiro
                         r => r.NormalizedName.ToUpper() == RoleConstants.PMO.ToUpper(),
                         cancellationToken);
 
-            // FX1: no engineer and no PMO user (a new installation) must not end in a server error; the id only stamps the linked documents
+            // FX1: no engineer and no PMO user (a new installation) must not end in a server error. The id stamps the linked documents and is a
+            // foreign key to the users, so the fallback is the signed-in person who creates the work order (never 0, which no user has).
             userId = roleAndUsers?.Users == null ? 0 : roleAndUsers.Users.Select(u => u.UserId).FirstOrDefault();
+            if (userId <= 0) userId = _userManager.CurrentUserId ?? 0;
 
             return userId;
         }
