@@ -37643,10 +37643,12 @@ namespace DataLayer.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal>("WorkOrderLevelActualProgress")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(20, 4)
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("WorkOrderLevelPlannedProgress")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(20, 4)
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<int>("WorkOrderRemainingDays")
                         .HasColumnType("int");
