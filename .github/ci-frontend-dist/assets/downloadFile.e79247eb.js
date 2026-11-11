@@ -1,0 +1,1 @@
+import{ao as i,s as r}from"./index.25c80777.js";const d=async(o,a)=>{const[n,t]=await i(a);if(t)r(t.message);else{const c=window.URL.createObjectURL(new Blob([n],{type:"application/jpg"})),e=document.createElement("a");e.href=c,e.setAttribute("download",o.description+o.mimeType),document.body.appendChild(e),e.click()}};export{d};
