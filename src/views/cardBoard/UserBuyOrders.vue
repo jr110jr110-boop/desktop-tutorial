@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { isRole } from "@/composables/roles";
 import type { AxiosRequestConfig } from "axios";
 import type PreviewTextRow from "@/types/PreviewTextRow";
 import type _Process from "@/types/Process";
@@ -129,7 +130,6 @@ const tableValues: TableValue[] = [
   },
 ];
 
-const userMode = localStorage.getItem("userRole").toLowerCase();
 const addedFiles: Ref<FileList> = ref();
 const addedLogSheetFiles: Ref<FileList> = ref();
 const isFileAdded: Ref<boolean> = ref(false);
@@ -1104,7 +1104,7 @@ onMounted(async () => {
               <span class="text-small">ثبت استعلام</span>
             </li>
             <li
-              v-else-if="rowData.status === 1 && userMode === 'engineering'"
+              v-else-if="rowData.status === 1 && isRole('ENGINEERING')"
               class="d-flex flex-row-reverse align-items-center gap-3"
               @click="
                 showTaskModal(
@@ -1196,7 +1196,7 @@ onMounted(async () => {
               </li>
             </template>
             <li
-              v-else-if="rowData.status === 99 && userMode === 'warehouse'"
+              v-else-if="rowData.status === 99 && isRole('WAREHOUSE')"
               class="d-flex flex-row-reverse align-items-center gap-3"
               @click="
                 showTaskModal(
@@ -1211,7 +1211,7 @@ onMounted(async () => {
             <li
               v-else-if="
                 (rowData.status === 7 || rowData.status === 9) &&
-                userMode === 'pmo'
+                isRole('PMO')
               "
               class="d-flex flex-row-reverse align-items-center gap-3"
               @click="

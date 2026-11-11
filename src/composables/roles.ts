@@ -2,7 +2,14 @@
 // The lists mirror the [Authorize(Roles = ...)] attributes of the controllers and the checks inside the services,
 // so a page or a button is shown only to the people who can really use it. The API checks again on every call.
 //
-// The UI gives a user one role: the first one of the token (stored by the login page as "userRole").
+// A user can have SEVERAL roles. The login page stores all of them, comma separated, in localStorage "userRole" (the API orders them by name).
+// A page, a menu item or a button is shown when ANY role of the user is allowed: use hasRole(list) for a role list and isRole("X") for one role.
+// currentRole() is only the primary role (see RolePriority in roleMatch.ts) for choosing a default landing page or a label; never use it to decide
+// what a user may do. The API checks every role of the user again on every call.
+
+import { matchesAny, parseRoles, primaryRole } from "./roleMatch";
+
+export { RolePriority } from "./roleMatch";
 
 export const Roles = {
   PMO: "PMO",
@@ -387,19 +394,36 @@ export function currentUserId(): number | null {
   }
 }
 
-/** The role of the signed-in user (upper case), or "" when it is unknown. */
-export function currentRole(): string {
+/** All roles of the signed-in user (upper case, trimmed, without duplicates); empty when unknown. */
+export function userRoles(): string[] {
   try {
-    const raw = localStorage.getItem("userRole") || "";
-    return raw.split(",")[0].trim().toUpperCase();
+    return parseRoles(localStorage.getItem("userRole"));
   } catch {
-    return "";
+    return [];
   }
 }
 
+/**
+ * The PRIMARY role of the signed-in user, chosen by the documented priority list (RolePriority), or "" when unknown.
+ * Only for choosing a default landing page or a label; for permissions use hasRole() / isRole().
+ */
+export function currentRole(): string {
+  return primaryRole(userRoles());
+}
+
+/** True when the list is empty (no role check) or the user has ANY of the allowed roles. */
 export function hasRole(allowed: string[] | undefined | null): boolean {
-  if (!allowed || allowed.length === 0) return true;
-  return allowed.includes(currentRole());
+  return matchesAny(userRoles(), allowed);
+}
+
+/** True when the user has this role (among possibly several). */
+export function isRole(name: string): boolean {
+  return userRoles().includes(String(name).trim().toUpperCase());
+}
+
+/** The user's roles as Persian titles, comma separated with the Persian comma, for a tooltip. */
+export function userRoleTitles(): string[] {
+  return userRoles().map((role) => roleTitles[role] || role);
 }
 
 /** The access list is stored by the login page as a comma separated text. */

@@ -5,7 +5,7 @@ import { rowsOf } from "@/api/ApiClient";
 import JDate from "@/components/pc/JDate.vue";
 import { fail, jalali, ok, rial, today } from "@/composables/inventory";
 import { amendmentOrigins, amendmentTypes } from "@/composables/projectControl";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 
 // Contract amendments (WI-IP-002): drafted by commercial, approved by the CEO, then the customer's approval letter; three copies are tracked.
 // The list endpoint does not carry the copies, so they are shown after an action on the amendment.
@@ -16,7 +16,6 @@ const busy = ref(false);
 const reference = ref("");
 const date = ref<string | null>(today());
 const canEdit = hasRole(ProjectControlRoles.commercial);
-const role = currentRole();
 
 async function load() {
   const [data, error] = await getAmendments({ ContractId: props.contractId, PageSize: 100 });
@@ -72,7 +71,7 @@ watch(() => props.contractId, () => { a.value = null; load(); });
       </div>
       <div class="d-flex flex-wrap gap-2 align-items-end mt-2">
         <button v-if="canEdit && !a.ceoApprovedAt" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
-        <button v-if="a.id && !a.ceoApprovedAt && role === 'CEO'" :disabled="busy" class="btn btn-sm btn-success" @click="act('ceo-approve')">تایید مدیرعامل</button>
+        <button v-if="a.id && !a.ceoApprovedAt && isRole('CEO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('ceo-approve')">تایید مدیرعامل</button>
         <template v-if="a.id && a.ceoApprovedAt && !a.customerApprovalReference && canEdit">
           <input v-model="reference" class="form-control form-control-sm" placeholder="شماره نامه تایید مشتری" style="max-width: 220px" />
           <div style="width: 150px"><JDate v-model="date" /></div>

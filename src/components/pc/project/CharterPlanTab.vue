@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { approvePlan, charterAction, getCharter, getPlan, saveCharter, savePlan } from "@/api/ProjectControlAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 
 // Project charter (13 sections, WI-PL-007) and project execution plan PEP (WI-PL-006). Gates: the project manager accepts the authority,
 // the CEO approves the charter, the PMO deputy approves the PEP. An approved document can be changed only through change control.
@@ -27,7 +27,6 @@ const note = ref("");
 const isCharter = computed(() => props.kind === "charter");
 const approved = computed(() => !!doc.value?.approvedAt);
 const canEdit = computed(() => !approved.value && hasRole(isCharter.value ? ProjectControlRoles.charter : ProjectControlRoles.planningOrPm));
-const role = currentRole();
 
 async function load() {
   doc.value = null;
@@ -76,9 +75,9 @@ watch(() => [props.contractId, props.kind], load);
       <button v-if="canEdit" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
       <template v-if="!approved">
         <input v-model="note" class="form-control form-control-sm" placeholder="یادداشت تایید" style="max-width: 260px" />
-        <button v-if="isCharter && role === 'PROJECTMANAGER' && !doc.managerAcceptedAt" :disabled="busy" class="btn btn-sm btn-outline-success" @click="act('accept')">پذیرش اختیارات (مدیر پروژه)</button>
-        <button v-if="isCharter && role === 'CEO'" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید منشور (مدیرعامل)</button>
-        <button v-if="!isCharter && role === 'PMO'" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید PEP (معاون PMO)</button>
+        <button v-if="isCharter && isRole('PROJECTMANAGER') && !doc.managerAcceptedAt" :disabled="busy" class="btn btn-sm btn-outline-success" @click="act('accept')">پذیرش اختیارات (مدیر پروژه)</button>
+        <button v-if="isCharter && isRole('CEO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید منشور (مدیرعامل)</button>
+        <button v-if="!isCharter && isRole('PMO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید PEP (معاون PMO)</button>
       </template>
     </div>
     <p class="inv-muted mt-2 mb-0">

@@ -18,7 +18,7 @@
         <div
           v-if="sidebarState.isSidebarExpanded"
           class="d-flex align-items-center w-100 justify-content-center bottom-0 no-pointer-event">
-          <span class="fw-bold text-xSmall">
+          <span class="fw-bold text-xSmall" :title="userRoleTooltip">
             {{ userRole }}
           </span>
         </div>
@@ -317,7 +317,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, currentRole, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, userRoles, userRoleTitles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
@@ -727,7 +727,11 @@ const aiLinks = computed<Links[]>(() => [
   { title: "مدیریت هوش مصنوعی", routeName: "AiAdminEndpoints", disabled: !hasRole(AiRoles.readers), hidden: !hasRole(AiRoles.readers) },
 ]);
 
-const userRole = localStorage.getItem("userRole");
+// the primary role and "+N" when the user has more roles; the tooltip lists all of them (Persian titles)
+const allRoles = userRoles();
+const userRole = allRoles.length > 1 ? `${currentRole()} +${allRoles.length - 1}` : currentRole();
+const userRoleTitleList = userRoleTitles();
+const userRoleTooltip = userRoleTitleList.join("، ");
 </script>
 
 <style scoped>

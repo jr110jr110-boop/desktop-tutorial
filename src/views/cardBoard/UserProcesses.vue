@@ -38,6 +38,7 @@ import CloudUploadIcon from "@/components/icons/CloudUploadIcon.vue";
 import ShoppingCartIcon from "@/components/icons/ShoppingCartIcon.vue";
 import MenuIcon from "@/components/icons/MenuIcon.vue";
 import { Colors } from "@/assets/colors";
+import { isRole } from "@/composables/roles";
 import type AttachFileToProccess from "@/types/AttachFileToProccess";
 import type _File from "@/types/_File";
 import EditIcon from "@/components/icons/EditIcon.vue";
@@ -88,7 +89,6 @@ const state = reactive({
   },
 });
 
-const userMode = localStorage.getItem("userRole");
 
 const previewModal = reactive({
   visible: false,
@@ -305,7 +305,7 @@ async function sendEngineerAcceptDocuments() {
     userProccesses.value[taskModal.madeIndex].assemblies[
       taskModal.assemblyIndex
     ].boms[taskModal.bomIndex].proccesses[taskModal.activeIndex].id,
-    userMode
+    isRole("ENGINEERING") ? "ENGINEERING" : "ENGINEER"
   );
 
   if (!data?.success) showErrorNotification(data?.message || error.message);
@@ -604,7 +604,7 @@ const fetchEngineerList = async () => {
 };
 
 function showMultiSelectBtn() {
-  if (userMode !== "PMO") return false;
+  if (!isRole("PMO")) return false;
   for (let i = 0; i < userProcessesFlat.value.length; i++)
     if (userProcessesFlat.value[i].processStatus === 0) return true;
   return false;
@@ -612,7 +612,7 @@ function showMultiSelectBtn() {
 
 onMounted(async () => {
   await fetchCardBoardUserProcesses();
-  if (userMode === "ENGINEERING") await fetchEngineerList();
+  if (isRole("ENGINEERING")) await fetchEngineerList();
 });
 </script>
 

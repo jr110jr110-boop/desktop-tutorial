@@ -5,7 +5,7 @@ import JDate from "@/components/pc/JDate.vue";
 import DailyExtras from "@/components/pc/progress/DailyExtras.vue";
 import { fail, jalali, ok, printPage, today } from "@/composables/inventory";
 import { unitOptions } from "@/composables/projectControl";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { currentRole, hasRole, isRole, userRoles, ProjectControlRoles } from "@/composables/roles";
 
 // Daily report of a unit (R-PR-4): the system pre-fills the activities that should be running; the unit manager adds the delay reason,
 // the preventive and the corrective action for every late activity and confirms. A confirmed report is not changed.
@@ -16,7 +16,7 @@ const rep = ref<any>(null);
 const busy = ref(false);
 const sub = ref("manpower");
 const canWrite = hasRole(ProjectControlRoles.unitManagers);
-const role = currentRole();
+const role = currentRole(); // primary role, only to preselect the unit
 
 async function load() {
   rep.value = null;
@@ -44,8 +44,8 @@ async function confirm() {
   ok("گزارش تایید شد.");
   rep.value = data;
 }
-const mayConfirm = () => (unit.value === "ALL" ? canWrite : role === unit.value || role === "PMO" || role === "PLANNING");
-onMounted(() => { if (role && unitOptions.some((u) => u[0] === role)) unit.value = role; load(); });
+const mayConfirm = () => (unit.value === "ALL" ? canWrite : isRole(unit.value) || isRole("PMO") || isRole("PLANNING"));
+onMounted(() => { const own = unitOptions.some((u) => u[0] === role) ? role : userRoles().find((r) => unitOptions.some((u) => u[0] === r)); if (own) unit.value = own; load(); });
 watch(() => props.contractId, load);
 </script>
 

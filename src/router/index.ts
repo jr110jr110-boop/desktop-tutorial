@@ -800,7 +800,7 @@ router.beforeEach((to, from, next) => {
   }
   if (!loggedIn) return next({ name: "Login" });
   // the CEO starts on the CEO home page (the login page reloads to "/", which lands here)
-  if (to.name === "Dashboard" && currentRole() === Roles.CEO) return next({ name: "CeoHome" });
+  if (to.name === "Dashboard" && currentRole() === Roles.CEO /* primary role: the CEO lands on the CEO home page */) return next({ name: "CeoHome" });
   // the trace page opens to the readers of any of its tabs (the old scan access, the quality readers, the new trace readers); each tab checks its own rule
   if (to.meta.traceAny && !canOpenTrace()) return handleHasNoAccess(next);
   const claim = typeof to.meta.access === "string" ? claims[to.meta.access] : undefined;

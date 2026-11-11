@@ -10,7 +10,7 @@ import { rowsOf } from "@/api/ApiClient";
 import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
 import { baselineKinds, baselineStatuses, costClasses, pcContractId, phases, progressMethods, resourceClasses, setPcContract, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 
 // Baselines (WI-PL-009 17): created from the calculated plan by planning, signed by the manager of every unit that owns activities,
 // approved by the PMO deputy. Cost baseline lines (CBS) are kept per project and are compared with the BAC of the baseline.
@@ -27,7 +27,6 @@ const note = ref("");
 const busy = ref(false);
 const terms = ref<any>(null);
 const canCreate = hasRole(ProjectControlRoles.planning);
-const role = currentRole();
 
 async function load() {
   if (!pcContractId.value) return;
@@ -71,7 +70,7 @@ async function showFrozen() {
 watch(() => sel.value?.id, () => { frozen.value = null; });
 const frozenBudget = computed(() => sumOf(frozen.value || [], "budget"));
 const share = (v: number | null | undefined) => (v === null || v === undefined ? "—" : (Number(v) * 100).toFixed(2) + "٪");
-const mySignatures = computed(() => (sel.value?.signatures || []).filter((s: any) => !s.signedAt && s.unitRole === role));
+const mySignatures = computed(() => (sel.value?.signatures || []).filter((s: any) => !s.signedAt && isRole(s.unitRole)));
 const signedCount = computed(() => (sel.value?.signatures || []).filter((s: any) => s.signedAt).length);
 
 // ---- cost lines
@@ -194,8 +193,8 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
               </tbody>
             </table>
             <div class="d-flex flex-wrap gap-2 align-items-end">
-              <button v-if="sel.status === 0 && mySignatures.length" :disabled="busy" class="btn btn-sm btn-success" @click="act('sign')">امضای برنامه (مدیر {{ unitTitle(role) }})</button>
-              <template v-if="sel.status === 1 && role === 'PMO'">
+              <button v-if="sel.status === 0 && mySignatures.length" :disabled="busy" class="btn btn-sm btn-success" @click="act('sign')">امضای برنامه ({{ mySignatures.map((s: any) => "مدیر " + unitTitle(s.unitRole)).join(" و ") }})</button>
+              <template v-if="sel.status === 1 && isRole('PMO')">
                 <input v-model="note" class="form-control form-control-sm" placeholder="یادداشت تایید" style="max-width: 260px" />
                 <button :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید خط مبنا (معاون PMO)</button>
               </template>

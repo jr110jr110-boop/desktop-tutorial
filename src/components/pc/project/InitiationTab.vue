@@ -4,7 +4,7 @@ import { getInitiation, initiationAction, startInitiation } from "@/api/ProjectC
 import UserSelect from "@/components/quality/UserSelect.vue";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { gateRoleTitles, initiationSteps } from "@/composables/projectControl";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { hasRole, ProjectControlRoles } from "@/composables/roles";
 
 // The ten steps of the project start (WI-PL-009) with the SLA of each step. Only the current step can be done; the API enforces the order and the gate role.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -47,7 +47,7 @@ const stepRoles: Record<number, string[]> = {
 };
 const where: Record<number, string> = { 2: "terms", 5: "charter", 6: "plan" };
 const whereText: Record<number, string> = { 2: "در زبانه «شرایط و کد پروژه» صادر کنید", 5: "در زبانه «منشور» تایید کنید", 6: "در زبانه «برنامه اجرایی (PEP)» تایید کنید", 9: "سیستم ثبت می‌کند", 10: "سیستم ثبت می‌کند", 1: "سیستم ثبت می‌کند" };
-const canDo = (step: number) => (stepRoles[step] || []).includes(currentRole());
+const canDo = (step: number) => !!stepRoles[step] && hasRole(stepRoles[step]);
 
 async function act(step: number) {
   busy.value = true;

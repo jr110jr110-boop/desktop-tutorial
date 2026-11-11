@@ -4,7 +4,7 @@
 //   token            access token (JWT, 60 minutes)
 //   refreshToken     refresh token (7 days, works once)
 //   tokenExpireDate  "exp" of the access token, seconds since the epoch
-//   userRole         role claim of the access token (the first one is the role the UI uses, see composables/roles.ts)
+//   userRole         role claim of the access token: all roles, comma separated (see composables/roles.ts)
 //   accessList       claims of the roles, comma separated (only the sign-in answers carry it, a refresh keeps the stored list)
 // Everything that starts or ends a session goes through storeSession() and clearSession(), so the keys always change together.
 // Other keys of the storage (theme, selected project, ...) are not touched.

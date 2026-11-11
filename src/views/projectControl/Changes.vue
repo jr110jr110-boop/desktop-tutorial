@@ -11,7 +11,7 @@ import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok, rial } from "@/composables/inventory";
 import ChangePrint from "@/components/pc/print/ChangePrint.vue";
 import { changeDecisions, changeOrigins, changeStatuses, changeTypes, contractLabel, dependencyTypes, pcContractId, phases, progressMethods, scenarioOperations, unitManagerTitles, unitTitle, usePcPrint, votes } from "@/composables/projectControl";
-import { currentRole, hasRole, ProjectControlRoles } from "@/composables/roles";
+import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 
 // Change control: register (the change board is formed from the affected units), impact analysis (CPM before/after), PM recommendation, board votes, decision within the
 // approval authority; an approved change makes a new approved baseline. The authorities are edited by the CEO.
@@ -28,7 +28,6 @@ const sub = ref<any>(null);
 const auth = ref<any[]>([]);
 const editAuth = ref<any>(null);
 const busy = ref(false);
-const role = currentRole();
 const canCreate = hasRole(ProjectControlRoles.unitManagers);
 const canAnalyze = hasRole(ProjectControlRoles.planningOrPm);
 const canRecommend = hasRole(ProjectControlRoles.projectManagers);
@@ -89,7 +88,9 @@ async function act(action: string, extra: any = {}) {
   d.value = c;
   load();
 }
-const myOpenVote = computed(() => d.value?.board?.some((m: any) => m.vote === 0 && m.role === role));
+// a user with several roles votes once for each board seat of theirs; the first open seat is offered, the next one after the vote
+const myOpenSeat = computed(() => d.value?.board?.find((m: any) => m.vote === 0 && isRole(m.role)));
+const myOpenVote = computed(() => !!myOpenSeat.value);
 async function saveAuth() {
   busy.value = true;
   const [, e] = await saveAuthority(editAuth.value);
@@ -273,7 +274,7 @@ watch(pcContractId, load);
           </template>
           <template v-if="d.status === 2">
             <div v-if="canRecommend" class="d-flex gap-2 mt-3"><input v-model="sub.note" class="form-control form-control-sm" placeholder="پیشنهاد مدیر پروژه" /><button :disabled="busy || !sub.note" class="btn btn-sm btn-outline-primary text-nowrap" @click="act('recommend', { note: sub.note })">ثبت پیشنهاد</button></div>
-            <div v-if="myOpenVote" class="d-flex gap-2 mt-3"><select v-model.number="sub.vote" class="form-select form-select-sm" style="width: 130px"><option :value="1">موافق</option><option :value="2">مخالف</option></select><input v-model="sub.voteNote" class="form-control form-control-sm" placeholder="توضیح رای" /><button :disabled="busy" class="btn btn-sm btn-outline-primary text-nowrap" @click="act('vote', { vote: sub.vote, boardRole: role, note: sub.voteNote })">ثبت رای</button></div>
+            <div v-if="myOpenVote" class="d-flex gap-2 mt-3"><select v-model.number="sub.vote" class="form-select form-select-sm" style="width: 130px"><option :value="1">موافق</option><option :value="2">مخالف</option></select><input v-model="sub.voteNote" class="form-control form-control-sm" placeholder="توضیح رای" /><button :disabled="busy" class="btn btn-sm btn-outline-primary text-nowrap" @click="act('vote', { vote: sub.vote, boardRole: myOpenSeat?.role, note: sub.voteNote })">ثبت رای</button></div>
             <div class="d-flex gap-2 mt-3"><select v-model.number="sub.decision" class="form-select form-select-sm" style="width: 190px"><option v-for="k in [1, 2, 3, 4]" :key="k" :value="k">{{ changeDecisions[k] }}</option></select><input v-model="sub.decNote" class="form-control form-control-sm" placeholder="دلیل تصمیم (لازم)" /><button :disabled="busy || !sub.decNote" class="btn btn-sm btn-success text-nowrap" @click="act('decide', { decision: sub.decision, note: sub.decNote })">ثبت تصمیم</button></div>
             <p class="small inv-muted mt-1 mb-0">تایید فقط پس از رای همه اعضای هیئت و ثبت پیشنهاد مدیر پروژه ممکن است؛ با رای مخالف تنها مدیرعامل می‌تواند تایید کند. تایید، خط مبنای جدید می‌سازد.</p>
           </template>
