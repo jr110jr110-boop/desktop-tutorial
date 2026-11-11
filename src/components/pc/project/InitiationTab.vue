@@ -5,6 +5,7 @@ import UserSelect from "@/components/quality/UserSelect.vue";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { gateRoleTitles, initiationSteps } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // The ten steps of the project start (WI-PL-009) with the SLA of each step. Only the current step can be done; the API enforces the order and the gate role.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -48,6 +49,8 @@ const stepRoles: Record<number, string[]> = {
 const where: Record<number, string> = { 2: "terms", 5: "charter", 6: "plan" };
 const whereText: Record<number, string> = { 2: "در زبانه «شرایط و کد پروژه» صادر کنید", 5: "در زبانه «منشور» تایید کنید", 6: "در زبانه «برنامه اجرایی (PEP)» تایید کنید", 9: "سیستم ثبت می‌کند", 10: "سیستم ثبت می‌کند", 1: "سیستم ثبت می‌کند" };
 const canDo = (step: number) => !!stepRoles[step] && hasRole(stepRoles[step]);
+// FX2: a step whose role (PMO, CEO) was requested but waits for the second person shows its button disabled, with the reason
+const waitReason = (step: number): string | null => (!stepRoles[step] || hasRole(stepRoles[step]) ? null : signGate(stepRoles[step]).pendingReason);
 
 async function act(step: number) {
   busy.value = true;
@@ -90,6 +93,10 @@ watch(() => props.contractId, load);
                 <template v-if="canDo(s.step)">
                   <div v-if="s.step === 4" class="mb-1"><UserSelect v-model="managerId" placeholder="مدیر پروژه" /></div>
                   <button :disabled="busy || (s.step === 4 && !managerId)" class="btn btn-sm btn-success" @click="act(s.step)">انجام شد</button>
+                </template>
+                <template v-else-if="waitReason(s.step)">
+                  <button disabled :title="waitReason(s.step) || ''" class="btn btn-sm btn-success">انجام شد</button>
+                  <div class="small text-danger">{{ waitReason(s.step) }}</div>
                 </template>
                 <a v-else-if="where[s.step]" href="#" @click.prevent="emit('goto', where[s.step])">{{ whereText[s.step] }}</a>
                 <span v-else class="inv-muted">{{ whereText[s.step] || "در انتظار " + (gateRoleTitles[s.gateRole] || s.gateRole) }}</span>

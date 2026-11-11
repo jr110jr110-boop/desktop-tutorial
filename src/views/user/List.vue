@@ -12,7 +12,7 @@ import KsButton from "@/components/common/KsButton.vue";
 import UsersIcon from "@/components/icons/UsersIcon.vue";
 import { Colors } from "@/assets/colors";
 
-const tableHeads: string[] = ["نام", "نام خانوادگی", "ایمیل", "موبایل"];
+const tableHeads: string[] = ["نام", "نام خانوادگی", "ایمیل", "موبایل", "نقش‌های منتظر تأیید"];
 
 const tableValues: TableValue[] = [
   {
@@ -30,6 +30,11 @@ const tableValues: TableValue[] = [
   },
   {
     propName: "phoneNumber",
+    type: "text",
+  },
+  {
+    // FX2: sensitive roles asked for the user that still wait for the second person (Persian labels from the API)
+    propName: "pendingRolesText",
     type: "text",
   },
 ];
@@ -130,6 +135,10 @@ const removeUserDataModal = () => {
                     بدون نقش
                   </span>
                 </div>
+              </div>
+              <div v-if="userDataModal.data.pendingRolesText" class="d-flex gap-2 flex-1 align-items-sm-center">
+                <span class="text-small fw-light row-title"> منتظر تأیید: </span>
+                <span class="text-small">{{ userDataModal.data.pendingRolesText }}</span>
               </div>
               <div class="d-flex gap-2 flex-1 align-items-center">
                 <div class="d-flex gap-2 flex-1 align-items-md-center">

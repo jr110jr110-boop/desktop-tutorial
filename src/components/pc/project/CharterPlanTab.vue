@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { approvePlan, charterAction, getCharter, getPlan, saveCharter, savePlan } from "@/api/ProjectControlAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // Project charter (13 sections, WI-PL-007) and project execution plan PEP (WI-PL-006). Gates: the project manager accepts the authority,
 // the CEO approves the charter, the PMO deputy approves the PEP. An approved document can be changed only through change control.
@@ -25,6 +26,10 @@ const doc = ref<any>(null);
 const busy = ref(false);
 const note = ref("");
 const isCharter = computed(() => props.kind === "charter");
+// FX2: a holder of the role sees the sign button; one whose sensitive role waits for the second person sees it disabled, with the reason
+const ceoGate = signGate(["CEO"]);
+// the API (ApprovePlanAsync) lets the project manager or the CEO approve the PEP, not the PMO deputy
+const pepGate = signGate(["PROJECTMANAGER", "CEO"]);
 const approved = computed(() => !!doc.value?.approvedAt);
 const canEdit = computed(() => !approved.value && hasRole(isCharter.value ? ProjectControlRoles.charter : ProjectControlRoles.planningOrPm));
 
@@ -76,13 +81,15 @@ watch(() => [props.contractId, props.kind], load);
       <template v-if="!approved">
         <input v-model="note" class="form-control form-control-sm" placeholder="یادداشت تایید" style="max-width: 260px" />
         <button v-if="isCharter && isRole('PROJECTMANAGER') && !doc.managerAcceptedAt" :disabled="busy" class="btn btn-sm btn-outline-success" @click="act('accept')">پذیرش اختیارات (مدیر پروژه)</button>
-        <button v-if="isCharter && isRole('CEO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید منشور (مدیرعامل)</button>
-        <button v-if="!isCharter && isRole('PMO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید PEP (معاون PMO)</button>
+        <button v-if="isCharter && ceoGate.show" :disabled="busy || !!ceoGate.pendingReason" :title="ceoGate.pendingReason || ''" class="btn btn-sm btn-success" @click="act('approve')">تایید منشور (مدیرعامل)</button>
+        <span v-if="isCharter && ceoGate.pendingReason" class="small text-danger">{{ ceoGate.pendingReason }}</span>
+        <button v-if="!isCharter && pepGate.show" :disabled="busy || !!pepGate.pendingReason" :title="pepGate.pendingReason || ''" class="btn btn-sm btn-success" @click="act('approve')">تایید PEP (مدیر پروژه یا مدیرعامل)</button>
+        <span v-if="!isCharter && pepGate.pendingReason" class="small text-danger">{{ pepGate.pendingReason }}</span>
       </template>
     </div>
     <p class="inv-muted mt-2 mb-0">
       <template v-if="isCharter">منشور را مدیرعامل پس از پذیرش اختیارات توسط مدیر پروژه تایید می‌کند. تغییر منشور تاییدشده از مسیر کنترل تغییرات انجام می‌شود.</template>
-      <template v-else>برنامه اجرایی پروژه (PEP) را معاون PMO تایید می‌کند (مهلت تایید در گام‌های شروع پروژه دیده می‌شود).</template>
+      <template v-else>برنامه اجرایی پروژه (PEP) را معاون PMO تهیه می‌کند و مدیر پروژه یا مدیرعامل تایید می‌کند (تهیه‌کننده یا ویرایش‌کننده آن را تایید نمی‌کند) (مهلت تایید در گام‌های شروع پروژه دیده می‌شود).</template>
     </p>
   </div>
 </template>

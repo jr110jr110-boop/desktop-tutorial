@@ -5,6 +5,7 @@ import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok } from "@/composables/inventory";
 import { reviewDecisions, reviewKinds, reviewStages } from "@/composables/projectControl";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // Contract review (ISO 9001 8.2.3, WI-IP-002): eight checks, the capability check by planning (special orders), the decision by the CEO.
 const props = defineProps({ contractId: { type: Number, required: true }, openId: { type: Number, default: null } });
@@ -13,6 +14,11 @@ const r = ref<any>(null);
 const busy = ref(false);
 const note = ref("");
 const canEdit = hasRole(ProjectControlRoles.reviews);
+const ceoGate = signGate(["CEO"]);
+// FX2: the sign buttons come from the API (canSignPmo / canSignCommercial and the reason): the very rules of the accept action. A user with the role or with a role request that waits
+// for the second person sees the button (disabled, with the reason beside it); a user with neither does not see it.
+const pmoShown = () => r.value && !r.value.pmoAcceptedAt && (r.value.canSignPmo || !!r.value.signBlockedReasonPmo);
+const commercialShown = () => r.value && !r.value.commercialAcceptedAt && (r.value.canSignCommercial || !!r.value.signBlockedReasonCommercial);
 
 const checks: [string, string][] = [
   ["requirementsDefined", "الزامات مشتری تعریف شده است"], ["differencesResolved", "اختلاف با پیشنهاد رفع شده است"], ["capabilityChecked", "توانایی اجرا (تایید برنامه‌ریزی)"],
@@ -94,16 +100,19 @@ watch(() => props.contractId, () => { r.value = null; load(); });
         <button v-if="pending() && canEdit" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
         <template v-if="r.id && pending()">
           <button v-if="isRole('PLANNING') || isRole('PMO')" :disabled="busy || r.capabilityChecked" class="btn btn-sm btn-outline-secondary" @click="act('capability-check')">تایید توانایی اجرا (برنامه‌ریزی)</button>
-          <template v-if="isRole('PMO') && !r.pmoAcceptedAt">
-            <button :disabled="busy" class="btn btn-sm btn-success" @click="act('accept', 0, 'pmo')">پذیرش و امضا (معاون PMO)</button>
-          </template>
-          <template v-if="isRole('COMMERCIAL') && !r.commercialAcceptedAt">
-            <button :disabled="busy" class="btn btn-sm btn-success" @click="act('accept', 0, 'commercial')">پذیرش و امضا (بازرگانی)</button>
-          </template>
-          <template v-if="isRole('CEO') && r.stage !== 3">
+          <span v-if="pmoShown()" class="d-inline-flex flex-wrap gap-2 align-items-center">
+            <button :disabled="busy || !r.canSignPmo" :title="r.signBlockedReasonPmo || ''" class="btn btn-sm btn-success" @click="act('accept', 0, 'pmo')">پذیرش و امضا (معاون PMO)</button>
+            <span v-if="!r.canSignPmo && r.signBlockedReasonPmo" class="small text-danger" data-testid="pmo-sign-reason">{{ r.signBlockedReasonPmo }}</span>
+          </span>
+          <span v-if="commercialShown()" class="d-inline-flex flex-wrap gap-2 align-items-center">
+            <button :disabled="busy || !r.canSignCommercial" :title="r.signBlockedReasonCommercial || ''" class="btn btn-sm btn-success" @click="act('accept', 0, 'commercial')">پذیرش و امضا (بازرگانی)</button>
+            <span v-if="!r.canSignCommercial && r.signBlockedReasonCommercial" class="small text-danger" data-testid="commercial-sign-reason">{{ r.signBlockedReasonCommercial }}</span>
+          </span>
+          <template v-if="ceoGate.show && r.stage !== 3">
             <input v-model="note" class="form-control form-control-sm" placeholder="دلیل تصمیم (الزامی)" style="max-width: 260px" />
-            <button :disabled="busy || !note.trim()" class="btn btn-sm btn-outline-warning" @click="act('decide', 3)">نیاز به اصلاح</button>
-            <button :disabled="busy || !note.trim()" class="btn btn-sm btn-outline-danger" @click="act('decide', 2)">رد</button>
+            <button :disabled="busy || !note.trim() || !!ceoGate.pendingReason" :title="ceoGate.pendingReason || ''" class="btn btn-sm btn-outline-warning" @click="act('decide', 3)">نیاز به اصلاح</button>
+            <button :disabled="busy || !note.trim() || !!ceoGate.pendingReason" :title="ceoGate.pendingReason || ''" class="btn btn-sm btn-outline-danger" @click="act('decide', 2)">رد</button>
+            <span v-if="ceoGate.pendingReason" class="small text-danger">{{ ceoGate.pendingReason }}</span>
           </template>
         </template>
         <button class="btn btn-sm btn-outline-secondary" @click="r = null">بستن</button>

@@ -62,6 +62,7 @@ import KsNotification
   from "./components/common/KsNotification/KsNotification.vue";
 import AppLoader from "@/layouts/AppLoader.vue";
 import RemoteBanner from "@/components/common/RemoteBanner.vue";
+import PendingRoleBar from "@/components/common/PendingRoleBar.vue";
 
 const state = reactive({
   sidebar: {
@@ -155,6 +156,7 @@ onMounted(() => {
       <div
         :class="{ 'px-0 px-sm-3 py-3 flex-1': $route.name !== 'Login' }"
         class="min-w-0">
+        <PendingRoleBar v-if="$route.name !== 'Login'" />
         <RemoteBanner v-if="$route.name !== 'Login'" />
         <router-view v-slot="{ Component, route }">
           <transition mode="out-in" name="fade">

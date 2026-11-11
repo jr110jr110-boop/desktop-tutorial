@@ -11,6 +11,7 @@ import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
 import { fail, jalali, ok, printPage, rial } from "@/composables/inventory";
 import { baselineKinds, baselineStatuses, costClasses, pcContractId, phases, progressMethods, resourceClasses, setPcContract, sumOf, unitTitle, usePcPrint } from "@/composables/projectControl";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // Baselines (WI-PL-009 17): created from the calculated plan by planning, signed by the manager of every unit that owns activities,
 // approved by the PMO deputy. Cost baseline lines (CBS) are kept per project and are compared with the BAC of the baseline.
@@ -71,6 +72,10 @@ watch(() => sel.value?.id, () => { frozen.value = null; });
 const frozenBudget = computed(() => sumOf(frozen.value || [], "budget"));
 const share = (v: number | null | undefined) => (v === null || v === undefined ? "—" : (Number(v) * 100).toFixed(2) + "٪");
 const mySignatures = computed(() => (sel.value?.signatures || []).filter((s: any) => !s.signedAt && isRole(s.unitRole)));
+// FX2: a unit signature or the PMO approval whose (sensitive) role waits for the second person: the button is shown disabled, with the reason
+const pmoGate = computed(() => signGate(["PMO"]));
+const waitingSignatures = computed(() => (sel.value?.signatures || []).filter((s: any) => !s.signedAt && !isRole(s.unitRole) && signGate([s.unitRole]).pendingReason));
+const signWaitReason = computed(() => (mySignatures.value.length ? null : waitingSignatures.value.map((s: any) => signGate([s.unitRole]).pendingReason)[0] || null));
 const signedCount = computed(() => (sel.value?.signatures || []).filter((s: any) => s.signedAt).length);
 
 // ---- cost lines
@@ -194,9 +199,14 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
             </table>
             <div class="d-flex flex-wrap gap-2 align-items-end">
               <button v-if="sel.status === 0 && mySignatures.length" :disabled="busy" class="btn btn-sm btn-success" @click="act('sign')">امضای برنامه ({{ mySignatures.map((s: any) => "مدیر " + unitTitle(s.unitRole)).join(" و ") }})</button>
-              <template v-if="sel.status === 1 && isRole('PMO')">
+              <template v-if="sel.status === 0 && signWaitReason">
+                <button disabled :title="signWaitReason" class="btn btn-sm btn-success">امضای برنامه</button>
+                <span class="small text-danger">{{ signWaitReason }}</span>
+              </template>
+              <template v-if="sel.status === 1 && pmoGate.show">
                 <input v-model="note" class="form-control form-control-sm" placeholder="یادداشت تایید" style="max-width: 260px" />
-                <button :disabled="busy" class="btn btn-sm btn-success" @click="act('approve')">تایید خط مبنا (معاون PMO)</button>
+                <button :disabled="busy || !!pmoGate.pendingReason" :title="pmoGate.pendingReason || ''" class="btn btn-sm btn-success" @click="act('approve')">تایید خط مبنا (معاون PMO)</button>
+                <span v-if="pmoGate.pendingReason" class="small text-danger">{{ pmoGate.pendingReason }}</span>
               </template>
             </div>
             <p class="inv-muted mt-2 mb-0">امضا شده: {{ signedCount }} از {{ sel.signatures.length }}. پس از امضای همه مدیران، معاون PMO تایید می‌کند؛ تایید، خط مبنای قبلی را جایگزین‌شده می‌کند و گام «تایید خط مبنا» از شروع پروژه ثبت می‌شود. تا پایان امضا و تایید، خط مبنای جدید دیگری ساخته نمی‌شود.</p>

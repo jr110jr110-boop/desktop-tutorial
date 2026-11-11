@@ -267,3 +267,18 @@ export async function editUserProfilePhoto(
     return [null, error];
   }
 }
+
+/**
+ * GET Accounts/my-pending-roles (every signed-in user): the sensitive roles asked for the OWN account that still wait for the second person.
+ * The answer data is a list of { role, roleLabel, requestedAt, expiresAt, warningText }; empty when nothing waits.
+ */
+export async function getMyPendingRoles(): Promise<
+  [any, null] | [null, AxiosError] | undefined
+> {
+  try {
+    const { data } = await axiosInstance.get("Accounts/my-pending-roles");
+    return [data, null];
+  } catch (error) {
+    return [null, error];
+  }
+}

@@ -6,6 +6,7 @@ import JDate from "@/components/pc/JDate.vue";
 import { fail, jalali, ok, rial, today } from "@/composables/inventory";
 import { variationStatuses } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // Variation orders (دستور تغییر): price and time change that the client has to approve in writing.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -18,7 +19,10 @@ const busy = ref(false);
 const can = hasRole(ProjectControlRoles.variations);
 // R1c H3: the commercial unit sends, the PMO deputy or the CEO approves / rejects (CEO alone above the price threshold of the settings); the one who made, edited or sent cannot approve
 const canSubmit = hasRole(["COMMERCIAL"]);
-const canDecide = hasRole(["PMO", "CEO"]);
+// FX2: PMO / CEO are sensitive roles; while one waits for the second person the buttons are shown disabled, with the reason
+const decideGate = signGate(["PMO", "CEO"]);
+const canDecide = decideGate.show;
+const decideWait = decideGate.pendingReason;
 const isCeo = hasRole(["CEO"]);
 
 async function load() {
@@ -68,8 +72,9 @@ watch(() => props.contractId, load);
             <template v-if="can">
               <template v-if="r.status === 0"><button class="btn btn-sm btn-outline-secondary me-1" @click="form = { ...r }">ویرایش</button><button v-if="canSubmit" class="btn btn-sm btn-outline-primary" @click="act(r, 'submit')">ارسال برای کارفرما</button></template>
               <template v-if="r.status === 1 && canDecide">
-                <button v-if="!r.needsCeo || isCeo" class="btn btn-sm btn-outline-success me-1" @click="ap = { r, reference: '', date: today(), letterId: r.clientLetterId || '', documentId: r.clientDocumentId || '' }">تایید کارفرما</button>
-                <button class="btn btn-sm btn-outline-danger" @click="rj = { r, note: '' }">رد</button>
+                <button v-if="!r.needsCeo || isCeo || decideWait" :disabled="!!decideWait" :title="decideWait || ''" class="btn btn-sm btn-outline-success me-1" @click="ap = { r, reference: '', date: today(), letterId: r.clientLetterId || '', documentId: r.clientDocumentId || '' }">تایید کارفرما</button>
+                <button :disabled="!!decideWait" :title="decideWait || ''" class="btn btn-sm btn-outline-danger" @click="rj = { r, note: '' }">رد</button>
+                <div v-if="decideWait" class="small text-danger">{{ decideWait }}</div>
               </template>
             </template>
           </td>

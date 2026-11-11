@@ -6,6 +6,7 @@ import JDate from "@/components/pc/JDate.vue";
 import { fail, jalali, ok, rial, today } from "@/composables/inventory";
 import { amendmentOrigins, amendmentTypes } from "@/composables/projectControl";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
+import { signGate } from "@/composables/pendingRoles";
 
 // Contract amendments (WI-IP-002): drafted by commercial, approved by the CEO, then the customer's approval letter; three copies are tracked.
 // The list endpoint does not carry the copies, so they are shown after an action on the amendment.
@@ -16,6 +17,8 @@ const busy = ref(false);
 const reference = ref("");
 const date = ref<string | null>(today());
 const canEdit = hasRole(ProjectControlRoles.commercial);
+// FX2: the CEO sees the approve button; one whose CEO role waits for the second person sees it disabled, with the reason
+const ceoGate = signGate(["CEO"]);
 
 async function load() {
   const [data, error] = await getAmendments({ ContractId: props.contractId, PageSize: 100 });
@@ -71,7 +74,8 @@ watch(() => props.contractId, () => { a.value = null; load(); });
       </div>
       <div class="d-flex flex-wrap gap-2 align-items-end mt-2">
         <button v-if="canEdit && !a.ceoApprovedAt" :disabled="busy" class="btn btn-sm btn-primary" @click="save">ذخیره</button>
-        <button v-if="a.id && !a.ceoApprovedAt && isRole('CEO')" :disabled="busy" class="btn btn-sm btn-success" @click="act('ceo-approve')">تایید مدیرعامل</button>
+        <button v-if="a.id && !a.ceoApprovedAt && ceoGate.show" :disabled="busy || !!ceoGate.pendingReason" :title="ceoGate.pendingReason || ''" class="btn btn-sm btn-success" @click="act('ceo-approve')">تایید مدیرعامل</button>
+        <span v-if="a.id && !a.ceoApprovedAt && ceoGate.pendingReason" class="small text-danger">{{ ceoGate.pendingReason }}</span>
         <template v-if="a.id && a.ceoApprovedAt && !a.customerApprovalReference && canEdit">
           <input v-model="reference" class="form-control form-control-sm" placeholder="شماره نامه تایید مشتری" style="max-width: 220px" />
           <div style="width: 150px"><JDate v-model="date" /></div>
