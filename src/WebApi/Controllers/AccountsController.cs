@@ -241,6 +241,14 @@ namespace Controllers
 
         // ---- two-person approval of sensitive roles (★ PMO only; the approver is neither the one who asked nor the one who receives the role)
 
+        // FX2: the own open role requests, for the warning bar of every page (any signed-in user; only the own requests are returned)
+        [HttpGet("my-pending-roles")]
+        [ProducesResponseType(typeof(ResponseDto<List<OwnRoleRequestDto>>), (int)HttpStatusCode.OK)]
+        public async ValueTask<ActionResult<ResponseDto<List<OwnRoleRequestDto>>>> GetMyPendingRolesAsync(CancellationToken cancellationToken)
+        {
+            return Ok(await _accountService.GetMyPendingRolesAsync(cancellationToken));
+        }
+
         [HttpGet("role-grants")]
         [Authorize(Roles = RoleConstants.PMO)]
         [ProducesResponseType(typeof(ResponseDto<List<RoleGrantDto>>), (int)HttpStatusCode.OK)]

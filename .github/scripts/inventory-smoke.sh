@@ -12981,6 +12981,61 @@ as "$COM_TOKEN" GET go-live/po-stale-lines; check "pkg po: line A is no longer s
 ibx "$COM_TOKEN" "po-drawing:$PKGLA"; check "pkg po: the alert of line A is closed" '.success and (.data.data|length) == 0'
 p9_action "$COM_TOKEN" "$PKGFA"; check "pkg po p9: the finding of order A passes its automatic re-check" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
 
+# --- FX2: two-person signatures and roles (placed before the PB2 fix round on purpose: own contracts, own users, no stock). (A) a user with PMO + PLANNING + PROJECTMANAGER signs the contract review as the PMO
+# deputy and the commercial signature of another user completes it; (B) a user with only the PMO role: before the second person approves the grant the sign predicate says "blocked, the role waits for the second person",
+# the own request list and the user list of the administrator show it; after the approval and a new sign-in CanSignPmo is true.
+FX2WAIT='نقش PMO شما منتظر تأیید نفر دوم است؛ پس از تأیید یک بار خارج و دوباره وارد شوید.'
+FX2TERMS() { echo "{\"contractId\":$1,\"currencyCode\":\"IRR\",\"valueExVat\":500000000,\"vatPercent\":10,\"advancePercent\":10,\"retentionPercent\":5,\"latePenaltyPercentPerWeek\":1,\"penaltyCapPercent\":10,\"graceDays\":0,\"dataDateWeekday\":3,\"accrualMode\":1,\"clientReviewDays\":14,\"managementReserve\":0,\"autoSnapshot\":true,\"clientReportShowsIndices\":false}"; }
+call POST Contracts '{"code":"FX2-CT-01","title":"قرارداد آزمون امضای دونفره","status":1,"employer":"کارفرمای آزمون"}'; check "fx2: contract 1 created" '.success and .data.id > 0'
+FX2CT1=$(val .data.id)
+call POST Contracts '{"code":"FX2-CT-02","title":"قرارداد آزمون نقش منتظر تأیید","status":1,"employer":"کارفرمای آزمون"}'; check "fx2: contract 2 created" '.success and .data.id > 0'
+FX2CT2=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "$(FX2TERMS "$FX2CT1")"; check "fx2: terms of contract 1 saved with an amount" '.success and .data.valueExVat == 500000000'
+as "$PLAN_TOKEN" POST $PC/terms "$(FX2TERMS "$FX2CT2")"; check "fx2: terms of contract 2 saved with an amount" '.success and .data.valueExVat == 500000000'
+as "$PLAN_TOKEN" POST $PC/reviews "{\"contractId\":$FX2CT1,$PCREVTICKS}"; check "fx2: review of contract 1 saved fully ticked by planning" '.success and .data.id > 0 and .data.stage == 2'
+FX2RV1=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/reviews "{\"contractId\":$FX2CT2,$PCREVTICKS}"; check "fx2: review of contract 2 saved fully ticked by planning" '.success and .data.id > 0 and .data.stage == 2'
+FX2RV2=$(val .data.id)
+
+# (A) three roles: PMO (a request that the second PMO user approves) + PLANNING + PROJECTMANAGER (given at once)
+user2 fx2.multi.ci 1,11,15 'Ci#Fx2Multi-User-2026' 09120000149 0012345649
+check "fx2 a: the user is registered with PMO + PLANNING + PROJECTMANAGER; PMO waits, the other two roles are given at once" '.success and .data.id > 0 and .data.pending == true and ([.data.roles[]?.name]|sort) == ["PLANNING","PROJECTMANAGER"]'
+approve_grants fx2.multi.ci
+FX2M_TOKEN=$(login fx2.multi.ci 'Ci#Fx2Multi-User-2026'); [ -n "$FX2M_TOKEN" ] && ok "fx2 a: the three-role user signs in again after the approval" || bad "fx2 a: the three-role user signs in again after the approval"
+FX2MID=$(uid "$FX2M_TOKEN")
+as "$FX2M_TOKEN" GET "Accounts/my-pending-roles"; check "fx2 a: nothing waits for him any more" '.success and (.data|length) == 0'
+as "$FX2M_TOKEN" GET "$PC/reviews?ContractId=$FX2CT1&PageSize=0"
+check "fx2 a: the review of contract 1 offers him the PMO signature (CanSignPmo true, no reason) and not the commercial one (no commercial role: no reason either)" ".success and ([.data.data[]|select(.id == $FX2RV1 and .canSignPmo == true and .signBlockedReasonPmo == null and .canSignCommercial == false and .signBlockedReasonCommercial == null)]|length) == 1"
+as "$FX2M_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV1,\"action\":\"accept\",\"slot\":\"pmo\"}"
+check "fx2 a: he signs as the PMO deputy and the review waits for the commercial signature" ".success and .data.decision == 0 and .data.pmoAcceptedByUserId == $FX2MID and .data.commercialAcceptedByUserId == null and .data.canSignPmo == false"
+as "$COM2_TOKEN" GET "$PC/reviews?ContractId=$FX2CT1&PageSize=0"
+check "fx2 a: the second commercial user may now sign the commercial slot (CanSignCommercial true)" ".success and ([.data.data[]|select(.id == $FX2RV1 and .canSignCommercial == true and .signBlockedReasonCommercial == null and .canSignPmo == false and .signBlockedReasonPmo == null)]|length) == 1"
+as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV1,\"action\":\"accept\",\"slot\":\"commercial\"}"
+check "fx2 a: the commercial signature of another user completes the review: accepted, both signers are different people" ".success and .data.decision == 1 and .data.pmoAcceptedByUserId == $FX2MID and .data.commercialAcceptedByUserId > 0 and .data.commercialAcceptedByUserId != $FX2MID"
+
+# (B) a user with only the PMO role
+user2 fx2.pmo.ci 1 'Ci#Fx2Pmo-User-2026' 09120000150 0012345650
+check "fx2 b: a user registered with only the PMO role has no role yet (two active PMO users exist: the grant is a request)" '.success and .data.id > 0 and .data.pending == true and ((.data.roles // [])|length) == 0'
+FX2PID=$(val .data.id)
+FX2PRE_TOKEN=$(login fx2.pmo.ci 'Ci#Fx2Pmo-User-2026'); [ -n "$FX2PRE_TOKEN" ] && ok "fx2 b: he signs in with the registered password (no role yet)" || bad "fx2 b: he signs in with the registered password (no role yet)"
+as "$FX2PRE_TOKEN" GET "Accounts/my-pending-roles"
+check "fx2 b: his own request list names the PMO role and carries the Persian warning" ".success and (.data|length) == 1 and .data[0].role == \"PMO\" and .data[0].roleLabel == \"PMO\" and .data[0].warningText == \"$FX2WAIT\""
+as "$FX2M_TOKEN" GET "Accounts/my-pending-roles"; check "fx2 b: only the own requests are returned (another user sees none)" '.success and (.data|length) == 0'
+as "$FX2PRE_TOKEN" GET "$PC/reviews?ContractId=$FX2CT2&PageSize=0"
+check "fx2 b: before the approval CanSignPmo is false and the reason is that the role waits for the second person; the commercial slot shows neither a button nor a reason" ".success and ([.data.data[]|select(.id == $FX2RV2 and .canSignPmo == false and .signBlockedReasonPmo == \"$FX2WAIT\" and .canSignCommercial == false and .signBlockedReasonCommercial == null)]|length) == 1"
+as "$FX2PRE_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV2,\"action\":\"accept\",\"slot\":\"pmo\"}"; nomsg "fx2 b: and the action refuses with the very same reason" "$FX2WAIT"
+as "$ADMIN_TOKEN" GET "Accounts/get-all-users?PageSize=0&Contains=fx2.pmo.ci"
+check "fx2 b: the user list of the administrator shows the pending role of the user" ".success and ([.. | objects | select(.id? == $FX2PID and .pendingRolesText? == \"PMO\" and (.pendingRoles|length) == 1 and .pendingRoles[0] == \"PMO\")]|length) == 1"
+as "$ADMIN_TOKEN" GET "Accounts/get-all-users?PageSize=0&Contains=fx2.multi.ci"
+check "fx2 b: ... and the user whose request was approved has no pending role" ".success and ([.. | objects | select(.id? == $FX2MID and .pendingRolesText? == \"\" and (.pendingRoles|length) == 0)]|length) == 1"
+approve_grants fx2.pmo.ci
+FX2P_TOKEN=$(login fx2.pmo.ci 'Ci#Fx2Pmo-User-2026'); [ -n "$FX2P_TOKEN" ] && ok "fx2 b: after the approval he signs in again" || bad "fx2 b: after the approval he signs in again"
+as "$FX2P_TOKEN" GET "Accounts/my-pending-roles"; check "fx2 b: nothing waits for him any more" '.success and (.data|length) == 0'
+as "$FX2P_TOKEN" GET "$PC/reviews?ContractId=$FX2CT2&PageSize=0"
+check "fx2 b: after the approval and the new sign-in CanSignPmo is true and there is no reason" ".success and ([.data.data[]|select(.id == $FX2RV2 and .canSignPmo == true and .signBlockedReasonPmo == null and .canSignCommercial == false and .signBlockedReasonCommercial == null)]|length) == 1"
+as "$FX2P_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV2,\"action\":\"accept\",\"slot\":\"pmo\"}"; check "fx2 b: he signs as the PMO deputy" '.success and .data.decision == 0 and .data.pmoAcceptedByUserId > 0'
+as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":$FX2RV2,\"action\":\"accept\",\"slot\":\"commercial\"}"; check "fx2 b: the commercial signature completes the review" '.success and .data.decision == 1'
+
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":100000}]}"; check "pb2 fix: the receipt draft of 1 ring part is saved into quarantine (the part needs incoming inspection)" '.success and .data.id > 0'; PB2RC=$(val .data.id)

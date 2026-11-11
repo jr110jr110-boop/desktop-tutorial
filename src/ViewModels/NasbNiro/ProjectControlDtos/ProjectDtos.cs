@@ -226,6 +226,16 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string CommercialAcceptedByName { get; set; }
         public DateTimeOffset? CommercialAcceptedAt { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>
+        /// FX2: output only, for the signed-in user. CanSignPmo / CanSignCommercial: the same rules as the accept action (role, not signed yet, not the maker or an editor, items complete,
+        /// contract terms with an amount, no other accepted review). SignBlockedReasonPmo / SignBlockedReasonCommercial: the Persian reason when it is blocked and the user has the role
+        /// or a request for it that waits for the second person; null when the user has no such role at all (the screen then shows no button) or when the user can sign.
+        /// </summary>
+        public bool CanSignPmo { get; set; }
+        public bool CanSignCommercial { get; set; }
+        public string SignBlockedReasonPmo { get; set; }
+        public string SignBlockedReasonCommercial { get; set; }
     }
 
     public class PcReviewActionDto
