@@ -189,6 +189,40 @@ namespace MsTests
         }
 
         [TestMethod, Timeout(60000)]
+        public async Task ASubAssemblyIsGeneratedExactlyOnce_AndSavedExactlyOnceWithTheWorkOrder()
+        {
+            int product = NewProduct();
+            int a1 = NewAssembly(product, "G1");
+            int a2 = NewAssembly(product, "G2");
+            int a3 = NewAssembly(product, "G3");
+            NewAssembly(product, "H1", a2);
+            NewAssembly(product, "H2", a2);
+            SetAssemblyPredecessorLater(a1, a3);   // G1 follows G3
+
+            ResponseGeneratedAssembliesDto result = await Generate(product);
+
+            Assert.IsNull(result.Problem, result.Problem);
+            Assert.AreEqual(5, result.Assemblies.Count());
+            Assert.AreEqual("G2,G3,H1,H2,G1", string.Join(",", result.Assemblies.Select(a => a.Code)));
+            Assert.IsTrue(result.Assemblies.All(a => a.Children == null || a.Children.Count == 0 || a.Children.All(c => result.Assemblies.Contains(c))), "no copy of an assembly is hidden under its parent");
+
+            int contract = 0;
+            H.Write(u =>
+            {
+                var c = AppHost.Add(u, new ContractEntity { Code = "C-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "contract" });
+                u.SaveChanges(); contract = c.Id;
+                AppHost.Add(u, new ContractEquipment { ContractId = c.Id, EquipmentId = product, Count = 5 });
+                u.SaveChanges();
+            }, Pmo);
+            ResponseDto<ResponseWorkOrderDto> wo = await AsPmo(p => p.GetRequiredService<IWorkOrderService>()
+                .AddWorkOrderAsync(new AddWorkOrderDto { ContractId = contract, EquipmentId = product, Code = "W2", Title = "دستور", Description = "d", Count = 1 }, CancellationToken.None).AsTask());
+            Assert.IsTrue(wo.Success, wo.Message);
+
+            var rows = H.Read(u => u.Set<Entities.Model.NasbNiro.Contracts.AssemblyEntity>().Where(a => a.WorkOrderId == wo.Data.Id).Select(a => a.Code).ToList());
+            Assert.AreEqual("G1,G2,G3,H1,H2", string.Join(",", rows.OrderBy(x => x, StringComparer.Ordinal)), "every assembly of the work order exists exactly once");
+        }
+
+        [TestMethod, Timeout(60000)]
         public async Task ADeletedPredecessor_IsAPersianRefusalNamingTheItem_NoThrow()
         {
             int product = NewProduct();

@@ -56,6 +56,8 @@ namespace ViewModels.Mapping
                 .ForMember(dest => dest.PredecessorId, opt => opt.Ignore())
                 .ForMember(dest => dest.Deleted, opt => opt.Ignore())
                 .ForMember(dest => dest.WorkOrder, opt => opt.Ignore())
+                // FX1: the tracked bank assemblies are linked to each other by EF (Children); copying them here made every sub-assembly a second time, as a copy under its parent
+                .ForMember(dest => dest.Children, opt => opt.Ignore())
                 .ForMember(dest => dest.Boms, opt => opt.Ignore());
 
             CreateMap<EquipmentBom, Bom>()
