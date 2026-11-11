@@ -49,6 +49,7 @@ namespace IocConfig
             services.AddTransient<IEquipmentAssemblyService, EquipmentAssemblyService>();
             services.AddTransient<IContractEquipmentService, ContractEquipmentService>();
             services.AddTransient<IEquipmentBomService, EquipmentBomService>();
+            services.AddTransient<IEquipmentPredecessorCheckService, EquipmentPredecessorCheckService>();
             services.AddTransient<IEquipmentProcessService, EquipmentProcessService>();
             services.AddTransient<IWorkOrderService, WorkOrderService>();
             services.AddTransient<IAssemblyService, AssemblyService>();

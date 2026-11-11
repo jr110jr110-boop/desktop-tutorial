@@ -264,6 +264,23 @@ namespace Services.NasbNiro
                 }
             }
 
+            #region Clean BOM lines of other assemblies that had a BOM line of this assembly as predecessor
+            // FX1: the BOM lines of this assembly are deleted above; a line of another assembly of the product that followed one of them would keep a deleted predecessor
+            // (and the work order from the product used to throw on it)
+            int[] removedBomIds = equipmentAssemblyToRemove.EquipmentBoms == null ? new int[0] : equipmentAssemblyToRemove.EquipmentBoms.Select(b => b.Id).ToArray();
+            if (removedBomIds.Length > 0)
+            {
+                List<EquipmentBom> followers = await _unitOfWork.Set<EquipmentBom>()
+                    .Where(b => !b.Deleted && b.PredecessorId.HasValue && removedBomIds.Contains(b.PredecessorId.Value))
+                    .ToListAsync(cancellationToken);
+
+                foreach (EquipmentBom follower in followers)
+                {
+                    follower.RemovePredecessor();
+                }
+            }
+            #endregion
+
             #region Clean From Being Predecessor
             IEnumerable<EquipmentAssembly> equipmentAssembliesToRemovePredecessor = await _equipmentAssemblies
                 .Where(x => !x.Deleted && x.PredecessorId == equipmentAssemblyToRemove.Id)
@@ -429,8 +446,7 @@ namespace Services.NasbNiro
                 }
             }
 
-            IEnumerable<Task> tasks = data.Select(x => IncludeChildrenAsync(x, cancellationToken));
-            await Task.WhenAll(tasks);
+            await IncludeChildrenAsync(data, equipmentAssemblyPaginationParams.EquipmentId, cancellationToken);
 
             return ResponseDtoHelper.Ok(data);
         }
@@ -483,7 +499,10 @@ namespace Services.NasbNiro
                     ea.Id == dto.Id && ea.EquipmentId == dto.EquipmentId,
                     cancellationToken);
 
-            await IncludeChildrenAsync(data, cancellationToken);
+            if (data != null)
+            {
+                await IncludeChildrenAsync(new[] { data }, data.EquipmentId, cancellationToken);
+            }
 
             if (data != null)
             {
@@ -515,18 +534,32 @@ namespace Services.NasbNiro
             return result;
         }
 
-        private async Task IncludeChildrenAsync(ResponseEquipmentAssemblyDto data, CancellationToken cancellationToken)
+        /// <summary>
+        /// Reads every non-deleted assembly of the product with ONE query and builds the sub-tree of each
+        /// root in memory (a DbContext cannot run parallel queries). Nodes that would close a cycle are
+        /// not expanded again and are logged.
+        /// </summary>
+        private async Task IncludeChildrenAsync(IEnumerable<ResponseEquipmentAssemblyDto> roots, int equipmentId, CancellationToken cancellationToken)
         {
-            if (data != null)
+            ResponseEquipmentAssemblyDto[] rootArray = roots?.Where(x => x != null).ToArray();
+            if (rootArray == null || rootArray.Length == 0)
             {
-                data.Children = await _equipmentAssemblies
-                    .Where(x => !x.Deleted && x.PredecessorId == data.Id)
-                    .ProjectTo<ResponseEquipmentAssemblyDto>(_mapper.ConfigurationProvider)
-                    .ToArrayAsync(cancellationToken);
+                return;
+            }
 
-                IEnumerable<Task> tasks = data.Children.Select(x => IncludeChildrenAsync(x, cancellationToken));
+            ResponseEquipmentAssemblyDto[] all = await _equipmentAssemblies
+                .AsNoTracking()
+                .Where(x => !x.Deleted && x.EquipmentId == equipmentId)
+                .ProjectTo<ResponseEquipmentAssemblyDto>(_mapper.ConfigurationProvider)
+                .ToArrayAsync(cancellationToken);
 
-                await Task.WhenAll(tasks);
+            List<int> cycles = AssemblyTreeBuilder.AttachChildren(
+                rootArray, all, x => x.Id, x => x.ParentId, (node, children) => node.Children = children);
+
+            if (cycles.Count > 0)
+            {
+                _logger.LogWarning("Predecessor cycle in product {EquipmentId}; assemblies not expanded again: {Ids}",
+                    equipmentId, string.Join(",", cycles.Distinct()));
             }
         }
     }

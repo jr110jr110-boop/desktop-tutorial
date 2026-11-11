@@ -12981,6 +12981,58 @@ as "$COM_TOKEN" GET go-live/po-stale-lines; check "pkg po: line A is no longer s
 ibx "$COM_TOKEN" "po-drawing:$PKGLA"; check "pkg po: the alert of line A is closed" '.success and (.data.data|length) == 0'
 p9_action "$COM_TOKEN" "$PKGFA"; check "pkg po p9: the finding of order A passes its automatic re-check" '.success and .data.statusValue == 3 and .data.recheckPassed == true'
 
+# --- FX1 fix round (placed before the PB2 fix round on purpose: it uses products, assemblies, BOM lines, a contract and a work order of its own and no stock, so no figure of the PB2 fix round moves).
+# The sub-assemblies page of a product (it answered HTTP 500 as soon as two assemblies stood on one level), the predecessor rules of the BOM add/edit, the clean-up when an assembly is deleted, the read-only check for the PMO.
+TOKEN=$ADMIN_TOKEN
+call POST Equipments '{"code":"FX1-EQ","title":"FX1 product (tree)"}'; check "fx1: the product of the tree test is created" '.success and .data.id > 0'; FX1EQ=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ,\"assemblerDuration\":1,\"code\":\"FX1-A1\",\"title\":\"FX1 A1\"}"; check "fx1: assembly A1 is created" '.success and .data.id > 0'; FX1A1=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ,\"assemblerDuration\":1,\"code\":\"FX1-A2\",\"title\":\"FX1 A2\"}"; check "fx1: assembly A2 is created" '.success and .data.id > 0'; FX1A2=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ,\"assemblerDuration\":1,\"code\":\"FX1-A3\",\"title\":\"FX1 A3\"}"; check "fx1: assembly A3 is created" '.success and .data.id > 0'; FX1A3=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ,\"assemblerDuration\":1,\"code\":\"FX1-B1\",\"title\":\"FX1 B1\"}"; check "fx1: sub-assembly B1 is created" '.success and .data.id > 0'; FX1B1=$(val .data.id)
+call PUT EquipmentAssemblies/set-predecessor "{\"id\":$FX1B1,\"predecessorId\":$FX1A2}"; check "fx1: B1 follows A2" '.success'
+call GET "EquipmentAssemblies?EquipmentId=$FX1EQ&IsDeleted=false&PageNumber=1&PageSize=50"
+if [ "$CODE" = "200" ]; then ok "fx1 tree: the page of three sibling assemblies and one sub-assembly answers HTTP 200 (it answered 500 before)"; else bad "fx1 tree: the page answers HTTP $CODE"; fi
+check "fx1 tree: the three root assemblies in order A1, A2, A3" '.success and [.data.data[]|.code] == ["FX1-A1","FX1-A2","FX1-A3"]'
+check "fx1 tree: A1 and A3 have no children, A2 has exactly one" '[.data.data[]|(.children|length)] == [0,1,0]'
+check "fx1 tree: the child of A2 is B1, and B1 has no children" '.data.data[1].children[0].code == "FX1-B1" and (.data.data[1].children[0].children|length) == 0'
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ,\"assemblerDuration\":1,\"code\":\"FX1-B2\",\"title\":\"FX1 B2\"}"; check "fx1: sub-assembly B2 is created" '.success and .data.id > 0'; FX1B2=$(val .data.id)
+call PUT EquipmentAssemblies/set-predecessor "{\"id\":$FX1B2,\"predecessorId\":$FX1A2}"; check "fx1: B2 follows A2" '.success'
+call GET "EquipmentAssemblies?EquipmentId=$FX1EQ&IsDeleted=false&PageNumber=1&PageSize=50"
+check "fx1 tree: two sub-assemblies on one level under A2 are read in order B1, B2" '.success and [.data.data[1].children[]|.code] == ["FX1-B1","FX1-B2"]'
+
+# the read-only check of the product bank: planning reads it, a buyer is turned away, the clean product has no finding
+as "$PLAN_TOKEN" GET EquipmentPredecessorChecks
+check "fx1 check: planning reads the report; the report says that a second person approves every correction; the finding count is the row count; the clean product has no row" ".success and (.data.note|contains(\"تأیید نفر دوم\")) and .data.findingCount == (.data.rows|length) and ([.data.rows[]|select(.equipmentId == $FX1EQ)]|length) == 0 and .data.productsChecked > 0"
+as "$COM_TOKEN" GET EquipmentPredecessorChecks; r403 "fx1 check: a buyer cannot read the predecessor check (403)"
+
+# the work order from the product: A1 follows A3, which is created AFTER A1 (the predecessor is later in the queue); the work order must be made, in the right order
+call PUT EquipmentAssemblies/set-predecessor "{\"id\":$FX1A1,\"predecessorId\":$FX1A3}"; check "fx1: A1 follows A3 (a predecessor created later)" '.success'
+call POST Contracts '{"code":"FX1-CT-1","title":"قرارداد آزمون FX1","status":1,"employer":"کارفرمای آزمون"}'; check "fx1: contract created" '.success and .data.id > 0'; FX1CT=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$FX1CT,\"equipmentId\":$FX1EQ,\"count\":2}"; check "fx1: contract equipment" '.success'
+call POST WorkOrders "{\"contractId\":$FX1CT,\"equipmentId\":$FX1EQ,\"code\":\"FX1-WO-1\",\"title\":\"FX1 work order\",\"description\":\"x\",\"count\":1}"; check "fx1: the work order is made from the product although a predecessor comes later in the queue" '.success and .data.id > 0'; FX1WO=$(val .data.id)
+call GET "Assemblies?WorkOrderId=$FX1WO&IsDeleted=false&PageNumber=1&PageSize=50"
+check "fx1 work order: the assemblies of the work order are the same tree, roots A2 and A3" '.success and [.data.data[]|.code] == ["FX1-A2","FX1-A3"]'
+check "fx1 work order: A2 has B1 and B2, A3 has A1" '[.data.data[0].children[]|.code] == ["FX1-B1","FX1-B2"] and [.data.data[1].children[]|.code] == ["FX1-A1"]'
+
+# BOM add and edit: the predecessor rules, a BOM without processes, processes saved together with the BOM
+call POST Equipments '{"code":"FX1-EQ2","title":"FX1 product (BOM)"}'; check "fx1 bom: product created" '.success and .data.id > 0'; FX1EQ2=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ2,\"assemblerDuration\":1,\"code\":\"FX1-X1\",\"title\":\"FX1 X1\"}"; check "fx1 bom: assembly X1 created" '.success and .data.id > 0'; FX1X1=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ2,\"assemblerDuration\":1,\"code\":\"FX1-X2\",\"title\":\"FX1 X2\"}"; check "fx1 bom: assembly X2 created" '.success and .data.id > 0'; FX1X2=$(val .data.id)
+call POST Equipments '{"code":"FX1-EQ3","title":"FX1 product (another)"}'; check "fx1 bom: another product created" '.success and .data.id > 0'; FX1EQ3=$(val .data.id)
+call POST EquipmentAssemblies "{\"equipmentId\":$FX1EQ3,\"assemblerDuration\":1,\"code\":\"FX1-Y1\",\"title\":\"FX1 Y1\"}"; check "fx1 bom: assembly Y1 of the other product created" '.success and .data.id > 0'; FX1Y1=$(val .data.id)
+FX1BOMJ='"positionNumber":1,"title":"ورق","count":2,"unit":"عدد","material":"CS","standard":"ASTM","diagonal":"1","length":"1","width":"1","height":"1","notWetWeight":1,"wetWeight":1,"sort":1'
+legacy_open
+call POST EquipmentBoms '{"equipmentAssemblyId":'"$FX1Y1"','"$FX1BOMJ"'}'; check "fx1 bom: a BOM line without any process field is saved with no processes" '.success and .data.id > 0 and (.data.equipmentProcesses|length) == 0'; FX1BY1=$(val .data.id)
+call POST EquipmentBoms '{"equipmentAssemblyId":'"$FX1X2"','"$FX1BOMJ"',"equipmentProcesses":null}'; check "fx1 bom: a BOM line whose processes are null is saved with no processes (it was a server error after the BOM was saved)" '.success and .data.id > 0 and (.data.equipmentProcesses|length) == 0'; FX1BX2=$(val .data.id)
+call POST EquipmentBoms '{"equipmentAssemblyId":'"$FX1X1"','"$FX1BOMJ"',"predecessorId":'"$FX1BX2"',"equipmentProcesses":[{"title":"برش","enterCommodityCode":"FX1-C1","exitCommodityCode":"FX1-C2","mapDuration":1,"masterDuration":1,"processDuration":1,"weightPercent":10,"type":1,"programPrice":0}]}'; check "fx1 bom: a BOM line with a predecessor of the same product and one process is saved together with its process" ".success and .data.predecessorId == $FX1BX2 and (.data.equipmentProcesses|length) == 1 and .data.equipmentProcesses[0].title == \"برش\""; FX1BX1=$(val .data.id)
+call POST EquipmentBoms '{"equipmentAssemblyId":'"$FX1X1"','"$FX1BOMJ"',"predecessorId":987654321}'; nomsg "fx1 bom: a predecessor that does not exist is refused, naming the rule" "وجود ندارد"
+call POST EquipmentBoms '{"equipmentAssemblyId":'"$FX1X1"','"$FX1BOMJ"',"predecessorId":'"$FX1BY1"'}'; nomsg "fx1 bom: a predecessor of another product is refused, naming the rule" "متعلق به محصول دیگری است"
+call PUT EquipmentBoms '{"id":'"$FX1BX2"',"equipmentAssemblyId":'"$FX1X2"','"$FX1BOMJ"',"predecessorId":'"$FX1BX1"'}'; nomsg "fx1 bom: an edit that closes a loop (X2 line after the X1 line that follows it) is refused" "حلقه"
+call GET "EquipmentBoms/get-equipmentBom?Id=$FX1BX1&EquipmentAssemblyId=$FX1X1"; check "fx1 bom: the BOM line still follows the X2 line before the assembly is deleted" ".success and .data.predecessorId == $FX1BX2"
+call DELETE "EquipmentAssemblies/$FX1X2"; check "fx1 bom: assembly X2 is deleted" '.success'
+call GET "EquipmentBoms/get-equipmentBom?Id=$FX1BX1&EquipmentAssemblyId=$FX1X1"; check "fx1 bom: the line of X1 that followed a line of the deleted assembly has no predecessor any more" '.success and .data.predecessorId == null'
+legacy_close
+
 # --- PB2 fix round (last on purpose: it receives stock and orders goods, so no earlier count in this script moves). Stock that is NOT zero and an order that covers a request only in part; every figure exact and every draft request checked.
 # The bought ring part (PB2I1) needs 2 for the 2 units. 1 piece is received; a project request asks 2 and an order covers 1 of them. So: 1 reserved from stock, 1 still open on the request (2 asked - 1 ordered), nothing short.
 call POST inventory/documents "{\"type\":1,\"documentDate\":\"${TODAY}T00:00:00\",\"warehouseId\":$WQ,\"destinationWarehouseId\":$W1,\"lines\":[{\"itemId\":$PB2I1,\"quantity\":1,\"unitPrice\":100000}]}"; check "pb2 fix: the receipt draft of 1 ring part is saved into quarantine (the part needs incoming inspection)" '.success and .data.id > 0'; PB2RC=$(val .data.id)

@@ -69,7 +69,7 @@ namespace Services.NasbNiro.Inventory
             result.MissingCodes.AddRange(warehouses.Select(w => "کد سپیدار انبار: " + w));
 
             List<string> items = await waiting.SelectMany(d => d.Lines).Select(l => l.Item)
-                .Where(i => i.SepidarCode == null).Select(i => i.Code).Distinct().Take(50).ToListAsync(cancellationToken);
+                .Where(i => i.SepidarCode == null).Select(i => i.Code).Distinct().OrderBy(c => c).Take(50).ToListAsync(cancellationToken);
             if (items.Count > 0)
                 result.MissingCodes.Add("کالاهای بدون کد سپیدار (کد PMIS فرستاده می‌شود): " + string.Join("، ", items));
 

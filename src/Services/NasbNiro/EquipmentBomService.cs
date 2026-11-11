@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Equipments;
 using Entities.Resources;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Services.NasbNiro.Contracts;
 using Services.Resources;
@@ -80,58 +81,115 @@ namespace Services.NasbNiro
             if (!equipmentAssemblyExists)
                 return ResponseDtoHelper.NotFound<ResponseEquipmentBomDto>(NasbNiroMessages.EquipmentAssemblyNotFound);
 
-            EquipmentBom EquipmentBomToAdd = new EquipmentBom()
-            {
-                EquipmentAssemblyId = addEquipmentBomDto.EquipmentAssemblyId,
-                Title = addEquipmentBomDto.Title,
-                Sort = addEquipmentBomDto.Sort,
-                Count = addEquipmentBomDto.Count,
-                Standard = addEquipmentBomDto.Standard,
-                Material = addEquipmentBomDto.Material,
-                Length = addEquipmentBomDto.Length,
-                LengthUnit = addEquipmentBomDto.LengthUnit,
-                Height = addEquipmentBomDto.Height,
-                HeightUnit = addEquipmentBomDto.HeightUnit,
-                Width = addEquipmentBomDto.Width,
-                WidthUnit = addEquipmentBomDto.WidthUnit,
-                WetWeight = addEquipmentBomDto.WetWeight,
-                NotWetWeightUnit = addEquipmentBomDto.WetWeightUnit,
-                Diagonal = addEquipmentBomDto.Diagonal,
-                PositionNumber = addEquipmentBomDto.PositionNumber,
-                PredecessorId = addEquipmentBomDto.PredecessorId
-            };
+            // FX1: validate everything BEFORE anything is saved. A BOM without processes is allowed (the screen offers to add them afterwards): null is the same as empty.
+            List<ViewModels.NasbNiro.EquipmentProcessDtos.ResponseEquipmentProcessDto> processDtos =
+                (addEquipmentBomDto.equipmentProcesses ?? new List<ViewModels.NasbNiro.EquipmentProcessDtos.ResponseEquipmentProcessDto>())
+                .Where(x => x != null).ToList();
 
-            EntityEntry<EquipmentBom> entityEntry = await _equipmentBoms.AddAsync(EquipmentBomToAdd);
-
-            if (await this.SaveChangesAsync(cancellationToken))
+            if (addEquipmentBomDto.PredecessorId.HasValue)
             {
-                var bomId = await this.GetResponseEquipmentBomDtoByIdAsync(entityEntry.Entity, cancellationToken);
-                for (int i = 0; i < addEquipmentBomDto.equipmentProcesses.Count; i++)
+                int equipmentId = await _unitOfWork.Set<EquipmentAssembly>().AsNoTracking()
+                    .Where(x => x.Id == addEquipmentBomDto.EquipmentAssemblyId)
+                    .Select(x => x.EquipmentId)
+                    .SingleAsync(cancellationToken);
+
+                string predecessorProblem = await PredecessorValidator.ValidateAsync(
+                    "BOM", BomNodes(), null, equipmentId, addEquipmentBomDto.PredecessorId.Value, cancellationToken);
+                if (predecessorProblem != null)
+                    return ResponseDtoHelper.BadRequest<ResponseEquipmentBomDto>(predecessorProblem);
+            }
+
+            // BOM and its processes are saved together, in ONE transaction (all or nothing)
+            int savedBomId = 0;
+            bool saved = false;
+
+            async Task WorkAsync()
+            {
+                EquipmentBom equipmentBomToAdd = new EquipmentBom()
                 {
-                    EquipmentProcess equipmentProcess = new EquipmentProcess()
+                    EquipmentAssemblyId = addEquipmentBomDto.EquipmentAssemblyId,
+                    Title = addEquipmentBomDto.Title,
+                    Sort = addEquipmentBomDto.Sort,
+                    Count = addEquipmentBomDto.Count,
+                    Standard = addEquipmentBomDto.Standard,
+                    Material = addEquipmentBomDto.Material,
+                    Length = addEquipmentBomDto.Length,
+                    LengthUnit = addEquipmentBomDto.LengthUnit,
+                    Height = addEquipmentBomDto.Height,
+                    HeightUnit = addEquipmentBomDto.HeightUnit,
+                    Width = addEquipmentBomDto.Width,
+                    WidthUnit = addEquipmentBomDto.WidthUnit,
+                    WetWeight = addEquipmentBomDto.WetWeight,
+                    NotWetWeightUnit = addEquipmentBomDto.WetWeightUnit,
+                    Diagonal = addEquipmentBomDto.Diagonal,
+                    PositionNumber = addEquipmentBomDto.PositionNumber,
+                    PredecessorId = addEquipmentBomDto.PredecessorId,
+                    EquipmentProcesses = new List<EquipmentProcess>()
+                };
+
+                foreach (ViewModels.NasbNiro.EquipmentProcessDtos.ResponseEquipmentProcessDto process in processDtos)
+                {
+                    equipmentBomToAdd.EquipmentProcesses.Add(new EquipmentProcess()
                     {
-                        EquipmentBomId = bomId.Data.Id,
-                        ExitCommodityCode = addEquipmentBomDto.equipmentProcesses[i].ExitCommodityCode,
-                        EnterCommodityCode = addEquipmentBomDto.equipmentProcesses[i].EnterCommodityCode,
-                        Title = addEquipmentBomDto.equipmentProcesses[i].Title,
-                        MapDuration = addEquipmentBomDto.equipmentProcesses[i].MapDuration,
-                        MasterDuration = addEquipmentBomDto.equipmentProcesses[i].MasterDuration,
-                        ProcessDuration = addEquipmentBomDto.equipmentProcesses[i].ProcessDuration,
-                        ProgramPrice = addEquipmentBomDto.equipmentProcesses[i].ProgramPrice,
-                        WeightPercent = addEquipmentBomDto.equipmentProcesses[i].WeightPercent,
-                        Type = addEquipmentBomDto.equipmentProcesses[i].Type,
-                        WorkflowId=addEquipmentBomDto.equipmentProcesses[i].WorkflowId
-                        
-                    };
-                    await _equipmentProcess.AddAsync(equipmentProcess);
-                    await _unitOfWork.SaveChangesAsync();
+                        ExitCommodityCode = process.ExitCommodityCode,
+                        EnterCommodityCode = process.EnterCommodityCode,
+                        Title = process.Title,
+                        MapDuration = process.MapDuration,
+                        MasterDuration = process.MasterDuration,
+                        ProcessDuration = process.ProcessDuration,
+                        ProgramPrice = process.ProgramPrice,
+                        WeightPercent = process.WeightPercent,
+                        Type = process.Type,
+                        WorkflowId = process.WorkflowId
+                    });
                 }
-                return bomId;
+
+                await _equipmentBoms.AddAsync(equipmentBomToAdd, cancellationToken);
+                saved = await this.SaveChangesAsync(cancellationToken);
+                savedBomId = equipmentBomToAdd.Id;
+            }
+
+            if (_unitOfWork is DbContext db && db.Database.IsRelational())
+            {
+                int attempt = 0;
+                await db.Database.CreateExecutionStrategy().ExecuteAsync(async token =>
+                {
+                    if (attempt++ > 0) db.ChangeTracker.Clear();
+                    await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(token);
+                    await WorkAsync();
+                    if (saved) await transaction.CommitAsync(token);
+                    else await transaction.RollbackAsync(token);
+                }, cancellationToken);
+            }
+            else
+            {
+                await WorkAsync();
+            }
+
+            if (saved)
+            {
+                return await this.GetResponseEquipmentBomDtoByIdAsync(
+                    new GetEquipmentBomDto()
+                    {
+                        Id = savedBomId,
+                        EquipmentAssemblyId = addEquipmentBomDto.EquipmentAssemblyId,
+                        IncludeTypes = true
+                    }, cancellationToken);
             }
 
             return ResponseDtoHelper.BadRequest<ResponseEquipmentBomDto>
                 (NasbNiroMessages.EquipmentBomNotAdded);
         }
+
+        private IQueryable<PredecessorNode> BomNodes() => _equipmentBoms.AsNoTracking()
+            .Select(b => new PredecessorNode
+            {
+                Id = b.Id,
+                PredecessorId = b.PredecessorId,
+                Deleted = b.Deleted,
+                EquipmentId = b.EquipmentAssembly.EquipmentId,
+                Title = b.Title
+            });
 
         public async EquipmentBomResult UpdateEquipmentBomAsync(UpdateEquipmentBomDto updateEquipmentBomDto, CancellationToken cancellationToken)
         {
@@ -148,6 +206,20 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper
                     .BadRequest<ResponseEquipmentBomDto>
                         (NasbNiroMessages.EquipmentAssemblyEquipmentBomNotMatched);
+
+            // FX1: the predecessor given by an edit gets the same rules as SetPredecessor (same product, not deleted, no loop)
+            if (updateEquipmentBomDto.PredecessorId.HasValue && updateEquipmentBomDto.PredecessorId != equipmentBom.PredecessorId)
+            {
+                int equipmentId = await _unitOfWork.Set<EquipmentAssembly>().AsNoTracking()
+                    .Where(x => x.Id == equipmentBom.EquipmentAssemblyId)
+                    .Select(x => x.EquipmentId)
+                    .SingleAsync(cancellationToken);
+
+                string predecessorProblem = await PredecessorValidator.ValidateAsync(
+                    "BOM", BomNodes(), equipmentBom.Id, equipmentId, updateEquipmentBomDto.PredecessorId.Value, cancellationToken);
+                if (predecessorProblem != null)
+                    return ResponseDtoHelper.BadRequest<ResponseEquipmentBomDto>(predecessorProblem);
+            }
 
             _mapper.Map(updateEquipmentBomDto, equipmentBom);
 
@@ -183,7 +255,7 @@ namespace Services.NasbNiro
                 })
                 .SingleOrDefaultAsync(cancellationToken);
 
-            EquipmentBom bomToUpdate = bomAndEquipment.EquipmentBom;
+            EquipmentBom bomToUpdate = bomAndEquipment?.EquipmentBom;
 
             if (bomToUpdate is null)
                 return ResponseDtoHelper

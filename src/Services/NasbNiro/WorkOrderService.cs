@@ -121,6 +121,12 @@ namespace Services.NasbNiro
                 return ResponseDtoHelper.NotFound<ResponseWorkOrderDto>(NasbNiroMessages.EquipmentNotFound);
             }
 
+            // FX1: invalid predecessors of the product (deleted, other product, missing, loop) are a refusal with a Persian message, not a server error
+            if (!string.IsNullOrEmpty(responseGeneratedAssembliesDto.Problem))
+            {
+                return ResponseDtoHelper.BadRequest<ResponseWorkOrderDto>(responseGeneratedAssembliesDto.Problem);
+            }
+
             // Package A2 (single BOM master): a work order is not built from the legacy equipment BOM / process template while the legacy BOM is frozen; the BOM of the project comes from the product bank (baseline)
             if (responseGeneratedAssembliesDto.Assemblies != null && responseGeneratedAssembliesDto.Assemblies.Any(a => (a.Boms != null && a.Boms.Any())))
             {

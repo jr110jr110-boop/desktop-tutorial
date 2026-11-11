@@ -181,7 +181,7 @@ namespace Services.NasbNiro.ProductBank
             if (preview.Title == null) return;
             string title = preview.Title;
             List<string> sameTitle = await Uow.Set<InventoryItem>().AsNoTracking()
-                .Where(i => !i.Deleted && i.Title == title && (i.PartNumber != preview.PartNumber || i.PartNumber == null) && i.Code != preview.Code).Select(i => i.Code).Take(5).ToListAsync(ct);
+                .Where(i => !i.Deleted && i.Title == title && (i.PartNumber != preview.PartNumber || i.PartNumber == null) && i.Code != preview.Code).Select(i => i.Code).OrderBy(c => c).Take(5).ToListAsync(ct);
             if (sameTitle.Count > 0) preview.Warnings.Add("کالایی با همین عنوان و شماره قطعه دیگر وجود دارد (احتمال تکرار): " + string.Join("، ", sameTitle));
         }
 

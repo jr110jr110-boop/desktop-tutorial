@@ -22,8 +22,21 @@ namespace WebApi
             this.logger = logger;
         }
 
+        /// <summary>The status that is written when the client closed the connection before the answer was ready (nginx convention).</summary>
+        public const int ClientClosedRequestStatus = 499;
+
         public void OnException(ExceptionContext context)
         {
+            // FX1: the client aborted the request (closed the page): not a server fault. An OperationCanceledException that is NOT a client abort (a real timeout) stays an error below.
+            if (context.Exception is OperationCanceledException && context.HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                this.logger.LogInformation("Request {Method} {Path} was cancelled by the client.", context.HttpContext.Request.Method, context.HttpContext.Request.Path);
+                context.HttpContext.Response.StatusCode = ClientClosedRequestStatus;
+                context.Result = new EmptyResult();
+                context.ExceptionHandled = true;
+                return;
+            }
+
             this.logger.LogError(new EventId(context.Exception.HResult),
                 context.Exception,
                 context.Exception.Message);

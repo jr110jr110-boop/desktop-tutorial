@@ -12,6 +12,11 @@ namespace DataLayer.Configurations.EF.NasbNiro
         {
             builder.ToTable("ProgressReports");
 
+            // FX1: these two are percent values (0..100, computed as count * 100 / total). The column keeps its 16 integer digits and gains two decimals
+            // (was decimal(18,2) by the EF default, which also made EF warn): widening only.
+            builder.Property(x => x.WorkOrderLevelPlannedProgress).HasPrecision(20, 4);
+            builder.Property(x => x.WorkOrderLevelActualProgress).HasPrecision(20, 4);
+
             builder
                 .HasOne(x => x.Contract)
                 .WithMany()

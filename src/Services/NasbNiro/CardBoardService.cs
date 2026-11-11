@@ -446,6 +446,7 @@ namespace Services.NasbNiro
 
             result.TotalCount = await query.CountAsync(cancellationToken);
             result.Entities = await query
+                .OrderBy(x => x.Id)
                 .Take(10)
                 .ProjectTo<ResponseAssemblyDashboardDto>(_mapper.ConfigurationProvider)
                 .ToListAsync(cancellationToken);

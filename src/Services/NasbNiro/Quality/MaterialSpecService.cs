@@ -410,7 +410,7 @@ namespace Services.NasbNiro.Quality
             sheet.Receipts = await (from d in _uow.Set<InventoryDocument>().AsNoTracking()
                                     join l in _uow.Set<InventoryDocumentLine>().AsNoTracking() on d.Id equals l.DocumentId
                                     where !d.Deleted && l.LotId == cert.Data.LotId
-                                    select d.Number).Distinct().Take(10).ToListAsync(ct);
+                                    select d.Number).Distinct().OrderBy(n => n).Take(10).ToListAsync(ct);
             if (cert.Data.Evaluation != CertRowStatus.Pass && CertificateRules.NeedsValues(cert.Data.Type)) sheet.Problems.Add(cert.Data.EvaluationText ?? "گواهی هنوز سنجیده نشده است.");
             if (required.Data?.Type != null && cert.Data.Type < required.Data.Type.Value) sheet.Problems.Add($"نوع گواهی ({CertificateRules.TypeText(cert.Data.Type)}) کمتر از نوع لازم ({required.Data.TypeText}) است.");
             if (cert.Data.Result != CertificateResult.Accepted) sheet.Problems.Add("گواهی هنوز توسط QC تایید نشده است.");

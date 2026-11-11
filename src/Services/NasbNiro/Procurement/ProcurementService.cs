@@ -529,7 +529,7 @@ namespace Services.NasbNiro.Procurement
         {
             IQueryable<PurchaseInquiry> q = _uow.Set<PurchaseInquiry>().Where(i => !i.Deleted);
             if (purchaseRequestId.HasValue) q = q.Where(i => i.PurchaseRequestId == purchaseRequestId.Value);
-            return ResponseDtoHelper.Ok(await LoadInquiriesAsync(q.Take(500), cancellationToken));
+            return ResponseDtoHelper.Ok(await LoadInquiriesAsync(q.OrderBy(i => i.Id).Take(500), cancellationToken));
         }
 
         public async Task<ResponseDto<InquiryDto>> GetInquiryAsync(int id, CancellationToken cancellationToken)

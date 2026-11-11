@@ -246,7 +246,7 @@ namespace Services.NasbNiro.Trace
 
             TraceNodeDto root = PartNode(c, line, "part");
             root.Quantity = null;
-            var parents = await _uow.Set<PbBomLine>().AsNoTracking().Where(l => !l.Deleted && l.PartNumber == pn && l.BomHeader.Status == PbBomStatus.Released).Select(l => l.BomHeader.AssemblyPartNumber).Distinct().Take(20).ToListAsync(ct);
+            var parents = await _uow.Set<PbBomLine>().AsNoTracking().Where(l => !l.Deleted && l.PartNumber == pn && l.BomHeader.Status == PbBomStatus.Released).Select(l => l.BomHeader.AssemblyPartNumber).Distinct().OrderBy(a => a).Take(20).ToListAsync(ct);
             Fact(root, "به‌کاررفته در مجموعه‌های", string.Join("، ", parents));
             root.Children.AddRange(PartDetails(c, pn));
             dto.Root = root;

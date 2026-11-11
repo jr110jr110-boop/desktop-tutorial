@@ -405,8 +405,7 @@ namespace Services.NasbNiro
                              assemblyPaginationParams.PageNumber,
                              assemblyPaginationParams.PageSize, cancellationToken);
 
-            IEnumerable<Task> tasks = data.Select(x => IncludeChildrenAsync(x, cancellationToken));
-            await Task.Run(() => Task.WhenAll(tasks), cancellationToken);
+            await IncludeChildrenAsync(data, assemblyPaginationParams.WorkOrderId, cancellationToken);
 
             return ResponseDtoHelper.Ok(data);
         }
@@ -447,7 +446,7 @@ namespace Services.NasbNiro
 
             if (data != null)
             {
-                await IncludeChildrenAsync(data, cancellationToken);
+                await IncludeChildrenAsync(new[] { data }, data.WorkOrderId, cancellationToken);
 
                 return ResponseDtoHelper.Ok(data);
             }
@@ -721,18 +720,27 @@ namespace Services.NasbNiro
             return (pl, true);
         }
 
-        private async Task IncludeChildrenAsync(ResponseAssemblyDto data, CancellationToken cancellationToken)
+        // One query for the whole work order, tree built in memory (a DbContext cannot run parallel queries).
+        private async Task IncludeChildrenAsync(IEnumerable<ResponseAssemblyDto> roots, int workOrderId, CancellationToken cancellationToken)
         {
-            if (data != null)
+            ResponseAssemblyDto[] rootArray = roots?.Where(x => x != null).ToArray();
+            if (rootArray == null || rootArray.Length == 0)
             {
-                data.Children = await _assembliesQueryable
-                    .Where(x => !x.Deleted && x.PredecessorId == data.Id)
-                    .ProjectTo<ResponseAssemblyDto>(_mapper.ConfigurationProvider)
-                    .ToArrayAsync(cancellationToken);
+                return;
+            }
 
-                IEnumerable<Task> tasks = data.Children.Select(x => IncludeChildrenAsync(x, cancellationToken));
+            ResponseAssemblyDto[] all = await _assembliesQueryable
+                .Where(x => !x.Deleted && x.WorkOrderId == workOrderId)
+                .ProjectTo<ResponseAssemblyDto>(_mapper.ConfigurationProvider)
+                .ToArrayAsync(cancellationToken);
 
-                await Task.Run(async () => await Task.WhenAll(tasks), cancellationToken);
+            List<int> cycles = AssemblyTreeBuilder.AttachChildren(
+                rootArray, all, x => x.Id, x => x.ParentId, (node, children) => node.Children = children);
+
+            if (cycles.Count > 0)
+            {
+                _logger.LogWarning("Predecessor cycle in work order {WorkOrderId}; assemblies not expanded again: {Ids}",
+                    workOrderId, string.Join(",", cycles.Distinct()));
             }
         }
 

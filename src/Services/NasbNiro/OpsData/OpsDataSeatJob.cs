@@ -137,7 +137,7 @@ namespace Services.NasbNiro.OpsData
 
         private async Task<int> SweepAsync(CancellationToken ct)
         {
-            List<OpsFinding> open = await _uow.Set<OpsFinding>().Where(f => !f.Deleted && f.Status == OpsFindingStatus.Open && f.DocumentType == OpsDocTypes.InventoryDocument).Take(500).ToListAsync(ct);
+            List<OpsFinding> open = await _uow.Set<OpsFinding>().Where(f => !f.Deleted && f.Status == OpsFindingStatus.Open && f.DocumentType == OpsDocTypes.InventoryDocument).OrderBy(f => f.Id).Take(500).ToListAsync(ct);
             if (open.Count == 0) return 0;
             List<int> ids = open.Select(f => f.DocumentId).Distinct().ToList();
             HashSet<int> alive = (await _uow.Set<InventoryDocument>().AsNoTracking().Where(d => ids.Contains(d.Id) && !d.Deleted && d.Status != InventoryDocumentStatus.Cancelled).Select(d => d.Id).ToListAsync(ct)).ToHashSet();
@@ -154,7 +154,7 @@ namespace Services.NasbNiro.OpsData
 
         private async Task LotOverdrawAsync(DateTime from, List<Candidate> into, CancellationToken ct)
         {
-            List<int> lots = await _uow.Set<StockTransaction>().AsNoTracking().Where(t => t.LotId != null && t.TransactionDate >= from).Select(t => t.LotId.Value).Distinct().Take(500).ToListAsync(ct);
+            List<int> lots = await _uow.Set<StockTransaction>().AsNoTracking().Where(t => t.LotId != null && t.TransactionDate >= from).Select(t => t.LotId.Value).Distinct().OrderBy(l => l).Take(500).ToListAsync(ct);
             if (lots.Count == 0) return;
             var sums = await _uow.Set<StockTransaction>().AsNoTracking().Where(t => t.LotId != null && lots.Contains(t.LotId.Value)).GroupBy(t => t.LotId.Value)
                 .Select(g => new { Lot = g.Key, Net = g.Sum(x => x.Quantity), Received = g.Where(x => x.Quantity > 0).Sum(x => x.Quantity) }).ToListAsync(ct);

@@ -377,69 +377,61 @@ namespace Services.NasbNiro
             #endregion
 
             #region Map Boms First
-            // Order is important , Predecessor Matters
-            IEnumerable<EquipmentBom> bomsToMap = await _equipmentBoms
+            // FX1: topological order (a predecessor is always mapped before its successors); a missing predecessor or a loop is refused with a Persian message, never thrown, never looped
+            List<EquipmentBom> bomsToMap = await _equipmentBoms
                 .Where(x => !x.Deleted && x.EquipmentAssembly.EquipmentId == equipmentId)
-                .OrderBy(x => x.PredecessorId)
-                .ToListAsync();
+                .OrderBy(x => x.Id)
+                .ToListAsync(cancellationToken);
 
-            Queue<EquipmentBom> bomsPendingPredecessor = new Queue<EquipmentBom>(bomsToMap);
-
-            while (bomsPendingPredecessor.Any())
+            PredecessorOrdering.Result<EquipmentBom> bomOrder = PredecessorOrdering.Sort(bomsToMap, x => x.Id, x => x.PredecessorId);
+            if (!bomOrder.IsClean)
             {
-                EquipmentBom bomToMap = bomsPendingPredecessor.Dequeue();
-                int? predecessorId = bomToMap.PredecessorId;
+                result.Problem = await DescribePredecessorProblemsAsync("BOM", bomOrder, x => x.Id, x => x.PredecessorId, x => x.Title,
+                    async ids => await _equipmentBoms.AsNoTracking().Where(x => ids.Contains(x.Id))
+                        .Select(x => new PredecessorNode { Id = x.Id, Deleted = x.Deleted, EquipmentId = x.EquipmentAssembly.EquipmentId, Title = x.Title })
+                        .ToListAsync(cancellationToken),
+                    equipmentId);
+                return result;
+            }
 
-                EquipmentBomAndAssemblyId cacheKey = (bomToMap.Id, bomToMap.EquipmentAssemblyId);
-
-                Bom resultBom;
-
-                if (!predecessorId.HasValue)
+            Dictionary<int, Bom> bomById = new Dictionary<int, Bom>();
+            foreach (EquipmentBom bomToMap in bomOrder.Ordered)
+            {
+                Bom resultBom = await MapSingleBom(bomToMap);
+                if (bomToMap.PredecessorId.HasValue)
                 {
-                    resultBom = await MapSingleBom(bomToMap);
-                }
-                else
-                {
-                    if (!bomCache.Keys.Any(x => x.Item1 == predecessorId.Value))
-                    {
-                        bomsPendingPredecessor.Enqueue(bomToMap);
-                        throw new Exception("پیشنیاز BOM "+bomToMap.Title+" موجود نمی باشد");
-                    }
-
-                    resultBom = await MapSingleBom(bomToMap);
-                    EquipmentBomAndAssemblyId predecessorKey = bomCache.Keys.Where(x => x.Item1 == predecessorId.Value).First();
-                    resultBom.Predecessor = bomCache[predecessorKey];
-
+                    resultBom.Predecessor = bomById[bomToMap.PredecessorId.Value];
                 }
 
-                bomCache.Add(cacheKey, resultBom);
+                bomById[bomToMap.Id] = resultBom;
+                bomCache.Add((bomToMap.Id, bomToMap.EquipmentAssemblyId), resultBom);
             }
             #endregion
 
             List<AssemblyEntity> assemblies = new List<AssemblyEntity>();
 
-            // Order is important , Predecessor Matters
-            IEnumerable<EquipmentAssembly> equipmentAssemblies =
+            List<EquipmentAssembly> equipmentAssemblies =
                 await _unitOfWork
                 .Set<EquipmentAssembly>()
                 .Where(e => e.EquipmentId == equipmentId && !e.Deleted)
-                .OrderBy(x => x.PredecessorId)
-                .ToListAsync();
+                .OrderBy(x => x.Id)
+                .ToListAsync(cancellationToken);
 
-            var assembliesQueue = new Queue<EquipmentAssembly>(equipmentAssemblies);
+            PredecessorOrdering.Result<EquipmentAssembly> assemblyOrder = PredecessorOrdering.Sort(equipmentAssemblies, x => x.Id, x => x.PredecessorId);
+            if (!assemblyOrder.IsClean)
+            {
+                result.Problem = await DescribePredecessorProblemsAsync("مونتاژ", assemblyOrder, x => x.Id, x => x.PredecessorId, x => x.Title,
+                    async ids => await _unitOfWork.Set<EquipmentAssembly>().AsNoTracking().Where(x => ids.Contains(x.Id))
+                        .Select(x => new PredecessorNode { Id = x.Id, Deleted = x.Deleted, EquipmentId = x.EquipmentId, Title = x.Title })
+                        .ToListAsync(cancellationToken),
+                    equipmentId);
+                return result;
+            }
+
             var equipmentAssemblyIdAndMappedAssembly = new Dictionary<int, AssemblyEntity>();
 
-            while (assembliesQueue.Any())
+            foreach (EquipmentAssembly currentEquipmentAssembly in assemblyOrder.Ordered)
             {
-                EquipmentAssembly currentEquipmentAssembly = assembliesQueue.Dequeue();
-
-                if (currentEquipmentAssembly.PredecessorId.HasValue &&
-                    !equipmentAssemblyIdAndMappedAssembly.ContainsKey(currentEquipmentAssembly.PredecessorId.Value))
-                {
-                    assembliesQueue.Enqueue(currentEquipmentAssembly);
-                    continue;
-                }
-
                 AssemblyEntity assembly = _mapper.Map<AssemblyEntity>(currentEquipmentAssembly);
 
                 assembly.Boms = bomCache.Keys
@@ -449,7 +441,6 @@ namespace Services.NasbNiro
 
                 if (currentEquipmentAssembly.PredecessorId is int number)
                 {
-                    //assembly.Predecessor = equipmentAssemblyIdAndMappedAssembly[currentEquipmentAssembly.PredecessorId.Value];
                     assembly.Predecessor = equipmentAssemblyIdAndMappedAssembly[number];
                 }
 
@@ -459,6 +450,46 @@ namespace Services.NasbNiro
 
             result.Assemblies = assemblies;
             return result;
+        }
+
+        /// <summary>Persian text naming each item with a bad predecessor (deleted, other product, missing) or on a loop.</summary>
+        private static async Task<string> DescribePredecessorProblemsAsync<T>(
+            string label,
+            PredecessorOrdering.Result<T> order,
+            Func<T, int> idOf,
+            Func<T, int?> predOf,
+            Func<T, string> titleOf,
+            Func<List<int>, Task<List<PredecessorNode>>> loadPredecessors,
+            int equipmentId)
+        {
+            List<string> lines = new List<string>();
+
+            List<int> predecessorIds = order.MissingPredecessor.Select(x => predOf(x).Value).Distinct().ToList();
+            Dictionary<int, PredecessorNode> found = predecessorIds.Count == 0
+                ? new Dictionary<int, PredecessorNode>()
+                : (await loadPredecessors(predecessorIds)).ToDictionary(x => x.Id);
+
+            foreach (T item in order.MissingPredecessor)
+            {
+                int predecessorId = predOf(item).Value;
+                string reason;
+                if (!found.TryGetValue(predecessorId, out PredecessorNode node)) reason = "وجود ندارد";
+                else if (node.Deleted) reason = "حذف شده است";
+                else if (node.EquipmentId != equipmentId) reason = "متعلق به محصول دیگری است";
+                else reason = "در این محصول فعال نیست";
+
+                lines.Add(label + " «" + titleOf(item) + "» پیش‌نیاز نامعتبر دارد: " + label + " پیش‌نیاز («"
+                    + (node != null ? node.Title : "شناسه " + predecessorId) + "») " + reason + ".");
+            }
+
+            if (order.OnCycle.Count > 0)
+            {
+                lines.Add("پیش‌نیازهای " + label + " حلقه دارند: " + string.Join("، ", order.OnCycle.Select(x => "«" + titleOf(x) + "»")) + ".");
+            }
+
+            return "ساخت دستور کار از محصول ممکن نیست. " + string.Join(" ", lines.Take(5))
+                + (lines.Count > 5 ? " (و " + (lines.Count - 5) + " مورد دیگر)" : "")
+                + " ابتدا پیش‌نیازها را در بانک محصول اصلاح کنید.";
         }
 
         private async ValueTask<int> GetDefaultProcessUserIdAsync(CancellationToken cancellationToken)
@@ -477,7 +508,8 @@ namespace Services.NasbNiro
                         r => r.NormalizedName.ToUpper() == RoleConstants.PMO.ToUpper(),
                         cancellationToken);
 
-            userId = roleAndUsers.Users.Select(u => u.UserId).First();
+            // FX1: no engineer and no PMO user (a new installation) must not end in a server error; the id only stamps the linked documents
+            userId = roleAndUsers?.Users == null ? 0 : roleAndUsers.Users.Select(u => u.UserId).FirstOrDefault();
 
             return userId;
         }

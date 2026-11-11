@@ -284,7 +284,7 @@ namespace Services.NasbNiro.Trace
             }
             if (kind == null || kind == "serial")
             {
-                var serials = await _uow.Set<SerialUnit>().AsNoTracking().Where(u => !u.Deleted && u.SerialNumber == text).Select(u => new { u.Id, ItemCode = u.Item.Code, ItemTitle = u.Item.Title }).Take(20).ToListAsync(ct);
+                var serials = await _uow.Set<SerialUnit>().AsNoTracking().Where(u => !u.Deleted && u.SerialNumber == text).OrderBy(u => u.Id).Select(u => new { u.Id, ItemCode = u.Item.Code, ItemTitle = u.Item.Title }).Take(20).ToListAsync(ct);
                 if (serials.Count == 1) { r.Mode = "serial"; r.SerialId = serials[0].Id; return r; }
                 if (serials.Count > 1)
                 {
@@ -295,7 +295,7 @@ namespace Services.NasbNiro.Trace
             if (kind == null || kind == "lot")
             {
                 var lots = await _uow.Set<InventoryLot>().AsNoTracking().Where(l => !l.Deleted && (l.LotNumber == text || l.HeatNumber == text || l.CertificateNumber == text))
-                    .Select(l => new { l.Id, l.LotNumber, l.HeatNumber, ItemCode = l.Item.Code, ItemTitle = l.Item.Title }).Take(20).ToListAsync(ct);
+                    .OrderBy(l => l.Id).Select(l => new { l.Id, l.LotNumber, l.HeatNumber, ItemCode = l.Item.Code, ItemTitle = l.Item.Title }).Take(20).ToListAsync(ct);
                 if (lots.Count == 1) { r.Mode = "lot"; r.LotId = lots[0].Id; return r; }
                 if (lots.Count > 1)
                 {

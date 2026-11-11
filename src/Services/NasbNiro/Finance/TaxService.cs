@@ -167,6 +167,7 @@ namespace Services.NasbNiro.Finance
                 .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice"
                             && l.Event.EventDate >= from && l.Event.EventDate <= to && (l.Event.LegalEntityId == FinanceSeed.MainEntityId || l.Event.LegalEntityId == 0))   // the VAT return is the main company's: other entities file their own
                 .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber })
+                .OrderBy(g => g.Key.EventId)
                 .Select(g => new { g.Key.Description, g.Key.SourceNumber, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct);
             foreach (var p in others.Where(p => p.Vat != 0))
             {

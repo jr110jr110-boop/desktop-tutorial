@@ -442,24 +442,15 @@ namespace Services.NasbNiro.Reports
                 .Select(x => x.Id)
                 .ToArrayAsync(cancellationToken);
 
-            IEnumerable<Task<ValueTuple<MaterialBalanceDto, string>>> tasks =
-                bomIds.Select(bomId => GetMaterialBalanceReportOfAsync(bomId, cancellationToken));
+            // Sequential on purpose: the queries share one DbContext, which is not thread safe.
+            List<MaterialBalanceDto> reports = new List<MaterialBalanceDto>();
+            foreach (int bomId in bomIds)
+            {
+                (MaterialBalanceDto report, string error) = await GetMaterialBalanceReportOfAsync(bomId, cancellationToken);
+                reports.Add(string.IsNullOrEmpty(error) ? report : new MaterialBalanceDto() { ApiError = error });
+            }
 
-            return ResponseDtoHelper.Ok(
-                (await Task.WhenAll(tasks)).Select(result =>
-                {
-                    if (string.IsNullOrEmpty(result.Item2))
-                    {
-                        return result.Item1;
-                    }
-                    else
-                    {
-                        return new MaterialBalanceDto()
-                        {
-                            ApiError = result.Item2
-                        };
-                    }
-                }));
+            return ResponseDtoHelper.Ok(reports.AsEnumerable());
         }
 
         private async Task<ValueTuple<MaterialBalanceDto, string>> GetMaterialBalanceReportOfAsync(int bomId, CancellationToken cancellationToken)

@@ -46,6 +46,7 @@ namespace Services.NasbNiro.Finance
             foreach (var o in await _uow.Set<AccountingEventLine>().AsNoTracking()
                          .Where(l => l.AccountRole == AccountRoles.Vat && l.Event.Status != AccountingEventStatus.NotRequired && l.Event.SourceType != "SupplierInvoice" && l.Event.EventDate >= t.From && l.Event.EventDate <= t.To)
                          .GroupBy(l => new { l.EventId, l.Event.Description, l.Event.SourceNumber, l.Event.EventDate, l.Event.SourceType })
+                         .OrderBy(g => g.Key.EventId)
                          .Select(g => new { g.Key.Description, g.Key.SourceNumber, g.Key.EventDate, g.Key.SourceType, Vat = g.Sum(x => x.Debit - x.Credit) }).Take(5000).ToListAsync(ct))
                 if (o.Vat != 0) dto.Rows.Add(new FnVatDetailRowDto { Side = "Purchases", Date = o.EventDate, DocumentNumber = o.SourceNumber, PartyName = o.Description ?? o.SourceNumber, VatAmount = o.Vat, SourceType = o.SourceType });
 

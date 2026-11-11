@@ -161,10 +161,14 @@ function Register($u, [string]$pw, [string]$token) {
     return (Call-Api POST 'Accounts/register-user' $body $token)
 }
 function Is-Existing($r) {
-    $faInUse = -join ([char[]](0x0627, 0x0633, 0x062A, 0x0641, 0x0627, 0x062F, 0x0647))   # "in use" (the duplicate user name message)
+    # The API refuses a second account with the same user name ("... '<name>' <hamakonoon> mored-e estefade ast", code DuplicateUserName)
+    # or the same e-mail (the same text with the word "e-mail", code DuplicateEmail). Both mean "exists already", not a failure.
+    $faInUse = -join ([char[]](0x0627, 0x0633, 0x062A, 0x0641, 0x0627, 0x062F, 0x0647))   # "in use"
     $faDup   = -join ([char[]](0x062A, 0x06A9, 0x0631, 0x0627, 0x0631, 0x06CC))         # "duplicate"
     $text = "$($r.message) $(($r.errors | Out-String)) $(($r.data | Out-String))"
-    return ($text -match ('DuplicateUserName|already exists|' + $faInUse + '|' + $faDup))
+    # unify the Arabic letter forms (yeh, kaf) that some texts carry
+    $text = $text.Replace([string][char]0x064A, [string][char]0x06CC).Replace([string][char]0x0643, [string][char]0x06A9)
+    return ($text -match ('DuplicateUserName|DuplicateEmail|already exists|' + $faInUse + '|' + $faDup))
 }
 
 # Who does what (two different people for every sensitive role, as the program demands):
