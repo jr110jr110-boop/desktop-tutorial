@@ -18,7 +18,9 @@ namespace ViewModels.Mapping
                 // the pending-request members are filled by the register and update calls only
                 .ForMember(dest => dest.Pending, opt => opt.Ignore())
                 .ForMember(dest => dest.GrantId, opt => opt.Ignore())
-                .ForMember(dest => dest.GrantIds, opt => opt.Ignore());
+                .ForMember(dest => dest.GrantIds, opt => opt.Ignore())
+                .ForMember(dest => dest.PendingRoles, opt => opt.Ignore())
+                .ForMember(dest => dest.PendingRolesText, opt => opt.Ignore());
 
             CreateMap<User, ResponseDashboardUserDto>()
                 .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.Name + " " + src.LastName))

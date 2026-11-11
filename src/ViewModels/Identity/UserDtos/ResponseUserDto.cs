@@ -38,5 +38,11 @@ namespace ViewModels.Identity.UserDtos
         public bool Pending { get; set; }
         public int? GrantId { get; set; }
         public int[] GrantIds { get; set; }
+
+        /// <summary>FX2: filled only in the full user list (PMO): the sensitive roles asked for this user that still wait for the second person (role names, upper case).</summary>
+        public string[] PendingRoles { get; set; }
+
+        /// <summary>FX2: the same roles as Persian labels joined with «، » (a column of the user list); empty when nothing waits.</summary>
+        public string PendingRolesText { get; set; }
     }
 }

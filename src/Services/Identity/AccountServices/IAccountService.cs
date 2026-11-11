@@ -56,6 +56,9 @@ namespace Services.Identity.AccountServices
         ValueTask<ResponseDto<string>> AttachProfilePhotoAsync(AttachProfilePhotoDto dto, CancellationToken cancellationToken);
         ValueTask<ResponseDto<bool>> DetachUserProfilePhotoAsync(int userId, CancellationToken cancellationToken);
 
+        /// <summary>FX2: every signed-in user: the sensitive roles asked for the own account that still wait for the second person (own requests only; empty when none).</summary>
+        ValueTask<ResponseDto<List<OwnRoleRequestDto>>> GetMyPendingRolesAsync(CancellationToken cancellationToken);
+
         /// <summary>PMO only: the sensitive roles that wait for a second PMO user.</summary>
         ValueTask<ResponseDto<List<RoleGrantDto>>> GetRoleGrantsAsync(CancellationToken cancellationToken);
 

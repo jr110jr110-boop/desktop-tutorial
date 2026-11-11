@@ -1774,7 +1774,29 @@ namespace Services.Identity.AccountServices
                                          cancellationToken);
 
 
-            return ResponseDtoHelper.Ok(await data);
+            PagedList<ResponseUserDto> page = await data;
+
+            // FX2: the sensitive roles that still wait for the second person, per user (one query for the page)
+            var waiting = await PendingRoleLookup.OpenRoleRequestsAsync(_uow, page.Select(u => u.Id), cancellationToken);
+            foreach (ResponseUserDto u in page)
+            {
+                u.PendingRoles = waiting.TryGetValue(u.Id, out List<PendingRoleGrant> list) ? list.Select(g => g.Role).ToArray() : Array.Empty<string>();
+                u.PendingRolesText = string.Join("، ", u.PendingRoles.Select(PendingRoleLookup.Label));
+            }
+            return ResponseDtoHelper.Ok(page);
+        }
+
+        /// <summary>FX2: the own open sensitive-role requests (never somebody else's).</summary>
+        public async ValueTask<ResponseDto<List<OwnRoleRequestDto>>> GetMyPendingRolesAsync(CancellationToken cancellationToken)
+        {
+            if (Me <= 0)
+                return ResponseDtoHelper.Unauthorized<List<OwnRoleRequestDto>>(AccountServiceMessages.NotSignedIn);
+            List<PendingRoleGrant> mine = await PendingRoleLookup.OpenRoleRequestsOfAsync(_uow, Me, cancellationToken);
+            string text = PendingRoleLookup.WaitingText(mine.Select(g => g.Role));
+            return ResponseDtoHelper.Ok(mine.Select(g => new OwnRoleRequestDto
+            {
+                Role = g.Role, RoleLabel = PendingRoleLookup.Label(g.Role), RequestedAt = g.RequestedAt, ExpiresAt = g.ExpiresAt, WarningText = text,
+            }).ToList());
         }
 
         /// <summary>

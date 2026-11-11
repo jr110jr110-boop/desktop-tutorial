@@ -816,6 +816,7 @@ namespace Services.NasbNiro.ProjectControl
             PcReviewDto dto = ToDto(r);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { r.PmoAcceptedByUserId, r.CommercialAcceptedByUserId }, cancellationToken);
             dto.PmoAcceptedByName = names.Name(r.PmoAcceptedByUserId); dto.CommercialAcceptedByName = names.Name(r.CommercialAcceptedByUserId);
+            await ApplySignStateAsync(dto, r, await MyPendingRolesAsync(cancellationToken), cancellationToken);
             return dto;
         }
 
@@ -837,6 +838,15 @@ namespace Services.NasbNiro.ProjectControl
             PagedList<PcReviewDto> page = await PagedList<PcReviewDto>.CreateAsync(projection, query.PageNumber, query.PageSize, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, page.SelectMany(x => new int?[] { x.PmoAcceptedByUserId, x.CommercialAcceptedByUserId }), cancellationToken);
             foreach (PcReviewDto x in page) { x.PmoAcceptedByName = names.Name(x.PmoAcceptedByUserId); x.CommercialAcceptedByName = names.Name(x.CommercialAcceptedByUserId); }
+            // FX2: what the signed-in user may sign now (open reviews only; the entities are read once for the page)
+            int[] openIds = page.Where(x => x.Id.HasValue && (x.Decision == PcReviewDecision.Pending || x.Decision == PcReviewDecision.ReviewRequired)).Select(x => x.Id.Value).ToArray();
+            if (openIds.Length > 0)
+            {
+                Dictionary<int, PcContractReview> open = (await _uow.Set<PcContractReview>().AsNoTracking().Where(x => openIds.Contains(x.Id)).ToListAsync(cancellationToken)).ToDictionary(x => x.Id);
+                List<string> mine = await MyPendingRolesAsync(cancellationToken);
+                foreach (PcReviewDto x in page)
+                    if (x.Id.HasValue && open.TryGetValue(x.Id.Value, out PcContractReview entity)) await ApplySignStateAsync(x, entity, mine, cancellationToken);
+            }
             return ResponseDtoHelper.Ok(page);
         }
 
@@ -876,6 +886,67 @@ namespace Services.NasbNiro.ProjectControl
             return ResponseDtoHelper.Ok(await ToNamedDtoAsync(r, cancellationToken));
         }
 
+        // FX2: ONE predicate for "may this user sign this slot of the review now", used by ReviewActionAsync and by the DTO (CanSignPmo, CanSignCommercial and their reasons).
+        // Reason is null when the signature is allowed. RoleHeldOrPending is false only when the user has neither the role nor a request for it (the UI then shows no button).
+        internal sealed class PcReviewSignVerdict
+        {
+            public string Reason { get; set; }
+            public bool RoleHeldOrPending { get; set; }
+            public PcContractTerms Terms { get; set; }
+        }
+
+        /// <param name="myPendingRoles">the role names of the own open requests; null = read them here</param>
+        internal async Task<PcReviewSignVerdict> CheckReviewSignAsync(PcContractReview r, string slot, bool trackTerms, IReadOnlyCollection<string> myPendingRoles, CancellationToken cancellationToken)
+        {
+            var v = new PcReviewSignVerdict();
+            if (r.Decision != PcReviewDecision.Pending && r.Decision != PcReviewDecision.ReviewRequired) { v.Reason = "درباره این بازنگری تصمیم گرفته شده است."; v.RoleHeldOrPending = true; return v; }
+            string role = slot == "pmo" ? ProjectControlRoles.Pmo : "COMMERCIAL";
+            if (!_user.IsInRole(role))
+            {
+                IReadOnlyCollection<string> pending = myPendingRoles ?? (await global::Services.Identity.AccountServices.PendingRoleLookup.OpenRoleRequestsOfAsync(_uow, Me, cancellationToken)).Select(g => g.Role).ToList();
+                if (pending.Contains(role, StringComparer.OrdinalIgnoreCase))
+                {
+                    v.Reason = global::Services.Identity.AccountServices.PendingRoleLookup.WaitingText(new[] { role });
+                    v.RoleHeldOrPending = true;
+                    return v;
+                }
+                v.Reason = PcText.NotAllowed + (slot == "pmo" ? " (امضای PMO با معاون PMO است)" : " (امضای بازرگانی با واحد بازرگانی است)");
+                return v;
+            }
+            v.RoleHeldOrPending = true;
+            if (slot == "pmo" ? r.PmoAcceptedByUserId.HasValue : r.CommercialAcceptedByUserId.HasValue) { v.Reason = "این امضا قبلاً ثبت شده است."; return v; }
+            // M1: whoever saved or edited the review does not sign it (maker-checker)
+            if (PcMaker.Touched(r.CreatorUserId, r.EditorUserIds, Me)) { v.Reason = PcText.SameUser + " ثبت‌کننده یا ویرایش‌کننده بازنگری آن را امضا نمی‌کند."; return v; }
+            int? other = slot == "pmo" ? r.CommercialAcceptedByUserId : r.PmoAcceptedByUserId;
+            if (other == Me) { v.Reason = PcText.SameUser + " پذیرش بازنگری را دو نفر متفاوت (PMO و بازرگانی) امضا می‌کنند."; return v; }
+            List<string> missing = PcGates.MissingItems(r);
+            if (missing.Count > 0) { v.Reason = "پذیرش پیش از تکمیل بازنگری ممکن نیست: " + string.Join("، ", missing); return v; }
+            if (r.Stage == PcReviewStage.Contract)
+            {
+                if (!r.ContractId.HasValue) { v.Reason = "بازنگری قرارداد باید به یک قرارداد وصل باشد."; return v; }
+                PcContractTerms terms = await PcContext.TermsAsync(_uow, r.ContractId.Value, trackTerms, cancellationToken);
+                if (terms == null || !(terms.ValueExVat > 0m)) { v.Reason = "پیش از پذیرش بازنگری، شرایط قرارداد با مبلغ آن ثبت شود (از این پس این شرایط ثابت است)."; return v; }
+                if (await _uow.Set<PcContractReview>().AnyAsync(x => x.Id != r.Id && x.ContractId == r.ContractId && !x.Deleted && x.Stage == PcReviewStage.Contract && x.Decision == PcReviewDecision.Accept, cancellationToken))
+                { v.Reason = "بازنگری این قرارداد قبلاً پذیرفته شده است."; return v; }
+                v.Terms = terms;
+            }
+            return v;
+        }
+
+        /// <summary>FX2: fills CanSignPmo, CanSignCommercial and the reasons of a review for the signed-in user.</summary>
+        private async Task ApplySignStateAsync(PcReviewDto dto, PcContractReview r, IReadOnlyCollection<string> myPendingRoles, CancellationToken cancellationToken)
+        {
+            dto.CanSignPmo = false; dto.CanSignCommercial = false; dto.SignBlockedReasonPmo = null; dto.SignBlockedReasonCommercial = null;
+            if (r.Decision != PcReviewDecision.Pending && r.Decision != PcReviewDecision.ReviewRequired) return;
+            PcReviewSignVerdict pmo = await CheckReviewSignAsync(r, "pmo", false, myPendingRoles, cancellationToken);
+            dto.CanSignPmo = pmo.Reason == null; dto.SignBlockedReasonPmo = pmo.RoleHeldOrPending ? pmo.Reason : null;
+            PcReviewSignVerdict com = await CheckReviewSignAsync(r, "commercial", false, myPendingRoles, cancellationToken);
+            dto.CanSignCommercial = com.Reason == null; dto.SignBlockedReasonCommercial = com.RoleHeldOrPending ? com.Reason : null;
+        }
+
+        private async Task<List<string>> MyPendingRolesAsync(CancellationToken cancellationToken) =>
+            Me <= 0 ? new List<string>() : (await global::Services.Identity.AccountServices.PendingRoleLookup.OpenRoleRequestsOfAsync(_uow, Me, cancellationToken)).Select(g => g.Role).ToList();
+
         public async Task<ResponseDto<PcReviewDto>> ReviewActionAsync(PcReviewActionDto dto, CancellationToken cancellationToken)
         {
             if (dto == null || Clean(dto.Action) == null) return Bad<PcReviewDto>(PcText.InvalidData);
@@ -896,24 +967,10 @@ namespace Services.NasbNiro.ProjectControl
                     string slot = (Clean(dto.Slot) ?? "").ToLowerInvariant();
                     if (slot == "") slot = isPmo && !isCommercial ? "pmo" : isCommercial && !isPmo ? "commercial" : r.PmoAcceptedByUserId == null ? "pmo" : "commercial";
                     if (slot != "pmo" && slot != "commercial") return Bad<PcReviewDto>("امضا باید pmo یا commercial باشد.");
-                    if (slot == "pmo" && !isPmo) return Bad<PcReviewDto>(PcText.NotAllowed + " (امضای PMO با معاون PMO است)");
-                    if (slot == "commercial" && !isCommercial) return Bad<PcReviewDto>(PcText.NotAllowed + " (امضای بازرگانی با واحد بازرگانی است)");
-                    if (slot == "pmo" ? r.PmoAcceptedByUserId.HasValue : r.CommercialAcceptedByUserId.HasValue) return Bad<PcReviewDto>("این امضا قبلاً ثبت شده است.");
-                    // M1: whoever saved or edited the review does not sign it (maker-checker)
-                    if (PcMaker.Touched(r.CreatorUserId, r.EditorUserIds, Me)) return Bad<PcReviewDto>(PcText.SameUser + " ثبت‌کننده یا ویرایش‌کننده بازنگری آن را امضا نمی‌کند.");
-                    int? other = slot == "pmo" ? r.CommercialAcceptedByUserId : r.PmoAcceptedByUserId;
-                    if (other == Me) return Bad<PcReviewDto>(PcText.SameUser + " پذیرش بازنگری را دو نفر متفاوت (PMO و بازرگانی) امضا می‌کنند.");
-                    List<string> missing = PcGates.MissingItems(r);
-                    if (missing.Count > 0) return Bad<PcReviewDto>("پذیرش پیش از تکمیل بازنگری ممکن نیست: " + string.Join("، ", missing));
-                    PcContractTerms terms = null;
-                    if (r.Stage == PcReviewStage.Contract)
-                    {
-                        if (!r.ContractId.HasValue) return Bad<PcReviewDto>("بازنگری قرارداد باید به یک قرارداد وصل باشد.");
-                        terms = await PcContext.TermsAsync(_uow, r.ContractId.Value, true, cancellationToken);
-                        if (terms == null || !(terms.ValueExVat > 0m)) return Bad<PcReviewDto>("پیش از پذیرش بازنگری، شرایط قرارداد با مبلغ آن ثبت شود (از این پس این شرایط ثابت است).");
-                        if (await _uow.Set<PcContractReview>().AnyAsync(x => x.Id != r.Id && x.ContractId == r.ContractId && !x.Deleted && x.Stage == PcReviewStage.Contract && x.Decision == PcReviewDecision.Accept, cancellationToken))
-                            return Bad<PcReviewDto>("بازنگری این قرارداد قبلاً پذیرفته شده است.");
-                    }
+                    // FX2: the one predicate that also feeds CanSignPmo / CanSignCommercial of the DTO
+                    PcReviewSignVerdict verdict = await CheckReviewSignAsync(r, slot, true, null, cancellationToken);
+                    if (verdict.Reason != null) return Bad<PcReviewDto>(verdict.Reason);
+                    PcContractTerms terms = verdict.Terms;
                     if (slot == "pmo") { r.PmoAcceptedByUserId = Me; r.PmoAcceptedAt = now; }
                     else { r.CommercialAcceptedByUserId = Me; r.CommercialAcceptedAt = now; }
                     if (r.PmoAcceptedByUserId.HasValue && r.CommercialAcceptedByUserId.HasValue)
