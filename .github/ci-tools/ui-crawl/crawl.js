@@ -12,6 +12,7 @@
 //   REFUSED       a GET answered success=false while a page loaded (only for pages without a record id in the address)
 //   JS-ERROR      an uncaught error of the front end while a page loaded
 //   LOGIN         the user could not sign in (the crawl of that user is skipped)
+//   INFO-NO-PERSONNEL-FILE  a page told the user that he has no personnel file (true for the throwaway CI users; reported, not counted as a defect)
 // OUTDIR/<label>.json keeps everything that was seen; OUTDIR/summary.txt counts per kind.
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -71,7 +72,7 @@ async function crawl(browser, u) {
       else if (q.s >= 500) add(u.label, "HTTP-5XX", where, q.s + " " + what);
       else if (q.s === 401) add(u.label, "HTTP-401", where, what);
       else if (!hasId && (q.s === 404 || q.s === 405)) add(u.label, "HTTP-404", where, q.s + " " + what);
-      else if (!hasId && q.refused && q.s === 200) add(u.label, "REFUSED", where, what);
+      else if (!hasId && q.refused && q.s === 200) add(u.label, /پرونده پرسنلی/.test(q.msg) ? "INFO-NO-PERSONNEL-FILE" : "REFUSED", where, what);
     }
     for (const e of [...new Set(seen.err)]) add(u.label, "JS-ERROR", where, e);
   };
@@ -122,8 +123,11 @@ async function crawl(browser, u) {
   fs.writeFileSync(OUT + "/findings.tsv", findings.map((f) => f.join("\t")).join("\n") + (findings.length ? "\n" : ""));
   const kinds = {}; for (const f of findings) kinds[f[1]] = (kinds[f[1]] || 0) + 1;
   // the same defect seen by several users is one defect: group by kind + page + detail
-  const groups = {}; for (const f of findings) { const k = f[1] + "\t" + f[2] + "\t" + f[3]; (groups[k] = groups[k] || []).push(f[0]); }
+  // (record ids and query strings are left out of the key, so one defect seen on several records is still one defect)
+  const groups = {}; for (const f of findings) { const k = f[1] + "\t" + f[2] + "\t" + f[3].replace(/\?[^ ]*/, "").replace(/\/\d+(?=\/|\s|$)/g, "/{id}"); (groups[k] = groups[k] || []).push(f[0]); }
+  // INFO kinds are expected for the throwaway CI users (they have no personnel file) and are reported, not counted
+  const defects = Object.keys(groups).filter((k) => !k.startsWith("INFO-")).length;
   fs.writeFileSync(OUT + "/grouped.tsv", Object.entries(groups).map(([k, v]) => k + "\t" + v.join(",")).join("\n") + "\n");
-  fs.writeFileSync(OUT + "/summary.txt", "users " + users.length + "\nfindings " + findings.length + "\ndistinct " + Object.keys(groups).length + "\n" + Object.entries(kinds).map(([k, v]) => k + " " + v).join("\n") + "\n");
+  fs.writeFileSync(OUT + "/summary.txt", "users " + users.length + "\nfindings " + findings.length + "\ndistinct " + defects + "\n" + Object.entries(kinds).map(([k, v]) => k + " " + v).join("\n") + "\n");
   console.log(fs.readFileSync(OUT + "/summary.txt", "utf8"));
 })();

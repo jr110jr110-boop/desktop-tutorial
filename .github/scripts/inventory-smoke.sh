@@ -13121,7 +13121,8 @@ TOKEN=$ADMIN_TOKEN
 # A real browser signs in as one user of every role (and as the role sets of the unit test users of the test kit) and opens every menu item and every page
 # against this API and the data the scenario left behind (.github/ci-tools/ui-crawl/crawl.js). The API checks above cannot see what a user is OFFERED:
 # a menu item that the route guard refuses, a page that asks for something the role may not read, a page that breaks on real data.
-# The workflow switches it on for one database (UI_CRAWL=1, UI_NODE_PATH = node_modules with playwright). The findings are written to smoke-output/ui-crawl/.
+# The workflow switches it on for one database (UI_CRAWL=1, UI_NODE_PATH = node_modules with playwright). The findings are written to smoke-output/ui-crawl/
+# and two checks gate the build: every user was crawled to the end, and there is not a single defect.
 if [ "${UI_CRAWL:-0}" = "1" ]; then
   UIU="$OUT/ui-users.tsv"; : > "$UIU"; UIN=0
   UI_ADMIN=$(login Admin 'Ci#Adm1n-Build-2026'); [ -n "$UI_ADMIN" ] || UI_ADMIN=$ADMIN_TOKEN
@@ -13157,7 +13158,10 @@ if [ "${UI_CRAWL:-0}" = "1" ]; then
   echo "ui crawl: $(wc -l < "$UIU") users prepared" | tee -a "$OUT/ui-crawl-setup.txt"
   NODE_PATH="${UI_NODE_PATH:-}" node .github/ci-tools/ui-crawl/crawl.js "$BASE" "$UIU" "$OUT/ui-crawl" > "$OUT/ui-crawl.log" 2>&1 || echo "ui crawl: the crawler ended with an error" | tee -a "$OUT/ui-crawl-setup.txt"
   rm -f "$UIU"   # passwords of throwaway CI users; not published
-  echo "--- ui crawl: $(grep -m1 '^distinct ' "$OUT/ui-crawl/summary.txt" 2>/dev/null || echo 'no summary')" | tee -a "$R"
+  UIUSERS=$(grep -m1 '^users ' "$OUT/ui-crawl/summary.txt" 2>/dev/null | cut -d' ' -f2); UIDEF=$(grep -m1 '^distinct ' "$OUT/ui-crawl/summary.txt" 2>/dev/null | cut -d' ' -f2)
+  UIDONE=$(grep -c '^done ' "$OUT/ui-crawl.log" 2>/dev/null); cp "$OUT/ui-crawl/grouped.tsv" "$B" 2>/dev/null || echo 'no findings file' > "$B"
+  [ "${UIUSERS:-0}" = "36" ] && [ "${UIDONE:-0}" = "36" ] && ok "ui crawl: a browser signed in as all 36 users (28 roles and the 8 role sets of the unit test users) and finished the menu and the pages of each" || bad "ui crawl: a browser signed in as all 36 users and finished the menu and the pages of each (users ${UIUSERS:-none}, finished ${UIDONE:-0})"
+  [ "${UIDEF:-x}" = "0" ] && ok "ui crawl: no enabled menu item is refused by the route guard and no page asks the API for something its user may not read (0 defects)" || bad "ui crawl: 0 defects expected, got ${UIDEF:-no summary} (smoke-output/ui-crawl/grouped.tsv)"
 fi
 
 finished=1
