@@ -13117,6 +13117,49 @@ done
 as "$PLAN_TOKEN" GET procurement/requests/$PB2RQ; check "pb2 fix: the request a person made is untouched by the balance (still approved, still 2)" '.success and .data.status == 2 and .data.lines[0].quantity == 2'
 TOKEN=$ADMIN_TOKEN
 
+# ------------------------------------------------------------------------------------------ UI access crawl
+# A real browser signs in as one user of every role (and as the role sets of the unit test users of the test kit) and opens every menu item and every page
+# against this API and the data the scenario left behind (.github/ci-tools/ui-crawl/crawl.js). The API checks above cannot see what a user is OFFERED:
+# a menu item that the route guard refuses, a page that asks for something the role may not read, a page that breaks on real data.
+# The workflow switches it on for one database (UI_CRAWL=1, UI_NODE_PATH = node_modules with playwright). The findings are written to smoke-output/ui-crawl/.
+if [ "${UI_CRAWL:-0}" = "1" ]; then
+  UIU="$OUT/ui-users.tsv"; : > "$UIU"; UIN=0
+  UI_ADMIN=$(login Admin 'Ci#Adm1n-Build-2026'); [ -n "$UI_ADMIN" ] || UI_ADMIN=$ADMIN_TOKEN
+  UI_PMO2=$(login pmo2.ci 'Ci#Pmo2-User-2026'); [ -n "$UI_PMO2" ] || UI_PMO2=$PMO2_TOKEN
+  ui_user() { # ui_user LABEL ROLEIDS SENSITIVE(0|1) : registers ui.LABEL.ci; a user with a sensitive role first chooses his own password, then the second PMO user approves his requests
+    local label=$1 roles=$2 sens=$3 name="ui.$1.ci" pw t g
+    UIN=$((UIN+1)); pw="Ci#Ui${UIN}-User-2026"
+    TOKEN=$UI_ADMIN; user2 "$name" "$roles" "$pw" "0912000$((7000+UIN))" "00124$((70000+UIN))"
+    if ! jq -e '.success' "$B" >/dev/null 2>&1; then echo "ui crawl: register $name failed: $(head -c 300 "$B")" | tee -a "$OUT/ui-crawl-setup.txt"; return 0; fi
+    if [ "$sens" = "1" ]; then
+      t=$(login "$name" "$pw")
+      as "$t" POST Accounts/change-password "{\"currentPassword\":\"$pw\",\"newPassword\":\"$pw-Own\"}"
+      jq -e '.success' "$B" >/dev/null 2>&1 || echo "ui crawl: own password of $name failed: $(head -c 300 "$B")" | tee -a "$OUT/ui-crawl-setup.txt"
+      pw="$pw-Own"
+      as "$UI_PMO2" GET Accounts/role-grants
+      for g in $(jq -r --arg u "$name" '.data[]? | select(.canApprove and .userName == $u) | .id' "$B"); do
+        as "$UI_PMO2" POST "Accounts/role-grants/$g/approve"
+        jq -e '.success' "$B" >/dev/null 2>&1 || echo "ui crawl: approval $g of $name failed: $(head -c 300 "$B")" | tee -a "$OUT/ui-crawl-setup.txt"
+      done
+    fi
+    printf '%s\t%s\t%s\n' "$label" "$name" "$pw" >> "$UIU"
+  }
+  : > "$OUT/ui-crawl-setup.txt"
+  # one user per role
+  ui_user PMO 1 1; ui_user COMMERCIAL 2 0; ui_user FINANCIAL 3 0; ui_user ENGINEERING 4 0; ui_user QC 5 0; ui_user WAREHOUSE 6 0; ui_user ASSEMBLER 7 0
+  ui_user ENGINEER 8 0; ui_user CONSTRUCTION 9 0; ui_user SECURITY 10 0; ui_user PLANNING 11 0; ui_user WHSUPERVISOR 12 0; ui_user CEO 13 1; ui_user QA 14 0
+  ui_user PROJECTMANAGER 15 0; ui_user DCC 16 0; ui_user FINANCEMANAGER 17 1; ui_user PAYROLL 18 1; ui_user TREASURY 19 0; ui_user PRODUCTIONMANAGER 20 0
+  ui_user SHOPSUPERVISOR 21 0; ui_user OPERATOR 22 0; ui_user MAINTENANCE 23 0; ui_user SALES 24 0; ui_user SERVICE 25 0; ui_user SECRETARIAT 26 1; ui_user HR 27 1; ui_user AUDITOR 28 1
+  # the role sets of the unit users of the test kit (Test-Users.xlsx)
+  ui_user unit-projects 1,11,15 1; ui_user unit-engineering 4,16 0; ui_user unit-inventory 6,12 0; ui_user unit-production 20,21,22,7,23 0
+  ui_user unit-quality 5,14 0; ui_user unit-sales 24,25 0; ui_user unit-hr 27,26,18,10 1; ui_user unit-finance 3,17,19 1
+  TOKEN=$ADMIN_TOKEN
+  echo "ui crawl: $(wc -l < "$UIU") users prepared" | tee -a "$OUT/ui-crawl-setup.txt"
+  NODE_PATH="${UI_NODE_PATH:-}" node .github/ci-tools/ui-crawl/crawl.js "$BASE" "$UIU" "$OUT/ui-crawl" > "$OUT/ui-crawl.log" 2>&1 || echo "ui crawl: the crawler ended with an error" | tee -a "$OUT/ui-crawl-setup.txt"
+  rm -f "$UIU"   # passwords of throwaway CI users; not published
+  echo "--- ui crawl: $(grep -m1 '^distinct ' "$OUT/ui-crawl/summary.txt" 2>/dev/null || echo 'no summary')" | tee -a "$R"
+fi
+
 finished=1
 echo "--- inventory: $pass passed, $fail failed" | tee -a "$R"
 rm -f "$B"

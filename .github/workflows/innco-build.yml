@@ -109,7 +109,7 @@ jobs:
     # Runs the API for real against an empty SQL Server (Linux container): 2022 and 2025 Express.
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120  # the SQL 2022 leg also runs the UI access crawl (a browser as every role, every menu item and page)
     strategy:
       fail-fast: false
       matrix:
@@ -188,6 +188,16 @@ jobs:
           ASPNETCORE_URLS: http://127.0.0.1:5080
           ConnectionStrings__SqlServer__ApplicationDbContextConnection: 'Data Source=127.0.0.1,1433;Initial Catalog=IRNNCO_CI;User ID=sa;Password=Ci_Sql_Passw0rd_2026;TrustServerCertificate=True;'
         run: bash .github/scripts/smoke.sh
+
+      - name: Install the browser of the UI access crawl (SQL Server 2022 leg only)
+        if: matrix.tag == '2022'
+        run: |
+          mkdir -p "$RUNNER_TEMP/ui" && cd "$RUNNER_TEMP/ui"
+          npm init -y > /dev/null
+          npm install playwright@1.48.2 > npm.log 2>&1 || { cat npm.log; exit 1; }
+          npx playwright install --with-deps chromium
+          echo "UI_NODE_PATH=$RUNNER_TEMP/ui/node_modules" >> "$GITHUB_ENV"
+          echo "UI_CRAWL=1" >> "$GITHUB_ENV"
 
       - name: Start the mock local AI endpoints (chat, embeddings, speech)
         run: bash .github/ci-tools/mock-llm/start.sh
