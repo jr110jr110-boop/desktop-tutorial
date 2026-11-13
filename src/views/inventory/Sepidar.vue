@@ -123,7 +123,7 @@ onMounted(() => {
           <button :class="tab === 'codes' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="tab = 'codes'; loadMappings()">کدهای سپیدار</button>
         </div></div>
       </div>
-      <div v-if="!canRead" class="alert alert-info small py-2">اسناد و کدهای سپیدار فقط برای مدیر مالی، کارشناس مالی و معاونت قابل مشاهده است.</div>
+      <div v-if="!canRead" class="alert alert-info small py-2">اسناد و کدهای سپیدار فقط برای واحد مالی، مدیر مالی و معاونت PMO قابل مشاهده است.</div>
       <div v-if="check" class="alert small py-2" :class="check.missingCodes.length ? 'alert-warning' : 'alert-success'">
         {{ check.pendingDocuments }} سند تاییدشده منتظر ارسال به سپیدار است.
         <template v-if="check.missingCodes.length">
