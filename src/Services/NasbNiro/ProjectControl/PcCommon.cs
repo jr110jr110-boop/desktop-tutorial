@@ -35,6 +35,12 @@ namespace Services.NasbNiro.ProjectControl
 
         public const string Quality = "QC";
         public const string Readers = "PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,QC,QA,CONSTRUCTION,ASSEMBLER,WAREHOUSE,WHSUPERVISOR";
+
+        /// <summary>
+        /// Who may READ the working-calendar list: the readers above plus the production roles, because a production work centre references a
+        /// calendar and its page («مراکز کار و ماشین‌ها») fills the calendar select from this list. Reading only; saving a calendar stays <see cref="Planning"/>.
+        /// </summary>
+        public const string CalendarReaders = Readers + ",PRODUCTIONMANAGER,SHOPSUPERVISOR,OPERATOR,MAINTENANCE,FINANCEMANAGER,AUDITOR";
     }
 
     /// <summary>Counter kinds in <c>DocumentNumberSequence</c> (project control uses 421..440).</summary>

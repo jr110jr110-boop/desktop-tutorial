@@ -125,7 +125,7 @@ namespace WebApi.Controllers.ProjectControl
         public ProjectControlScheduleController(IPcScheduleService schedule) { _schedule = schedule; }
 
         [HttpGet("calendars")]
-        [Authorize(Roles = ProjectControlRoles.Readers)]
+        [Authorize(Roles = ProjectControlRoles.CalendarReaders)]
         public async Task<IActionResult> CalendarsAsync([FromQuery] PaginationParams query, CancellationToken ct) => Ok((await _schedule.GetCalendarsAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpPost("calendars")]

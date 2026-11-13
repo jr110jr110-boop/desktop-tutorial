@@ -129,6 +129,8 @@ namespace Services.NasbNiro.Attachments
         public const string ReceiptWrite = "PMO,WAREHOUSE,WHSUPERVISOR,COMMERCIAL";
         public const string InspectionWrite = "PMO,QC";
         public const string NcrWrite = "PMO,QC,ENGINEERING,CONSTRUCTION,PRODUCTIONMANAGER,WAREHOUSE,WHSUPERVISOR";
+        /// <summary>Who may read (list, download) the files of a production operation: the operational readers plus the OPERATOR, who works the operation on the shop terminal (ProductionRoles.Terminal). Reading only; writing stays <see cref="ProductionWrite"/>.</summary>
+        public const string ProductionRead = Operational + ",OPERATOR";
         public const string ProductionWrite = "PMO,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,ENGINEERING,ENGINEER,ASSEMBLER,PLANNING";
         public const string PartOperationWrite = InventoryRoles.Production + ",WHSUPERVISOR";
         public const string InvoiceWrite = "COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,PMO";

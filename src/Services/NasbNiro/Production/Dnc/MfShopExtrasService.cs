@@ -391,7 +391,7 @@ namespace Services.NasbNiro.Production.Dnc
             {
                 // an employee: his own approved events only
                 List<int> own = await _uow.Set<FnEmployee>().AsNoTracking().Where(e => e.UserId == Me).Select(e => e.Id).ToListAsync(ct);
-                if (own.Count == 0 && !reader) return Bad<PagedList<HrEventDto>>(MfText.NotAllowed);
+                if (own.Count == 0 && !reader) return Bad<PagedList<HrEventDto>>(MfShopFloorService.NoEmployee);   // not a refusal of the role: the page is open to everybody, the personnel file is what is missing
                 q = q.Where(e => own.Contains(e.EmployeeId) && e.Status == HrEventStatus.Approved);
             }
             else if (OnlyQuality) q = q.Where(e => e.Kind == HrEventKind.QualityFeedback);

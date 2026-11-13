@@ -169,5 +169,17 @@ namespace MsTests
             }
             Assert.AreEqual(0, redundant.Count, "controllers with [RolesCheckedInService] that do not need it: " + string.Join(", ", redundant));
         }
+
+        [TestMethod]
+        public void TheCalendarListIsReadByTheProductionRolesAndOnlyThePlanningRolesSaveACalendar()
+        {
+            Type controller = typeof(WebApi.Controllers.ProjectControl.ProjectControlScheduleController);
+            string Roles(string action) => string.Join(",", controller.GetMethod(action).GetCustomAttributes<AuthorizeAttribute>(inherit: true).Select(a => a.Roles));
+            string[] read = Roles("CalendarsAsync").Split(',');
+            foreach (string role in new[] { "PRODUCTIONMANAGER", "SHOPSUPERVISOR", "OPERATOR", "MAINTENANCE", "FINANCEMANAGER", "AUDITOR", "PLANNING", "PMO", "WHSUPERVISOR" })
+                CollectionAssert.Contains(read, role);
+            Assert.AreEqual("PLANNING,PMO", Roles("SaveCalendarAsync"), "saving stays with planning");
+            Assert.AreEqual("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,QC,QA,CONSTRUCTION,ASSEMBLER,WAREHOUSE,WHSUPERVISOR", Services.NasbNiro.ProjectControl.ProjectControlRoles.Readers, "the other endpoints keep the old list");
+        }
     }
 }

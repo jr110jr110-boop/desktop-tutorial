@@ -101,12 +101,13 @@ namespace Services.NasbNiro.Attachments
                 case AttachmentOwnerType.WarehouseDocument:
                 case AttachmentOwnerType.QcInspection:
                 case AttachmentOwnerType.Ncr:
-                case AttachmentOwnerType.ProductionOperation:
                 case AttachmentOwnerType.PartOperation:
                 case AttachmentOwnerType.InventoryItem:
                 case AttachmentOwnerType.InventoryLot:
                 case AttachmentOwnerType.SerialUnit:
                     return AttachmentRoles.Operational;
+                case AttachmentOwnerType.ProductionOperation:
+                    return AttachmentRoles.ProductionRead;
                 case AttachmentOwnerType.PbBomHeader:
                 case AttachmentOwnerType.PbOpcRouting:
                     // the drawings and specifications of a product: project, planning, engineering, warehouse, procurement, QC and management only; an AI seat has none of these roles unless it is granted one
@@ -233,7 +234,7 @@ namespace Services.NasbNiro.Attachments
                     string orderNumber = await uow.Set<MfProductionOrder>().AsNoTracking().Where(m => m.Id == o.OrderId).Select(m => m.Number).FirstOrDefaultAsync(ct);
                     f.Exists = true; f.Number = (orderNumber ?? "") + " / " + o.Sequence + " " + o.Title;
                     f.Locked = o.Status == MfOperationStatus.Done || o.Status == MfOperationStatus.Rejected || o.Status == MfOperationStatus.Skipped;
-                    f.ReadRoles = AttachmentRoles.Operational; f.WriteRoles = AttachmentRoles.ProductionWrite;
+                    f.ReadRoles = AttachmentRoles.ProductionRead; f.WriteRoles = AttachmentRoles.ProductionWrite;
                     if (o.PurchaseRequestId.HasValue) f.PurchaseRequestIds.Add(o.PurchaseRequestId.Value);
                     if (o.PurchaseRequestLineId.HasValue) f.PurchaseRequestLineIds.Add(o.PurchaseRequestLineId.Value);
                     return f;

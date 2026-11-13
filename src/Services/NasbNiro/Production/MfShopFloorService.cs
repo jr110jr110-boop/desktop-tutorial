@@ -120,7 +120,7 @@ namespace Services.NasbNiro.Production
         private static string Clean(string s) => MfText.Clean(s);
         private static ResponseDto<T> Bad<T>(string m) => MfText.Bad<T>(m);
         private static string Join(IEnumerable<string> parts) => string.Join("؛ ", parts);
-        private const string NoEmployee = "برای شما پرونده پرسنلی ثبت نشده است؛ با واحد منابع انسانی هماهنگ کنید.";
+        internal const string NoEmployee = "برای شما پرونده پرسنلی ثبت نشده است؛ با واحد منابع انسانی هماهنگ کنید.";
 
         private static PagedList<T> AsPage<T>(PagedList<T> all, int total, int number, int size)
         {

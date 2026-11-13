@@ -130,6 +130,31 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task A_NonReader_Without_A_Personnel_File_Is_Told_So_And_Not_Refused_And_With_A_File_Gets_An_Answer()
+        {
+            var (provider, user) = Host();
+            using var _ = provider;
+            using (var sc = provider.CreateScope())
+            {
+                var db = sc.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                db.Set<FnEmployee>().Add(new FnEmployee { Id = 7, PersonnelCode = "MF01", FirstName = "اپراتور", LastName = "آزمون", NationalCode = "0084575948", UserId = 13, IsActive = true });
+                await db.SaveChangesAsync();
+            }
+            using var scope = provider.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IHrEventService>();
+            user.Roles = "SECURITY"; user.UserId = 99;
+            var without = await svc.GetEventsAsync(new HrEventQuery { Mine = true }, default);
+            Assert.IsFalse(without.Success);
+            Assert.AreEqual(Services.NasbNiro.Production.MfShopFloorService.NoEmployee, without.Message);
+            Assert.IsTrue(without.Message.Contains("پرونده پرسنلی"));
+            Assert.AreNotEqual(Services.NasbNiro.Production.MfText.NotAllowed, without.Message);
+            user.Roles = "OPERATOR"; user.UserId = 13;
+            var with = await svc.GetEventsAsync(new HrEventQuery(), default);
+            Assert.IsTrue(with.Success, with.Message);
+            Assert.AreEqual(0, with.Data.Count);
+        }
+
+        [TestMethod]
         public async Task Performance_Events_Need_A_Second_Person_And_An_Employee_Sees_Only_His_Approved_Events()
         {
             var (provider, user) = Host();

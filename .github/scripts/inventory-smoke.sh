@@ -13117,6 +13117,14 @@ done
 as "$PLAN_TOKEN" GET procurement/requests/$PB2RQ; check "pb2 fix: the request a person made is untouched by the balance (still approved, still 2)" '.success and .data.status == 2 and .data.lines[0].quantity == 2'
 TOKEN=$ADMIN_TOKEN
 
+# ------------------------------------------------------------------------------------------ access fixes found by the UI crawl
+# the work-centre page fills its calendar select from projectcontrol/calendars: the production roles read it, a role outside the list is refused
+as "$MPM_TOKEN" GET "projectcontrol/calendars?PageNumber=1&PageSize=50"; check "acc: the production manager reads the working calendars (the work-centre page needs them)" '.success'
+as "$MOP_TOKEN" GET "projectcontrol/calendars?PageNumber=1&PageSize=50"; check "acc: the operator reads the working calendars" '.success'
+as "$SEC_TOKEN" GET "projectcontrol/calendars?PageNumber=1&PageSize=50"; r403 "acc: the security guard is still refused the working calendars (403)"
+# a user without a personnel file is told that, not that he lacks the permission (the security user is linked to no personnel file in this script)
+as "$SEC_TOKEN" GET "production/staff-events?Mine=true&PageNumber=1&PageSize=50"; nomsg "acc: staff events of a user without a personnel file say so (no personnel file), not that he lacks the permission" "پرونده پرسنلی"
+
 # ------------------------------------------------------------------------------------------ UI access crawl
 # A real browser signs in as one user of every role (and as the role sets of the unit test users of the test kit) and opens every menu item and every page
 # against this API and the data the scenario left behind (.github/ci-tools/ui-crawl/crawl.js). The API checks above cannot see what a user is OFFERED:
