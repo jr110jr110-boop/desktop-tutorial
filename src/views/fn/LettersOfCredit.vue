@@ -8,7 +8,7 @@ import { getSuppliers } from "@/api/ProcurementAPIs";
 import { fail, jalali, num, ok, today } from "@/composables/inventory";
 import { camelize, money, parseAmount } from "@/composables/fn";
 import { lcPostingKinds, lcStatuses } from "@/composables/fnF3";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { FnRoles, ProcurementRoles, hasRole } from "@/composables/roles";
 
 // Letters of credit (اعتبار اسنادی): open, pay the margin and fees, receive the documents, settle at the rate of the day, expire or cancel.
 const list = ref<any[]>([]);
@@ -83,8 +83,10 @@ async function act(v: any) {
 onMounted(async () => {
   const [b] = await getBankAccounts({ PageSize: 200 });
   banks.value = (b?.data || []).filter((x: any) => x.isActive);
-  const [s] = await getSuppliers();
-  suppliers.value = camelize(s) || [];
+  if (hasRole(ProcurementRoles.readers)) { // the auditor may not read the supplier list (GET procurement/suppliers): the list stays empty for that role
+    const [s] = await getSuppliers();
+    suppliers.value = camelize(s) || [];
+  }
   load();
 });
 </script>

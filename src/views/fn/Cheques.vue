@@ -9,7 +9,7 @@ import { getBankAccounts, getChequeBooks, getIssuedCheques, getReceivedCheques, 
 import { getSuppliers } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { issuedChequeStatuses, money, parseAmount, printSheet, receivedChequeStatuses, usePagedList } from "@/composables/fn";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { FnRoles, ProcurementRoles, hasRole } from "@/composables/roles";
 
 // Received cheques (in box -> deposited -> cleared / bounced / returned / endorsed), cheque books and issued cheques.
 const tab = ref("received");
@@ -88,8 +88,10 @@ const badgeOfReceived = (s: number) => (s === 3 ? "ok" : s === 4 ? "bad" : s ===
 onMounted(async () => {
   const [b] = await getBankAccounts({ PageSize: 200 });
   banks.value = (b?.data || []).filter((x: any) => x.isActive);
-  const [s] = await getSuppliers();
-  suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  if (hasRole(ProcurementRoles.readers)) { // the auditor may not read the supplier list (GET procurement/suppliers): the list stays empty for that role
+    const [s] = await getSuppliers();
+    suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  }
   received.load();
   issued.load();
   books.load();

@@ -321,6 +321,9 @@ import { AccountRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRol
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
+import { PbRoles } from "@/composables/productBank";
+import { DesignRoles } from "@/composables/designControl";
+import { BalanceRoles } from "@/composables/projectBalance";
 import { AuditRoles } from "@/composables/audit";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
@@ -452,7 +455,7 @@ const links = {
     { title: "نقطه سفارش مجدد", routeName: "InventoryReorder", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.reports) },
     { title: "کرایه حمل و بهای تمام‌شده", routeName: "InventoryFreight", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.freight) },
     { title: "قالب و ورود از Excel", routeName: "InventoryExcel", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.counts) },
-    { title: "اموال، تبدیل واحد و سقف مصرف", routeName: "InventoryRegisters", disabled: !accessList.includes("Warehouse") },
+    { title: "اموال، تبدیل واحد و سقف مصرف", routeName: "InventoryRegisters", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.reports) },
     { title: "ورود موجودی اولیه (Excel)", routeName: "InventoryOpeningImport", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.openingImport) },
     { title: "درخواست کد کالا", routeName: "InventoryItemRequests", disabled: !accessList.includes("Warehouse") || !hasRole(InventoryRoles.itemRequest) },
     { title: "جدول‌های کدینگ (WI-WH-002)", routeName: "InventoryCoding", disabled: !accessList.includes("Warehouse") },
@@ -470,20 +473,20 @@ const links = {
     { title: "صندوق تصمیم مدیرعامل", routeName: "CeoInbox", disabled: !hasRole(GoLiveRoles.ceoInbox) },
   ] as Links[],
   productBank: [
-    { title: "بانک محصول", routeName: "ProductBankProducts" },
-    { title: "فهرست مواد (BOM)", routeName: "ProductBankBoms" },
-    { title: "چارت‌های فرآیند (OPC)", routeName: "ProductBankRoutings" },
-    { title: "مبنای BOM پروژه و انحراف‌ها", routeName: "ProductBankDeviations" },
-    { title: "برنامه‌های طراحی", routeName: "DesignPlans" },
-    { title: "ورودی‌های طراحی", routeName: "DesignInputs" },
-    { title: "بازبینی، تایید و صحه‌گذاری طراحی", routeName: "DesignReviews" },
-    { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions" },
+    { title: "بانک محصول", routeName: "ProductBankProducts", disabled: !hasRole(PbRoles.readers) },
+    { title: "فهرست مواد (BOM)", routeName: "ProductBankBoms", disabled: !hasRole(PbRoles.readers) },
+    { title: "چارت‌های فرآیند (OPC)", routeName: "ProductBankRoutings", disabled: !hasRole(PbRoles.readers) },
+    { title: "مبنای BOM پروژه و انحراف‌ها", routeName: "ProductBankDeviations", disabled: !hasRole(PbRoles.readers) },
+    { title: "برنامه‌های طراحی", routeName: "DesignPlans", disabled: !hasRole(DesignRoles.readers) },
+    { title: "ورودی‌های طراحی", routeName: "DesignInputs", disabled: !hasRole(DesignRoles.readers) },
+    { title: "بازبینی، تایید و صحه‌گذاری طراحی", routeName: "DesignReviews", disabled: !hasRole(DesignRoles.readers) },
+    { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions", disabled: !hasRole(DesignRoles.readers) },
     { title: "درخواست‌های تغییر مهندسی (ECR)", routeName: "EngChangeRequests", disabled: !hasRole(EcRoles.readers) },
     { title: "دستورهای تغییر مهندسی (ECO)", routeName: "EngChangeOrders", disabled: !hasRole(EcRoles.readers) },
-    { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance" },
-    { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes" },
-    { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings" },
-    { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages" },
+    { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance", disabled: !hasRole(BalanceRoles.readers) },
+    { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes", disabled: !hasRole(BalanceRoles.readers) },
+    { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings", disabled: !hasRole(PbRoles.readers) },
+    { title: "فهرست مراحل OPC و تنظیم کدینگ", routeName: "ProductBankStages", disabled: !hasRole(PbRoles.readers) },
     { title: "کیفیت داده و آمادگی مهندسی", routeName: "OpsDataQuality", disabled: !hasRole(OpsDataRoles.readers) },
   ] as Links[],
   procurement: [

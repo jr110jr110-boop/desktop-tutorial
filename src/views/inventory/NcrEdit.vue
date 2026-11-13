@@ -340,7 +340,8 @@ onMounted(async () => {
   getProviders().then(([list]) => (providers.value = rowsOf(list)));
   getWorkOrders().then(([list]) => (workOrders.value = rowsOf(list)));
   getContracts().then(([list]) => (contracts.value = rowsOf(list)));
-  getEquipmentList({ PageSize: 300 }).then(([list]) => (equipment.value = rowsOf(list)));
+  // GET quality/equipment is for the quality readers only: the equipment list stays empty for the other roles
+  if (hasRole(QualityRoles.readers)) getEquipmentList({ PageSize: 300 }).then(([list]) => (equipment.value = rowsOf(list)));
   if (route.params.id === "new") {
     ncr.value = blank();
   } else {

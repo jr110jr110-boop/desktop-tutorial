@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { hasRole } from "@/composables/roles";
+import { hasRole, InventoryRoles } from "@/composables/roles";
 // Link to Sepidar (finance): documents waiting to be posted, CSV export, and Sepidar codes of providers / work orders / contracts.
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { exportSepidar, getDocument, getSepidarCheck, getSepidarMappings, getSepidarOutbox, saveSepidarMapping } from "@/api/InventoryAPIs";
 import { documentStatuses, documentTypes, fail, jalali, num, ok, sepidarStatuses } from "@/composables/inventory";
+
+/** the check, the outbox and the Sepidar codes are all read with the same role list (the API answers 403 to the others, e.g. the CEO) */
+const canRead = hasRole(InventoryRoles.sepidarReaders);
 
 const tab = ref<"outbox" | "codes">("outbox");
 const check = ref<any>(null);
@@ -103,6 +106,7 @@ async function saveMap(m: any) {
 }
 
 onMounted(() => {
+  if (!canRead) return;
   loadCheck();
   loadOutbox();
 });
@@ -114,11 +118,12 @@ onMounted(() => {
     <div class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title screen-only">ارتباط با سپیدار (مالی)</h1>
-        <div class="d-flex gap-2 d-print-none"><button class="btn btn-sm btn-outline-secondary" @click="printReport">چاپ</button><div class="btn-group btn-group-sm">
+        <div class="d-flex gap-2 d-print-none"><button class="btn btn-sm btn-outline-secondary" @click="printReport">چاپ</button><div v-if="canRead" class="btn-group btn-group-sm">
           <button :class="tab === 'outbox' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="tab = 'outbox'">اسناد برای سپیدار</button>
           <button :class="tab === 'codes' ? 'btn-primary' : 'btn-outline-primary'" class="btn" @click="tab = 'codes'; loadMappings()">کدهای سپیدار</button>
         </div></div>
       </div>
+      <div v-if="!canRead" class="alert alert-info small py-2">اسناد و کدهای سپیدار فقط برای مدیر مالی، کارشناس مالی و معاونت قابل مشاهده است.</div>
       <div v-if="check" class="alert small py-2" :class="check.missingCodes.length ? 'alert-warning' : 'alert-success'">
         {{ check.pendingDocuments }} سند تاییدشده منتظر ارسال به سپیدار است.
         <template v-if="check.missingCodes.length">
@@ -136,7 +141,7 @@ onMounted(() => {
       </p>
     </div>
 
-    <div v-if="tab === 'outbox'" class="inv-card">
+    <div v-if="canRead && tab === 'outbox'" class="inv-card">
       <div class="inv-filters mb-3">
         <select v-model="status" class="form-select form-select-sm" @change="page = 1; loadOutbox()">
           <option :value="null">همه</option>
@@ -185,7 +190,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-else class="inv-card">
+    <div v-else-if="canRead" class="inv-card">
       <p class="inv-muted">کد کالا در صفحه «کالاها» و کد انبار در صفحه «انبارها» ثبت می‌شود. اینجا کد تفصیلی تامین‌کنندگان، دستورهای ساخت (مرکز هزینه) و قراردادها در سپیدار ثبت می‌شود.</p>
       <div class="inv-filters mb-3">
         <select v-model="entityType" class="form-select form-select-sm" @change="loadMappings">

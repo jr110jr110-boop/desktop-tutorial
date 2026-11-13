@@ -8,7 +8,7 @@ import { getSupplierInvoices, getSuppliers } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { money, parseAmount, yesNo } from "@/composables/fn";
 import { settlementStatuses, supplierNoteKinds } from "@/composables/fnF3";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { FnRoles, ProcurementRoles, hasRole } from "@/composables/roles";
 
 // Supplier credit / debit notes (draft -> approved by someone else) and the reconciliation of a supplier's statement with our ledger.
 const tab = ref("notes");
@@ -77,8 +77,10 @@ async function reconcile() {
 
 onMounted(async () => {
   load();
-  const [s] = await getSuppliers();
-  suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  if (hasRole(ProcurementRoles.readers)) { // the auditor may not read the supplier list (GET procurement/suppliers): the list stays empty for that role
+    const [s] = await getSuppliers();
+    suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  }
 });
 </script>
 

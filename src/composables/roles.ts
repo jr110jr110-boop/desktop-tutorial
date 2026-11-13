@@ -117,6 +117,8 @@ export const InventoryRoles = {
   routing: list("PMO,ENGINEERING"),
   qc: list("PMO,QC"),
   finance: list("PMO,FINANCIAL"),
+  /** GET inventory/sepidar/check, outbox and mappings (SepidarLinkController, InventoryRoles.Finance in the API: PMO, FINANCIAL, FINANCEMANAGER); the CEO may open the page but reads none of it */
+  sepidarReaders: list("PMO,FINANCIAL,FINANCEMANAGER"),
   materialRequest: list("PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR"),
   approvers: list("PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL,PRODUCTIONMANAGER"),
   exitCheck: list("PMO,WAREHOUSE,WHSUPERVISOR,SECURITY"),

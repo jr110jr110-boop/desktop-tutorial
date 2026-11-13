@@ -9,7 +9,7 @@ import { getSuppliers } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { money, parseAmount } from "@/composables/fn";
 import { guaranteeDirections, guaranteeEvents, guaranteeKinds, guaranteeStatuses } from "@/composables/fnF3";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { FnRoles, ProcurementRoles, hasRole } from "@/composables/roles";
 
 // Bank guarantees register (issued by our banks / received from suppliers and contractors): extend, reduce, release, claim, bank limits and exposure per bank.
 const tab = ref("register");
@@ -83,8 +83,10 @@ async function saveLimit() {
 onMounted(async () => {
   load();
   loadExposure();
-  const [s] = await getSuppliers(); // the auditor is not a procurement reader: the supplier list stays empty for that role
-  suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  if (hasRole(ProcurementRoles.readers)) { // the auditor may not read the supplier list (GET procurement/suppliers): the list stays empty for that role
+    const [s] = await getSuppliers();
+    suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  }
 });
 </script>
 

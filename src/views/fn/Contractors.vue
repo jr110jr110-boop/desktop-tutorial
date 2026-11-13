@@ -8,7 +8,7 @@ import { getClearances, getRetentionStatus, releaseRetention, saveClearance } fr
 import { getSuppliers } from "@/api/ProcurementAPIs";
 import { fail, jalali, ok, today } from "@/composables/inventory";
 import { money, parseAmount, yesNo } from "@/composables/fn";
-import { FnRoles, hasRole } from "@/composables/roles";
+import { FnRoles, ProcurementRoles, hasRole } from "@/composables/roles";
 
 // Contractors: social-insurance clearance letters (مفاصاحساب بیمه) and the retention (حسن انجام کار) held, released and releasable; a release needs a valid clearance.
 const tab = ref("clearance");
@@ -67,8 +67,10 @@ async function release() {
 
 onMounted(async () => {
   load();
-  const [s] = await getSuppliers();
-  suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  if (hasRole(ProcurementRoles.readers)) { // the auditor may not read the supplier list (GET procurement/suppliers): the list stays empty for that role
+    const [s] = await getSuppliers();
+    suppliers.value = Array.isArray(s) ? s : s?.data || [];
+  }
 });
 </script>
 

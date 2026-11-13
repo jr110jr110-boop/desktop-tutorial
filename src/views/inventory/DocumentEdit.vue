@@ -19,7 +19,7 @@ import {
   needsApprovalTypes, num, ok, openLabels, outgoingTypes, parseScan, printPage, purchaseOrderTypes, rial, sepidarStatuses,
   transferTypes, today, trackingModes, typeOrder, warehouseKinds, distributionText,
 } from "@/composables/inventory";
-import { hasRole, InventoryRoles, OpsDataRoles } from "@/composables/roles";
+import { hasRole, InventoryRoles, OpsDataRoles, ProcurementRoles } from "@/composables/roles";
 
 const route = useRoute();
 const router = useRouter();
@@ -698,7 +698,8 @@ onMounted(async () => {
   getWorkOrders().then(([p]) => (workOrders.value = rowsOf(p)));
   getContracts().then(([p]) => (contracts.value = rowsOf(p)));
   getMaterialRequests({ Status: 2, PageSize: 200 }).then(([p]) => (requests.value = rowsOf(p)));
-  getOpenPurchaseOrders().then(([p]) => (orders.value = rowsOf(p)));
+  // GET procurement/orders is for the procurement readers only: the list of open orders stays empty for the other roles
+  if (hasRole(ProcurementRoles.readers)) getOpenPurchaseOrders().then(([p]) => (orders.value = rowsOf(p)));
   if (route.params.id === "new") {
     doc.value = emptyDoc(Number(route.query.type) || 1);
     parseQuotes("");

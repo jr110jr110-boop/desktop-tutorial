@@ -440,7 +440,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/inventory/freight", name: "InventoryFreight", component: () => import("@/views/inventory/Freight.vue"), meta: { access: "warehouse", roles: InventoryRoles.freight } },
   { path: "/inventory/reorder", name: "InventoryReorder", component: () => import("@/views/inventory/Reorder.vue"), meta: { access: "warehouse", roles: InventoryRoles.reports } },
   { path: "/inventory/excel", name: "InventoryExcel", component: () => import("@/views/inventory/ExcelImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.counts } },
-  { path: "/inventory/registers", name: "InventoryRegisters", component: () => import("@/views/inventory/Registers.vue"), meta: { access: "warehouse" } },
+  { path: "/inventory/registers", name: "InventoryRegisters", component: () => import("@/views/inventory/Registers.vue"), meta: { access: "warehouse", roles: InventoryRoles.reports } },
   { path: "/inventory/opening-import", name: "InventoryOpeningImport", component: () => import("@/views/inventory/OpeningImport.vue"), meta: { access: "warehouse", roles: InventoryRoles.openingImport } },
   // Finance and cost accounting
   { path: "/procurement/settings", name: "ProcurementSettings", component: () => import("@/views/procurement/Settings.vue"), meta: { roles: ProcurementRoles.readers } },
@@ -484,7 +484,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/fn/reports/project-profitability", name: "FnReportProfit", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "project-profitability" }, meta: { roles: FnRoles.readers } },
   { path: "/fn/reports/reconciliation", name: "FnReportRecon", component: () => import("@/views/fn/LedgerReports.vue"), props: { kind: "reconciliation" }, meta: { roles: FnRoles.readers } },
   { path: "/fn/treasury/accounts", name: "FnTreasuryAccounts", component: () => import("@/views/fn/TreasuryAccounts.vue"), meta: { roles: FnRoles.readers } },
-  { path: "/fn/treasury/petty-cash", name: "FnPettyCash", component: () => import("@/views/fn/PettyCash.vue"), meta: {} },
+  { path: "/fn/treasury/petty-cash", name: "FnPettyCash", component: () => import("@/views/fn/PettyCash.vue"), meta: { roles: FnRoles.readers } /* first read: GET finance/treasury/settlements */ },
   { path: "/fn/treasury/payments", name: "FnPayments", component: () => import("@/views/fn/Payments.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/treasury/receipts", name: "FnReceipts", component: () => import("@/views/fn/Receipts.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/treasury/cheques", name: "FnCheques", component: () => import("@/views/fn/Cheques.vue"), meta: { roles: FnRoles.readers } },
