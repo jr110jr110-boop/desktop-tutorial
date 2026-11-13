@@ -3,6 +3,7 @@
 // «پذیرش مشخصه‌های نقشه موجود» (engineering writes the list, QA approves) and «پذیرش پیکربندی پروژه موجود» (preparer, one more engineer and one PMO person: three different people).
 // Also the pre-check of the transmittal revision setting and the open purchase order lines that cite a superseded drawing revision.
 import { onMounted, ref } from "vue";
+import { GoLiveRoles, hasRole } from "@/composables/roles";
 import { charAdoptionAction, configAdoptionAction, confirmPoLine, getCharAdoptions, getCharCandidates, getConfigAdoptions, getConfigCandidates, getDriftRehearsal, getGoLiveOverview, getPoUncitedLines, getRevisionPreCheck, getStalePoLines, requestCharAdoption, requestConfigAdoption } from "@/api/GoLiveAPIs";
 import { fail, jalali, ok } from "@/composables/inventory";
 
@@ -24,15 +25,27 @@ const configForm = ref<any>({ workOrderId: null, productId: null, bomHeaderId: n
 const confirmForm = ref<{ lineId: number | null; reference: string }>({ lineId: null, reference: "" });
 const classes: Record<number, string> = { 1: "بحرانی", 2: "مهم", 3: "عادی" };
 
+// every read is made only for the roles the service answers to (the others get «شما مجوز این کار را ندارید»); the section that shows it is hidden for them
+const canChar = hasRole(GoLiveRoles.charCandidates);
+const canConfig = hasRole(GoLiveRoles.configCandidates);
+const canPoLines = hasRole(GoLiveRoles.poLines);
+const canRehearsal = hasRole(GoLiveRoles.rehearsal);
+
 async function load() {
   const [o] = await getGoLiveOverview();
   overview.value = o;
-  await loadChar();
-  charAdoptions.value = (await getCharAdoptions())[0] || [];
-  await loadConfig();
-  configAdoptions.value = (await getConfigAdoptions())[0] || [];
-  stale.value = (await getStalePoLines())[0] || [];
-  uncited.value = (await getPoUncitedLines({ pageSize: 50 }))[0] || { total: 0, items: [] };
+  if (canChar) {
+    await loadChar();
+    charAdoptions.value = (await getCharAdoptions())[0] || [];
+  }
+  if (canConfig) {
+    await loadConfig();
+    configAdoptions.value = (await getConfigAdoptions())[0] || [];
+  }
+  if (canPoLines) {
+    stale.value = (await getStalePoLines())[0] || [];
+    uncited.value = (await getPoUncitedLines({ pageSize: 50 }))[0] || { total: 0, items: [] };
+  }
 }
 
 // the candidate lists are filtered and paged on the server (an old legacy drawing or work order is never cut off)
@@ -137,7 +150,7 @@ onMounted(load);
       </div>
     </div>
 
-    <div class="inv-card">
+    <div v-if="canChar" class="inv-card">
       <h2 class="h6">پذیرش مشخصه‌های نقشه موجود (مهندسی + QA)</h2>
       <div class="d-flex gap-2 mb-2"><input v-model="charPage.search" class="form-control form-control-sm" placeholder="جست‌وجوی شماره یا عنوان نقشه" @keyup.enter="searched(charPage, loadChar)" /><button class="btn btn-sm btn-outline-secondary" @click="searched(charPage, loadChar)">جست‌وجو</button></div>
       <div class="table-responsive"><table class="table table-sm">
@@ -172,7 +185,7 @@ onMounted(load);
       </table></div>
     </div>
 
-    <div class="inv-card">
+    <div v-if="canConfig" class="inv-card">
       <h2 class="h6">پذیرش پیکربندی پروژه موجود (مهندسی + مهندسی دوم + PMO)</h2>
       <div class="d-flex gap-2 mb-2"><input v-model="configPage.search" class="form-control form-control-sm" placeholder="جست‌وجوی کد یا عنوان دستور کار" @keyup.enter="searched(configPage, loadConfig)" /><button class="btn btn-sm btn-outline-secondary" @click="searched(configPage, loadConfig)">جست‌وجو</button></div>
       <div class="table-responsive"><table class="table table-sm">
@@ -213,7 +226,7 @@ onMounted(load);
       </table></div>
     </div>
 
-    <div class="inv-card">
+    <div v-if="canPoLines" class="inv-card">
       <h2 class="h6">ردیف‌های سفارش خرید با بازنگری منسوخ‌شده نقشه</h2>
       <div class="table-responsive"><table class="table table-sm">
         <thead><tr><th>سفارش</th><th>نقشه</th><th>بازنگری ارجاع‌شده</th><th>بازنگری جاری</th><th></th></tr></thead>
@@ -226,7 +239,7 @@ onMounted(load);
       <div v-if="confirmForm.lineId" class="d-flex gap-2"><input v-model="confirmForm.reference" class="form-control" placeholder="مرجع تایید تامین‌کننده (نامه، ایمیل)" /><button :disabled="busy" class="btn btn-primary" @click="confirmLine">ثبت</button></div>
     </div>
 
-    <div class="inv-card">
+    <div v-if="canPoLines" class="inv-card">
       <h2 class="h6">ردیف‌های باز سفارش‌های قدیمی که نقشه‌شان ارجاع داده نشده است ({{ uncited.total }})</h2>
       <p class="small inv-muted">قطعه این ردیف‌ها نقشه منتشرشده دارد ولی ردیف به نقشه ارجاع ندارد؛ با اصلاح یا انتشار دوبارهٔ سفارش ارجاع ثبت می‌شود.</p>
       <div class="table-responsive"><table class="table table-sm">
@@ -238,7 +251,7 @@ onMounted(load);
       </table></div>
     </div>
 
-    <div class="inv-card">
+    <div v-if="canRehearsal" class="inv-card">
       <h2 class="h6">تمرین پیش از به‌روزرسانی: نقطهٔ شروع سوابق رکوردهای تازه‌پوشش‌یافته</h2>
       <p class="small inv-muted">این گزارش فقط می‌خواند و چیزی نمی‌نویسد. پیش از به‌روزرسانی روی رونوشت پایگاه داده سرور اجرا شود؛ نخستین بررسی یکپارچگی پس از به‌روزرسانی وضعیت فعلی این جدول‌ها را مبنا می‌گیرد.</p>
       <button class="btn btn-sm btn-outline-secondary mb-2" @click="runRehearsal">اجرای تمرین</button>

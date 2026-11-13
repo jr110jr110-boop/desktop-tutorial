@@ -2,6 +2,7 @@
 // Data-quality widget for the EPM dashboards and the CEO dashboard: open findings, exceptions this week, top rules, readiness. Read only.
 import { onMounted, ref } from "vue";
 import { getOpsSummary, getReadinessSummary } from "@/api/OpsDataAPIs";
+import { hasRole, OpsDataRoles } from "@/composables/roles";
 
 const props = defineProps<{ unit?: number | null; readiness?: boolean }>();
 const s = ref<any>(null);
@@ -9,6 +10,8 @@ const r = ref<any>(null);
 const hidden = ref(false);
 
 onMounted(async () => {
+  // GET opsdata/summary answers 403 to the roles outside OpsDataRoles.readers (e.g. the project manager, the treasurer): the tile stays hidden for them
+  if (!hasRole(OpsDataRoles.readers)) { hidden.value = true; return; }
   const [d, e] = await getOpsSummary(props.unit ?? null);
   if (e) { hidden.value = true; return; }
   s.value = d;

@@ -577,5 +577,14 @@ export const IntegrityRoles = {
 /** Package G «گذار به کنترل» (the API checks again on every call): the overview is read by the roles that run quality and configuration; the CEO inbox by the CEO, the PMO and the auditor. */
 export const GoLiveRoles = {
   readers: list("PMO,CEO,QA,QC,AUDITOR,ENGINEERING,ENGINEER,COMMERCIAL,DCC"),
-  ceoInbox: list("CEO,PMO,AUDITOR"),
+  /** GET go-live/ceo-inbox: CEO only (GoLiveOverviewService.CeoInboxAsync) */
+  ceoInbox: ["CEO"],
+  /** GET go-live/char-adoptions/candidates (GlCharAdoptionService.CandidatesAsync) */
+  charCandidates: list("ENGINEERING,ENGINEER,QA,QC,PMO,AUDITOR,CEO"),
+  /** GET go-live/config-adoptions/candidates (GlConfigAdoptionService.CandidatesAsync) */
+  configCandidates: list("ENGINEERING,PMO,QA,AUDITOR,CEO"),
+  /** GET go-live/po-stale-lines and po-uncited-lines (PoCitationService) */
+  poLines: list("COMMERCIAL,PMO,ENGINEERING,AUDITOR,CEO,QA"),
+  /** GET go-live/drift-rehearsal (GoLiveOverviewService.DriftRehearsalAsync; the API also admits ADMIN) */
+  rehearsal: list("CEO,PMO,QA,AUDITOR,ADMIN"),
 };

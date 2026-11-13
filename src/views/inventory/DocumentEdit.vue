@@ -135,7 +135,11 @@ function setDoc(dto: any) {
 }
 const isDirty = () => { try { return savedSnapshot === "" || JSON.stringify(toDto()) !== savedSnapshot; } catch { return true; } };
 
+/** GET procurement/orders/{id} is for the procurement readers only: the other roles never ask for the order */
+const canReadOrders = hasRole(ProcurementRoles.readers);
+
 async function loadOrderLines() {
+  if (!canReadOrders) return;
   const [order] = await getPurchaseOrderForReceipt(doc.value.purchaseOrderId);
   orderLines.value = (order?.lines || []).filter((l: any) => l.itemId);
 }
@@ -486,7 +490,7 @@ async function uploadWeighbridge(event: any) {
 
 /** Items of an order line come without the tracking mode, so the item is read again by its code. */
 async function fillFromOrder() {
-  if (!doc.value.purchaseOrderId) return;
+  if (!doc.value.purchaseOrderId || !canReadOrders) return;
   busy.value = true;
   const [order, error] = await getPurchaseOrderForReceipt(doc.value.purchaseOrderId);
   if (error) {
