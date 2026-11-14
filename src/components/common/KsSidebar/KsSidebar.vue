@@ -52,6 +52,18 @@
       </KsSidebarLink>
       <KsSidebarLink
         :sidebar-state="sidebarState"
+        :subs="agentLinks"
+        has-sub
+        route-name="Ag"
+        tag="agents-collapse"
+        title="ایجنت‌ها">
+        <CpuIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('Ag') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+      <KsSidebarLink
+        :sidebar-state="sidebarState"
         :subs="links.cardBoards"
         has-sub
         route-name="Cardboard"
@@ -317,7 +329,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, currentRole, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, userRoles, userRoleTitles } from "@/composables/roles";
+import { AccountRoles, AgentRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, currentRole, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, userRoles, userRoleTitles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
@@ -327,6 +339,7 @@ import { BalanceRoles } from "@/composables/projectBalance";
 import { AuditRoles } from "@/composables/audit";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getInboxCounts } from "@/api/OfficeAPIs";
+import { getAgentInboxCounts } from "@/api/AgentAPIs";
 import type { PropType } from "vue";
 import type Links from "@/components/common/KsSidebar/type";
 
@@ -656,11 +669,28 @@ async function loadInboxCount() {
   const [data, error] = await getInboxCounts();
   if (!error) inboxOpen.value = Number(data?.open) || 0;
 }
+// Agent layer: what waits for the person at the gates (GET agents/inbox/counts; same refresh, a failure just hides the number).
+const agentOpen = ref(0);
+let agentTimer: ReturnType<typeof setInterval> | undefined;
+async function loadAgentCount() {
+  if (!localStorage.getItem("token")) return;
+  const [data, error] = await getAgentInboxCounts();
+  if (!error) agentOpen.value = Number(data?.total) || 0;
+}
 onMounted(() => {
   loadInboxCount();
   inboxTimer = setInterval(loadInboxCount, 60000);
+  loadAgentCount();
+  agentTimer = setInterval(loadAgentCount, 60000);
 });
-onBeforeUnmount(() => inboxTimer && clearInterval(inboxTimer));
+onBeforeUnmount(() => {
+  if (inboxTimer) clearInterval(inboxTimer);
+  if (agentTimer) clearInterval(agentTimer);
+});
+const agentLinks = computed<Links[]>(() => [
+  { title: "کارتابل گیت", routeName: "AgInbox", badge: agentOpen.value },
+  { title: "نمای ایجنت اصلی", routeName: "AgBoard", disabled: !hasRole(AgentRoles.board), hidden: !hasRole(AgentRoles.board) },
+]);
 const officeLinks = computed<Links[]>(() => [
   { title: "کارتابل اداری", routeName: "OfInbox", badge: inboxOpen.value },
   { title: "وظایف من (کارتابل، بورد، تقویم)", routeName: "Tasks" },

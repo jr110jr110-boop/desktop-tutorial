@@ -62,6 +62,19 @@ export const seatTitles: Record<string, string> = {
   "QC-NCR-ASSIST": "دستیار گزارش عدم انطباق",
   "FIN-ANOMALY": "بازبینی ناهنجاری‌های مالی",
   "OFFICE-DRAFT": "پیش‌نویس پاسخ نامه و خلاصه‌ی صورت‌جلسه",
+  "AG-MASTER": "ایجنت اصلی (هماهنگ‌کننده فرایندها)",
+  "AG-SALES": "ایجنت فروش و پیشنهاد",
+  "AG-CONTRACT": "ایجنت قرارداد و بازنگری قرارداد",
+  "AG-INIT": "ایجنت آغاز پروژه",
+  "AG-PLAN": "ایجنت برنامه‌ریزی و کنترل پروژه",
+  "AG-ENG": "ایجنت مهندسی",
+  "AG-PROC": "ایجنت تدارکات و خرید",
+  "AG-WH": "ایجنت انبار",
+  "AG-MF": "ایجنت تولید",
+  "AG-QC": "ایجنت کیفیت",
+  "AG-SHIP": "ایجنت بسته‌بندی، ارسال و تحویل",
+  "AG-SERVICE": "ایجنت خدمات پس از فروش",
+  "AG-FIN": "ایجنت مالی و سپیدار",
   EVAL: "ارزیابی هوش مصنوعی",
 };
 export const seatTitleOf = (code: string | null | undefined, title?: string | null) => title || (code ? seatTitles[code] : "") || code || "";
@@ -78,6 +91,7 @@ export const auditKinds: Record<string, string> = {
   seat: "اجرای صندلی",
   note: "تصمیم درباره یادداشت",
   eval: "ارزیابی",
+  agent: "ایجنت",
 };
 
 /**

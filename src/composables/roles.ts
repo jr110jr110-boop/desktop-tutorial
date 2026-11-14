@@ -595,3 +595,16 @@ export const GoLiveRoles = {
   /** GET go-live/drift-rehearsal (GoLiveOverviewService.DriftRehearsalAsync; the API also admits ADMIN) */
   rehearsal: list("CEO,PMO,QA,AUDITOR,ADMIN"),
 };
+
+/**
+ * Agent layer (AgentRoles in Services/NasbNiro/Agents/AgentCommon.cs). The gate inbox is for every signed-in person (the service shows only what waits for his roles);
+ * the master board and the task detail are read by BoardReaders = "PMO,CEO,AUDITOR"; the step catalogue by "PMO,CEO"; retry and the step switches are PMO only.
+ */
+export const AgentRoles = {
+  /** the master board, the tasks and their events (AgentRoles.BoardReaders) */
+  board: list("PMO,CEO,AUDITOR"),
+  /** the step catalogue (AgentRoles.StepReaders) */
+  steps: list("PMO,CEO"),
+  /** retry a failed task and switch a step on or off (AgentRoles.Admins) */
+  admin: ["PMO"],
+};
