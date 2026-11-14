@@ -242,7 +242,9 @@ namespace Services.NasbNiro
 
         private async Task<List<ProccessCardBoardBomDto>> GetBomToCardBoard(int assemblyId)
         {
-            IEnumerable<ProcessStatus> HasProcessStatuses = await GetCurrentUserProcessStatusesAsync(new CancellationToken());
+            // materialized: a List translates to IN (...) on every provider
+            List<ProcessStatus> HasProcessStatuses = (await GetCurrentUserProcessStatusesAsync(new CancellationToken())).ToList();
+            bool hasWorkflowStart = HasProcessStatuses.Contains(ProcessStatus.EngineeringWorkflowStart);
             int userId = int.Parse(_userManager.GetCurrentUserId());
             List<ProccessCardBoardBomDto> proccessCardBoardBomDtos = await _bom.Where(x => x.AssemblyId == assemblyId
                                                                                         && !x.Deleted)
@@ -321,9 +323,9 @@ namespace Services.NasbNiro
                                                                                   && !x.Deleted
                                                                                   && x.ProcessStatus != ProcessStatus.ProcessIsCompleted)
                                                                          .OrderBy(x => x.Sort)
-                                                                         .Where(x => HasProcessStatuses.Any(ps =>
-                                                                            ((ps != ProcessStatus.EngineeringWorkflowStart && ps != ProcessStatus.DocumentsAdded) && ps == x.ProcessStatus) ||
-                                                                            (ps == ProcessStatus.EngineeringWorkflowStart && x.WorkflowUserId == userId)))
+                                                                         .Where(x =>
+                                                                            (x.ProcessStatus != ProcessStatus.EngineeringWorkflowStart && x.ProcessStatus != ProcessStatus.DocumentsAdded && HasProcessStatuses.Contains(x.ProcessStatus)) ||
+                                                                            (hasWorkflowStart && x.WorkflowUserId == userId))
                                                                          .Select(x => new ProccessCardBoardProccessDto()
                                                                          {
                                                                              Id = x.Id,
@@ -561,7 +563,8 @@ namespace Services.NasbNiro
         private async Task<IQueryable<ProcessEntity>> GetCurrentUserProcessesQueryAsync(CancellationToken cancellationToken)
         {
 
-            IEnumerable<ProcessStatus> HasProcessStatuses = await GetCurrentUserProcessStatusesAsync(cancellationToken);
+            // materialized: a List translates to IN (...) on every provider
+            List<ProcessStatus> HasProcessStatuses = (await GetCurrentUserProcessStatusesAsync(cancellationToken)).ToList();
 
             int userId = int.Parse(_userManager.GetCurrentUserId());
             
@@ -569,9 +572,9 @@ namespace Services.NasbNiro
                 .AsNoTracking()
                 .Where(WhereWorkOrderOfProcessIsActive)
                 .Where(x => !x.Deleted)
-                .Where(x => HasProcessStatuses.Any(ps =>
-                    ((ps != ProcessStatus.EngineeringWorkflowStart && ps != ProcessStatus.DocumentsAdded) && ps == x.ProcessStatus) ||
-                    (ps == x.ProcessStatus && x.WorkflowUserId == userId)));
+                .Where(x =>
+                    (x.ProcessStatus != ProcessStatus.EngineeringWorkflowStart && x.ProcessStatus != ProcessStatus.DocumentsAdded && HasProcessStatuses.Contains(x.ProcessStatus)) ||
+                    (HasProcessStatuses.Contains(x.ProcessStatus) && x.WorkflowUserId == userId));
         }
 
         private async Task<IEnumerable<ProcessStatus>> GetCurrentUserProcessStatusesAsync(CancellationToken cancellationToken)
@@ -618,7 +621,8 @@ namespace Services.NasbNiro
         private async Task<IQueryable<AssemblyEntity>> GetCurrentUserAssembliesQueryAsync(CancellationToken cancellationToken)
         {
 
-            IEnumerable<AssemblyStatus> HasAssemblyStatuses = await GetCurrentUserAssembliesStatusesAsync(cancellationToken);
+            // materialized: a List translates to IN (...) on every provider
+            List<AssemblyStatus> HasAssemblyStatuses = (await GetCurrentUserAssembliesStatusesAsync(cancellationToken)).ToList();
 
             int userId = int.Parse(_userManager.GetCurrentUserId());
 
@@ -628,7 +632,7 @@ namespace Services.NasbNiro
                 .Where(x => !x.Deleted)
                 .Where(x => x.Status != AssemblyStatus.IsCompleted && x.Status != AssemblyStatus.NewAssembly)
                 .Where(x => ApplicationDbContext.CalculateAssemblyProgressLevel(x.Id) == Constants.CompletedProgressLevel)
-                .Where(x => HasAssemblyStatuses.Any(ps => ps == x.Status));
+                .Where(x => HasAssemblyStatuses.Contains(x.Status));
         }
 
         private async Task<IEnumerable<AssemblyStatus>> GetCurrentUserAssembliesStatusesAsync(CancellationToken cancellationToken)

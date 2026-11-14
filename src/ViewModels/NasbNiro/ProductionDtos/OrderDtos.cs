@@ -96,6 +96,9 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public int? KitRequestId { get; set; }
         public string KitNumber { get; set; }
 
+        /// <summary>Status of the kit material request (0 draft, 1 submitted, 2 approved, 3 rejected, 4 closed); null without a kit.</summary>
+        public int? KitStatus { get; set; }
+
         /// <summary>The material requests of the kit are fully issued.</summary>
         public bool KitIssued { get; set; }
 

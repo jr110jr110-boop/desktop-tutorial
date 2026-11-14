@@ -43,6 +43,33 @@ namespace Services.NasbNiro.Production
             _notify = notify;
         }
 
+        /// <summary>
+        /// The kit (material request) got an issue confirmed: the released orders that use it recompute their operations at once, the same work as the order action
+        /// «refresh-readiness» (no new rule). The caller has already saved the issue, so the kit lines read here carry the issued quantities. A concurrent edit is not an error
+        /// here (the issue is already confirmed; the production manager can still refresh by hand).
+        /// </summary>
+        public static async Task RefreshAfterKitIssueAsync(IUnitOfWork uow, IInventoryUserContext user, IInventoryDocumentService documents, int materialRequestId, CancellationToken ct)
+        {
+            List<MfProductionOrder> orders = await uow.Set<MfProductionOrder>()
+                .Where(o => !o.Deleted && o.KitRequestId == materialRequestId && (o.Status == MfOrderStatus.Released || o.Status == MfOrderStatus.InProgress)).ToListAsync(ct);
+            if (orders.Count == 0) return;
+            var flow = new MfFlow(uow, user, documents);
+            foreach (MfProductionOrder order in orders)
+            {
+                List<MfOperation> ops = await uow.Set<MfOperation>().Where(o => o.OrderId == order.Id && !o.Deleted).ToListAsync(ct);
+                await flow.ApplyAsync(order, ops, ct);
+            }
+            try
+            {
+                await uow.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return;
+            }
+            await flow.AfterSaveAsync(ct);
+        }
+
         public static List<MfOperation> Chain(IEnumerable<MfOperation> ops) =>
             ops.Where(o => !o.Deleted).OrderBy(o => o.Sequence).ThenBy(o => o.IsRework ? 1 : 0).ThenBy(o => o.Id).ToList();
 

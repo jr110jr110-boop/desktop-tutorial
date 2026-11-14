@@ -100,12 +100,13 @@ namespace Services.NasbNiro.Attachments
                     return AttachmentRoles.Procurement;
                 case AttachmentOwnerType.WarehouseDocument:
                 case AttachmentOwnerType.QcInspection:
-                case AttachmentOwnerType.Ncr:
                 case AttachmentOwnerType.PartOperation:
                 case AttachmentOwnerType.InventoryItem:
                 case AttachmentOwnerType.InventoryLot:
                 case AttachmentOwnerType.SerialUnit:
                     return AttachmentRoles.Operational;
+                case AttachmentOwnerType.Ncr:
+                    return AttachmentRoles.NcrRead;
                 case AttachmentOwnerType.ProductionOperation:
                     return AttachmentRoles.ProductionRead;
                 case AttachmentOwnerType.PbBomHeader:
@@ -215,7 +216,7 @@ namespace Services.NasbNiro.Attachments
                     if (n == null) return f;
                     f.Exists = true; f.Number = n.Number;
                     f.Locked = n.Status != NcrStatus.Open; f.Closed = n.Status == NcrStatus.Cancelled;
-                    f.ReadRoles = AttachmentRoles.Operational; f.WriteRoles = AttachmentRoles.NcrWrite; f.LockedWriteRoles = AttachmentRoles.NcrLockedWrite;
+                    f.ReadRoles = AttachmentRoles.NcrRead; f.WriteRoles = AttachmentRoles.NcrWrite; f.LockedWriteRoles = AttachmentRoles.NcrLockedWrite;
                     var docs = new List<int>();
                     if (n.ReceiptDocumentId.HasValue) docs.Add(n.ReceiptDocumentId.Value);
                     if (n.InspectionId.HasValue)

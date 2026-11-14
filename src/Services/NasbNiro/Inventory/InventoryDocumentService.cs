@@ -1395,6 +1395,9 @@ namespace Services.NasbNiro.Inventory
             string saveError = await SaveAsync(cancellationToken);
             if (saveError != null) return ResponseDtoHelper.BadRequest<DocumentDto>(saveError);
             await RefreshPurchaseOrderAsync(document, cancellationToken);
+            // the kit of a released production order is issued: its operations are recomputed now (the same as «refresh-readiness»)
+            if (request != null)
+                await global::Services.NasbNiro.Production.MfFlow.RefreshAfterKitIssueAsync(_uow, _user, this, request.Id, cancellationToken);
             // PB4: the genealogy links (kit issues -> production receipt) follow the confirmed documents
             await global::Services.NasbNiro.Trace.GenealogyBuilder.AfterDocumentAsync(_uow, _user.UserId, type, document.Id, document.MaterialRequestId, cancellationToken);
             return await GetDocumentAsync(document.Id, cancellationToken);

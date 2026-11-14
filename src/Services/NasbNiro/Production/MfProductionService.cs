@@ -138,7 +138,9 @@ namespace Services.NasbNiro.Production
             if (o.ReleasedByUserId.HasValue) dto.ReleasedByName = (await InventoryUsers.GetNamesAsync(_uow, new int?[] { o.ReleasedByUserId }, ct)).Name(o.ReleasedByUserId);
             if (o.KitRequestId.HasValue)
             {
-                dto.KitNumber = await _uow.Set<MaterialRequest>().AsNoTracking().Where(m => m.Id == o.KitRequestId.Value).Select(m => m.Number).FirstOrDefaultAsync(ct);
+                var kit = await _uow.Set<MaterialRequest>().AsNoTracking().Where(m => m.Id == o.KitRequestId.Value).Select(m => new { m.Number, m.Status }).FirstOrDefaultAsync(ct);
+                dto.KitNumber = kit?.Number;
+                dto.KitStatus = kit == null ? (int?)null : (int)kit.Status;
                 dto.KitIssued = o.Status != MfOrderStatus.Draft && await _flow.KitReadyAsync(new MfProductionOrder { KitRequestId = o.KitRequestId }, ct);
             }
             if (o.ProductionReceiptId.HasValue)

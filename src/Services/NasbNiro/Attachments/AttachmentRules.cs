@@ -120,8 +120,10 @@ namespace Services.NasbNiro.Attachments
         public const string PurchaseRequestLockedWrite = "PLANNING,PMO";
         public const string PurchaseRequestWrite = ProcurementRoles.Requesters + ",PLANNING,ENGINEERING";
         public const string NcrLockedWrite = "PMO,QC";
+        /// <summary>Who reads the files of an NCR: the operational readers plus the QA manager, who gives the quality signature on the report and opens its page.</summary>
+        public const string NcrRead = Operational + ",QA";
         /// <summary>PB2: the documents of a product BOM or an OPC routing (drawings, specifications): engineering writes while the revision is a draft; after it is signed only engineering and the PMO void or replace, with a reason.</summary>
-        public const string ProductBankRead = "PMO,CEO,PLANNING,PROJECTMANAGER,COMMERCIAL,ENGINEERING,ENGINEER,QC,WAREHOUSE,WHSUPERVISOR,CONSTRUCTION";
+        public const string ProductBankRead = "PMO,CEO,PLANNING,PROJECTMANAGER,COMMERCIAL,ENGINEERING,ENGINEER,QC,WAREHOUSE,WHSUPERVISOR,CONSTRUCTION,QA,PRODUCTIONMANAGER,SHOPSUPERVISOR";
         public const string ProductBankWrite = "PMO,ENGINEERING,ENGINEER";
         public const string ProductBankLockedWrite = "PMO,ENGINEERING";
         public const string InquiryWrite = "COMMERCIAL,PLANNING,ENGINEERING,QC,CONSTRUCTION,PMO";
