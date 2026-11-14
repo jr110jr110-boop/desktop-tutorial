@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -256,7 +257,7 @@ watch(() => route.query.id, openFromLink);
               <option v-for="(t, k) in paymentTypes" :key="k" :value="Number(k)">{{ t }}</option>
             </select>
           </div>
-          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><input v-model="form.requestDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="form.requestDate" /></div>
           <div v-if="form.type === 3" class="col-12">
             <label class="form-label small mb-0">فاکتور تاییدشده *</label>
             <select v-model="form.invoiceId" class="form-select form-select-sm" @change="pickInvoice">

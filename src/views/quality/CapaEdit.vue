@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import CapaPrint from "@/components/quality/print/CapaPrint.vue";
@@ -171,7 +172,7 @@ onMounted(async () => {
         <div class="col-md-2"><label class="form-label small mb-0">روش تحلیل علت</label><select v-model="capa.rootCauseMethod" :disabled="!editable" class="form-select form-select-sm"><option v-for="(t, k) in rootCauseMethods" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div class="col-md-4"><label class="form-label small mb-0">تحلیل علت ریشه‌ای</label><textarea v-model="capa.rootCauseAnalysis" :disabled="!editable" class="form-control form-control-sm" rows="2"></textarea></div>
         <div class="col-md-3"><label class="form-label small mb-0">مسئول CAPA</label><UserSelect v-model="capa.ownerUserId" :disabled="!editable" /></div>
-        <div class="col-md-2"><label class="form-label small mb-0">موعد</label><input v-model="capa.dueDate" :disabled="!editable" class="form-control form-control-sm" type="date" /></div>
+        <div class="col-md-2"><label class="form-label small mb-0">موعد</label><FnDate v-model="capa.dueDate" :disabled="!editable" /></div>
         <div class="col-md-7"><label class="form-label small mb-0">معیار اثربخشی</label><input v-model="capa.effectivenessCriteria" :disabled="!editable" class="form-control form-control-sm" /></div>
         <div v-if="capa.implementedAt" class="col-md-2"><label class="form-label small mb-0">تاریخ اجرای اقدام‌ها</label><div class="small pt-1">{{ jalali(capa.implementedAt) }}</div></div>
         <div v-if="capa.effectivenessEarliest" class="col-md-3">
@@ -197,7 +198,7 @@ onMounted(async () => {
               <td v-if="multiRound">{{ a.iteration || capa.iteration }}</td>
               <td><input v-model="a.description" class="form-control form-control-sm" /></td>
               <td><UserSelect v-model="a.ownerUserId" /></td>
-              <td><input v-model="a.dueDate" class="form-control form-control-sm" type="date" /></td>
+              <td><FnDate v-model="a.dueDate" /></td>
               <td></td><td></td>
               <td class="text-nowrap">
                 <!-- QA, QC and PMO finish any saved action of the round that is open (the same button the owner of an action gets in the read-only row) -->
@@ -222,7 +223,7 @@ onMounted(async () => {
         <div class="col-md-5"><label class="form-label small mb-0">شرح انجام یا مدرک (برای اقدامی که «ثبت انجام» می‌زنید) *</label><input v-model="note" class="form-control form-control-sm" /></div>
         <div class="col-md-3">
           <label class="form-label small mb-0">تاریخ انجام</label>
-          <input v-model="doneDate" :min="doneMin" :max="doneMax" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="doneDate" />
           <span v-if="doneWarning(doneDate)" class="small text-danger">{{ doneWarning(doneDate) }}</span>
         </div>
         <div class="col-md-4"><DocAttach v-model="evidence" title="مدرک انجام اقدام اصلاحی" /></div>

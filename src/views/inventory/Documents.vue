@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -96,8 +97,8 @@ onMounted(async () => {
           <option :value="null">همه انبارها</option>
           <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.title }}</option>
         </select>
-        <div><label class="form-label small mb-0">از تاریخ</label><input v-model="filters.From" class="form-control form-control-sm" type="date" @change="search" /></div>
-        <div><label class="form-label small mb-0">تا تاریخ</label><input v-model="filters.To" class="form-control form-control-sm" type="date" @change="search" /></div>
+        <div><label class="form-label small mb-0">از تاریخ</label><FnDate v-model="filters.From" @update:model-value="$nextTick(search)" /></div>
+        <div><label class="form-label small mb-0">تا تاریخ</label><FnDate v-model="filters.To" @update:model-value="$nextTick(search)" /></div>
         <button class="btn btn-sm btn-secondary" @click="search">جستجو</button>
       </div>
 

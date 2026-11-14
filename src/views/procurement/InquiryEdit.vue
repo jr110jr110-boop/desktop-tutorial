@@ -306,7 +306,7 @@ onMounted(async () => {
               <td>
                 <input v-model="q.quoteNumber" :disabled="!canEdit" class="form-control form-control-sm inv-ltr mb-1" placeholder="شماره" />
                 <FnDate v-model="q.quoteDate" :disabled="!canEdit" class="mb-1" />
-                <FnDate v-model="q.validUntil" :disabled="!canEdit" title="اعتبار تا" />
+                <FnDate v-model="q.validUntil" :disabled="!canEdit" placeholder="اعتبار تا" />
               </td>
               <td>
                 <input v-model.number="q.deliveryDays" :disabled="!canEdit" class="form-control form-control-sm mb-1" placeholder="روز" type="number" />

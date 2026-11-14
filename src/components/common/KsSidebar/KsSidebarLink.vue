@@ -5,7 +5,7 @@
         :class="[{ 'active-link': isRouteActive }]"
         :disabled="isLocked"
         class="btn sidebar-link align-items-center text-end position-relative"
-        @click="$router.push({ name: routeName })">
+        @click="goMenu($router, routeName)">
         <span
           :class="{
             'color-secondary fw-bold': isRouteActive,
@@ -66,7 +66,7 @@
             class="d-grid sidebar-li-sub">
             <button
               class="btn text-end IRANYekan text-xSmall sidebar-link-sub px-3 position-relative"
-              @click="$router.push({ name: sub.routeName })">
+              @click="goMenu($router, sub.routeName)">
               <span
                 :class="{
                   'color-secondary fw-bold': currentRouteName === sub.routeName,
@@ -98,6 +98,7 @@ import type { PropType } from "vue";
 import type Links from "./type";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
+import { goMenu } from "@/composables/pageReload";
 
 import { Colors } from "@/assets/colors";
 import AngleLeftIcon from "@/components/icons/AngleLeftIcon.vue";

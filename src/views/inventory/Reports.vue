@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -100,8 +101,8 @@ onMounted(async () => {
           <option v-for="c in catalog" :key="c.key" :value="c.key">{{ c.title }}</option>
         </select>
         <template v-if="uses('date')">
-          <input v-model="filters.DateFrom" class="form-control form-control-sm inv-ltr" title="از تاریخ" type="date" />
-          <input v-model="filters.DateTo" class="form-control form-control-sm inv-ltr" title="تا تاریخ" type="date" />
+          <FnDate v-model="filters.DateFrom" placeholder="از تاریخ" />
+          <FnDate v-model="filters.DateTo" placeholder="تا تاریخ" />
         </template>
         <select v-if="uses('warehouse')" v-model="filters.WarehouseId" class="form-select form-select-sm">
           <option :value="null">همه انبارها</option>

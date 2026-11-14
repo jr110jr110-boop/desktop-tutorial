@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
+import ContractPick from "@/components/fn/ContractPick.vue";
+import { getPurchaseOrders } from "@/api/ProcurementAPIs";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import Pb6Dialog from "@/components/common/Pb6Dialog.vue";
@@ -142,7 +145,15 @@ async function savePlan() {
   ok("برنامه نقدی ذخیره شد (برنامه قبلی این قرارداد جایگزین شد).");
 }
 
+// Purchase orders for the order select (the list the procurement pages use).
+const orders = ref<any[]>([]);
+async function loadOrders() {
+  const [data] = await getPurchaseOrders({ PageSize: 200 });
+  orders.value = data?.data || [];
+}
+
 onMounted(() => {
+  loadOrders();
   if (route.query.id) getStatement(Number(route.query.id)).then(([d]) => (current.value = d));
   load();
 });
@@ -167,10 +178,10 @@ function switchTab(t: any) {
           <h2 class="h6">صورت‌وضعیت جدید (بازرگانی)</h2>
           <div class="inv-filters">
             <select v-model.number="form.side" class="form-select form-select-sm"><option :value="1">تامین‌کننده/پیمانکار</option><option :value="2">کارفرما</option></select>
-            <input v-model.number="form.purchaseOrderId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه سفارش (قرارداد)" />
-            <input v-model.number="form.contractId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه قرارداد پروژه" />
-            <input v-model="form.periodFrom" type="date" class="form-control form-control-sm" />
-            <input v-model="form.periodTo" type="date" class="form-control form-control-sm" />
+            <select v-model="form.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش (قرارداد) — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+            <ContractPick v-model="form.contractId" placeholder="قرارداد پروژه — انتخاب کنید" />
+            <FnDate v-model="form.periodFrom" />
+            <FnDate v-model="form.periodTo" />
             <input v-model="form.subject" class="form-control form-control-sm" placeholder="موضوع" />
           </div>
           <table class="table table-sm mt-2"><thead><tr><th>شرح</th><th>تعداد</th><th>قیمت واحد</th><th>پیش‌پرداخت</th><th>پس از تحویل و QC</th><th>عملکرد خوب</th><th>پس از آزمون نهایی</th><th>CBS</th></tr></thead><tbody>
@@ -234,7 +245,7 @@ function switchTab(t: any) {
             <select v-model.number="pay.payMethod" class="form-select form-select-sm"><option :value="1">چک</option><option :value="2">انتقال بانکی</option><option :value="3">نقد</option><option :value="9">سایر</option></select>
             <input v-model="pay.chequeNumber" class="form-control form-control-sm inv-ltr" placeholder="شماره چک" />
             <input v-model.number="pay.receivedAmount" type="number" class="form-control form-control-sm inv-ltr" placeholder="مبلغ" />
-            <input v-model="pay.paidDate" type="date" class="form-control form-control-sm" />
+            <FnDate v-model="pay.paidDate" />
             <button class="btn btn-sm btn-primary" @click="recordPay">ثبت پرداخت/دریافت</button>
           </div>
           <p v-if="current.status === 6">پرداخت: {{ jalali(current.paidDate) }} — مورد انتظار {{ rial(current.expectedAmount) }}، دریافتی {{ rial(current.receivedAmount) }}، اختلاف {{ rial(current.paymentVariance) }}</p>
@@ -270,8 +281,8 @@ function switchTab(t: any) {
 
       <template v-else-if="tab === 'cbs' || tab === 'cash'">
         <div class="inv-filters mb-2">
-          <input v-model.number="scope.purchaseOrderId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه سفارش" />
-          <input v-model.number="scope.contractId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه قرارداد پروژه" />
+          <select v-model="scope.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+          <ContractPick v-model="scope.contractId" placeholder="قرارداد پروژه — انتخاب کنید" />
           <button class="btn btn-sm btn-secondary" @click="loadScope">نمایش</button>
         </div>
         <template v-if="tab === 'cbs'">
@@ -288,7 +299,7 @@ function switchTab(t: any) {
           <h3 class="h6">برنامه نقدی دستی (جایگزین برنامه ثبت‌شده)</h3>
           <div v-for="(p, i) in planRows" :key="i" class="inv-filters mb-1">
             <select v-model.number="p.direction" class="form-select form-select-sm"><option :value="2">پرداخت</option><option :value="1">دریافت</option></select>
-            <input v-model="p.dueDate" type="date" class="form-control form-control-sm" />
+            <FnDate v-model="p.dueDate" />
             <input v-model.number="p.amount" type="number" class="form-control form-control-sm inv-ltr" placeholder="مبلغ (ریال)" />
             <input v-model="p.note" class="form-control form-control-sm" placeholder="توضیح" />
           </div>

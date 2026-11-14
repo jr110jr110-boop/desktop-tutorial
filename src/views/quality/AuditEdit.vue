@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import AuditPrint from "@/components/quality/print/AuditPrint.vue";
@@ -86,7 +87,7 @@ onMounted(load);
         <div class="row g-2">
           <div class="col-md-2"><label class="form-label small mb-0">بند استاندارد</label><input v-model="finding.clause" class="form-control form-control-sm inv-ltr" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">نوع</label><select v-model="finding.type" class="form-select form-select-sm"><option v-for="(t, k) in findingTypes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
-          <div class="col-md-3"><label class="form-label small mb-0">مهلت اقدام</label><input v-model="finding.dueDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">مهلت اقدام</label><FnDate v-model="finding.dueDate" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">شناسه CAPA موجود (اختیاری)</label><input v-model.number="finding.capaId" class="form-control form-control-sm" type="number" /></div>
           <div class="col-12"><label class="form-label small mb-0">شواهد *</label><textarea v-model="finding.evidence" class="form-control form-control-sm" rows="2"></textarea></div>
           <div class="col-12 d-flex gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="saveFinding">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="finding = null">انصراف</button></div>

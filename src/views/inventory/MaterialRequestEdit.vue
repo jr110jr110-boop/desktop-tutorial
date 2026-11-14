@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
@@ -208,7 +209,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="request.requestDate" :disabled="!editable" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="request.requestDate" :disabled="!editable" />
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">دستور ساخت (پروژه)</label>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import WelderCardPrint from "@/components/quality/print/WelderCardPrint.vue";
@@ -169,8 +170,8 @@ onMounted(persons.load);
             <div class="col-md-1"><label class="form-label small mb-0">قطر تا</label><input v-model="qualForm.rangeDiameterMax" class="form-control form-control-sm inv-ltr" type="number" step="any" /></div>
           </template>
           <div class="col-md-2"><label class="form-label small mb-0">شماره گواهی *</label><input v-model="qualForm.certificateNumber" class="form-control form-control-sm inv-ltr" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ صدور / آزمون *</label><input v-model="qualForm.issuedDate" class="form-control form-control-sm" type="date" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ انقضا</label><input v-model="qualForm.expiryDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ صدور / آزمون *</label><FnDate v-model="qualForm.issuedDate" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ انقضا</label><FnDate v-model="qualForm.expiryDate" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">فایل گواهی</label><DocAttach v-model="qualForm.certificateDocumentId" title="گواهی صلاحیت" /></div>
           <div class="col-md-3 d-flex align-items-end gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="saveQualForm">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="qualForm = null">انصراف</button></div>
         </div>

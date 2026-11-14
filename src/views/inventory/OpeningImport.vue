@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 // Opening balance from the cleaned old warehouse data (Excel). The API makes one draft per warehouse; the drafts need
 // the approval of the warehouse supervisor and the planning manager before they are confirmed.
 import { computed, ref } from "vue";
@@ -194,7 +195,7 @@ async function run() {
       <div class="row g-2 mt-1 align-items-end">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ سند</label>
-          <input v-model="header.documentDate" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="header.documentDate" />
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">مرجع (مثلاً شماره انبارگردانی)</label>

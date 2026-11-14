@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
@@ -35,7 +36,7 @@ onMounted(search);
       </div>
       <div v-if="form" class="border rounded p-2 mb-3">
         <div class="row g-2 align-items-end">
-          <div class="col-md-3"><label class="form-label small mb-0">تاریخ جلسه</label><input v-model="form.reviewDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">تاریخ جلسه</label><FnDate v-model="form.reviewDate" /></div>
           <div class="col-md-6"><label class="form-label small mb-0">حاضرین (عناوین شغلی)</label><input v-model="form.attendees" class="form-control form-control-sm" /></div>
           <div class="col-md-3 d-flex gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="create">ایجاد</button><button class="btn btn-sm btn-outline-secondary" @click="form = null">انصراف</button></div>
         </div>

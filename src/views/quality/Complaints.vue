@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import ComplaintPrint from "@/components/quality/print/ComplaintPrint.vue";
@@ -107,7 +108,7 @@ onMounted(list.load);
           </div>
         </div>
         <div class="row g-2">
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ دریافت</label><input v-model="c.receivedDate" :disabled="!editable()" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ دریافت</label><FnDate v-model="c.receivedDate" :disabled="!editable()" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">دستور ساخت</label><WorkOrderSelect v-model="c.workOrderId" :disabled="!editable()" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">کانال دریافت (نامه، ایمیل، تلفن ...)</label><input v-model="c.channel" :disabled="!editable()" class="form-control form-control-sm" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">شدت</label><select v-model="c.severity" :disabled="!editable()" class="form-select form-select-sm"><option v-for="(t, k) in severities" :key="k" :value="Number(k)">{{ t }}</option></select></div>

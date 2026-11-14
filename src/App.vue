@@ -63,6 +63,7 @@ import KsNotification
 import AppLoader from "@/layouts/AppLoader.vue";
 import RemoteBanner from "@/components/common/RemoteBanner.vue";
 import PendingRoleBar from "@/components/common/PendingRoleBar.vue";
+import { pageReloadKey } from "@/composables/pageReload";
 
 const state = reactive({
   sidebar: {
@@ -160,7 +161,7 @@ onMounted(() => {
         <RemoteBanner v-if="$route.name !== 'Login'" />
         <router-view v-slot="{ Component, route }">
           <transition mode="out-in" name="fade">
-            <component :is="Component" :key="route.path" />
+            <component :is="Component" :key="route.path + ':' + pageReloadKey" />
           </transition>
         </router-view>
       </div>

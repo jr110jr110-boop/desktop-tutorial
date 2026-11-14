@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import WeldLogPrint from "@/components/quality/print/WeldLogPrint.vue";
@@ -92,7 +93,7 @@ onMounted(list.load);
         <div class="row g-2">
           <div class="col-md-2">
             <label class="form-label small mb-0">تاریخ جوشکاری</label>
-            <input v-model="form.weldDate" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+            <FnDate v-model="form.weldDate" />
             <span v-if="dateWarning(form.weldDate)" class="small text-danger">{{ dateWarning(form.weldDate) }}</span>
           </div>
           <div class="col-md-2"><label class="form-label small mb-0">دستور ساخت *</label><WorkOrderSelect v-model="form.workOrderId" @change="loadReports" /></div>

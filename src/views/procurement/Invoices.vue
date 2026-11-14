@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, nextTick, onMounted, ref } from "vue";
@@ -257,7 +258,7 @@ onMounted(async () => {
             </select>
           </div>
           <div class="col-md-3"><label class="form-label small mb-0">شماره فاکتور تامین‌کننده *</label><input v-model="form.invoiceNumber" class="form-control form-control-sm inv-ltr" /></div>
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ فاکتور *</label><input v-model="form.invoiceDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ فاکتور *</label><FnDate v-model="form.invoiceDate" /></div>
           <div class="col-md-2 d-flex align-items-end"><label class="form-check small"><input v-model="form.isOfficial" class="form-check-input" type="checkbox" /> رسمی</label></div>
           <div class="col-md-3"><label class="form-label small mb-0">مالیات ارزش افزوده (ریال)</label><input v-model.number="form.vatAmount" class="form-control form-control-sm" type="number" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">تصویر فاکتور</label><input class="form-control form-control-sm" type="file" @change="attach" /><span v-if="form.documentId" class="inv-badge ok">پیوست است</span></div>

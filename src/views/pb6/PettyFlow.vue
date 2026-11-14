@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import Pb6Table from "@/components/common/Pb6Table.vue";
 import { getPettyRequests, getPettySummaries, getPettySummary, pettyRequestAction, pettySummaryAction, previewPettySummary, savePettyRequest, savePettySummary } from "@/api/Pb6APIs";
@@ -86,8 +87,8 @@ onMounted(load);
         <h2 class="h6">خلاصه تنخواه جدید (پر شدن خودکار از ردیف‌های تسویه)</h2>
         <div class="inv-filters">
           <input v-model.number="sum.pettyCashId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه تنخواه" />
-          <input v-model="sum.periodFrom" type="date" class="form-control form-control-sm" />
-          <input v-model="sum.periodTo" type="date" class="form-control form-control-sm" />
+          <FnDate v-model="sum.periodFrom" />
+          <FnDate v-model="sum.periodTo" />
           <button class="btn btn-sm btn-outline-secondary" @click="createSummary(true)">پیش‌نمایش</button>
           <button class="btn btn-sm btn-primary" @click="createSummary(false)">ذخیره</button>
         </div>

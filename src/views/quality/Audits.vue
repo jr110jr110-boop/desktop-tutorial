@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
@@ -74,7 +75,7 @@ onMounted(() => {
           <div class="col-md-3"><label class="form-label small mb-0">برنامه</label><select v-model="audit.programId" class="form-select form-select-sm"><option :value="null">بدون برنامه</option><option v-for="p in programs" :key="p.id" :value="p.id">{{ p.year }} — {{ p.scope }}</option></select></div>
           <div class="col-md-3"><label class="form-label small mb-0">واحد ممیزی‌شونده *</label><input v-model="audit.auditedUnit" class="form-control form-control-sm" /></div>
           <div class="col-md-3"><label class="form-label small mb-0">معیار</label><input v-model="audit.criteria" class="form-control form-control-sm inv-ltr" /></div>
-          <div class="col-md-3"><label class="form-label small mb-0">تاریخ برنامه *</label><input v-model="audit.plannedDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">تاریخ برنامه *</label><FnDate v-model="audit.plannedDate" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">ممیز ارشد *</label><UserSelect v-model="audit.leadAuditorUserId" /></div>
           <div class="col-md-5">
             <label class="form-label small mb-0">اعضای تیم</label>

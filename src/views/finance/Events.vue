@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { exportAccountingEvents, getAccountingEvents, markAccountingEvents } from "@/api/FinanceAPIs";
@@ -99,8 +100,8 @@ onMounted(load);
           <option :value="null">همه انواع</option>
           <option v-for="(t, k) in eventTypes" :key="k" :value="Number(k)">{{ t }}</option>
         </select>
-        <input v-model="filters.From" class="form-control form-control-sm" title="از تاریخ" type="date" @change="search" />
-        <input v-model="filters.To" class="form-control form-control-sm" title="تا تاریخ" type="date" @change="search" />
+        <FnDate v-model="filters.From" placeholder="از تاریخ" @update:model-value="$nextTick(search)" />
+        <FnDate v-model="filters.To" placeholder="تا تاریخ" @update:model-value="$nextTick(search)" />
         <button class="btn btn-sm btn-secondary" @click="search">جستجو</button>
       </div>
       <div v-if="legacyCsv && selected.length" class="d-flex flex-wrap gap-2 align-items-center mb-2 d-print-none">

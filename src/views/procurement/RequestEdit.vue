@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
 import { computed, onMounted, ref, watch } from "vue";
@@ -255,7 +256,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="req.requestDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="req.requestDate" :disabled="!canEdit" />
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">نوع فرم</label>
@@ -270,7 +271,7 @@ onMounted(async () => {
           </select>
         </div>
         <template v-if="isVehicleForm(req.formType)">
-          <div class="col-md-2"><label class="form-label small mb-0">تاریخ خودرو</label><input v-model="req.vehicleDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-2"><label class="form-label small mb-0">تاریخ خودرو</label><FnDate v-model="req.vehicleDate" :disabled="!canEdit" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">واحد</label><input v-model="req.vehicleUnit" :disabled="!canEdit" class="form-control form-control-sm" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">نوع خودرو</label><input v-model="req.vehicleType" :disabled="!canEdit" class="form-control form-control-sm" /></div>
           <div class="col-md-2"><label class="form-label small mb-0">مبدأ</label><input v-model="req.vehicleOrigin" :disabled="!canEdit" class="form-control form-control-sm" /></div>
@@ -334,7 +335,7 @@ onMounted(async () => {
               <td><input v-model="l.description" :disabled="!canEdit" class="form-control form-control-sm" /></td>
               <td><input v-model="l.unit" :disabled="!canEdit" class="form-control form-control-sm" /></td>
               <td><input v-model.number="l.quantity" :disabled="!canEdit" class="form-control form-control-sm" step="any" type="number" /></td>
-              <td><input v-model="l.neededBy" :disabled="!canEdit" class="form-control form-control-sm" type="date" /></td>
+              <td><FnDate v-model="l.neededBy" :disabled="!canEdit" /></td>
               <td><input v-model.number="l.estimatedUnitPrice" :disabled="!canEdit" class="form-control form-control-sm" type="number" /></td>
               <td><input v-model="l.technicalRequirements" :disabled="!canEdit" class="form-control form-control-sm" /></td>
               <td v-if="req.id" class="num">{{ num(l.orderedQuantity) }}</td>

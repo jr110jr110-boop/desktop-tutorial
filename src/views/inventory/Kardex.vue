@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
@@ -62,8 +63,8 @@ onMounted(async () => {
           <option :value="null">همه انبارها</option>
           <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.title }}</option>
         </select>
-        <div><label class="form-label small mb-0">از</label><input v-model="filters.From" class="form-control form-control-sm" type="date" @change="load" /></div>
-        <div><label class="form-label small mb-0">تا</label><input v-model="filters.To" class="form-control form-control-sm" type="date" @change="load" /></div>
+        <div><label class="form-label small mb-0">از</label><FnDate v-model="filters.From" @update:model-value="$nextTick(load)" /></div>
+        <div><label class="form-label small mb-0">تا</label><FnDate v-model="filters.To" @update:model-value="$nextTick(load)" /></div>
         <button class="btn btn-sm btn-outline-secondary d-print-none" @click="printPage">چاپ</button>
       </div>
 

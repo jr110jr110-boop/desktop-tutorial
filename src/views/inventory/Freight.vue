@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { approveFreight, getFreight, getFreights, saveFreight, voidFreight } from "@/api/InventoryAPIs";
 import { freightBases, freightStatuses, fail, jalali, ok, rial, today } from "@/composables/inventory";
@@ -62,7 +63,7 @@ onMounted(load);
       <div class="inv-toolbar"><h1 class="inv-title">کرایه حمل و بهای تمام‌شده کالا</h1></div>
       <div class="inv-filters mb-3">
         <input v-model.number="form.receiptDocumentId" class="form-control form-control-sm inv-ltr" placeholder="شناسه رسید خرید تاییدشده" type="number" />
-        <input v-model="form.freightDate" class="form-control form-control-sm inv-ltr" type="date" />
+        <FnDate v-model="form.freightDate" />
         <input v-model="form.vehiclePlate" class="form-control form-control-sm" placeholder="پلاک خودرو" />
         <input v-model="form.goodsType" class="form-control form-control-sm" placeholder="نوع کالا" />
         <input v-model="form.billOfLadingNumber" class="form-control form-control-sm inv-ltr" placeholder="شماره بارنامه" />

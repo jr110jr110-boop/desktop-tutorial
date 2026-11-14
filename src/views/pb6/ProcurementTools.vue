@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import Pb6Table from "@/components/common/Pb6Table.vue";
 import Pb6Dialog from "@/components/common/Pb6Dialog.vue";
@@ -156,7 +157,7 @@ onMounted(load);
           <div class="inv-filters mb-2">
             <input v-model.number="aForm.purchaseOrderId" type="number" class="form-control form-control-sm inv-ltr" placeholder="شناسه سفارش" />
             <button class="btn btn-sm btn-outline-secondary" @click="loadOrderLines">بارگذاری ردیف‌ها</button>
-            <input v-model="aForm.deliveryDateAfter" type="date" class="form-control form-control-sm" title="تاریخ تحویل جدید (اختیاری)" />
+            <FnDate v-model="aForm.deliveryDateAfter" placeholder="تاریخ تحویل جدید (اختیاری)" />
             <input v-model="aForm.reason" class="form-control form-control-sm" placeholder="علت الحاقیه" />
           </div>
           <table v-if="aForm.lines.length" class="table table-sm">
@@ -182,7 +183,7 @@ onMounted(load);
             <input v-model.number="gForm.amount" type="number" class="form-control form-control-sm inv-ltr" placeholder="مبلغ (ریال)" />
             <input v-model="gForm.guaranteeNumber" class="form-control form-control-sm inv-ltr" placeholder="شماره" />
             <input v-model="gForm.issuer" class="form-control form-control-sm" placeholder="صادرکننده" />
-            <input v-model="gForm.expiryDate" type="date" class="form-control form-control-sm" />
+            <FnDate v-model="gForm.expiryDate" />
             <button class="btn btn-sm btn-primary" @click="addGuarantee">ثبت</button>
           </div>
         </div>
@@ -191,8 +192,8 @@ onMounted(load);
       <template v-else>
         <div class="inv-filters mb-2 d-print-none">
           <select v-model="filter.report" class="form-select form-select-sm"><option v-for="c in catalog" :key="c.key" :value="c.key">{{ c.title }}</option></select>
-          <input v-model="filter.dateFrom" type="date" class="form-control form-control-sm" />
-          <input v-model="filter.dateTo" type="date" class="form-control form-control-sm" />
+          <FnDate v-model="filter.dateFrom" />
+          <FnDate v-model="filter.dateTo" />
           <button class="btn btn-sm btn-secondary" @click="runReport">نمایش</button>
           <button class="btn btn-sm btn-outline-success" @click="exportReport">خروجی Excel</button>
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ</button>

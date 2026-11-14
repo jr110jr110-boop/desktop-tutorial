@@ -383,7 +383,7 @@ onMounted(async () => {
         <div class="col-md-2"><label class="form-label small mb-0">اقدام</label><select v-model="release.action" class="form-select form-select-sm"><option v-for="(t, k) in releaseActions" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-0">نام شخص *</label><input v-model="release.personName" class="form-control form-control-sm" /></div>
         <div class="col-md-2"><label class="form-label small mb-0">سازمان</label><input v-model="release.organisation" class="form-control form-control-sm" /></div>
-        <div class="col-md-1"><label class="form-label small mb-0">تاریخ</label><input v-model="release.releaseDate" class="form-control form-control-sm" type="date" /></div>
+        <div class="col-md-1"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="release.releaseDate" /></div>
         <div class="col-md-2"><label class="form-label small mb-0">مرجع (نامه)</label><input v-model="release.reference" class="form-control form-control-sm" /></div>
         <div class="col-md-1"><button :disabled="busy" class="btn btn-sm btn-primary w-100" @click="addRelease">ثبت</button></div>
       </div>
@@ -403,7 +403,7 @@ onMounted(async () => {
           <div v-if="canPlan" class="col-md-4">
             <label class="form-label small mb-0">تاریخ برنامه</label>
             <div class="d-flex gap-2">
-              <input v-model="planDate" class="form-control form-control-sm" type="date" />
+              <FnDate v-model="planDate" />
               <button :disabled="busy" class="btn btn-sm btn-outline-secondary text-nowrap" @click="planActivity">تعیین تاریخ برنامه</button>
             </div>
           </div>
@@ -480,7 +480,7 @@ onMounted(async () => {
           <div class="col-md-2"><label class="form-label small mb-0">نقطه کارفرما (C)</label><select v-model="edit.pointClient" class="form-select form-select-sm"><option v-for="(t, k) in pointHints" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div class="col-md-3"><label class="form-label small mb-0">گزارش آزمون لازم</label><select v-model="edit.requiredReportType" class="form-select form-select-sm"><option :value="null">—</option><option v-for="(t, k) in reportTypes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div class="col-md-3"><label class="form-label small mb-0">مدرک تولیدشده</label><input v-model="edit.documentProduced" class="form-control form-control-sm" /></div>
-          <div class="col-md-3"><label class="form-label small mb-0">تاریخ برنامه</label><input v-model="edit.plannedDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">تاریخ برنامه</label><FnDate v-model="edit.plannedDate" /></div>
           <div class="col-md-3 d-flex align-items-end"><label class="form-check small"><input v-model="edit.gatesRelease" class="form-check-input" type="checkbox" /> شرط ترخیص</label></div>
           <div class="col-md-12"><label class="form-label small mb-0">توضیح</label><input v-model="edit.remark" class="form-control form-control-sm" /></div>
           <div v-if="approved" class="col-md-12"><label class="form-label small mb-0">دلیل تغییر برنامه تاییدشده * (بازنگری جدید ساخته می‌شود)</label><input v-model="edit.reason" class="form-control form-control-sm" /></div>

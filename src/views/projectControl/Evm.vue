@@ -37,6 +37,9 @@ async function load() {
   cash.value = Array.isArray(c) ? c : [];
   costs.value = rowsOf(k);
 }
+// CPI is undefined without actual cost (AC = 0) and SPI without planned value (PV = 0): the API sends null there; the page also never shows a number on its own.
+const cpiShown = computed<number | null>(() => (evm.value && Number(evm.value.ac) > 0 && evm.value.cpi != null ? evm.value.cpi : null));
+const spiShown = computed<number | null>(() => (evm.value && Number(evm.value.pv) > 0 && evm.value.spi != null ? evm.value.spi : null));
 const series = computed(() => [
   { name: "هزینه برنامه‌ای تجمعی", color: "#0d6efd", dashed: true, points: cash.value.map((p) => ({ date: p.date, y: Number(p.plannedCumulative) })) },
   { name: "هزینه واقعی تجمعی", color: "#dc3545", points: cash.value.map((p) => ({ date: p.date, y: Number(p.actualCostCumulative) })) },
@@ -80,8 +83,8 @@ watch(pcContractId, load);
       <NeedContract v-if="!pcContractId" />
       <template v-else-if="evm">
         <div class="row g-2 mb-3">
-          <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">SPI</div><span :class="statusBadge(evm.spiStatus)" class="inv-badge fs-6">{{ idx(evm.spi) }}</span> <small>{{ statusText(evm.spiStatus) }}</small></div></div>
-          <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">CPI</div><span :class="statusBadge(evm.cpiStatus)" class="inv-badge fs-6">{{ idx(evm.cpi) }}</span> <small>{{ statusText(evm.cpiStatus) }}</small></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">SPI</div><span :class="statusBadge(spiShown === null ? null : evm.spiStatus)" class="inv-badge fs-6">{{ idx(spiShown) }}</span> <small>{{ spiShown === null ? "" : statusText(evm.spiStatus) }}</small></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">CPI</div><span :class="statusBadge(cpiShown === null ? null : evm.cpiStatus)" class="inv-badge fs-6">{{ idx(cpiShown) }}</span> <small>{{ cpiShown === null ? "" : statusText(evm.cpiStatus) }}</small></div></div>
           <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">SPI(t) زمان کسب‌شده</div><b>{{ idx(evm.spiTime) }}</b><div class="small">ES = {{ fx(evm.earnedScheduleDays) }} روز، زمان واقعی = {{ evm.actualTimeDays }} روز، انحراف = {{ fx(evm.scheduleVarianceDays) }}</div></div></div>
           <div class="col-6 col-md-3"><div class="border rounded p-2"><div class="inv-muted">TCPI</div><b>{{ idx(evm.tcpi) }}</b> <small>(نسبت به EAC: {{ idx(evm.tcpiEac) }})</small></div></div>
         </div>

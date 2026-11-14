@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, nextTick, onMounted, ref } from "vue";
 import PrintForm from "@/components/print/PrintForm.vue";
 import { evaluateSupplier, getEvaluationPreview, getSupplierEvaluations, getSuppliers, saveSupplierProfile } from "@/api/ProcurementAPIs";
@@ -226,7 +227,7 @@ onMounted(load);
               <option v-for="(t, k) in evaluationKinds" :key="k" :value="Number(k)">{{ t }}</option>
             </select>
           </div>
-          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><input v-model="evalForm.evaluationDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="evalForm.evaluationDate" /></div>
         </div>
         <table class="table table-sm table-bordered">
           <thead><tr><th>پرسش</th><th style="width: 80px">وزن (W)</th><th style="width: 110px">امتیاز (S) ۰ تا ۱۰۰</th><th style="width: 60px">N/A</th></tr></thead>

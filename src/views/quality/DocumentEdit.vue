@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, nextTick, onMounted, ref } from "vue";
 import TransmittalPrint from "@/components/quality/print/TransmittalPrint.vue";
 import { useRoute } from "vue-router";
@@ -124,7 +125,7 @@ onMounted(load);
         <div class="d-flex flex-wrap gap-2 align-items-end">
           <button v-if="r.status === 0 && canReview" :disabled="busy" class="btn btn-sm btn-outline-primary" @click="act(r.id, 'review')">بررسی شد</button>
           <template v-if="r.status === 1 && canApprove">
-            <input v-model="effective" class="form-control form-control-sm" style="max-width: 160px" type="date" />
+            <FnDate v-model="effective" style="max-width: 160px" />
             <button :disabled="busy" class="btn btn-sm btn-success" @click="act(r.id, 'approve', { effectiveDate: effective })">{{ startsLater ? "تایید و زمان‌بندی اجرا" : "تایید و اجرا" }}</button>
           </template>
           <button v-if="r.status === 3 && canApprove" :disabled="busy" class="btn btn-sm btn-outline-danger" @click="act(r.id, 'obsolete')">منسوخ</button>

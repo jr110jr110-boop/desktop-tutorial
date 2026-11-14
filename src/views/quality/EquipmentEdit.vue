@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import CalibrationPrint from "@/components/quality/print/CalibrationPrint.vue";
@@ -172,7 +173,7 @@ onMounted(async () => {
     <div v-if="cal" class="inv-card screen-only">
       <h2 class="inv-title mb-2">ثبت کالیبراسیون</h2>
       <div class="row g-2">
-        <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><input v-model="cal.eventDate" class="form-control form-control-sm" type="date" /></div>
+        <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="cal.eventDate" /></div>
         <div class="col-md-4"><label class="form-label small mb-0">آزمایشگاه کالیبراسیون *</label><input v-model="cal.labName" class="form-control form-control-sm" /></div>
         <div class="col-md-3 d-flex align-items-end"><label class="form-check small"><input v-model="cal.labAccredited" class="form-check-input" type="checkbox" /> آزمایشگاه دارای گواهی ISO/IEC 17025</label></div>
         <div class="col-md-3"><label class="form-label small mb-0">شماره گواهی *</label><input v-model="cal.certificateNumber" class="form-control form-control-sm inv-ltr" /></div>

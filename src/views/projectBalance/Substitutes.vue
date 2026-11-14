@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import { decideSubstitute, getSubstitutes, saveSubstitute } from "@/api/ProjectBalanceAPIs";
@@ -101,8 +102,8 @@ onMounted(load);
           <div class="col-md-4"><label class="form-label small mb-0">نسبت *</label><input v-model.number="form.ratio" type="number" min="0" step="any" class="form-control form-control-sm" /></div>
           <div class="col-md-4"><label class="form-label small mb-0">دامنه</label><select v-model.number="form.scope" class="form-select form-select-sm"><option v-for="(t, k) in substituteScopes" :key="k" :value="Number(k)">{{ t }}</option></select></div>
           <div class="col-md-4"><label class="form-label small mb-0">شناسهٔ دستور کار (مخصوص پروژه)</label><input v-model.number="form.workOrderId" type="number" class="form-control form-control-sm" :disabled="form.scope !== 2" /></div>
-          <div class="col-md-6"><label class="form-label small mb-0">اعتبار از</label><input v-model="form.validFrom" type="date" class="form-control form-control-sm" /></div>
-          <div class="col-md-6"><label class="form-label small mb-0">اعتبار تا</label><input v-model="form.validTo" type="date" class="form-control form-control-sm" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">اعتبار از</label><FnDate v-model="form.validFrom" /></div>
+          <div class="col-md-6"><label class="form-label small mb-0">اعتبار تا</label><FnDate v-model="form.validTo" /></div>
           <div class="col-12"><label class="form-label small mb-0">دلیل فنی *</label><textarea v-model="form.reason" rows="2" class="form-control form-control-sm"></textarea></div>
         </div>
         <div class="d-flex gap-2 mt-3">

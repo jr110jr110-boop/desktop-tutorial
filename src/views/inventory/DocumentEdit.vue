@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 // One warehouse document: header, lines (with lot / serial entry and barcode scanning), save / confirm / cancel.
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
@@ -936,7 +937,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="doc.documentDate" :disabled="!isDraft" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="doc.documentDate" :disabled="!isDraft" />
           <span class="inv-muted">{{ jalali(doc.documentDate) }}</span>
         </div>
         <div class="col-md-3">
@@ -1016,7 +1017,7 @@ onMounted(async () => {
       <div v-if="doc.type === 18" class="row g-2 mt-1">
         <div class="col-md-3">
           <label class="form-label small mb-0">موعد بازگشت کالای امانی</label>
-          <input v-model="doc.consignmentDueDate" :disabled="!isDraft" class="form-control form-control-sm inv-ltr" type="date" />
+          <FnDate v-model="doc.consignmentDueDate" :disabled="!isDraft" />
           <div class="inv-muted small">خالی: تاریخ سند + تنظیم «روز بازگشت امانی» (پیش‌فرض ۳۰ روز)</div>
         </div>
         <div v-if="doc.status === 1" class="col-md-3 small pt-4">باز مانده برای برگشت: {{ num(doc.consignmentOpenQuantity) }}</div>

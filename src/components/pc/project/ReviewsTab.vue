@@ -3,7 +3,8 @@ import { onMounted, ref, watch } from "vue";
 import { getReviews, reviewAction, saveReview } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, ok } from "@/composables/inventory";
-import { reviewDecisions, reviewKinds, reviewStages } from "@/composables/projectControl";
+import { reviewDecisions, reviewKinds, reviewStages, usePcPrint } from "@/composables/projectControl";
+import ReviewPrint from "@/components/pc/print/ReviewPrint.vue";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 import { signGate } from "@/composables/pendingRoles";
 
@@ -12,6 +13,7 @@ const props = defineProps({ contractId: { type: Number, required: true }, openId
 const rows = ref<any[]>([]);
 const r = ref<any>(null);
 const busy = ref(false);
+const { job, run } = usePcPrint();
 const note = ref("");
 const canEdit = hasRole(ProjectControlRoles.reviews);
 const ceoGate = signGate(["CEO"]);
@@ -115,9 +117,12 @@ watch(() => props.contractId, () => { r.value = null; load(); });
             <span v-if="ceoGate.pendingReason" class="small text-danger">{{ ceoGate.pendingReason }}</span>
           </template>
         </template>
+        <button v-if="r.id" class="btn btn-sm btn-outline-secondary" @click="run('review', r)">چاپ فرم</button>
         <button class="btn btn-sm btn-outline-secondary" @click="r = null">بستن</button>
       </div>
       <p class="inv-muted mt-2 mb-0">پذیرش فقط پس از تکمیل همه بررسی‌ها ممکن است را دو نفر متفاوت، معاون PMO و بازرگانی، امضا می‌کنند (ثبت‌کننده یا ویرایش‌کننده‌ی بازنگری آن را امضا نمی‌کند)؛ برای سفارش ویژه، تایید توانایی اجرا توسط برنامه‌ریزی هم لازم است. مدیرعامل فقط رد یا نیاز به اصلاح را تصمیم می‌گیرد؛ بازنگری مجدد پس از تغییر فقط پذیرفته می‌شود.</p>
     </div>
+    <!-- the print form must be a direct child of .inv-page (see printForm), so it is moved there -->
+    <Teleport to=".inv-page"><ReviewPrint v-if="job?.kind === 'review'" :r="job.data" :checks="checks" /></Teleport>
   </div>
 </template>

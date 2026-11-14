@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -102,7 +103,7 @@ onMounted(async () => {
           </div>
           <div class="col-6">
             <label class="form-label small mb-0">تاریخ</label>
-            <input v-model="form.countDate" class="form-control form-control-sm" type="date" />
+            <FnDate v-model="form.countDate" />
           </div>
           <div class="col-6">
             <label class="form-label small mb-0">انبار *</label>

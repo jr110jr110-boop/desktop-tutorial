@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import ReviewPrint from "@/components/quality/print/ReviewPrint.vue";
@@ -185,7 +186,7 @@ onMounted(load);
         <div class="row g-2">
           <div class="col-12"><label class="form-label small mb-0">متن تصمیم *</label><textarea v-model="decision.text" class="form-control form-control-sm" rows="2"></textarea></div>
           <div class="col-md-4"><label class="form-label small mb-0">مسئول</label><UserSelect v-model="decision.responsibleUserId" /></div>
-          <div class="col-md-3"><label class="form-label small mb-0">مهلت</label><input v-model="decision.dueDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">مهلت</label><FnDate v-model="decision.dueDate" /></div>
           <div v-if="!decision.id" class="col-md-3 d-flex align-items-end"><label class="form-check small"><input v-model="decision.createCapa" class="form-check-input" type="checkbox" /> ایجاد پیش‌نویس CAPA</label></div>
           <div class="col-12 d-flex gap-2"><button :disabled="busy" class="btn btn-sm btn-primary" @click="saveDecision">ثبت</button><button class="btn btn-sm btn-outline-secondary" @click="decision = null">انصراف</button></div>
         </div>

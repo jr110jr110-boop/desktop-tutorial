@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KsReportHeader from "@/components/common/KsReportHeader.vue";
@@ -57,8 +58,8 @@ onMounted(load);
           <option :value="null">همه اولویت‌ها</option>
           <option v-for="(t, k) in requestPriorities" :key="k" :value="Number(k)">{{ t }}</option>
         </select>
-        <input v-model="filters.DateFrom" class="form-control form-control-sm" type="date" title="از تاریخ" @change="search" />
-        <input v-model="filters.DateTo" class="form-control form-control-sm" type="date" title="تا تاریخ" @change="search" />
+        <FnDate v-model="filters.DateFrom" placeholder="از تاریخ" @update:model-value="$nextTick(search)" />
+        <FnDate v-model="filters.DateTo" placeholder="تا تاریخ" @update:model-value="$nextTick(search)" />
         <select v-model="filters.Archive" class="form-select form-select-sm" @change="search">
           <option value="">فعال</option>
           <option value="only">فقط بایگانی</option>

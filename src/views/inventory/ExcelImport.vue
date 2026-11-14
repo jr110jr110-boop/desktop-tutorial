@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { downloadExcelTemplate, getWarehouses, importExcel } from "@/api/InventoryAPIs";
@@ -58,7 +59,7 @@ onMounted(async () => {
             <option :value="null">انبار</option>
             <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.title }}</option>
           </select>
-          <input v-model="fields.DocumentDate" class="form-control form-control-sm inv-ltr" type="date" />
+          <FnDate v-model="fields.DocumentDate" />
           <input v-if="kind === 'receipt'" v-model.number="fields.ProviderId" class="form-control form-control-sm inv-ltr" placeholder="شناسه تامین‌کننده" type="number" />
           <input v-if="kind === 'issue'" v-model.number="fields.MaterialRequestId" class="form-control form-control-sm inv-ltr" placeholder="شناسه درخواست مواد (الزامی)" type="number" />
           <input v-model="fields.Description" class="form-control form-control-sm" placeholder="توضیح" />

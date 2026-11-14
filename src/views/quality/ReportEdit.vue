@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FnDate from "@/components/fn/FnDate.vue";
 import { nextTick } from "vue";
 import { printForm } from "@/composables/quality";
 import TestReportPrint from "@/components/quality/print/TestReportPrint.vue";
@@ -196,7 +197,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="rep.reportDate" :disabled="!editable" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="rep.reportDate" :disabled="!editable" />
           <span v-if="editable && dateWarning(rep.reportDate)" class="small text-danger">{{ dateWarning(rep.reportDate) }}</span>
         </div>
         <div class="col-md-2">
@@ -336,7 +337,7 @@ onMounted(async () => {
               <tr v-for="(w, i) in rep.witnesses" :key="i">
                 <td><select v-model="w.party" :disabled="!editable" class="form-select form-select-sm"><option v-for="(t, k) in releaseParties" :key="k" :value="Number(k)">{{ t }}</option></select></td>
                 <td><input v-model="w.name" :disabled="!editable" class="form-control form-control-sm" /></td>
-                <td><input v-model="w.witnessDate" :disabled="!editable" class="form-control form-control-sm" type="date" /></td>
+                <td><FnDate v-model="w.witnessDate" :disabled="!editable" /></td>
                 <td><button v-if="editable" class="btn btn-sm btn-outline-danger" @click="rep.witnesses.splice(i, 1)">حذف</button></td>
               </tr>
             </tbody>

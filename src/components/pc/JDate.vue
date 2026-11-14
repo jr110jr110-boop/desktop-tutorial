@@ -1,16 +1,29 @@
 <script setup lang="ts">
-// A date field: the browser date input (yyyy-mm-dd) with the Jalali date shown under it.
-import { computed } from "vue";
+// A date field: typed Jalali entry (FnDate) with the same contract as before: v-model is yyyy-mm-dd or null; `max` is the latest date allowed.
+import { ref } from "vue";
+import FnDate from "@/components/fn/FnDate.vue";
 import { jalali } from "@/composables/inventory";
 
-const props = defineProps({ modelValue: { type: String, default: null }, disabled: Boolean, /** latest date the browser lets the user pick (yyyy-mm-dd) */ max: { type: String, default: undefined } });
+const props = defineProps({ modelValue: { type: String, default: null }, disabled: Boolean, /** latest date allowed (yyyy-mm-dd) */ max: { type: String, default: undefined } });
 const emit = defineEmits(["update:modelValue"]);
-const text = computed(() => (props.modelValue ? jalali(props.modelValue) : ""));
+const tooLate = ref("");
+const remount = ref(0);
+
+function onValue(v: string | null) {
+  if (v && props.max && v > props.max.slice(0, 10)) {
+    // not accepted: the field is rebuilt from the model so what is shown is what will be saved
+    tooLate.value = `تاریخ نباید بعد از ${jalali(props.max)} باشد؛ مقدار قبلی برگردانده شد.`;
+    remount.value++;
+    return;
+  }
+  tooLate.value = "";
+  emit("update:modelValue", v);
+}
 </script>
 
 <template>
   <div>
-    <input :disabled="disabled" :max="max" :value="modelValue ? modelValue.slice(0, 10) : ''" class="form-control form-control-sm" type="date" @input="emit('update:modelValue', ($event.target as HTMLInputElement).value || null)" />
-    <div class="inv-muted" style="min-height: 1.1rem">{{ text }}</div>
+    <FnDate :key="remount" :disabled="disabled" :model-value="modelValue ? modelValue.slice(0, 10) : null" @update:model-value="onValue" />
+    <div v-if="tooLate" class="text-danger" style="font-size: 0.7rem" role="alert">{{ tooLate }}</div>
   </div>
 </template>
