@@ -183,7 +183,7 @@ function switchTab(t: any) {
           <div class="inv-filters">
             <select v-model.number="form.side" class="form-select form-select-sm"><option :value="1">تامین‌کننده/پیمانکار</option><option :value="2">کارفرما</option></select>
             <select v-if="canOrders" v-model="form.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش (قرارداد) — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
-            <span v-else class="small inv-muted align-self-center">فهرست سفارش‌ها برای نقش شما در دسترس نیست؛ صورت‌وضعیت تامین‌کننده را بازرگانی ثبت می‌کند.</span>
+            <span v-else class="small inv-muted align-self-center">فهرست سفارش‌ها برای نقش شما در دسترس نیست.</span>
             <ContractPick v-model="form.contractId" placeholder="قرارداد پروژه — انتخاب کنید" />
             <FnDate v-model="form.periodFrom" />
             <FnDate v-model="form.periodTo" />
