@@ -1,0 +1,1 @@
+const c=(o="mock.txt",a=100,l="plain/txt")=>{function r(i){let e="";for(let n=0;n<i;n++)e+="a";return e}const t=new Blob([r(a)],{type:l});return t.lastModifiedDate=new Date,t.name=o,t};export{c as g};
