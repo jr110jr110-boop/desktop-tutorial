@@ -47,6 +47,8 @@ const canCommercial = hasRole(ProcurementRoles.commercial);
 const canEdit = computed(() => isDraft.value && canCommercial);
 const canApprove = hasRole(ProcurementRoles.orderApproval);
 const canAccept = hasRole(ProcurementRoles.serviceAcceptance);
+// the payment terms and the contract print are read by fewer roles than the order itself (an engineer reads the order, not its terms)
+const canContractTerms = hasRole(ProcurementRoles.contractTermReaders);
 const rate = computed(() => (order.value?.currency ? Number(order.value.exchangeRate) || 1 : 1));
 const totalRial = computed(() => (order.value?.lines || []).reduce((s: number, l: any) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0) * rate.value);
 const orderable = computed(() => requests.value);
@@ -497,7 +499,7 @@ onMounted(async () => {
         </div>
       </div>
     </div>
-    <OrderContractPanel v-if="order?.id && order.status >= 2" :order-id="order.id" />
+    <OrderContractPanel v-if="order?.id && order.status >= 2 && canContractTerms" :order-id="order.id" />
     <AttachmentPanel v-if="order?.id" :owner-type="AttachmentOwner.PurchaseOrder" :owner-id="order.id" title="مدارک فنی درخواست و پیوست‌های سفارش" />
   </div>
 </template>

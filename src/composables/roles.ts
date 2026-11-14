@@ -364,6 +364,8 @@ export const ProcurementRoles = {
   requesters: list("PMO,PLANNING,WAREHOUSE,WHSUPERVISOR,ENGINEERING,ENGINEER,CONSTRUCTION,QC,ASSEMBLER,FINANCIAL,FINANCEMANAGER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SALES,SERVICE,PROJECTMANAGER,SECRETARIAT,HR"),
   /** PB6: who opens the request screens (the extra requesters see their own requests only). */
   requestReaders: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SALES,SERVICE,PROJECTMANAGER,SECRETARIAT,HR"),
+  /** Who may read the payment terms and the contract print of an order (SupplierContractRoles.Readers in the API); the other order readers see the order without this panel. */
+  contractTermReaders: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,AUDITOR"),
   /** Who may read the purchase-order list (GET procurement/orders: ProcurementRoles.Readers + ASSEMBLER,ENGINEER,PROJECTMANAGER in the API). */
   orderReaders: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PROJECTMANAGER"),
   /** PB6: procurement tools, contracts system, statements, petty cash flow (the API decides each action). */
