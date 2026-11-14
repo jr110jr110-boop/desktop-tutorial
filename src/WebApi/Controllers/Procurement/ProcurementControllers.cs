@@ -18,6 +18,8 @@ namespace WebApi.Controllers
     public class ProcurementController : ControllerBase
     {
         private const string Readers = ProcurementRoles.Readers + ",ASSEMBLER,ENGINEER";
+        // company decision 1405/08/24: the project manager reads purchase orders (list, one order, its revisions) to prepare supplier-side progress statements; no other procurement read opens with it
+        private const string OrderReaders = Readers + ",PROJECTMANAGER";
         private readonly IProcurementService _service;
         private readonly IPayablesService _payables;
 
@@ -76,12 +78,12 @@ namespace WebApi.Controllers
 
         // purchase orders
         [HttpGet("orders")]
-        [Authorize(Roles = Readers)]
+        [Authorize(Roles = OrderReaders)]
         public async Task<IActionResult> OrdersAsync([FromQuery] PurchaseOrderQuery query, CancellationToken ct) =>
             Ok((await _service.GetOrdersAsync(query, ct)).ToPaginatedResultSafe());
 
         [HttpGet("orders/{id:int}")]
-        [Authorize(Roles = Readers)]
+        [Authorize(Roles = OrderReaders)]
         public async Task<IActionResult> OrderAsync(int id, CancellationToken ct) => Ok(await _service.GetOrderAsync(id, ct));
 
         [HttpPost("orders")]
@@ -95,7 +97,7 @@ namespace WebApi.Controllers
 
         // R1c (M13): the frozen earlier revisions of an order
         [HttpGet("orders/{id:int}/revisions")]
-        [Authorize(Roles = Readers)]
+        [Authorize(Roles = OrderReaders)]
         public async Task<IActionResult> OrderRevisionsAsync(int id, CancellationToken ct) => Ok(await _service.GetOrderRevisionsAsync(id, ct));
 
         [HttpPost("orders/accept-service")]
