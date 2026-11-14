@@ -333,6 +333,7 @@
 .ag .ag-node.input { border-color: var(--ag-input); background: var(--ag-input-soft); color: var(--ag-input); }
 .ag .ag-node.physical { border: 2px dashed var(--ag-physical); background: var(--ag-physical-soft); color: var(--ag-physical); }
 .ag .ag-node.gate { border-color: var(--ag-gate); background: var(--ag-gate-soft); color: var(--ag-gate); }
+.ag .ag-node.done { border-color: var(--ag-ok, #2f7d4f); background: var(--ag-ok, #2f7d4f); color: #fff; }
 .ag .ag-node.failed { border-color: var(--ag-danger); background: var(--ag-danger); color: #fff; }
 .ag .ag-node.agent svg { animation: ag-pulse 2s ease-in-out infinite; }
 @keyframes ag-pulse {

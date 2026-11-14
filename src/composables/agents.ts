@@ -32,18 +32,19 @@ export function badgeOfState(state: number): string {
 }
 
 /** AgentCellStatus (a higher value is worse; the cell shows the worst). */
-export const AgentCellStatus = { NotStarted: 0, Idle: 1, Agent: 2, WaitingInput: 3, WaitingPhysical: 4, WaitingGate: 5, Failed: 6 } as const;
+export const AgentCellStatus = { NotStarted: 0, Idle: 1, Agent: 2, WaitingInput: 3, WaitingPhysical: 4, WaitingGate: 5, Failed: 6, Done: 7 } as const;
 export const cellStatuses: Record<number, { key: string; title: string; short: string }> = {
   0: { key: "none", title: "شروع نشده", short: "شروع نشده" },
-  1: { key: "idle", title: "بدون کار باز", short: "انجام‌شده" },
+  1: { key: "idle", title: "بدون کار باز", short: "بدون کار باز" },
   2: { key: "agent", title: "ایجنت در حال کار", short: "ایجنت کار می‌کند" },
   3: { key: "input", title: "منتظر ورود اطلاعات", short: "منتظر اطلاعات" },
   4: { key: "physical", title: "منتظر کار فیزیکی", short: "کار فیزیکی" },
   5: { key: "gate", title: "منتظر تأیید و امضا", short: "منتظر تأیید" },
   6: { key: "failed", title: "ناموفق", short: "ناموفق" },
+  7: { key: "done", title: "ایستگاه کامل", short: "کامل" },
 };
 /** The order of the legend (best to worst). */
-export const cellStatusOrder = [0, 1, 2, 3, 4, 5, 6];
+export const cellStatusOrder = [0, 7, 1, 2, 3, 4, 5, 6];
 
 /** AgentStuckReason. */
 export const stuckReasons: Record<number, string> = { 1: "ناموفق", 2: "گیت با تأخیر", 3: "ایجنت خاموش (دستی)" };
