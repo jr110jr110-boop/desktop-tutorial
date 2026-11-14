@@ -65,7 +65,8 @@ async function run(action: "close" | "kit-override" | "refresh-readiness" | "ref
   replace(camelize(d));
 }
 
-watch(id, load);
+// no load once the route has left this page (the id is then missing and Number(undefined) is NaN)
+watch(id, (v) => { if (Number.isFinite(v) && v > 0) load(); });
 onMounted(load);
 </script>
 
@@ -112,7 +113,7 @@ onMounted(load);
         <div class="row g-2 small">
           <div class="col-md-3">
             <b>درخواست کیت مواد:</b>
-            <template v-if="order.kitRequestId"><router-link :to="{ name: 'InventoryMaterialRequestEdit', params: { id: order.kitRequestId } }" class="inv-ltr">{{ order.kitNumber || "پیش‌نویس" }}</router-link> <span :class="order.kitIssued ? 'ok' : order.kitShortage ? 'warn' : 'info'" class="inv-badge">{{ order.kitIssued ? "تحویل شده" : order.kitShortage ? "کمبود" : "در انتظار تحویل" }}</span></template>
+            <template v-if="order.kitRequestId"><router-link :to="{ name: 'InventoryMaterialRequestEdit', params: { id: order.kitRequestId } }" class="inv-ltr">{{ order.kitNumber || "پیش‌نویس" }}</router-link> <span :class="order.kitIssued ? 'ok' : order.kitShortage ? 'warn' : 'info'" class="inv-badge">{{ order.kitIssued ? "تحویل شده" : order.kitShortage ? "کمبود" : order.kitStatus === 0 ? "پیش‌نویس" : "در انتظار تحویل" }}</span></template>
             <span v-else class="inv-muted">ساخته نشده</span>
           </div>
           <div class="col-md-3">

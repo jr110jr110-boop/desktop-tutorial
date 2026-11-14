@@ -45,7 +45,8 @@ async function act(action: "review" | "cancel") {
   cancelling.value = false;
   d.value = x;
 }
-watch(id, load);
+// no load once the route has left this page (the id is then missing and Number(undefined) is NaN)
+watch(id, (v) => { if (Number.isFinite(v) && v > 0) load(); });
 onMounted(load);
 </script>
 

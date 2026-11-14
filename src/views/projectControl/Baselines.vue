@@ -43,7 +43,8 @@ async function create() {
   const [data, error] = await createBaseline(pcContractId.value!, reason.value);
   busy.value = false;
   if (error) return fail(error);
-  ok("خط مبنا ساخته شد؛ مدیران واحدها باید امضا کنند.");
+  // without a responsible unit there is no signature slot: the baseline is already waiting for the PMO deputy
+  ok((data?.signatures || []).length ? "خط مبنا ساخته شد؛ مدیران واحدها باید امضا کنند." : "خط مبنا ساخته شد؛ امضای واحدی لازم نیست و منتظر تایید معاون PMO است.");
   reason.value = "";
   sel.value = data;
   load();

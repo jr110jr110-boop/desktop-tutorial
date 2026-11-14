@@ -102,8 +102,9 @@ export function jalaliToIso(text: string): string | null {
   const m = /^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/.exec(latinDigits(text).trim());
   if (!m) return null;
   const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  if (!(moment as any).jIsValid(y, mo, d)) return null;
+  if (y < 1200 || y > 1600 || mo < 1 || mo > 12 || d < 1) return null;
+  // moment-jalaali has no jIsValid; the month length (leap years included) comes from jDaysInMonth (0-based month).
+  if (d > (moment as any).jDaysInMonth(y, mo - 1)) return null;
   return moment(`${y}/${mo}/${d}`, "jYYYY/jM/jD").format("YYYY-MM-DD");
 }
 

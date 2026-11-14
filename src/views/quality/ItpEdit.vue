@@ -25,6 +25,7 @@ import {
   useBackdateWindow,
 } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
+import FnDate from "@/components/fn/FnDate.vue";
 
 // One ITP: activities with V / TPI / C points, notices, releases, acceptance limits and the plan actions.
 const route = useRoute();
@@ -50,7 +51,7 @@ const touchedByMe = ref(false);
 const approveError = ref("");
 const minNoticeDays = settingValue("MinNoticeDays", 1);
 // the date of the client's approval is today or a day inside the back-date window
-const { min: approvalMin, max: approvalMax, warning: approvalWarning } = useBackdateWindow(false);
+const { warning: approvalWarning } = useBackdateWindow(false);
 const release = ref({ party: 3, action: 1, personName: "", organisation: "", releaseDate: today(), reference: "" });
 const limitEdit = ref<Record<number, { min: any; max: any; source: string }>>({});
 
@@ -261,7 +262,7 @@ onMounted(async () => {
         <template v-if="itp.status === 1 && canManage">
           <template v-if="!touchedByMe">
             <input v-model="approve.reference" class="form-control form-control-sm" maxlength="300" placeholder="شماره نامه تایید کارفرما *" style="max-width: 220px" />
-            <input v-model="approve.date" :max="approvalMax" :min="approvalMin" class="form-control form-control-sm" style="max-width: 160px" type="date" />
+            <FnDate v-model="approve.date" style="max-width: 160px" />
             <button :disabled="busy" class="btn btn-sm btn-success" @click="clientApprove">ثبت تایید کارفرما</button>
           </template>
           <span v-else class="small text-warning-emphasis">شما این برنامه را تهیه، ویرایش، بازنگری یا ارسال کرده‌اید؛ تایید کارفرما را شخص دیگری (از مدیران QA / QC) ثبت می‌کند.</span>

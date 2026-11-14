@@ -119,7 +119,8 @@ export const InventoryRoles = {
   finance: list("PMO,FINANCIAL"),
   /** GET inventory/sepidar/check, outbox and mappings (SepidarLinkController, InventoryRoles.Finance in the API: PMO, FINANCIAL, FINANCEMANAGER); the CEO may open the page but reads none of it */
   sepidarReaders: list("PMO,FINANCIAL,FINANCEMANAGER"),
-  materialRequest: list("PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR"),
+  /** InventoryRoles.MaterialRequest in the API (InventoryCommon.cs:54): write and action roles; reading is open to every signed-in user */
+  materialRequest: list("PMO,PLANNING,CONSTRUCTION,ENGINEER,ASSEMBLER,ENGINEERING,WAREHOUSE,WHSUPERVISOR,PRODUCTIONMANAGER,SHOPSUPERVISOR"),
   approvers: list("PMO,PLANNING,WHSUPERVISOR,CONSTRUCTION,QC,ENGINEERING,WAREHOUSE,FINANCIAL,PRODUCTIONMANAGER"),
   exitCheck: list("PMO,WAREHOUSE,WHSUPERVISOR,SECURITY"),
   itemRequest: list("PMO,PLANNING,ENGINEERING,ENGINEER,WAREHOUSE,WHSUPERVISOR,QC,CONSTRUCTION"),
@@ -376,7 +377,8 @@ export const ProcurementRoles = {
   technicalAcceptance: list("ENGINEERING,QC"),
   orderApproval: list("PMO,CEO"),
   finance: list("FINANCIAL,FINANCEMANAGER,TREASURY,PMO"),
-  serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO"),
+  /** ProcurementRoles.ServiceAcceptance in the API (ProcurementCommon.cs:44), checked in ProcurementService.AcceptServiceAsync (line 1334); PMO is refused there */
+  serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING"),
   // the controller adds ASSEMBLER and ENGINEER to the readers of the services
   /** The request dossier: the same set the API opens it to (procurement readers and the shop floor / security). */
   dossier: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SECURITY"),

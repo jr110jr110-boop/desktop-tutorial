@@ -40,6 +40,7 @@ import {
   warehouseKinds,
 } from "@/composables/inventory";
 import { hasRole, InventoryRoles, QualityRoles } from "@/composables/roles";
+import FnDate from "@/components/fn/FnDate.vue";
 
 // Non-conformance report (FO-QC-013, procedure PR-QC-002): quality creates it, quality / engineering / manufacturing sign,
 // engineering issues the concession, the warehouse executes the decision, quality closes it after the effectiveness check.
@@ -520,7 +521,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="ncr.reportDate" :disabled="!open" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="ncr.reportDate" :disabled="!open" />
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">منبع</label>
@@ -720,7 +721,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">مهلت</label>
-          <input v-model="ncr.correctiveActionDueDate" :disabled="!editableFollowUp" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="ncr.correctiveActionDueDate" :disabled="!editableFollowUp" />
         </div>
       </div>
       <div v-if="ncr.status === 2 && canClose" class="d-flex flex-wrap gap-2 mt-3 align-items-center">
@@ -740,7 +741,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-3">
           <label class="form-label small mb-0">مهلت تصمیم <span v-if="ncr.overdue" class="inv-badge bad">از مهلت گذشته</span></label>
-          <input v-model="ncr.dueDate" :disabled="!open" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="ncr.dueDate" :disabled="!open" />
           <span class="inv-muted">پیش‌فرض: جزئی ۷ روز، عمده ۱۴ روز (تنظیمات کیفیت)</span>
         </div>
         <div class="col-md-3">

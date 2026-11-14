@@ -13,6 +13,7 @@ import { rowsOf } from "@/api/ApiClient";
 import { fail, jalali, num, ok, today } from "@/composables/inventory";
 import { activityStatuses, dateInput, qcResults, recordTypes, useBackdateWindow } from "@/composables/quality";
 import { hasRole, QualityRoles } from "@/composables/roles";
+import FnDate from "@/components/fn/FnDate.vue";
 
 // One inspection record with its measurements. A record cannot be edited after it is saved (the API has no update).
 const route = useRoute();
@@ -34,7 +35,7 @@ const canWrite = hasRole(QualityRoles.recordWriters);
 const isQc = hasRole(QualityRoles.inspectors);
 // the date of a record is limited to the back-date window of the company (R1q D15, setting MaxBackdateDays): from that many days back to tomorrow; the API refuses a date
 // outside it with its own Persian text, which is shown
-const { min: dateMin, max: dateMax, hint: dateHint, warning: dateWarning, load: loadWindow } = useBackdateWindow(true);
+const { hint: dateHint, warning: dateWarning, load: loadWindow } = useBackdateWindow(true);
 
 function blank() {
   return {
@@ -163,7 +164,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="rec.recordDate" :disabled="!isNew" :max="dateMax" :min="dateMin" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="rec.recordDate" :disabled="!isNew" />
           <span v-if="isNew && dateWarning(rec.recordDate)" class="small text-danger">{{ dateWarning(rec.recordDate) }}</span>
         </div>
         <div class="col-md-2">

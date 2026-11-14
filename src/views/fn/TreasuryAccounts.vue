@@ -100,7 +100,7 @@ onMounted(() => {
             <div class="col-6"><label class="form-label small mb-0">شعبه</label><input v-model="form.branch" class="form-control form-control-sm" /></div>
             <div class="col-6"><label class="form-label small mb-0">شماره حساب</label><input v-model="form.accountNumber" class="form-control form-control-sm inv-ltr" /></div>
             <div v-if="Features.foreignCurrency" class="col-6"><label class="form-label small mb-0">کد ارز (ریال = IRR)</label><input v-model="form.currencyCode" class="form-control form-control-sm inv-ltr" /></div>
-            <div class="col-12"><label class="form-label small mb-0">شماره شبا</label><input v-model="form.iban" class="form-control form-control-sm inv-ltr" /></div>
+            <div class="col-12"><label class="form-label small mb-0">شماره شبا *</label><input v-model="form.iban" class="form-control form-control-sm inv-ltr" /></div>
           </template>
           <div v-else class="col-12"><label class="form-label small mb-0">عهده‌دار صندوق</label><input v-model="form.custodianTitle" class="form-control form-control-sm" /></div>
           <div class="col-12"><label class="form-check small"><input v-model="form.isActive" class="form-check-input" type="checkbox" /> فعال</label></div>

@@ -12,6 +12,7 @@ import {
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
 import { orderStatuses, purchaseKinds } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
+import FnDate from "@/components/fn/FnDate.vue";
 
 // Purchase order: made by commerce from an approved request / inquiry, approved by the PMO deputy (another person), released to the supplier.
 const route = useRoute();
@@ -307,7 +308,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="order.orderDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="order.orderDate" :disabled="!canEdit" />
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">نوع</label>
@@ -358,7 +359,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ تحویل</label>
-          <input v-model="order.deliveryDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="order.deliveryDate" :disabled="!canEdit" />
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">محل تحویل</label>
@@ -375,7 +376,7 @@ onMounted(async () => {
           </div>
           <div class="col-md-2">
             <label class="form-label small mb-0">اعتبار ضمانت‌نامه</label>
-            <input v-model="order.advanceGuaranteeExpiry" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+            <FnDate v-model="order.advanceGuaranteeExpiry" :disabled="!canEdit" />
           </div>
         </template>
         <div class="col-md-3">
@@ -396,7 +397,7 @@ onMounted(async () => {
         </div>
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ امضای قرارداد</label>
-          <input v-model="order.contractSignedAt" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="order.contractSignedAt" :disabled="!canEdit" />
         </div>
         <div class="col-md-6">
           <label class="form-label small mb-0">الزامات فنی و کیفی (مشخصات، گواهی مواد، بازرسی) {{ order.kind !== 2 ? "*" : "" }}</label>
@@ -431,7 +432,7 @@ onMounted(async () => {
               <td>{{ l.unit }}</td>
               <td><input v-model.number="l.quantity" :disabled="!canEdit" class="form-control form-control-sm" step="any" type="number" /></td>
               <td><input v-model.number="l.unitPrice" :disabled="!canEdit" class="form-control form-control-sm" type="number" /></td>
-              <td><input v-model="l.deliveryDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" /></td>
+              <td><FnDate v-model="l.deliveryDate" :disabled="!canEdit" /></td>
               <td v-if="order.id" class="num">{{ num(l.receivedQuantity) }} / {{ num(l.acceptedQuantity) }}<span v-if="l.late" class="inv-badge bad ms-1">دیرکرد</span></td>
               <td v-if="order.id" class="num">{{ num(l.openQuantity) }}</td>
               <td v-if="canEdit"><button class="btn btn-sm btn-link text-danger p-0" @click="order.lines.splice(i, 1)">×</button></td>
@@ -484,7 +485,7 @@ onMounted(async () => {
         <h2 class="inv-title mb-2">تایید انجام خدمت — ردیف {{ acceptance.line.rowNumber }}</h2>
         <p class="small">{{ acceptance.line.description }} — مانده {{ num(acceptance.line.openQuantity) }} {{ acceptance.line.unit }}. تایید کننده باید غیر از خریدار و ابلاغ‌کننده سفارش باشد.</p>
         <div class="row g-2">
-          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><input v-model="acceptance.acceptanceDate" class="form-control form-control-sm" type="date" /></div>
+          <div class="col-6"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="acceptance.acceptanceDate" /></div>
           <div class="col-6"><label class="form-label small mb-0">مقدار تاییدشده</label><input v-model.number="acceptance.quantity" class="form-control form-control-sm" step="any" type="number" /></div>
           <div class="col-12"><label class="form-label small mb-0">توضیح</label><input v-model="acceptance.notes" class="form-control form-control-sm" /></div>
           <div class="col-12"><label class="form-label small mb-0">فایل گزارش / صورت‌وضعیت</label><input class="form-control form-control-sm" type="file" @change="attach" /></div>

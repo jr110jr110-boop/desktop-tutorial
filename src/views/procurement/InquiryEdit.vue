@@ -13,6 +13,7 @@ import { inquiryPlanningAction } from "@/api/Pb6APIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
 import { inquiryStatuses, supplierGrades } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
+import FnDate from "@/components/fn/FnDate.vue";
 
 // Inquiry: quotes of the suppliers for the lines of a purchase request, the choice with its reason, and the committee approvals.
 const route = useRoute();
@@ -253,7 +254,7 @@ onMounted(async () => {
       <div class="row g-2">
         <div class="col-md-2">
           <label class="form-label small mb-0">تاریخ</label>
-          <input v-model="inq.inquiryDate" :disabled="!canEdit" class="form-control form-control-sm" type="date" />
+          <FnDate v-model="inq.inquiryDate" :disabled="!canEdit" />
         </div>
         <div class="col-md-4">
           <label class="form-label small mb-0">توضیح</label>
@@ -304,8 +305,8 @@ onMounted(async () => {
               </td>
               <td>
                 <input v-model="q.quoteNumber" :disabled="!canEdit" class="form-control form-control-sm inv-ltr mb-1" placeholder="شماره" />
-                <input v-model="q.quoteDate" :disabled="!canEdit" class="form-control form-control-sm mb-1" type="date" />
-                <input v-model="q.validUntil" :disabled="!canEdit" class="form-control form-control-sm" title="اعتبار تا" type="date" />
+                <FnDate v-model="q.quoteDate" :disabled="!canEdit" class="mb-1" />
+                <FnDate v-model="q.validUntil" :disabled="!canEdit" title="اعتبار تا" />
               </td>
               <td>
                 <input v-model.number="q.deliveryDays" :disabled="!canEdit" class="form-control form-control-sm mb-1" placeholder="روز" type="number" />

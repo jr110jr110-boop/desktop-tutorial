@@ -53,7 +53,8 @@ async function load() {
   proposals.value = rowsOf(camelize(p)).filter((q: any) => q.estimateId === id.value);
   if (!workCenters.value.length) workCenters.value = await loadWorkCenters();
 }
-watch(id, load);
+// no load once the route has left this page (the id is then missing and Number(undefined) is NaN)
+watch(id, (v) => { if (Number.isFinite(v) && v > 0) load(); });
 
 function addLine(kind: number) {
   lines.value.push({ id: null, kind, description: "", equipmentId: null, equipmentBomId: null, itemId: null, workCenterId: null, unit: kind === 3 ? "ساعت" : kind === 2 ? "ساعت" : "", quantity: "1", unitCost: "", costSource: 0, edited: true, amount: null, note: "" });

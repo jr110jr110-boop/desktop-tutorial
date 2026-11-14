@@ -2,7 +2,7 @@
 import { onMounted, ref, watch } from "vue";
 import { generateProjectCode, getCalendars, getCoding, getTerms, getWorkOrderInfos, saveTerms, saveWorkOrderInfo } from "@/api/ProjectControlAPIs";
 import { getWorkOrders, rowsOf } from "@/api/InventoryAPIs";
-import JDate from "@/components/pc/JDate.vue";
+import FnDate from "@/components/fn/FnDate.vue";
 import { fail, ok, rial } from "@/composables/inventory";
 import { accrualModes, categories, dateOnly, weekdays } from "@/composables/projectControl";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
@@ -100,8 +100,8 @@ watch(() => props.contractId, load);
       <div class="col-md-2"><label class="form-label small mb-0">مهلت مجاز تاخیر (روز)</label><input v-model.number="t.graceDays" :disabled="!canEdit" class="form-control form-control-sm" type="number" min="0" /></div>
       <div class="col-md-4"><label class="form-label small mb-0">مبلغ فعلی (با دستور تغییرهای تاییدشده)</label><div>{{ rial(t.currentValue) }} <span class="inv-muted">(+{{ rial(t.approvedVariationPrice) }} و {{ t.approvedVariationDays }} روز)</span></div></div>
 
-      <div class="col-md-3"><label class="form-label small mb-0">تاریخ شروع برنامه</label><JDate v-model="t.scheduleStartDate" :disabled="!canEdit" /></div>
-      <div class="col-md-3"><label class="form-label small mb-0">تاریخ تحویل قراردادی</label><JDate v-model="t.contractDeliveryDate" :disabled="!canEdit" /></div>
+      <div class="col-md-3"><label class="form-label small mb-0">تاریخ شروع برنامه</label><FnDate v-model="t.scheduleStartDate" :disabled="!canEdit" /></div>
+      <div class="col-md-3"><label class="form-label small mb-0">تاریخ تحویل قراردادی</label><FnDate v-model="t.contractDeliveryDate" :disabled="!canEdit" /></div>
       <div class="col-md-3"><label class="form-label small mb-0">تقویم کاری پروژه</label>
         <select v-model="t.calendarId" :disabled="!canEdit" class="form-select form-select-sm"><option :value="null">تقویم شرکت</option><option v-for="c in calendars" :key="c.id" :value="c.id">{{ c.name }}</option></select>
       </div>
