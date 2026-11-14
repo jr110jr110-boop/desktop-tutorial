@@ -36,7 +36,8 @@ namespace Services.NasbNiro.ProjectBalance
 
         public async Task<ResponseDto<KitRunResultDto>> DraftKitsAsync(bool fromJob, CancellationToken ct)
         {
-            if (!fromJob && (!InRole(BalanceRoles.Planning) || IsAi)) return ResponseDtoHelper.BadRequest<KitRunResultDto>(BalanceMessages.NotAllowed);
+            // the kit drafts of the planning agent (step WH.KIT.DRAFT) are allowed: it only drafts, never submits or approves
+            if (!fromJob && (!InRole(BalanceRoles.Planning) || (IsAi && !global::Services.NasbNiro.Agents.AgentMaker.Allows("WH.KIT.DRAFT")))) return ResponseDtoHelper.BadRequest<KitRunResultDto>(BalanceMessages.NotAllowed);
             BalanceSettings s = await BalanceSettingKeys.LoadAsync(Uow, ct);
             var result = new KitRunResultDto();
             if (fromJob && !s.KitJobEnabled) { result.Notes.Add("کار خودکار کیت در تنظیمات خاموش است."); return ResponseDtoHelper.Ok(result); }

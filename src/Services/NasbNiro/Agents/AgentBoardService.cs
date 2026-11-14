@@ -46,10 +46,13 @@ namespace Services.NasbNiro.Agents
         private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _http;
         private readonly INotificationService _notify;
 
+        private readonly List<IAgentStationProbe> _probes;
+
         private bool IsSeat() => AiActing.IsActing || AiSeatNames.IsSeatUser(_http?.HttpContext?.User?.Identity?.Name);
 
-        public AgentBoardService(IUnitOfWork uow, IInventoryUserContext user, IAgentStepCatalog catalog, IAiAudit audit, Microsoft.AspNetCore.Http.IHttpContextAccessor http = null, INotificationService notify = null)
+        public AgentBoardService(IUnitOfWork uow, IInventoryUserContext user, IAgentStepCatalog catalog, IAiAudit audit, Microsoft.AspNetCore.Http.IHttpContextAccessor http = null, INotificationService notify = null, IEnumerable<IAgentStationProbe> probes = null)
         {
+            _probes = probes?.ToList() ?? new List<IAgentStationProbe>();
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -165,6 +168,13 @@ namespace Services.NasbNiro.Agents
             if (contractId.HasValue) { contractIds.Add(contractId.Value); general = false; }
 
             Dictionary<int, string> labels = await LabelsAsync(contractIds, ct);
+            // the stations that know when they are complete (from the documents): contract ids per station
+            var complete = new Dictionary<int, HashSet<int>>();
+            foreach (IAgentStationProbe probe in _probes)
+            {
+                try { complete[probe.Station] = await probe.CompleteContractsAsync(_uow, contractIds.ToList(), ct); }
+                catch (Exception) when (!ct.IsCancellationRequested) { /* a probe that fails leaves its station as it was */ }
+            }
             var board = new AgentBoardDto { GeneratedAt = now };
             for (int s = AgentStations.Min; s <= AgentStations.Max; s++) board.Stations.Add(new AgentStationDto { Number = s, Title = AgentStations.Title(s) });
 
@@ -176,7 +186,10 @@ namespace Services.NasbNiro.Agents
                     List<AgentTask> cellTasks = open.Where(t => t.ContractId == id && t.Station == s).ToList();
                     var cell = new AgentBoardCellDto { Station = s };
                     if (cellTasks.Count == 0)
+                    {
                         cell.Status = closedKeys.Any(k => k.ContractId == id && k.Station == s) ? AgentCellStatus.Idle : AgentCellStatus.NotStarted;
+                        if (id.HasValue && complete.TryGetValue(s, out HashSet<int> done) && done.Contains(id.Value)) cell.Status = AgentCellStatus.Done;
+                    }
                     else
                     {
                         // the worst status wins; inside it the oldest task

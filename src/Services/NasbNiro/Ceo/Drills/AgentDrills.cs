@@ -26,6 +26,7 @@ namespace Services.NasbNiro.Ceo.Drills
             AgentCellStatus.WaitingPhysical => "منتظر کار فیزیکی",
             AgentCellStatus.WaitingGate => "منتظر تصمیم انسان",
             AgentCellStatus.Failed => "ناموفق",
+            AgentCellStatus.Done => "ایستگاه کامل",
             _ => "شروع نشده",
         };
 

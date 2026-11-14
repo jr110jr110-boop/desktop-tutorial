@@ -68,10 +68,12 @@ namespace Services.NasbNiro.Agents.Steps
                 Source = PurchaseRequestSource.ReorderPoint, Kind = PurchaseKind.Goods, RequestDate = DateTime.Today, Submit = false,
                 Description = "پیش‌نویس خودکار ایجنت انبار: موجودی کالاهای فهرست‌شده از نقطه سفارش مجدد کمتر است. مقدار پیشنهادی از فهرست نقطه سفارش انبار گرفته شده و موجودی و مقدار در راه را حساب می‌کند. ایجنت فقط ارسال می‌کند؛ تایید با برنامه‌ریزی و مدیریت است.",
             };
+            // the estimate of each line comes from the system: the latest order, then the latest accepted quote; with none of them the save method takes the cost of the item
+            Dictionary<int, ProcPrices.ItemPrice> prices = await ProcPrices.ResolveAsync(services.GetRequiredService<IUnitOfWork>(), todo.Select(t => t.ItemId).ToList(), ct);
             foreach (ReorderRowDto i in todo)
                 dto.Lines.Add(new SavePurchaseRequestLineDto
                 {
-                    ItemId = i.ItemId, Unit = i.Unit, Quantity = i.SuggestedQuantity,
+                    ItemId = i.ItemId, Unit = i.Unit, Quantity = i.SuggestedQuantity, EstimatedUnitPrice = prices.TryGetValue(i.ItemId, out ProcPrices.ItemPrice price) ? price.Price : (decimal?)null,
                     Description = $"{i.ItemTitle}: موجودی {AiSeatTexts.Num(i.OnHand)} {i.Unit} کمتر از نقطه سفارش {AiSeatTexts.Num(i.ReorderPoint)} است{(i.OnOrder > 0 ? $"؛ {AiSeatTexts.Num(i.OnOrder)} {i.Unit} در راه است" : string.Empty)}",
                 });
             ResponseDto<PurchaseRequestDto> saved = await procurement.SaveRequestAsync(dto, ct);
@@ -182,7 +184,11 @@ namespace Services.NasbNiro.Agents.Steps
         {
             // a revision (PreviousRequestId set) is for a person: PROC.PR.FIX; a draft that a person took over has another creator
             IQueryable<PurchaseRequest> own = await OwnAsync(uow, PurchaseRequestStatus.Draft, ct);
-            var rows = await own.Where(r => r.PreviousRequestId == null && r.SupersededByRequestId == null).OrderBy(r => r.Id).Take(ProcStepCommon.Cap)
+            IQueryable<int> orderItems = ProcPrices.ItemsWithOrderPrice(uow), quoteItems = ProcPrices.ItemsWithQuotePrice(uow);
+            // a draft that PROC.PR.PRICE.AUTO can still price is not submitted yet (the next round submits it)
+            var rows = await own.Where(r => r.PreviousRequestId == null && r.SupersededByRequestId == null
+                                            && !r.Lines.Any(l => l.ItemId != null && (l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0) && (orderItems.Contains(l.ItemId.Value) || quoteItems.Contains(l.ItemId.Value))))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap)
                 .Select(r => new { r.Id, r.Number, r.ContractId, r.WorkOrderId, r.EstimatedAmount }).ToListAsync(ct);
             return ToItems(rows, r => Item("PurchaseRequest", r.Id, r.Number, r.ContractId, r.WorkOrderId, "پیش‌نویس ساخته‌شده توسط ایجنت منتظر ارسال است."));
         }
@@ -207,6 +213,63 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Link = Link(item), Title = "ارسال درخواست خرید " + item.TargetNumber };
     }
 
+    /// <summary>PROC.PR.PRICE.AUTO.*: the agent that made a draft fills the estimated price of its lines from the latest order or accepted quote of the item (a person prices only what the system has no price for).</summary>
+    internal sealed class PriceAutoStep : SeatRequestStep
+    {
+        private readonly string _fallback;
+
+        public PriceAutoStep(string code, string agentCode, string fallbackRoles) : base(code, agentCode)
+        {
+            _fallback = fallbackRoles;
+        }
+
+        public override string Title => "ایجنت: قیمت‌گذاری برآوردی ردیف‌های پیش‌نویس از سفارش‌ها و پیشنهادهای قبلی";
+        public override AgentStepKind Kind => AgentStepKind.Agent;
+        public override string FallbackRoles => _fallback;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            IQueryable<PurchaseRequest> own = await OwnAsync(uow, PurchaseRequestStatus.Draft, ct);
+            IQueryable<int> orderItems = ProcPrices.ItemsWithOrderPrice(uow), quoteItems = ProcPrices.ItemsWithQuotePrice(uow);
+            var rows = await own.Where(r => r.PreviousRequestId == null && r.SupersededByRequestId == null
+                                            && r.Lines.Any(l => l.ItemId != null && (l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0) && (orderItems.Contains(l.ItemId.Value) || quoteItems.Contains(l.ItemId.Value))))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap).Select(r => new { r.Id, r.Number, r.ContractId, r.WorkOrderId }).ToListAsync(ct);
+            return ToItems(rows, r => Item("PurchaseRequest", r.Id, r.Number, r.ContractId, r.WorkOrderId, "ردیف‌های بدون قیمت برآوردی پیش‌نویس، سابقه قیمت در سفارش یا پیشنهاد دارند."));
+        }
+
+        public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
+        {
+            IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
+            PurchaseRequest r = await uow.Set<PurchaseRequest>().AsNoTracking().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
+            if (r == null || r.Status != PurchaseRequestStatus.Draft) return AgentStepResult.Waiting("وضعیت درخواست تغییر کرده است.");
+            List<PurchaseRequestLine> lines = r.Lines.OrderBy(l => l.RowNumber).ToList();
+            Dictionary<int, ProcPrices.ItemPrice> prices = await ProcPrices.ResolveAsync(uow, lines.Where(l => l.ItemId.HasValue && (l.EstimatedUnitPrice ?? 0) <= 0).Select(l => l.ItemId.Value).Distinct().ToList(), ct);
+            if (prices.Count == 0) return AgentStepResult.Waiting("سابقه قیمتی برای کالاهای بدون قیمت پیدا نشد.");
+            // the whole draft goes back through the save method (the agent is its creator); only the empty prices change
+            var dto = new SavePurchaseRequestDto
+            {
+                Id = r.Id, Source = r.Source, Kind = r.Kind, RequestDate = r.RequestDate, WorkOrderId = r.WorkOrderId, ContractId = r.ContractId, CostCenter = r.CostCenter, MaterialRequestId = r.MaterialRequestId,
+                Description = r.Description, Priority = r.Priority, FormType = Enum.IsDefined(typeof(PurchaseFormType), r.FormType) ? r.FormType : (PurchaseFormType?)null, Submit = false,
+            };
+            var sources = new List<string>();
+            foreach (PurchaseRequestLine l in lines)
+            {
+                decimal? price = l.EstimatedUnitPrice;
+                if ((price ?? 0) <= 0 && l.ItemId.HasValue && prices.TryGetValue(l.ItemId.Value, out ProcPrices.ItemPrice p)) { price = p.Price; sources.Add(p.Source); }
+                dto.Lines.Add(new SavePurchaseRequestLineDto
+                {
+                    Id = l.Id, ItemId = l.ItemId, Description = l.Description, Unit = l.Unit, Quantity = l.Quantity, NeededBy = l.NeededBy, EstimatedUnitPrice = price,
+                    TechnicalRequirements = l.TechnicalRequirements, BuyOrderId = l.BuyOrderId, MaterialRequestLineId = l.MaterialRequestLineId,
+                });
+            }
+            ResponseDto<PurchaseRequestDto> saved = await services.GetRequiredService<IProcurementService>().SaveRequestAsync(dto, ct);
+            if (!saved.Success) return ProcStepCommon.Refusal(saved);
+            return AgentStepResult.Done("PurchaseRequest", r.Id, r.Number, $"ایجنت قیمت برآوردی {sources.Count} ردیف را از سابقه سیستم نوشت ({string.Join("؛ ", sources.Distinct().Take(3))}).");
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Link = Link(item), Title = "قیمت‌گذاری برآوردی پیش‌نویس " + item.TargetNumber };
+    }
+
     /// <summary>PROC.PR.PRICE.*: an agent's draft has a line without an item or a price: a planner prices it and submits it (and becomes its maker, so another person approves).</summary>
     internal sealed class PriceRequestStep : SeatRequestStep
     {
@@ -218,9 +281,16 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             IQueryable<PurchaseRequest> own = await OwnAsync(uow, PurchaseRequestStatus.Draft, ct);
-            var rows = await own.Where(r => r.PreviousRequestId == null && r.SupersededByRequestId == null && r.Lines.Any(l => l.ItemId == null || l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0))
-                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap).Select(r => new { r.Id, r.Number, r.ContractId, r.WorkOrderId, Missing = r.Lines.Count(l => l.ItemId == null || l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0) }).ToListAsync(ct);
+            IQueryable<int> orderItems = ProcPrices.ItemsWithOrderPrice(uow), quoteItems = ProcPrices.ItemsWithQuotePrice(uow);
+            // only the lines with no price anywhere in the system are for a person: the agent prices the others (PROC.PR.PRICE.AUTO)
+            var rows = await own.Where(r => r.PreviousRequestId == null && r.SupersededByRequestId == null
+                                            && r.Lines.Any(l => l.ItemId == null || ((l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0) && !orderItems.Contains(l.ItemId.Value) && !quoteItems.Contains(l.ItemId.Value))))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap)
+                .Select(r => new { r.Id, r.Number, r.ContractId, r.WorkOrderId, Missing = r.Lines.Count(l => l.ItemId == null || ((l.EstimatedUnitPrice == null || l.EstimatedUnitPrice <= 0) && !orderItems.Contains(l.ItemId.Value) && !quoteItems.Contains(l.ItemId.Value))) }).ToListAsync(ct);
+            var titles = new Dictionary<int, string>();
+            foreach (var r in rows) titles[r.Id] = string.Join("، ", (await ProcPrices.UnpricedTitlesAsync(uow, r.Id, ct)).Take(8));
             return ToItems(rows, r => Item("PurchaseRequest", r.Id, r.Number, r.ContractId, r.WorkOrderId,
+                $"کالاهای بدون سابقه قیمت (نه سفارش، نه پیشنهاد، نه بهای موجودی): {titles[r.Id]}. "+
                 $"{r.Missing} ردیف قیمت برآوردی یا کد کالا ندارد؛ ایجنت درخواست بدون قیمت را ارسال نمی‌کند. قیمت را وارد کنید و درخواست را خودتان ارسال کنید."));
         }
 

@@ -191,11 +191,11 @@ namespace MsTests
             using IServiceScope scope = e.Host.Provider.CreateScope();
             List<IAgentStep> steps = scope.ServiceProvider.GetServices<IAgentStep>().ToList();
             var procurement = steps.Where(s => s.Station == 6 && s.Code != null && !s.Code.StartsWith("TEST.")).ToList();
-            Assert.AreEqual(30, steps.Count, "the registrations of the application");
-            Assert.AreEqual(30, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
-            Assert.AreEqual(30, procurement.Count);
+            Assert.AreEqual(68, steps.Count, "the registrations of the application");
+            Assert.AreEqual(68, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
+            Assert.AreEqual(33, procurement.Count, "the station 6 steps");
             IAgentStepCatalog catalog = scope.ServiceProvider.GetRequiredService<IAgentStepCatalog>();
-            Assert.AreEqual(30, catalog.All.Count);
+            Assert.AreEqual(68, catalog.All.Count);
             foreach (IAgentStep s in steps)
             {
                 AiSeatDefinition seat = AiSeatCatalog.Find(s.AgentCode);
@@ -215,7 +215,7 @@ namespace MsTests
             string[] agentSteps = steps.Where(s => s.Kind == AgentStepKind.Agent).Select(s => s.Code).OrderBy(c => c, StringComparer.Ordinal).ToArray();
             CollectionAssert.AreEqual(new[]
             {
-                "PLAN.PR.BOM", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "WH.PR.REORDER",
+                "CON.REVIEW.DRAFT", "CON.TERMS.DRAFT", "INIT.BOM", "INIT.CHARTER.DRAFT", "INIT.CODE", "INIT.PEP.DRAFT", "INIT.START", "INIT.UNITS", "PLAN.BALANCE.RUN", "PLAN.BASELINE.CREATE", "PLAN.CPM", "PLAN.ITP.ACTIVITIES", "PLAN.PR.BOM", "PLAN.WBS.DICTIONARY", "PLAN.WBS.GENERATE", "PLAN.WEIGHTS", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PO.REQUIREMENTS", "PROC.PR.PRICE.AUTO.PLAN", "PROC.PR.PRICE.AUTO.WH", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "WH.KIT.DRAFT", "WH.MR.SUBMIT", "WH.PR.REORDER"
             }, agentSteps);
             // the two registrations of one class have distinct codes and distinct agents
             Assert.AreEqual("AG-WH", steps.Single(s => s.Code == "PROC.PR.SUBMIT.WH").AgentCode);
@@ -261,6 +261,59 @@ namespace MsTests
         }
 
         // ------------------------------------------------------------------------------------------------ the chain
+
+        [TestMethod]
+        public async Task Smoke_contract_reorder_draft_without_price_source()
+        {
+            Env e = await NewEnv("smoke-noprice");
+            Seed seed = SeedWorld(e, 500_000m);
+            int ghost = 0;
+            e.Host.Write(u =>
+            {
+                // never bought, never quoted, no stock, no cost: nothing in the system can price it
+                InventoryItem g = AppHost.Add(u, new InventoryItem { Code = "I-900", Title = "ghost part", Unit = "عدد", MinStock = 5m, ReorderQuantity = 5m });
+                u.SaveChanges();
+                ghost = g.Id;
+            }, Seeder);
+
+            await Master(e);
+            await Agent(e, "AG-WH");
+
+            // (a) exactly one WH.PR.REORDER task, Done, output = the draft
+            List<AgentTask> reorders = Tasks(e).Where(t => t.StepCode == "WH.PR.REORDER").ToList();
+            Assert.AreEqual(1, reorders.Count, Dump(e));
+            Assert.AreEqual(AgentTaskState.Done, reorders[0].State);
+            Assert.AreEqual(10, (int)AgentTaskState.Done);
+            Assert.AreEqual("PurchaseRequest", reorders[0].OutputType);
+            PurchaseRequest draft = Requests(e).Single();
+            Assert.AreEqual(draft.Id, reorders[0].OutputId);
+            Assert.AreEqual(PurchaseRequestStatus.Draft, draft.Status);
+            Assert.AreEqual(2, draft.Lines.Count, "one priceable line and one unpriced-forever line");
+            Assert.IsTrue(draft.Lines.Single(l => l.ItemId == seed.Item).EstimatedUnitPrice > 0);
+            Assert.IsTrue((draft.Lines.Single(l => l.ItemId == ghost).EstimatedUnitPrice ?? 0) <= 0);
+
+            // (b) one open Input for planning on that request
+            AgentTask price = OpenOne(e, "PROC.PR.PRICE.WH");
+            Assert.AreEqual(AgentTaskState.WaitingInput, price.State);
+            Assert.AreEqual("PLANNING", price.GateRoles);
+            Assert.AreEqual(draft.Id, price.TargetId);
+            Assert.AreEqual("/procurement/requests/" + draft.Id, price.Link);
+            StringAssert.Contains(price.Summary, "ghost part");
+
+            // (c) one open submit task, Queued, not counted as an attempt, with the reason
+            AgentTask submit = OpenOne(e, "PROC.PR.SUBMIT.WH");
+            Assert.AreEqual(AgentTaskState.Queued, submit.State);
+            Assert.AreEqual(draft.Id, submit.TargetId);
+            Assert.AreEqual(0, submit.AttemptCount);
+            StringAssert.Contains(submit.LastError, "قیمت برآوردی ردیف‌ها کامل نیست");
+
+            // (d) a second run makes no second reorder task and no second draft
+            await Agent(e, "AG-WH");
+            Assert.AreEqual(1, Tasks(e).Count(t => t.StepCode == "WH.PR.REORDER"), Dump(e));
+            Assert.AreEqual(1, Requests(e).Count);
+            Assert.AreEqual(1, Open(e, "PROC.PR.PRICE.WH").Count);
+            Assert.AreEqual(1, Open(e, "PROC.PR.SUBMIT.WH").Count);
+        }
 
         [TestMethod]
         public async Task The_Chain_From_The_Reorder_List_To_The_Order_Draft_Is_Made_By_The_Agents_And_Decided_By_People()
@@ -370,6 +423,12 @@ namespace MsTests
             Assert.AreEqual(inquiry.Id, order.InquiryId);
             Assert.AreEqual(procId, order.CreatorUserId);
             Assert.AreEqual(AgentTaskState.Done, Closed(e, "PROC.PO.DRAFT").State);
+            // the requirements are written by the agent from the request and the quote: nobody types them, and no contract is needed below the limit
+            StringAssert.StartsWith(order.Requirements, "مطابق مشخصات فنی درخواست خرید " + request.Number);
+            StringAssert.Contains(order.Requirements, inquiry.Number);
+            Assert.AreEqual(AgentTaskState.Done, Closed(e, "PROC.PO.REQUIREMENTS").State);
+            Assert.AreEqual(0, Open(e, "PROC.PO.COMPLETE").Count, "nothing is left for the buyer to type");
+            Assert.AreEqual(0, Tasks(e).Count(t => t.Kind == AgentStepKind.Input && t.State < AgentTaskState.Done && t.StepCode != "PROC.INQ.QUOTES"), "the only input of the whole chain was the supplier quotes");
 
             // the whole chain left no seat in a decision column
             AssertNoSeatInAnyDecisionColumn(e);
@@ -610,6 +669,123 @@ namespace MsTests
             await Agent(e, "AG-WH");
             Assert.AreEqual(1, Requests(e).Count, "one maker at a time");
             Assert.AreEqual(0, Open(e, "WH.PR.REORDER").Count, "the item is on an open request now: no task for anybody");
+        }
+
+        [TestMethod]
+        public async Task The_Agent_Prices_Its_Own_Draft_From_The_Latest_Order_Then_The_Accepted_Quote_And_A_Person_Gets_Only_What_Has_No_Price_At_All()
+        {
+            Env e = await NewEnv("autoprice");
+            Seed seed = SeedWorld(e, null);   // no cost of the item: only orders and quotes can price it
+            int item2 = 0, item3 = 0;
+            e.Host.Write(u =>
+            {
+                InventoryItem i2 = AppHost.Add(u, new InventoryItem { Code = "I-200", Title = "bolt", Unit = "عدد", MinStock = 20m, ReorderQuantity = 20m });
+                InventoryItem i3 = AppHost.Add(u, new InventoryItem { Code = "I-300", Title = "ghost part", Unit = "عدد", MinStock = 5m, ReorderQuantity = 5m });
+                u.SaveChanges();
+                item2 = i2.Id; item3 = i3.Id;
+                // the plate was bought: a released order of 430,000 and an older one of 410,000 (the latest wins)
+                var old = AppHost.Add(u, new PurchaseOrder { Number = "PO-OLD", Status = PurchaseOrderStatus.Closed, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today.AddDays(-90), TotalAmount = 1m });
+                var recent = AppHost.Add(u, new PurchaseOrder { Number = "PO-NEW", Status = PurchaseOrderStatus.Released, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today.AddDays(-5), TotalAmount = 1m });
+                // a draft order and a foreign-currency order do not count
+                var draft = AppHost.Add(u, new PurchaseOrder { Number = "PO-DRAFT", Status = PurchaseOrderStatus.Draft, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today, TotalAmount = 1m });
+                var foreign = AppHost.Add(u, new PurchaseOrder { Number = "PO-USD", Status = PurchaseOrderStatus.Released, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today, TotalAmount = 1m, Currency = "USD" });
+                u.SaveChanges();
+                AppHost.Add(u, new PurchaseOrderLine { PurchaseOrderId = old.Id, RowNumber = 1, ItemId = seed.Item, Description = "plate", Unit = "عدد", Quantity = 1m, UnitPrice = 410_000m });
+                AppHost.Add(u, new PurchaseOrderLine { PurchaseOrderId = recent.Id, RowNumber = 1, ItemId = seed.Item, Description = "plate", Unit = "عدد", Quantity = 1m, UnitPrice = 430_000m });
+                AppHost.Add(u, new PurchaseOrderLine { PurchaseOrderId = draft.Id, RowNumber = 1, ItemId = item2, Description = "bolt", Unit = "عدد", Quantity = 1m, UnitPrice = 1m });
+                AppHost.Add(u, new PurchaseOrderLine { PurchaseOrderId = foreign.Id, RowNumber = 1, ItemId = item2, Description = "bolt", Unit = "عدد", Quantity = 1m, UnitPrice = 2m });
+                // the bolt was only quoted: an accepted quote line of 12,000 and a rejected one of 9,000
+                var request = AppHost.Add(u, new PurchaseRequest { Number = "PR-OLDQ", Source = PurchaseRequestSource.AdHoc, Kind = PurchaseKind.Goods, Status = PurchaseRequestStatus.Closed, RequestDate = DateTime.Today.AddDays(-30) });
+                u.SaveChanges();
+                var rl = AppHost.Add(u, new PurchaseRequestLine { PurchaseRequestId = request.Id, RowNumber = 1, ItemId = item2, Description = "bolt", Unit = "عدد", Quantity = 1m });
+                var inq = AppHost.Add(u, new PurchaseInquiry { Number = "INQ-OLDQ", PurchaseRequestId = request.Id, Status = InquiryStatus.Approved, InquiryDate = DateTime.Today.AddDays(-20) });
+                u.SaveChanges();
+                var good = AppHost.Add(u, new SupplierQuote { InquiryId = inq.Id, ProviderId = seed.ProviderA, QuoteNumber = "Q1", QuoteDate = DateTime.Today.AddDays(-20), TechnicallyAccepted = true, TechnicalReviewedAt = DateTimeOffset.Now });
+                var bad = AppHost.Add(u, new SupplierQuote { InquiryId = inq.Id, ProviderId = seed.ProviderB, QuoteNumber = "Q2", QuoteDate = DateTime.Today.AddDays(-10), TechnicallyAccepted = false, TechnicalReviewedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                AppHost.Add(u, new SupplierQuoteLine { QuoteId = good.Id, RequestLineId = rl.Id, Quantity = 1m, UnitPrice = 12_000m });
+                AppHost.Add(u, new SupplierQuoteLine { QuoteId = bad.Id, RequestLineId = rl.Id, Quantity = 1m, UnitPrice = 9_000m });
+                u.SaveChanges();
+            }, Seeder);
+
+            await Master(e);
+            await Agent(e, "AG-WH");
+            PurchaseRequest draftRequest = Requests(e).Single(r => r.Source == PurchaseRequestSource.ReorderPoint);
+            Dictionary<int, decimal?> priced = draftRequest.Lines.ToDictionary(l => l.ItemId.Value, l => l.EstimatedUnitPrice);
+            Assert.AreEqual(430_000m, priced[seed.Item], "the latest live order wins over the older one");
+            Assert.AreEqual(12_000m, priced[item2], "no order of the bolt counts (draft, foreign currency): the accepted quote does");
+            Assert.IsNull(priced[item3], "the ghost part has no price anywhere");
+            Assert.AreEqual(PurchaseRequestStatus.Draft, draftRequest.Status, "one line is still without a price");
+            // the person is asked for the ghost part only
+            await Master(e);
+            AgentTask input = OpenOne(e, "PROC.PR.PRICE.WH");
+            Assert.AreEqual(AgentTaskState.WaitingInput, input.State);
+            StringAssert.Contains(input.Summary, "ghost part");
+            Assert.IsFalse(input.Summary.Contains("plate") || input.Summary.Contains("bolt"), input.Summary);
+            Assert.AreEqual(0, Open(e, "PROC.PR.PRICE.AUTO.WH").Count);
+
+            // the planner prices the ghost part by hand and submits; the earlier prices stay
+            ResponseDto<PurchaseRequestDto> saved = await e.Host.As(Planner, p => p.GetRequiredService<IProcurementService>().SaveRequestAsync(new SavePurchaseRequestDto
+            {
+                Id = draftRequest.Id, Source = PurchaseRequestSource.ReorderPoint, Kind = PurchaseKind.Goods, RequestDate = DateTime.Today,
+                Lines = draftRequest.Lines.Select(l => new SavePurchaseRequestLineDto { Id = l.Id, ItemId = l.ItemId, Unit = l.Unit, Quantity = l.Quantity, EstimatedUnitPrice = l.EstimatedUnitPrice ?? 77_000m }).ToList(),
+            }, Ct));
+            Assert.IsTrue(saved.Success, saved.Message);
+            Assert.AreEqual(draftRequest.Lines.Single(l => l.ItemId == seed.Item).Quantity * 430_000m + draftRequest.Lines.Single(l => l.ItemId == item2).Quantity * 12_000m + draftRequest.Lines.Single(l => l.ItemId == item3).Quantity * 77_000m, RequestOf(e, draftRequest.Id).EstimatedAmount);
+        }
+
+        [TestMethod]
+        public async Task A_Draft_Made_By_Another_Hand_Is_Priced_By_The_Agent_That_Owns_It_And_Then_Submitted_In_The_Same_Run()
+        {
+            Env e = await NewEnv("autoprice2");
+            Seed seed = SeedWorld(e, null);
+            // the draft of AG-PLAN (a BOM draft) with an unpriced line of the plate; the plate has a released order
+            int planId = UserOf(e, "AG-PLAN");
+            int requestId = 0;
+            e.Host.Write(u =>
+            {
+                var order = AppHost.Add(u, new PurchaseOrder { Number = "PO-1", Status = PurchaseOrderStatus.Released, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today.AddDays(-3), TotalAmount = 1m });
+                u.SaveChanges();
+                AppHost.Add(u, new PurchaseOrderLine { PurchaseOrderId = order.Id, RowNumber = 1, ItemId = seed.Item, Description = "plate", Unit = "عدد", Quantity = 1m, UnitPrice = 600_000m });
+                var r = AppHost.Add(u, new PurchaseRequest { Number = "PR-BOM", Source = PurchaseRequestSource.AdHoc, Kind = PurchaseKind.Goods, Status = PurchaseRequestStatus.Draft, RequestDate = DateTime.Today, CreatorUserId = planId });
+                u.SaveChanges();
+                AppHost.Add(u, new PurchaseRequestLine { PurchaseRequestId = r.Id, RowNumber = 1, ItemId = seed.Item, Description = "plate", Unit = "عدد", Quantity = 5m });
+                u.SaveChanges();
+                requestId = r.Id;
+            }, Seeder);
+            await Master(e);
+            Assert.AreEqual(1, Open(e, "PROC.PR.PRICE.AUTO.PLAN").Count);
+            Assert.AreEqual(0, Open(e, "PROC.PR.SUBMIT.PLAN").Count, "not submitted before it is priced");
+            Assert.AreEqual(0, Open(e, "PROC.PR.PRICE.PLAN").Count, "and no person is asked");
+            await Agent(e, "AG-PLAN");
+            PurchaseRequest done = RequestOf(e, requestId);
+            Assert.AreEqual(3_000_000m, done.EstimatedAmount, string.Join(" | ", Tasks(e).Select(t => t.StepCode + ":" + t.State + ":" + t.LastError)));
+            Assert.AreEqual(600_000m, done.Lines.Single().EstimatedUnitPrice);
+            Assert.AreEqual(PurchaseRequestStatus.Submitted, done.Status);
+            Assert.AreEqual(planId, done.CreatorUserId, "the maker is still the agent");
+            Assert.AreEqual(AgentTaskState.Done, Closed(e, "PROC.PR.PRICE.AUTO.PLAN").State);
+            StringAssert.Contains(Closed(e, "PROC.PR.PRICE.AUTO.PLAN").Summary ?? string.Empty, "PO-1");
+        }
+
+        [TestMethod]
+        public async Task A_Large_Order_Gets_Its_Requirements_From_The_Agent_And_Only_The_Signed_Contract_Is_Left_For_The_Buyer()
+        {
+            Env e = await NewEnv("contract");
+            Seed seed = SeedWorld(e, 500_000m);
+            int orderId = 0;
+            e.Host.Write(u =>
+            {
+                var order = AppHost.Add(u, new PurchaseOrder { Number = "PO-BIG", Status = PurchaseOrderStatus.Draft, Kind = PurchaseKind.Goods, ProviderId = seed.ProviderA, OrderDate = DateTime.Today, TotalAmount = 200_000_000m, CreatorUserId = UserOf(e, "AG-PROC") });
+                u.SaveChanges();
+                orderId = order.Id;
+            }, Seeder);
+            await Master(e);
+            Assert.AreEqual(1, Open(e, "PROC.PO.REQUIREMENTS").Count);
+            AgentTask contract = OpenOne(e, "PROC.PO.COMPLETE");
+            Assert.AreEqual(AgentStepKind.Input, contract.Kind);
+            Assert.AreEqual("COMMERCIAL", contract.GateRoles);
+            StringAssert.Contains(contract.Summary, "قرارداد");
+            Assert.IsFalse(contract.Summary.Contains("الزامات فنی"), "the requirements are not asked of a person");
         }
 
         // ------------------------------------------------------------------------------------------------ the board and the drills

@@ -328,6 +328,10 @@ namespace IocConfig
             }
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob>(sp => new Services.NasbNiro.Agents.AgentMasterJob(sp.GetRequiredService<Services.NasbNiro.Agents.IAgentReconciler>(), sp.GetRequiredService<Services.NasbNiro.Agents.IAgentExecutor>()));
             Services.NasbNiro.Agents.Steps.ProcurementSteps.AddProcurementSteps(services);
+            Services.NasbNiro.Agents.Steps.WarehouseSteps.AddWarehouseSteps(services);
+            Services.NasbNiro.Agents.Steps.ContractInitSteps.AddContractInitSteps(services);
+            Services.NasbNiro.Agents.Steps.PlanningSteps.AddPlanningSteps(services);
+            Services.NasbNiro.Agents.AgentStationProbes.AddAgentStationProbes(services);
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();

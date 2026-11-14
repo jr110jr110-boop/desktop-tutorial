@@ -13167,8 +13167,10 @@ as "$PLAN_TOKEN" POST $AG/inbox/return "{\"id\":${AGLPT:-0},\"reason\":\"\"}"; n
 airun AG-WH
 as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=WH.PR.REORDER&PageNumber=1&PageSize=50"; check "agl: a second run of the agent makes no second reorder task" '.success and (.data.data|length) == 1'
 # the coordinator and the board
-airun AG-MASTER; AGLMS=$(val .data.status)
-[ "$AGLMS" = "2" ] && ok "agl: the coordinator (AG-MASTER) reconciles every step without an error" || bad "agl: the coordinator (AG-MASTER) reconciles every step without an error (status $AGLMS, $(val .data.error))"
+airun AG-MASTER; AGLMS=$(val .data.status); AGLMO=$(val .data.outputs)
+[ "$AGLMS" = "2" ] && ok "agl: the run of the coordinator (AG-MASTER) succeeded" || bad "agl: the run of the coordinator (AG-MASTER) succeeded (status $AGLMS, $(val .data.error))"
+# every Discover query of every step ran on this SQL Server over the whole smoke data: a query the server cannot translate would be counted here
+case "$AGLMO" in *"errors=0") ok "agl: the coordinator reconciled every step of every station without one error";; *) as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=agent&PageSize=0"; bad "agl: the coordinator reconciled every step without one error (outputs '$AGLMO'; $(jq -r '[.data.data[]|select(.detail // .message // "" | contains("errors=") and (contains("errors=0")|not))][0] // empty | tostring' "$B" | head -c 900))";; esac
 as "$CEO_TOKEN" GET $AG/board
 check "agl: the CEO reads the master board: 13 stations in order, one row for the tasks of no contract, with 13 cells" '.success and ([.data.stations[].number]) == [1,2,3,4,5,6,7,8,9,10,11,12,13] and ([.data.rows[]|select(.contractId == null)]|length) == 1 and ([.data.rows[]|select(.contractId == null)][0].cells|length) == 13'
 cdrill ag.board; check "agl: the CEO assistant reads the same board through its drill" '.success == true'

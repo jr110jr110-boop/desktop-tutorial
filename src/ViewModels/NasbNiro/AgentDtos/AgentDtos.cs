@@ -139,6 +139,9 @@ namespace ViewModels.NasbNiro.AgentDtos
         WaitingPhysical = 4,
         WaitingGate = 5,
         Failed = 6,
+
+        /// <summary>No open work and the station's own probe says the station is complete for the contract (computed from the state of the documents).</summary>
+        Done = 7,
     }
 
     public class AgentBoardCellDto

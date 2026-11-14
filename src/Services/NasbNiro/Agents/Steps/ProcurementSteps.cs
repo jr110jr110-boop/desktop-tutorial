@@ -30,6 +30,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep>(sp => new SubmitRequestStep("PROC.PR.SUBMIT.PLAN", AgentCodes.Plan, "PLANNING,PMO"));
             services.AddScoped<IAgentStep>(sp => new PriceRequestStep("PROC.PR.PRICE.WH", AgentCodes.Wh));
             services.AddScoped<IAgentStep>(sp => new PriceRequestStep("PROC.PR.PRICE.PLAN", AgentCodes.Plan));
+            services.AddScoped<IAgentStep>(sp => new PriceAutoStep("PROC.PR.PRICE.AUTO.WH", AgentCodes.Wh, "WAREHOUSE,WHSUPERVISOR"));
+            services.AddScoped<IAgentStep>(sp => new PriceAutoStep("PROC.PR.PRICE.AUTO.PLAN", AgentCodes.Plan, "PLANNING,PMO"));
             services.AddScoped<IAgentStep, ApproveRequestStep>();
             services.AddScoped<IAgentStep>(sp => new ReviseRequestStep("PROC.PR.REVISE.WH", AgentCodes.Wh, "WAREHOUSE,WHSUPERVISOR"));
             services.AddScoped<IAgentStep>(sp => new ReviseRequestStep("PROC.PR.REVISE.PLAN", AgentCodes.Plan, "PLANNING,PMO"));
@@ -47,6 +49,7 @@ namespace Services.NasbNiro.Agents.Steps
 
             // order
             services.AddScoped<IAgentStep, DraftOrderStep>();
+            services.AddScoped<IAgentStep, OrderRequirementsStep>();
             services.AddScoped<IAgentStep, CompleteOrderStep>();
             services.AddScoped<IAgentStep, ApproveOrderStep>();
             services.AddScoped<IAgentStep, ReleaseOrderStep>();
@@ -61,6 +64,63 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, ApprovePaymentStep>();
             services.AddScoped<IAgentStep, PayStep>();
             return services;
+        }
+    }
+
+    /// <summary>The price an agent writes into the estimate of a draft line, from what the system already knows (B0): the latest live purchase-order line of the item, then the latest technically accepted quote line, then the stock valuation (the average cost of the item, which the save method of the request also falls back to).</summary>
+    internal static class ProcPrices
+    {
+        private static readonly PurchaseOrderStatus[] LiveOrder =
+        {
+            PurchaseOrderStatus.Approved, PurchaseOrderStatus.Released, PurchaseOrderStatus.PartlyReceived, PurchaseOrderStatus.Received, PurchaseOrderStatus.Closed,
+        };
+
+        /// <summary>The ids of the items that have a price in a live order (rial) or in an accepted quote: the SQL side of "an agent can price this line".</summary>
+        public static IQueryable<int> ItemsWithOrderPrice(IUnitOfWork uow) =>
+            uow.Set<PurchaseOrderLine>().AsNoTracking()
+                .Where(l => l.ItemId != null && l.UnitPrice > 0 && !l.PurchaseOrder.Deleted && l.PurchaseOrder.Currency == null && LiveOrder.Contains(l.PurchaseOrder.Status))
+                .Select(l => l.ItemId.Value);
+
+        public static IQueryable<int> ItemsWithQuotePrice(IUnitOfWork uow) =>
+            uow.Set<SupplierQuoteLine>().AsNoTracking()
+                .Where(l => l.RequestLine.ItemId != null && l.UnitPrice > 0 && l.Quote.TechnicallyAccepted && !l.Quote.Inquiry.Deleted)
+                .Select(l => l.RequestLine.ItemId.Value);
+
+        public sealed class ItemPrice
+        {
+            public decimal Price { get; set; }
+            public string Source { get; set; }
+        }
+
+        /// <summary>The price of each item that has one in an order or a quote (the cost table is left to the save method of the request, which uses it when no price is given).</summary>
+        public static async Task<Dictionary<int, ItemPrice>> ResolveAsync(IUnitOfWork uow, ICollection<int> itemIds, CancellationToken ct)
+        {
+            var result = new Dictionary<int, ItemPrice>();
+            if (itemIds.Count == 0) return result;
+            var orders = await uow.Set<PurchaseOrderLine>().AsNoTracking()
+                .Where(l => l.ItemId != null && itemIds.Contains(l.ItemId.Value) && l.UnitPrice > 0 && !l.PurchaseOrder.Deleted && l.PurchaseOrder.Currency == null && LiveOrder.Contains(l.PurchaseOrder.Status))
+                .OrderByDescending(l => l.PurchaseOrder.OrderDate).ThenByDescending(l => l.Id)
+                .Select(l => new { Item = l.ItemId.Value, l.UnitPrice, l.PurchaseOrder.Number }).Take(2000).ToListAsync(ct);
+            foreach (var o in orders)
+                if (!result.ContainsKey(o.Item)) result[o.Item] = new ItemPrice { Price = o.UnitPrice, Source = "آخرین سفارش خرید " + o.Number };
+            List<int> rest = itemIds.Where(i => !result.ContainsKey(i)).ToList();
+            if (rest.Count == 0) return result;
+            var quotes = await uow.Set<SupplierQuoteLine>().AsNoTracking()
+                .Where(l => l.RequestLine.ItemId != null && rest.Contains(l.RequestLine.ItemId.Value) && l.UnitPrice > 0 && l.Quote.TechnicallyAccepted && !l.Quote.Inquiry.Deleted)
+                .OrderByDescending(l => l.Quote.QuoteDate).ThenByDescending(l => l.Id)
+                .Select(l => new { Item = l.RequestLine.ItemId.Value, l.UnitPrice, l.Quote.Inquiry.Number }).Take(2000).ToListAsync(ct);
+            foreach (var q in quotes)
+                if (!result.ContainsKey(q.Item)) result[q.Item] = new ItemPrice { Price = q.UnitPrice, Source = "آخرین پیشنهاد قابل قبول فنی استعلام " + q.Number };
+            return result;
+        }
+
+        /// <summary>The items of the lines that have no price in the system at all (no order, no accepted quote, no cost): the only ones a person has to price.</summary>
+        public static async Task<List<string>> UnpricedTitlesAsync(IUnitOfWork uow, int requestId, CancellationToken ct)
+        {
+            var lines = await uow.Set<PurchaseRequestLine>().AsNoTracking().Where(l => l.PurchaseRequestId == requestId).OrderBy(l => l.RowNumber)
+                .Select(l => new { l.ItemId, l.Description, l.EstimatedUnitPrice }).ToListAsync(ct);
+            Dictionary<int, ItemPrice> known = await ResolveAsync(uow, lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId.Value).Distinct().ToList(), ct);
+            return lines.Where(l => (l.EstimatedUnitPrice ?? 0) <= 0 && !(l.ItemId.HasValue && known.ContainsKey(l.ItemId.Value))).Select(l => l.Description ?? ("#" + l.ItemId)).ToList();
         }
     }
 
@@ -102,7 +162,7 @@ namespace Services.NasbNiro.Agents.Steps
     internal abstract class ProcStep : IAgentStep
     {
         public abstract string Code { get; }
-        public int Station => ProcStepCommon.StationNumber;
+        public virtual int Station => ProcStepCommon.StationNumber;
         public abstract string AgentCode { get; }
         public abstract string Title { get; }
         public abstract AgentStepKind Kind { get; }
