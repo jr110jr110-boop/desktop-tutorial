@@ -8,6 +8,7 @@ import Pb6Dialog from "@/components/common/Pb6Dialog.vue";
 import Pb6Table from "@/components/common/Pb6Table.vue";
 import { getCashFlow, getCbs, getLegalRates, getStatement, getStatementAnalytics, getStatementPrint, getStatements, legalRateAction, recordStatementPayment, saveCashPlan, saveCbs, saveLegalRate, saveStatement, statementAction } from "@/api/Pb6APIs";
 import { fail, jalali, ok, printPage, rial, today } from "@/composables/inventory";
+import { hasRole, ProcurementRoles } from "@/composables/roles";
 
 // Progress statements (پیوست ۷ and the company form): preparation by commercial, technical office, supervision, authorisation by the project manager, payment.
 const route = useRoute();
@@ -147,7 +148,10 @@ async function savePlan() {
 
 // Purchase orders for the order select (the list the procurement pages use).
 const orders = ref<any[]>([]);
+// the order list is closed to roles outside the procurement readers (403): it is not asked for, and the select is replaced by a note
+const canOrders = hasRole(ProcurementRoles.orderReaders);
 async function loadOrders() {
+  if (!canOrders) return;
   const [data] = await getPurchaseOrders({ PageSize: 200 });
   orders.value = data?.data || [];
 }
@@ -178,7 +182,8 @@ function switchTab(t: any) {
           <h2 class="h6">صورت‌وضعیت جدید (بازرگانی)</h2>
           <div class="inv-filters">
             <select v-model.number="form.side" class="form-select form-select-sm"><option :value="1">تامین‌کننده/پیمانکار</option><option :value="2">کارفرما</option></select>
-            <select v-model="form.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش (قرارداد) — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+            <select v-if="canOrders" v-model="form.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش (قرارداد) — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+            <span v-else class="small inv-muted align-self-center">فهرست سفارش‌ها برای نقش شما در دسترس نیست؛ صورت‌وضعیت تامین‌کننده را بازرگانی ثبت می‌کند.</span>
             <ContractPick v-model="form.contractId" placeholder="قرارداد پروژه — انتخاب کنید" />
             <FnDate v-model="form.periodFrom" />
             <FnDate v-model="form.periodTo" />
@@ -281,7 +286,8 @@ function switchTab(t: any) {
 
       <template v-else-if="tab === 'cbs' || tab === 'cash'">
         <div class="inv-filters mb-2">
-          <select v-model="scope.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+          <select v-if="canOrders" v-model="scope.purchaseOrderId" class="form-select form-select-sm"><option :value="null">سفارش — انتخاب کنید</option><option v-for="o in orders" :key="o.id" :value="o.id">{{ o.number }} - {{ o.providerName }}</option></select>
+          <span v-else class="small inv-muted align-self-center">فهرست سفارش‌ها برای نقش شما در دسترس نیست؛ قرارداد پروژه را انتخاب کنید.</span>
           <ContractPick v-model="scope.contractId" placeholder="قرارداد پروژه — انتخاب کنید" />
           <button class="btn btn-sm btn-secondary" @click="loadScope">نمایش</button>
         </div>

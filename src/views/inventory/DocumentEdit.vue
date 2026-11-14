@@ -457,7 +457,8 @@ async function printForm(mode: "main" | "minutes" = "main") {
 }
 
 async function approve(kind: number) {
-  if (isDraft.value && !(await save(true))) return;
+  // an approver who cannot edit documents approves what was saved: saving first would be refused (403)
+  if (isDraft.value && canEdit && !(await save(true))) return;
   busy.value = true;
   const [data, error] = await approveDocument(doc.value.id, kind);
   busy.value = false;

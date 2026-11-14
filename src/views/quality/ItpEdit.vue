@@ -382,8 +382,8 @@ onMounted(async () => {
         <div class="col-md-2"><label class="form-label small mb-0">طرف</label><select v-model="release.party" class="form-select form-select-sm"><option v-for="(t, k) in releaseParties" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-0">اقدام</label><select v-model="release.action" class="form-select form-select-sm"><option v-for="(t, k) in releaseActions" :key="k" :value="Number(k)">{{ t }}</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-0">نام شخص *</label><input v-model="release.personName" class="form-control form-control-sm" /></div>
-        <div class="col-md-2"><label class="form-label small mb-0">سازمان</label><input v-model="release.organisation" class="form-control form-control-sm" /></div>
-        <div class="col-md-1"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="release.releaseDate" /></div>
+        <div class="col-md-1"><label class="form-label small mb-0">سازمان</label><input v-model="release.organisation" class="form-control form-control-sm" /></div>
+        <div class="col-md-2"><label class="form-label small mb-0">تاریخ</label><FnDate v-model="release.releaseDate" /></div>
         <div class="col-md-2"><label class="form-label small mb-0">مرجع (نامه)</label><input v-model="release.reference" class="form-control form-control-sm" /></div>
         <div class="col-md-1"><button :disabled="busy" class="btn btn-sm btn-primary w-100" @click="addRelease">ثبت</button></div>
       </div>

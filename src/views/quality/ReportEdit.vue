@@ -129,11 +129,12 @@ async function act(action: string, reason?: string) {
   ok(action === "submit" ? "ارسال شد." : action === "approve" ? "تایید شد." : "رد شد.");
 }
 
-watch(() => rep.value?.type, () => {
+// the type appearing (first load of a record or a new report) only loads the lists; the examiner is cleared only when the user changes an existing type
+watch(() => rep.value?.type, (type, oldType) => {
   if (!rep.value) return;
   loadStandards();
   loadActivities();
-  rep.value.examinerQualificationId = null;
+  if (oldType !== undefined && oldType !== type) rep.value.examinerQualificationId = null;
   loadQualifications();
 });
 
@@ -142,6 +143,9 @@ async function loadQualifications() {
   if (!ndtMethod.value) return;
   const [data] = await getQualifications({ Kind: 3, Method: ndtMethod.value, PageSize: 200 });
   qualifications.value = rowsOf(data).filter((q: any) => q.state === 0 || q.state === 1);
+  // a saved examiner stays unless he or she is no longer in the list
+  const chosen = rep.value?.examinerQualificationId;
+  if (chosen && !qualifications.value.some((q: any) => q.id === chosen)) rep.value.examinerQualificationId = null;
 }
 
 onMounted(async () => {
