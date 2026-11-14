@@ -54,7 +54,7 @@ namespace MsTests
     [TestClass]
     public class CeoDrillTests
     {
-        // the 68 keys of the contract (section 2 of the D1 contract)
+        // the 68 keys of the contract (section 2 of the D1 contract) and the two of the agent layer (ag.board, ag.stuck)
         private static readonly string[] ContractKeys =
         {
             "fin.cash_accounts", "fin.receivables_by_customer", "fin.receivable_invoices_overdue", "fin.payables_by_supplier", "fin.payables_overdue", "fin.cheques_due",
@@ -69,12 +69,13 @@ namespace MsTests
             "sv.requests_open", "sv.sla_breaches", "sv.orders_open", "sv.warranty_cost_by_month", "sv.units_by_customer", "sv.survey_by_month", "sv.ltsa_expiring",
             "of.decisions_overdue", "of.letters_waiting", "of.attendance_month", "of.leave_requests_pending",
             "ai.notes_new", "ai.seat_runs",
+            "ag.board", "ag.stuck",
         };
 
         private static readonly Dictionary<string, string> ModuleOfPrefix = new Dictionary<string, string>
         {
             ["fin"] = CeoModules.Finance, ["sl"] = CeoModules.Sales, ["pc"] = CeoModules.Projects, ["mf"] = CeoModules.Production, ["qc"] = CeoModules.Quality,
-            ["inv"] = CeoModules.Inventory, ["pr"] = CeoModules.Procurement, ["sv"] = CeoModules.Service, ["of"] = CeoModules.Office, ["ai"] = CeoModules.Ai,
+            ["inv"] = CeoModules.Inventory, ["pr"] = CeoModules.Procurement, ["sv"] = CeoModules.Service, ["of"] = CeoModules.Office, ["ai"] = CeoModules.Ai, ["ag"] = CeoModules.Ai,
         };
 
         private static readonly DateTime Today = new DateTime(2026, 10, 25);
@@ -86,11 +87,11 @@ namespace MsTests
         [TestMethod]
         public void Catalogue_Holds_Exactly_The_Contract_Keys()
         {
-            Assert.AreEqual(68, ContractKeys.Length);
+            Assert.AreEqual(70, ContractKeys.Length);
             Assert.AreEqual(ContractKeys.Length, ContractKeys.Distinct().Count());
             List<string> keys = CeoDrillCatalog.All.Select(d => d.Key).ToList();
             Assert.AreEqual(keys.Count, keys.Distinct(StringComparer.OrdinalIgnoreCase).Count(), "keys are unique");
-            Assert.AreEqual(68, keys.Count, "the exact number of drills of the contract");
+            Assert.AreEqual(70, keys.Count, "the exact number of drills of the contract and of the agent layer");
             CollectionAssert.AreEquivalent(ContractKeys, keys);
         }
 
@@ -100,7 +101,7 @@ namespace MsTests
             var expected = new Dictionary<string, int>
             {
                 [CeoModules.Finance] = 11, [CeoModules.Sales] = 10, [CeoModules.Projects] = 8, [CeoModules.Production] = 6, [CeoModules.Quality] = 6,
-                [CeoModules.Inventory] = 6, [CeoModules.Procurement] = 8, [CeoModules.Service] = 7, [CeoModules.Office] = 4, [CeoModules.Ai] = 2,
+                [CeoModules.Inventory] = 6, [CeoModules.Procurement] = 8, [CeoModules.Service] = 7, [CeoModules.Office] = 4, [CeoModules.Ai] = 4,
             };
             foreach (KeyValuePair<string, int> e in expected)
                 Assert.AreEqual(e.Value, CeoDrillCatalog.All.Count(d => d.Module == e.Key), e.Key);
@@ -115,7 +116,7 @@ namespace MsTests
             string[] kinds = { "text", "number", "rial", "percent", "date", "link", "status" };
             foreach (DrillDefinition d in CeoDrillCatalog.All)
             {
-                Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(d.Key, "^(fin|sl|pc|mf|qc|inv|pr|sv|of|ai)\\.[a-z0-9]+(_[a-z0-9]+)*$"), d.Key);
+                Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(d.Key, "^(fin|sl|pc|mf|qc|inv|pr|sv|of|ai|ag)\\.[a-z0-9]+(_[a-z0-9]+)*$"), d.Key);
                 Assert.AreEqual(ModuleOfPrefix[d.Key.Substring(0, d.Key.IndexOf('.'))], d.Module, d.Key);
                 Assert.IsTrue(HasPersian(d.Title), d.Key + " title");
                 Assert.IsTrue(HasPersian(d.Description), d.Key + " description");
@@ -190,7 +191,7 @@ namespace MsTests
         public void Compact_Catalogue_Lists_Every_Key_In_One_Short_Result()
         {
             Dictionary<string, object> compact = CeoDrillCatalog.Compact();
-            Assert.AreEqual(68, compact["totalCount"]);
+            Assert.AreEqual(70, compact["totalCount"]);
             string all = string.Join("\n", compact.Where(p => p.Key != "totalCount").Select(p => (string)p.Value));
             foreach (string key in ContractKeys) StringAssert.Contains(all, key);
             foreach (string module in CeoModules.All) Assert.IsTrue(compact.ContainsKey(module), module);
@@ -377,9 +378,9 @@ namespace MsTests
         [TestMethod]
         public void Every_Drill_Key_Of_The_Overview_Is_In_The_Catalogue_And_Every_Filter_Of_A_Figure_Is_Declared_By_Its_Drill()
         {
-            // the keys the overview points at are the 66 keys of the modules; the two drills of the AI module are behind no figure
+            // the keys the overview points at are the 66 keys of the modules; the two drills of the AI module and the two of the agent layer are behind no figure
             List<string> referred = typeof(CeoDrillRef).GetFields(BindingFlags.Public | BindingFlags.Static).Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()).ToList();
-            CollectionAssert.AreEquivalent(ContractKeys.Where(k => !k.StartsWith("ai.", StringComparison.Ordinal)).ToList(), referred);
+            CollectionAssert.AreEquivalent(ContractKeys.Where(k => !k.StartsWith("ai.", StringComparison.Ordinal) && !k.StartsWith("ag.", StringComparison.Ordinal)).ToList(), referred);
 
             var filtered = new List<string>();
             foreach (CeoKpiSpec spec in CeoKpiSpecs.All)
@@ -614,7 +615,7 @@ namespace MsTests
 
             var catalogue = await Service("PMO").GetCatalogueAsync(CancellationToken.None);
             Assert.IsTrue(catalogue.Success);
-            Assert.AreEqual(68, catalogue.Data.Count);
+            Assert.AreEqual(70, catalogue.Data.Count);
         }
 
         [TestMethod]

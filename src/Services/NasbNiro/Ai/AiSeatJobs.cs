@@ -26,7 +26,8 @@ using ViewModels.NasbNiro.ProcurementDtos;
 namespace Services.NasbNiro.Ai
 {
     // The seven seats. Each one runs as its own service user (see AiActing), so the services check its roles like anyone else's.
-    // What a seat leaves is a draft (WH-REORDER) or a note (all the others); no seat submits, approves, signs or pays.
+    // What a seat leaves is a draft (WH-REORDER) or a note (all the others). Policy of the owner (1405/08/24): an agent may SUBMIT its own drafts to the human gate (the agent layer does it, see Agents/);
+    // no seat approves, signs, releases or pays: the data layer refuses it (SeatApprovalGuard).
 
     public sealed class AiSeatRunContext
     {
@@ -43,6 +44,9 @@ namespace Services.NasbNiro.Ai
         public AiSeatRunStatus Status { get; set; }
         public string Summary { get; set; }
         public string Error { get; set; }
+
+        /// <summary>The job found nothing to do and changed nothing. Only the coordinator tick of the agent layer uses it: such a scheduled run writes no audit line (the run row is still written).</summary>
+        public bool Quiet { get; set; }
 
         public static AiSeatJobResult Done(string summary) => new AiSeatJobResult { Status = AiSeatRunStatus.Succeeded, Summary = summary };
         public static AiSeatJobResult Skip(string reason, string summary = null) => new AiSeatJobResult { Status = AiSeatRunStatus.Skipped, Error = reason, Summary = summary };
@@ -264,12 +268,17 @@ namespace Services.NasbNiro.Ai
     public class WhReorderSeatJob : IAiSeatJob
     {
         public const int MaxLines = 100;
+        /// <summary>The step of the agent layer that makes the same drafts (agent AG-WH).</summary>
+        public const string SupersedingStep = "WH.PR.REORDER";
+
         private readonly Inventory.IWarehouseReorderService _reorder;
         private readonly IProcurementService _procurement;
+        private readonly IUnitOfWork _uow;
+        private readonly Agents.IAgentStepCatalog _steps;
 
-        public WhReorderSeatJob(Inventory.IWarehouseReorderService reorder, IProcurementService procurement)
+        public WhReorderSeatJob(Inventory.IWarehouseReorderService reorder, IProcurementService procurement, IUnitOfWork uow = null, Agents.IAgentStepCatalog steps = null)
         {
-            _reorder = reorder; _procurement = procurement;
+            _reorder = reorder; _procurement = procurement; _uow = uow; _steps = steps;
         }
 
         public string Code => AiSeatCodes.WhReorder;
@@ -279,6 +288,10 @@ namespace Services.NasbNiro.Ai
 
         public async Task<AiSeatJobResult> RunAsync(AiSeatRunContext context, CancellationToken ct)
         {
+            // the agent layer makes these drafts (and submits them) when its step is registered and on and the warehouse agent is on: one maker, no doubled drafts
+            if (_uow != null && _steps != null && await Agents.AgentSupersession.IsSupersededAsync(_uow, _steps, SupersedingStep, Agents.AgentCodes.Wh, ct))
+                return AiSeatJobResult.Done("superseded by AG-WH");
+
             // M2: the same list as the warehouse screen: reorder point = daily use x lead time + safety stock; customer property, scrap and contractor stock do not count as on hand;
             // an item on an open request is covered and is not asked for again
             var list = await _reorder.GetAsync(new ViewModels.NasbNiro.InventoryDtos.ReorderQuery(), ct);

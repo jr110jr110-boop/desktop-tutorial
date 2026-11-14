@@ -430,6 +430,7 @@ namespace DataLayer.Context
             AddDesignControl();       // package A1: design plans, inputs, reviews, findings (FinanceAuditTrail.DesignControl.cs)
             AddEngChange();           // package A2: engineering change requests and orders, impact snapshot, dispositions, tasks (FinanceAuditTrail.EngChange.cs)
             AddAuditSeat();           // package 9: audit programme, runs, findings, reports, process audits (FinanceAuditTrail.AuditSeat.cs)
+            AddAgents();              // agent layer: tasks of the process agents, their events, the step switches (FinanceAuditTrail.Agents.cs)
             AddGoLive();              // package G: legacy register, adoptions, PO drawing citation; engineering masters in the record-drift scope (FinanceAuditTrail.GoLive.cs)
             var more = new Dictionary<Type, string[]>
             {

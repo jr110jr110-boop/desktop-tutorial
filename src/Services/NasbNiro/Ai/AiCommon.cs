@@ -79,6 +79,9 @@ namespace Services.NasbNiro.Ai
 
         /// <summary>An evaluation run.</summary>
         public const string Eval = "eval";
+
+        /// <summary>A step of an agent (reconcile, run, refusal, retry, a step switched on or off, a task sent back).</summary>
+        public const string Agent = "agent";
     }
 
     /// <summary>What a voice upload must look like: an audio media type (parameters such as codecs=opus are ignored) and the first bytes of a WAV, WebM or Ogg file.</summary>

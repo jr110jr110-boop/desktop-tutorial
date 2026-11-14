@@ -314,6 +314,20 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusAcceptanceService, Services.NasbNiro.AuditSeat.AusAcceptanceService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusProgramService, Services.NasbNiro.AuditSeat.AusProgramService>();
             services.AddScoped<Services.NasbNiro.AuditSeat.IAusAuditService, Services.NasbNiro.AuditSeat.AusAuditService>();
+            // agent layer: the steps (one IAgentStep registration per step, see Services/NasbNiro/Agents/Steps), the reconciler, the executor, the gate inbox and the master board;
+            // every process agent is a seat with its own job, and AG-MASTER reconciles all of them (Agents:Jobs=false keeps the scheduler from starting them)
+            services.AddScoped<Services.NasbNiro.Agents.IAgentStepCatalog, Services.NasbNiro.Agents.AgentStepCatalog>();
+            services.AddScoped<Services.NasbNiro.Agents.IAgentReconciler, Services.NasbNiro.Agents.AgentReconciler>();
+            services.AddScoped<Services.NasbNiro.Agents.IAgentExecutor, Services.NasbNiro.Agents.AgentExecutor>();
+            services.AddScoped<Services.NasbNiro.Agents.IAgentInboxService, Services.NasbNiro.Agents.AgentInboxService>();
+            services.AddScoped<Services.NasbNiro.Agents.IAgentBoardService, Services.NasbNiro.Agents.AgentBoardService>();
+            foreach (string agentCode in Services.NasbNiro.Agents.AgentCodes.Process)
+            {
+                string code = agentCode;
+                services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob>(sp => new Services.NasbNiro.Agents.AgentWorkJob(code, sp.GetRequiredService<Services.NasbNiro.Agents.IAgentExecutor>()));
+            }
+            services.AddScoped<Services.NasbNiro.Ai.IAiSeatJob>(sp => new Services.NasbNiro.Agents.AgentMasterJob(sp.GetRequiredService<Services.NasbNiro.Agents.IAgentReconciler>(), sp.GetRequiredService<Services.NasbNiro.Agents.IAgentExecutor>()));
+            Services.NasbNiro.Agents.Steps.ProcurementSteps.AddProcurementSteps(services);
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();
             services.AddScoped<Services.NasbNiro.Ai.IAiEvalService, Services.NasbNiro.Ai.AiEvalService>();

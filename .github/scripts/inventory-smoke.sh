@@ -8160,10 +8160,10 @@ print("%04d/%02d/%02d" % (jy, jm, jd))
 PYJ
 }
 
-AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true;MF-DISPATCH|seat.mf-dispatch|PLANNING|poll 60|true"
+AISEATS="CEO-BRIEF|seat.ceo-brief|CEO|daily 07:00|true;PMO-WEEKLY|seat.pmo-weekly|PMO|weekly 5 07:00|true;WH-REORDER|seat.wh-reorder|WAREHOUSE|daily 06:30|true;PROC-COMPARE|seat.proc-compare|COMMERCIAL|poll 15|true;QC-NCR-ASSIST|seat.qc-ncr-assist|QC|poll 10|true;FIN-ANOMALY|seat.fin-anomaly|FINANCIAL|daily 06:00|true;OFFICE-DRAFT|seat.office-draft|SECRETARIAT|poll 15|true;OPS-DATA|seat.ops-data|WAREHOUSE|daily 06:15|true;AUDIT|seat.audit|AUDITOR|daily 05:30|true;MF-DISPATCH|seat.mf-dispatch|PLANNING|poll 60|true;AG-MASTER|seat.ag-master||poll 2|true;AG-SALES|seat.ag-sales|SALES|poll 2|true;AG-CONTRACT|seat.ag-contract|COMMERCIAL|poll 2|true;AG-INIT|seat.ag-init|PLANNING|poll 2|true;AG-PLAN|seat.ag-plan|PLANNING|poll 2|true;AG-ENG|seat.ag-eng|ENGINEER|poll 2|true;AG-PROC|seat.ag-proc|COMMERCIAL|poll 2|true;AG-WH|seat.ag-wh|WAREHOUSE|poll 2|true;AG-MF|seat.ag-mf|PLANNING|poll 2|true;AG-QC|seat.ag-qc|QC|poll 2|true;AG-SHIP|seat.ag-ship|WAREHOUSE|poll 2|true;AG-SERVICE|seat.ag-service|SERVICE|poll 2|true;AG-FIN|seat.ag-fin|FINANCIAL|poll 2|true"
 as "$CEO_TOKEN" GET $AI/admin/seats
-check "ai seats: the CEO reads exactly the ten seats (PB8: OPS-DATA is the eighth, P9: AUDIT the ninth, P2: MF-DISPATCH the tenth) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
-check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 10'
+check "ai seats: the CEO reads exactly the twenty-three seats (the ten assistant seats and the thirteen process agents AG-*: the coordinator and one per specialty) with their service users, roles and schedules" ".success and ([.data[]|.code+\"|\"+.serviceUserName+\"|\"+.roles+\"|\"+.schedule+\"|\"+(.enabled|tostring)]|join(\";\")) == \"$AISEATS\""
+check "ai seats: no seat has run yet" '.success and ([.data[]|select(.lastRun == null)]|length) == 23'
 as "$WH_TOKEN" GET $AI/admin/seats; nomsg "ai seats: a storekeeper cannot list the seats" "$AINOTALLOWED"
 as "$WH_TOKEN" POST $AI/admin/seats/enable '{"code":"CEO-BRIEF","enabled":false}'; nomsg "ai seats: a storekeeper cannot switch a seat" "$AINOTALLOWED"
 as "$CEO_TOKEN" POST $AI/admin/seats/run '{"code":"CEO-BRIEF"}'; nomsg "ai seats: the CEO reads the seats but cannot run one" "$AINOTALLOWED"
@@ -8195,6 +8195,8 @@ as "$CEO_TOKEN" GET "$AI/admin/seats"; check "ai seats: the CEO-BRIEF seat now s
 
 # --- WH-REORDER: one draft purchase request for the items under their minimum that no open request asks for and no open order covers
 item AIWH1 "{\"code\":\"50.10.12.031.1\",\"title\":\"قطعه آزمون صندلی انبار یک\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":50,\"requiresIncomingInspection\":false}" "ai seat low-stock item 1"
+# agent layer: the warehouse agent (AG-WH, step WH.PR.REORDER) makes these drafts when its step is on; this block tests the old seat job, so the PMO switches the step off (the agents block switches it on again)
+as "$ADMIN_TOKEN" POST agents/steps/enable '{"code":"WH.PR.REORDER","enabled":false}'; check "ai reorder: the PMO switches the agent step WH.PR.REORDER off, so the seat job is not superseded" '.success == true'
 airun WH-REORDER "$TODAY"; AIWHOUT=$(val .data.outputs); AIWHST=$(val .data.status)
 [ "$AIWHST" = "2" ] && ok "ai reorder: the run succeeded" || bad "ai reorder: the run succeeded (status $AIWHST)"
 AIWHNUM=${AIWHOUT##*request=}
@@ -8743,7 +8745,7 @@ ceoc "ceo trend: the trend of salesBacklog ends with the backlog of the overview
 rm -f "$CEOOV"
 TOKEN=$ADMIN_TOKEN
 
-# ==============================================================================================================# CEO DRILLS (release D1, part A2): the 68 detail tables behind the KPIs and charts of the CEO dashboard (GET ceo/drills, GET ceo/drill)
+# ==============================================================================================================# CEO DRILLS (release D1, part A2): the 70 detail tables behind the KPIs and charts of the CEO dashboard (GET ceo/drills, GET ceo/drill)
 # Every drill is compared with what the module itself answers in this script (its own list or report, or the figures of its dashboards read as the same user at the same moment); no figure is typed in.
 # =====================================================================================================================
 CD=ceo
@@ -8752,16 +8754,16 @@ CDNOTALLOWED="شما مجوز این کار را ندارید."
 cdrill() { as "${3:-$CEO_TOKEN}" GET "$CD/drill?key=$1${2:+&$2}"; }
 # cdmsg NAME MESSAGE : the last answer was refused with exactly this message
 cdmsg() { if jq -e --arg m "$2" '.success == false and .message == $m' "$B" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
-CDKEYS='["ai.notes_new","ai.seat_runs","fin.bank_unreconciled","fin.cash_accounts","fin.cheques_due","fin.cost_by_month","fin.payables_by_supplier","fin.payables_overdue","fin.project_profitability","fin.receivable_invoices_overdue","fin.receivables_by_customer","fin.revenue_by_month","fin.vouchers_waiting","inv.items_below_minimum","inv.material_requests_open","inv.quarantine","inv.slow_moving","inv.stock_value_by_warehouse","inv.top_movements","mf.machines_down","mf.maintenance_overdue","mf.oee_by_work_center","mf.orders_by_status","mf.orders_late","mf.work_center_load","of.attendance_month","of.decisions_overdue","of.leave_requests_pending","of.letters_waiting","pc.change_requests_open","pc.client_responses_overdue","pc.guarantees_expiring","pc.initiation_overdue","pc.late_activities","pc.milestones_next","pc.penalty_exposure","pc.portfolio","pr.blocked_suppliers","pr.invoices_waiting","pr.late_lines","pr.orders_open","pr.payments_waiting","pr.requests_open","pr.spend_by_supplier","pr.supplier_on_time","qc.calibration_due","qc.capa_overdue","qc.complaints_open","qc.documents_waiting","qc.h_points_pending","qc.ncr_open","sl.customers_top","sl.hit_rate_by_month","sl.inquiries_open","sl.lost_by_reason","sl.orders_open","sl.orders_waiting_credit","sl.pipeline_by_stage","sl.proposals_due","sl.proposals_waiting","sl.quotations_expiring","sv.ltsa_expiring","sv.orders_open","sv.requests_open","sv.sla_breaches","sv.survey_by_month","sv.units_by_customer","sv.warranty_cost_by_month"]'
+CDKEYS='["ag.board","ag.stuck","ai.notes_new","ai.seat_runs","fin.bank_unreconciled","fin.cash_accounts","fin.cheques_due","fin.cost_by_month","fin.payables_by_supplier","fin.payables_overdue","fin.project_profitability","fin.receivable_invoices_overdue","fin.receivables_by_customer","fin.revenue_by_month","fin.vouchers_waiting","inv.items_below_minimum","inv.material_requests_open","inv.quarantine","inv.slow_moving","inv.stock_value_by_warehouse","inv.top_movements","mf.machines_down","mf.maintenance_overdue","mf.oee_by_work_center","mf.orders_by_status","mf.orders_late","mf.work_center_load","of.attendance_month","of.decisions_overdue","of.leave_requests_pending","of.letters_waiting","pc.change_requests_open","pc.client_responses_overdue","pc.guarantees_expiring","pc.initiation_overdue","pc.late_activities","pc.milestones_next","pc.penalty_exposure","pc.portfolio","pr.blocked_suppliers","pr.invoices_waiting","pr.late_lines","pr.orders_open","pr.payments_waiting","pr.requests_open","pr.spend_by_supplier","pr.supplier_on_time","qc.calibration_due","qc.capa_overdue","qc.complaints_open","qc.documents_waiting","qc.h_points_pending","qc.ncr_open","sl.customers_top","sl.hit_rate_by_month","sl.inquiries_open","sl.lost_by_reason","sl.orders_open","sl.orders_waiting_credit","sl.pipeline_by_stage","sl.proposals_due","sl.proposals_waiting","sl.quotations_expiring","sv.ltsa_expiring","sv.orders_open","sv.requests_open","sv.sla_breaches","sv.survey_by_month","sv.units_by_customer","sv.warranty_cost_by_month"]'
 
 # --- the catalogue and who may read it
 as "$CEO_TOKEN" GET $CD/drills
-check "ceo drills: the CEO reads the catalogue: exactly the 68 keys of the contract, once each" ".success and (.data|length) == 68 and ([.data[].key]|sort) == $CDKEYS"
-check "ceo drills: 11 finance, 10 sales, 8 project, 6 production, 6 quality, 6 inventory, 8 procurement, 7 service, 4 office and 2 AI drills, all for CEO,PMO, each titled and described in Persian" '([.data[]|.module]|group_by(.)|map({(.[0]):length})|add) == {"finance":11,"sales":10,"projects":8,"production":6,"quality":6,"inventory":6,"procurement":8,"service":7,"office":4,"ai":2} and ([.data[].roles]|unique) == ["CEO,PMO"] and ([.data[]|select((.title|length) == 0 or (.description|length) == 0)]|length) == 0'
+check "ceo drills: the CEO reads the catalogue: exactly the 70 keys of the contract, once each" ".success and (.data|length) == 70 and ([.data[].key]|sort) == $CDKEYS"
+check "ceo drills: 11 finance, 10 sales, 8 project, 6 production, 6 quality, 6 inventory, 8 procurement, 7 service, 4 office and 4 AI drills (two of them of the agent layer), all for CEO,PMO, each titled and described in Persian" '([.data[]|.module]|group_by(.)|map({(.[0]):length})|add) == {"finance":11,"sales":10,"projects":8,"production":6,"quality":6,"inventory":6,"procurement":8,"service":7,"office":4,"ai":4} and ([.data[].roles]|unique) == ["CEO,PMO"] and ([.data[]|select((.title|length) == 0 or (.description|length) == 0)]|length) == 0'
 check "ceo drills: 54 parameters in all; the portfolio takes status, the NCR list severity and onlyOverdue, the revenue months from and to, nothing else is required" '([.data[].parameters[]]|length) == 54 and ([.data[].parameters[]|select(.required)]|length) == 0 and ([.data[]|select(.key == "pc.portfolio")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "qc.ncr_open")|.parameters[]|[.name,.type]]) == [["severity","string"],["onlyOverdue","bool"]] and ([.data[]|select(.key == "fin.revenue_by_month")|.parameters[]|[.name,.type]]) == [["from","date"],["to","date"]] and ([.data[]|select(.key == "fin.cheques_due")|.parameters[]|[.name,.type]]) == [["kind","string"],["days","int"]]'
 check "ceo drills: the drills behind the counts of the overview take the parameter that gives the same records: pr.requests_open status, of.letters_waiting stage and mineOnly, of.leave_requests_pending status, sv.orders_open goodwillOnly, qc.calibration_due days, inv.top_movements from, to and kind" '([.data[]|select(.key == "pr.requests_open")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "of.letters_waiting")|.parameters[]|[.name,.type]]) == [["stage","string"],["mineOnly","bool"]] and ([.data[]|select(.key == "of.leave_requests_pending")|.parameters[]|[.name,.type]]) == [["status","string"]] and ([.data[]|select(.key == "sv.orders_open")|.parameters[]|[.name,.type]]) == [["goodwillOnly","bool"]] and ([.data[]|select(.key == "qc.calibration_due")|.parameters[]|[.name,.type]]) == [["days","int"]] and ([.data[]|select(.key == "inv.top_movements")|.parameters[]|[.name,.type]]) == [["from","date"],["to","date"],["kind","string"]]'
 as "$ADMIN_TOKEN" GET $CD/drills
-check "ceo drills: the PMO reads the same 68 keys" ".success and (.data|length) == 68 and ([.data[].key]|sort) == $CDKEYS"
+check "ceo drills: the PMO reads the same 70 keys" ".success and (.data|length) == 70 and ([.data[].key]|sort) == $CDKEYS"
 as "$WH_TOKEN" GET $CD/drills; cdmsg "ceo drills: a storekeeper cannot read the catalogue" "$CDNOTALLOWED"
 cdrill fin.cash_accounts "" "$WH_TOKEN"; cdmsg "ceo drills: a storekeeper cannot read a drill" "$CDNOTALLOWED"
 as "$FM_TOKEN" GET $CD/drills; cdmsg "ceo drills: the finance manager (who reads the finance module) cannot read the CEO catalogue" "$CDNOTALLOWED"
@@ -13121,6 +13123,56 @@ for RID in $PB2REQS; do
 done
 [ "$PB2NREQ" = "2" ] && ok "pb2 fix: both draft requests were checked" || bad "pb2 fix: both draft requests were checked (got $PB2NREQ)"
 as "$PLAN_TOKEN" GET procurement/requests/$PB2RQ; check "pb2 fix: the request a person made is untouched by the balance (still approved, still 2)" '.success and .data.status == 2 and .data.lines[0].quantity == 2'
+TOKEN=$ADMIN_TOKEN
+
+# ------------------------------------------------------------------------------------------ AGENT LAYER (A1 + station 6): the processes are made by AI agents, people decide at the gates
+# The scheduler does not start the agents here (Ai__Jobs=false); the PMO runs them by hand through the seat page, as the other seats of this script.
+AG=agents; AGLNOT="شما مجوز این کار را ندارید."
+as "$ADMIN_TOKEN" GET $AG/steps
+check "agl: the PMO reads the step catalogue; the reorder step is the one switched off above, every other step is on" '.success and ([.data[]|select(.enabled == false)|.code]) == ["WH.PR.REORDER"] and ([.data[]|select(.code == "PROC.PO.APPROVE")][0]|(.kind == 2 and .station == 6))'
+AGLSTEPS=$(val '.data|length')
+check "agl: every step belongs to a process agent AG-* whose seat is on, and has a Persian title" '([.data[]|select((.agentCode|startswith("AG-")|not) or .seatEnabled != true or (.title|length) == 0)]|length) == 0'
+as "$WH_TOKEN" GET $AG/steps; nomsg "agl: a storekeeper cannot read the step catalogue" "$AGLNOT"
+as "$CEO_TOKEN" POST $AG/steps/enable '{"code":"WH.PR.REORDER","enabled":true}'; nomsg "agl: the CEO reads the steps but cannot switch one (PMO only)" "$AGLNOT"
+as "$ADMIN_TOKEN" POST $AG/steps/enable '{"code":"NO.SUCH.STEP","enabled":true}'; nomsg "agl: an unknown step is refused" "گام ایجنت پیدا نشد"
+as "$ADMIN_TOKEN" POST $AG/steps/enable '{"code":"WH.PR.REORDER","enabled":true}'; check "agl: the PMO switches the reorder step on again" '.success == true'
+as "$ADMIN_TOKEN" GET $AG/steps; check "agl: now every step is on and the catalogue has the same steps" ".success and ([.data[]|select(.enabled == false)]|length) == 0 and (.data|length) == $AGLSTEPS"
+as "$WH_TOKEN" GET "$AG/inbox?PageNumber=1&PageSize=50"; check "agl: every signed-in person opens his gate inbox" '.success == true and (.data.data|type) == "array"'
+as "$WH_TOKEN" GET $AG/inbox/counts; check "agl: ... and its counters add up" '.success and .data.total == (.data.humanGate + .data.physical + .data.input)'
+as "$WH_TOKEN" GET $AG/board; nomsg "agl: the master board is not for a storekeeper" "$AGLNOT"
+as "$WH_TOKEN" POST $AG/inbox/return '{"id":0,"reason":"آزمون"}'; nomsg "agl: a task that does not exist cannot be sent back" "کار ایجنت پیدا نشد"
+# the warehouse agent: a new item under its minimum, with no price history
+item AGL1 "{\"code\":\"50.10.12.041.1\",\"title\":\"قطعه آزمون ایجنت انبار\",\"unit\":\"عدد\",\"trackingMode\":0,\"minStock\":40,\"requiresIncomingInspection\":false}" "agent layer low-stock item"
+as "$WH_TOKEN" GET inventory/alerts/reorder; AGLN=$(jq '[.data[]|select(.openRequest == false and .suggestedQuantity > 0)]|length' "$B"); [ "${AGLN:-0}" -gt 100 ] && AGLN=100
+check "agl: the reorder list has the new item for 80 without an open request" ".success and ([.data[]|select(.itemId == $AGL1 and .openRequest == false and .suggestedQuantity == 80)]|length) == 1"
+airun AG-WH; AGLST=$(val .data.status)
+[ "$AGLST" = "2" ] && ok "agl: the run of the warehouse agent succeeded" || bad "agl: the run of the warehouse agent succeeded (status $AGLST)"
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=WH.PR.REORDER&PageNumber=1&PageSize=50"
+check "agl: one reorder task, done by the agent, names the draft request it made" '.success and (.data.data|length) == 1 and (.data.data[0]|(.state == 10 and .agentCode == "AG-WH" and .kind == 1 and .outputType == "PurchaseRequest" and (.outputId|type) == "number"))'
+AGLPR=$(val '.data.data[0].outputId'); AGLT=$(val '.data.data[0].id')
+as "$ADMIN_TOKEN" GET "procurement/requests/${AGLPR:-0}"
+check "agl: the draft is from the reorder point, made by the agent's service user, with every item of the list ($AGLN lines) and the new item for 80; nobody approved it" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and (.data.lines|length) == $AGLN and ([.data.lines[]|select(.itemId == $AGL1 and .quantity == 80)]|length) == 1"
+as "$ADMIN_TOKEN" GET "$AG/tasks/${AGLT:-0}"; check "agl: the task keeps its history from queued to done, each event by the seat AG-WH" '.success and ([.data.events[].toState]|(first == 1 and last == 10)) and ([.data.events[].seatCode]|unique) == ["AG-WH"]'
+# the agent does not submit a request without prices: a planner gets an input task, the storekeeper does not see it
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=PROC.PR.PRICE.WH&OpenOnly=true&PageNumber=1&PageSize=50"
+check "agl: the unpriced draft waits for a person: one input task for planning on that request" ".success and ([.data.data[]|select(.targetId == ${AGLPR:-0})]|length) == 1 and ([.data.data[]|select(.targetId == ${AGLPR:-0})][0]|(.state == 6 and .gateRoles == \"PLANNING\" and .link == \"/procurement/requests/${AGLPR:-0}\"))"
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=PROC.PR.SUBMIT.WH&OpenOnly=true&PageNumber=1&PageSize=50"
+check "agl: ... and the submit task of the agent is back in its queue with the reason, no attempt counted" ".success and ([.data.data[]|select(.targetId == ${AGLPR:-0})][0]|(.state == 1 and .attemptCount == 0 and (.lastError|contains(\"قیمت برآوردی ردیف‌ها کامل نیست\"))))"
+as "$PLAN_TOKEN" GET "$AG/inbox?PageNumber=1&PageSize=0"; check "agl: the planner finds it in his gate inbox" ".success and ([.data.data[]|select(.stepCode == \"PROC.PR.PRICE.WH\" and .targetId == ${AGLPR:-0})]|length) == 1"
+as "$WH_TOKEN" GET "$AG/inbox?PageNumber=1&PageSize=0"; check "agl: the storekeeper does not" ".success and ([.data.data[]|select(.stepCode == \"PROC.PR.PRICE.WH\")]|length) == 0"
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=PROC.PR.PRICE.WH&OpenOnly=true&PageNumber=1&PageSize=50"; AGLPT=$(jq "[.data.data[]|select(.targetId == ${AGLPR:-0})][0].id // 0" "$B")
+as "$WH_TOKEN" POST $AG/inbox/return "{\"id\":${AGLPT:-0},\"reason\":\"آزمون\"}"; nomsg "agl: a person outside the gate roles cannot send the task back" "این کار در کارتابل نقش شما نیست"
+as "$PLAN_TOKEN" POST $AG/inbox/return "{\"id\":${AGLPT:-0},\"reason\":\"\"}"; nomsg "agl: sending back needs a reason" "علت برگشت به ایجنت را بنویسید"
+# a second run makes no second draft (the list has no item without an open request now)
+airun AG-WH
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=WH.PR.REORDER&PageNumber=1&PageSize=50"; check "agl: a second run of the agent makes no second reorder task" '.success and (.data.data|length) == 1'
+# the coordinator and the board
+airun AG-MASTER; AGLMS=$(val .data.status)
+[ "$AGLMS" = "2" ] && ok "agl: the coordinator (AG-MASTER) reconciles every step without an error" || bad "agl: the coordinator (AG-MASTER) reconciles every step without an error (status $AGLMS, $(val .data.error))"
+as "$CEO_TOKEN" GET $AG/board
+check "agl: the CEO reads the master board: 13 stations in order, one row for the tasks of no contract, with 13 cells" '.success and ([.data.stations[].number]) == [1,2,3,4,5,6,7,8,9,10,11,12,13] and ([.data.rows[]|select(.contractId == null)]|length) == 1 and ([.data.rows[]|select(.contractId == null)][0].cells|length) == 13'
+cdrill ag.board; check "agl: the CEO assistant reads the same board through its drill" '.success == true'
+as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=agent&PageSize=0"; check "agl: the agent runs are in the AI audit trail (kind agent)" '.success and ([.data.data[].kind]|unique) == ["agent"]'
 TOKEN=$ADMIN_TOKEN
 
 # ------------------------------------------------------------------------------------------ access fixes found by the UI crawl

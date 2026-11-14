@@ -206,7 +206,8 @@ namespace Services.NasbNiro.Ai
 
             var run = new AiSeatRun { SeatId = seat.Id, StartedAt = now, Status = AiSeatRunStatus.Running, AsOf = asOf, IsScheduled = scheduled };
             uow.Set<AiSeatRun>().Add(run);
-            audit.Add(AiAuditKinds.Seat, $"run started as of {asOf:yyyy-MM-dd}{(scheduled ? " (scheduled)" : string.Empty)}", seatCode: def.Code);
+            // the coordinator ticks every two minutes: its scheduled tick is written to the audit only when it changed something (the run row is always written)
+            if (!(scheduled && def.Code == Agents.AgentCodes.Master)) audit.Add(AiAuditKinds.Seat, $"run started as of {asOf:yyyy-MM-dd}{(scheduled ? " (scheduled)" : string.Empty)}", seatCode: def.Code);
             try
             {
                 await uow.SaveChangesAsync(ct);
@@ -273,7 +274,8 @@ namespace Services.NasbNiro.Ai
                 closed.FinishedAt = DateTimeOffset.Now;
                 closed.Outputs = AiText.Cut(result.Summary, 4000);
                 closed.Error = AiText.Cut(result.Error, 4000);
-                audit.Add(AiAuditKinds.Seat, $"run {closed.Id} {closed.Status.ToString().ToLowerInvariant()}; {AiText.Cut(result.Summary, 500)}{(string.IsNullOrEmpty(result.Error) ? string.Empty : "; " + AiText.Cut(result.Error, 800))}", seatCode: def.Code);
+                bool quietTick = run.IsScheduled && def.Code == Agents.AgentCodes.Master && result.Quiet && closed.Status == AiSeatRunStatus.Succeeded;
+                if (!quietTick) audit.Add(AiAuditKinds.Seat, $"run {closed.Id} {closed.Status.ToString().ToLowerInvariant()}; {AiText.Cut(result.Summary, 500)}{(string.IsNullOrEmpty(result.Error) ? string.Empty : "; " + AiText.Cut(result.Error, 800))}", seatCode: def.Code);
                 await uow.SaveChangesAsync(CancellationToken.None);
 
                 // the alert: a failure is shown to the PMO, a success closes it. (Skipped is a known state: the model is down or the service is stopping; the run is repeated.)
@@ -335,13 +337,36 @@ namespace Services.NasbNiro.Ai
                 if (s.Code == AiSeatCodes.Audit && string.Equals(_configuration?["Audit:Jobs"], "false", StringComparison.OrdinalIgnoreCase)) continue;
                 // Production:Jobs=false switches the production planning seat off together with the other production jobs
                 if (s.Code == AiSeatCodes.MfDispatch && string.Equals(_configuration?["Production:Jobs"], "false", StringComparison.OrdinalIgnoreCase)) continue;
+                // Agents:Jobs=false keeps the scheduler from starting any AG-* seat (the CI runs the agents by hand); a run by hand through the admin page still works. Absent means on.
+                if (Agents.AgentCodes.IsAgent(s.Code) && string.Equals(_configuration?[Agents.AgentConfigKeys.Jobs], "false", StringComparison.OrdinalIgnoreCase)) continue;
                 AiSchedule schedule = AiSchedule.Parse(s.Schedule);
                 if (schedule == null || !schedule.IsDue(now, s.LastAttempt, s.LastSuccess, Minutes(AiConfigKeys.RetryMinutes, DefaultRetryMinutes))) continue;
                 if (IsBackedOff(s.LastStatus, s.LastError, s.LastAttempt, now, Minutes(AiConfigKeys.SkipBackoffMinutes, DefaultSkipBackoffMinutes))) continue;
+                // a process agent is started only when it has work (or when its last run is old: the safety net); the coordinator reconciles every tick. A run by hand always runs.
+                if (Agents.AgentCodes.IsProcessAgent(s.Code) && !await HasAgentWorkAsync(s.Code, s.LastAttempt, now, ct)) continue;
                 var result = await RunCoreAsync(s.Code, now.Date, true, users, ct);
                 if (result.Success) started++;
             }
             return started;
+        }
+
+        /// <summary>The longest time a process agent may go without a scheduled run although it has no work (the safety net: a missed signal is found at the latest then).</summary>
+        public static readonly TimeSpan AgentSafetyNet = TimeSpan.FromMinutes(30);
+
+        private async Task<bool> HasAgentWorkAsync(string code, DateTime? lastAttempt, DateTime now, CancellationToken ct)
+        {
+            if (!lastAttempt.HasValue || now - lastAttempt.Value >= AgentSafetyNet) return true;
+            try
+            {
+                using IServiceScope scope = _scopes.CreateScope();
+                return await Agents.AgentWorkProbe.HasWorkAsync(scope.ServiceProvider.GetRequiredService<IUnitOfWork>(), code, new DateTimeOffset(now), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "AI seats: the work of agent {Seat} could not be checked; it runs", code);
+                return true;
+            }
         }
 
         /// <summary>The model was down at the last scheduled run: the seat waits for the back-off before it asks again (instead of trying every few minutes).</summary>

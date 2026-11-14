@@ -35,6 +35,7 @@ namespace Services.NasbNiro.Ceo.Drills
             list.AddRange(ServiceDrills.Build());
             list.AddRange(OfficeDrills.Build());
             list.AddRange(AiDrills.Build());
+            list.AddRange(AgentDrills.Build());
             return list;
         }
 

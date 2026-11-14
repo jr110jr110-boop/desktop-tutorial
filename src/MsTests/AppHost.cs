@@ -91,8 +91,12 @@ namespace MsTests
         {
         }
 
+        /// <summary>A host with extra registrations (the fake steps of the agent framework tests): <paramref name="configureServices"/> runs after the application's own registrations.</summary>
+        public static AppHost WithServices(string databaseName, Action<IServiceCollection> configureServices, IDictionary<string, string> settings = null) =>
+            new AppHost(databaseName, settings, null, configureServices);
+
         /// <param name="settings">Extra configuration values (for example <c>Identity:AuditHmacKey</c>) that win over appsettings.json.</param>
-        private AppHost(string databaseName, IDictionary<string, string> settings, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] sqlInterceptors)
+        private AppHost(string databaseName, IDictionary<string, string> settings, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] sqlInterceptors, Action<IServiceCollection> configureServices = null)
         {
             DatabaseName = databaseName;
             var services = new ServiceCollection();
@@ -159,6 +163,7 @@ namespace MsTests
                 if (sql) optionsBuilder.AddInterceptors(sqlInterceptors);
             });
 
+            configureServices?.Invoke(services);
             Provider = services.BuildServiceProvider();
             if (!sql) Provider.RunScopedService<ApplicationDbContext>(context => context.Database.EnsureCreated());
             Http = Provider.GetRequiredService<IHttpContextAccessor>();

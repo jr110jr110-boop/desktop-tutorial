@@ -42,6 +42,9 @@ namespace Services.NasbNiro.Ai
         public const string Audit = "AUDIT";
         public const string MfDispatch = "MF-DISPATCH";
 
+        // the agent layer: the process agents (AgentCodes) and the coordinator; they are seats like the others
+        public const string AgMaster = Agents.AgentCodes.Master;
+
         /// <summary>The user the evaluation runs as (it is not a seat).</summary>
         public const string Eval = "EVAL";
     }
@@ -79,6 +82,22 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = AiSeatCodes.Audit, Title = "ممیز داخلی هوشمند (ISO 19011)", Roles = new[] { "AUDITOR" }, Schedule = "daily 05:30", OutputKind = "AuditFindings", UsesModel = false },
             // production P2 part D: the planning seat; rule-based, read-only (PLANNING reads production and approves nothing there); it leaves the dispatch plan, bottleneck and late-risk notes
             new AiSeatDefinition { Code = AiSeatCodes.MfDispatch, Title = "برنامه‌ریز هوشمند تولید (اولویت کارها و گلوگاه)", Roles = new[] { "PLANNING" }, Schedule = "poll 60", OutputKind = "ProductionDispatch", UsesModel = false },
+            // the agent layer: one agent per specialty makes the documents of its station with fixed rules (no language model); people only decide at the gates and do the physical work.
+            // The role of an agent is the least role that the existing services ask of the maker of its documents; it holds no approving role, and the data layer refuses an approval by any seat (SeatApprovalGuard).
+            // AG-MASTER has no role: it reads through the unit of work and writes only the agent, AI and inbox tables.
+            new AiSeatDefinition { Code = Agents.AgentCodes.Master, Title = "ایجنت اصلی (هماهنگ‌کننده فرایندها)", Roles = new string[0], Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Sales, Title = "ایجنت فروش و پیشنهاد", Roles = new[] { "SALES" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Contract, Title = "ایجنت قرارداد و بازنگری قرارداد", Roles = new[] { "COMMERCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Init, Title = "ایجنت آغاز پروژه", Roles = new[] { "PLANNING" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Plan, Title = "ایجنت برنامه‌ریزی و کنترل پروژه", Roles = new[] { "PLANNING" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Eng, Title = "ایجنت مهندسی", Roles = new[] { "ENGINEER" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Proc, Title = "ایجنت تدارکات و خرید", Roles = new[] { "COMMERCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Wh, Title = "ایجنت انبار", Roles = new[] { "WAREHOUSE" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Mf, Title = "ایجنت تولید", Roles = new[] { "PLANNING" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Qc, Title = "ایجنت کیفیت", Roles = new[] { "QC" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Ship, Title = "ایجنت بسته‌بندی، ارسال و تحویل", Roles = new[] { "WAREHOUSE" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Service, Title = "ایجنت خدمات پس از فروش", Roles = new[] { "SERVICE" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Fin, Title = "ایجنت مالی و سپیدار", Roles = new[] { "FINANCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
         };
 
         /// <summary>The evaluation user: it reads like the CEO (★), it is not a seat and has no row in AiSeats.</summary>

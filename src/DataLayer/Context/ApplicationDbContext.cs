@@ -9,6 +9,7 @@ using Common.PersianToolkit;
 using DataLayer.Configurations.EF;
 using DataLayer.Configurations.EF.Identity;
 using DataLayer.Configurations.EF.NasbNiro;
+using DataLayer.Configurations.EF.NasbNiro.Agents;
 using DataLayer.Configurations.EF.NasbNiro.Attachments;
 using DataLayer.Configurations.EF.NasbNiro.EngChange;
 using DataLayer.Configurations.EF.NasbNiro.AuditSeat;
@@ -359,6 +360,7 @@ namespace DataLayer.Context
             setShadowProperties();
             this.ApplyCorrectYeKe();
             AuditorWriteGuard.Check(this, this.GetService<IHttpContextAccessor>());   // Package 9: the AUDIT seat writes only its own tables
+            SeatApprovalGuard.Check(this, this.GetService<IHttpContextAccessor>());   // agent layer: no AI seat records a decision of a person; the AG-MASTER seat writes only the agent, AI and inbox tables
             FinanceAuditTrail.Capture(this, this.GetService<IHttpContextAccessor>());
         }
 
@@ -506,6 +508,9 @@ namespace DataLayer.Context
 
             // Package 9: the AI internal auditor (audit programme, runs, findings, reports, process audits)
             builder.AddAuditSeatConfigurations();
+
+            // Agent layer: process agents' tasks, their events and the step switches
+            builder.AddAgentConfigurations();
 
             // This should be placed here, at the end.
             builder.AddAuditableShadowProperties();

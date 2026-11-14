@@ -122,15 +122,20 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------ catalogue and identity
 
         [TestMethod]
-        public void Catalogue_Has_The_Ten_Seats_With_Valid_Schedules()
+        public void Catalogue_Has_The_Ten_Seats_And_The_Thirteen_Agents_With_Valid_Schedules()
         {
             CollectionAssert.AreEqual(
-                new[] { "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "FIN-ANOMALY", "OFFICE-DRAFT", "OPS-DATA", "AUDIT", "MF-DISPATCH" },
+                new[]
+                {
+                    "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "FIN-ANOMALY", "OFFICE-DRAFT", "OPS-DATA", "AUDIT", "MF-DISPATCH",
+                    "AG-MASTER", "AG-SALES", "AG-CONTRACT", "AG-INIT", "AG-PLAN", "AG-ENG", "AG-PROC", "AG-WH", "AG-MF", "AG-QC", "AG-SHIP", "AG-SERVICE", "AG-FIN",
+                },
                 AiSeatCatalog.All.Select(s => s.Code).ToArray());
             foreach (AiSeatDefinition s in AiSeatCatalog.All)
             {
                 Assert.IsNotNull(AiSchedule.Parse(s.Schedule), s.Code);
-                Assert.IsTrue(s.Roles.Length > 0 && s.Roles.All(r => r == r.ToUpperInvariant()), s.Code);
+                // the coordinator AG-MASTER holds no role at all (it reads through the unit of work); every other seat holds at least one
+                Assert.IsTrue((s.Roles.Length > 0 || s.Code == "AG-MASTER") && s.Roles.All(r => r == r.ToUpperInvariant()), s.Code);
                 Assert.IsTrue(s.UserName.StartsWith("seat.") && s.UserName == s.UserName.ToLowerInvariant(), s.Code);
             }
             Assert.AreEqual("seat.wh-reorder", AiSeatCatalog.Find("WH-REORDER").UserName);

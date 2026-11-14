@@ -12,7 +12,12 @@ namespace Services.NasbNiro.Integrity
     public static partial class SafetyProfile
     {
         /// <summary>The AI seats that only draft or narrate (a brief, a weekly report, a reorder proposal, a comparison, an NCR draft, an office draft): one PMO or CEO user may switch them OFF at once with a reason.</summary>
-        public static readonly IReadOnlyList<string> DraftingSeats = new[] { "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "OFFICE-DRAFT" };
+        public static readonly IReadOnlyList<string> DraftingSeats = new[]
+        {
+            "CEO-BRIEF", "PMO-WEEKLY", "WH-REORDER", "PROC-COMPARE", "QC-NCR-ASSIST", "OFFICE-DRAFT",
+            // the twelve process agents of the agent layer make drafts and documents for the gates; one PMO or CEO user may stop one at once. AG-MASTER is a control and stays two-person.
+            "AG-SALES", "AG-CONTRACT", "AG-INIT", "AG-PLAN", "AG-ENG", "AG-PROC", "AG-WH", "AG-MF", "AG-QC", "AG-SHIP", "AG-SERVICE", "AG-FIN",
+        };
 
         /// <summary>★ A seat switched off at once must be confirmed by a second person within this time, else the CEO is told.</summary>
         public static readonly TimeSpan SeatOffConfirmWithin = TimeSpan.FromHours(24);

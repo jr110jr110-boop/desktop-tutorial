@@ -81,3 +81,8 @@ api/v1/edms/approvers
 api/v1/edms/notices
 api/v1/edms/tenders
 api/v1/dashboards
+api/v1/agents/inbox
+api/v1/agents/inbox/counts
+api/v1/agents/tasks
+api/v1/agents/board
+api/v1/agents/steps
