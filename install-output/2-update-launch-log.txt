@@ -1,0 +1,27 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261114204047
+Username: runnervmm7ud1\runneradmin
+RunAs User: runnervmm7ud1\runneradmin
+Configuration Name: 
+Machine: runnervmm7ud1 (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\PMIS Install (1)\نصب\INNCO_Setup\Install-PMIS-Server.ps1 -NoPrompt
+Process ID: 7788
+PSVersion: 5.1.26100.33648
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.33648
+BuildVersion: 10.0.26100.33648
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+This computer is 'runnervmm7ud1', not 'PMIS'.
+User: runnervmm7ud1\runneradmin (must be the user that installed SQL Server)
+PMIS is already installed. Taking a backup before the update...
+Backup finished. If the update must be undone, the backup is in the backup folder (database\*.bak or *.bak.enc; an encrypted one is opened by install.ps1 -RestoreBackup).
+Existing installation: folder D:\INNCO, backups D:\INNCO\Backup, database IRNNCO
+**********************
+Windows PowerShell transcript end
+End time: 20261114204053
+**********************

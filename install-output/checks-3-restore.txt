@@ -1,0 +1,32 @@
+PASS  home page shows the user interface  http=200
+PASS  page address inside the program  http=200
+PASS  javascript asset  /assets/index.2e1fd34e.js http=200 type=text/javascript
+PASS  unknown API address answers 404  http=404
+PASS  https answers with the user interface  https://runnervmm7ud1/ http=200
+PASS  https answers carry the HSTS header  max-age=31536000
+PASS  plain http is for the server itself only  http://172.27.160.1/ is not served (ProtocolError)
+PASS  sign in as Admin (the first time the program asks for a new password)  token length=885
+PASS  the installer password is no longer in the settings file  password removed, marker present, https issuer, audit key present, remote access off, no machine folder
+PASS  contracts list (database query)  http=200 bytes=133
+PASS  download the uploaded document  http=200
+PASS  uploaded files on disk  2 files in UploadedDocuments
+PASS  backup task exists  state=Ready lastResult=0
+PASS  database backup files  IRNNCO_20261114_2040.bak.enc=12312648 IRNNCO_pre-update_20261114_2041.bak.enc=17817672 IRNNCO_20261114_2041.bak.enc=17817672 IRNNCO_before-restore_20261114_2042.bak.enc=17817672 IRNNCO_20261114_2042.bak.enc=17817672
+PASS  file backup copy  4 files
+PASS  the database is in the full recovery model  FULL
+PASS  the hourly log backup task repeats every hour  state=Ready lastResult=0
+PASS  a log backup was made (database\log)  IRNNCO_20261114_204028.trn.enc=114760 IRNNCO_20261114_204132.trn.enc=2998344 IRNNCO_20261114_204229.trn.enc=311368
+PASS  the backup log says the full and the log backup were made  both kinds of backup are in backup-log.txt
+PASS  database backups are encrypted: by SQL Server where the edition can, else at file level (no plain .bak or .trn stays)  IRNNCO_20261114_2042.bak.enc: file level (AES-256 with an HMAC seal), no plain .bak or .trn in the backup folder
+PASS  the uploaded files in the backup are encrypted at file level  3 files, all .enc
+PASS  the keys folder holds the file key, and the off-site copy never takes the keys  file-encryption.key.dpapi is there; backup.ps1 copies database and files only
+PASS  the backup certificate and its key are in the keys folder, and the audit key is sealed there  INNCO_BackupCert.cer, INNCO_BackupCert.pvk and audit-key.sealed.txt (sealed with the file key)
+PASS  the settings copy of the backup holds no secret  secrets replaced by REDACTED; the real file is not in the backup
+PASS  the install log that holds the backup key password is readable by administrators only  1 log file(s), access: administrators and SYSTEM
+PASS  the audit trail is hash-chained  478 rows since the chain began, every one chained, no fork; 0 older rows from before the chain are not counted
+PASS  the database refuses the program account to change or delete a row of the audit trail  IIS AppPool\INNCO is in pmis_app and not db_owner; DENY UPDATE, DELETE on dbo.FnAuditLogs; a test UPDATE was refused (229)
+PASS  the program does not change the database structure itself (Database:MigrateAtStart is false)  Database:MigrateAtStart = false; the installer applied the updates (WebApi.dll --migrate-only)
+PASS  the backup and restore-test account NT AUTHORITY\SYSTEM is NOT a sysadmin, but may create databases (dbcreator) and read the restore-test tables  sysadmin=0 dbcreator=1 SELECT on the compared tables
+PASS  old program files were brought over  old-upload.txt and old-doc.txt present
+PASS  old document served as a static file  http=200
+PASS  safety backup made before the restore  IRNNCO_before-restore_20261114_2042.bak.enc

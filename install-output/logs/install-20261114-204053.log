@@ -1,0 +1,104 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261114204053
+Username: runnervmm7ud1\runneradmin
+RunAs User: runnervmm7ud1\runneradmin
+Configuration Name: 
+Machine: runnervmm7ud1 (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\PMIS Install (1)\نصب\INNCO_Setup\Install-PMIS-Server.ps1 -NoPrompt
+Process ID: 7788
+PSVersion: 5.1.26100.33648
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.33648
+BuildVersion: 10.0.26100.33648
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+INNCO PMIS installer 1.1
+    Windows:        Microsoft Windows Server 2025 Datacenter (10.0.26100)
+    Computer:       runnervmm7ud1
+    Program folder: D:\INNCO\app
+    Backup folder:  D:\INNCO\Backup
+    Package:        source_sha=50417e73fd2a15558eee268d6d4cfc37db16bc3a
+    Package:        built_utc=2026-11-14T20:33:27Z
+    Package:        sdk=10.0.404
+    Package:        aspnetcore_runtime=Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+    WARNING: The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+==> IIS (web server)
+    OK: IIS is installed.
+
+==> .NET 10 Hosting Bundle
+    OK: Already installed.
+
+==> SQL Server
+    Instance: .\SQLEXPRESS
+    Version:  Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64)
+    Edition:  Express Edition (64-bit)
+    OK: Connected (SQL Server service account: NT Service\MSSQL$SQLEXPRESS).
+
+==> Folders and permissions
+    OK: D:\INNCO and D:\INNCO\Backup are limited to Administrators, SYSTEM and the services that need them.
+
+==> IIS application pool
+    Stopped application pool 'INNCO'.
+    OK: No managed code, always running, restarts daily at 03:00, runs as 'IIS AppPool\INNCO'.
+
+==> Program files
+    OK: Program copied to D:\INNCO\app
+
+==> Database 'IRNNCO'
+    OK: SQL Server Express cannot encrypt a backup itself: the backup files are encrypted at file level instead (AES-256 with an HMAC seal; key sealed by DPAPI in D:\INNCO\Backup\keys).
+    OK: The existing database is kept.
+    Backing up the database before the update: D:\INNCO\Backup\database\IRNNCO_pre-update_20261114_2041.bak
+    sql: Processed 2160 pages for database 'IRNNCO', file 'IRNNCO' on file 1.
+    sql: Processed 2 pages for database 'IRNNCO', file 'IRNNCO_log' on file 1.
+    sql: BACKUP DATABASE successfully processed 2162 pages in 0.093 seconds (181.577 MB/sec).
+    sql: The backup set on file 1 is valid.
+    OK: Safety backup made and checked before the update: D:\INNCO\Backup\database\IRNNCO_pre-update_20261114_2041.bak.enc
+    OK: 'NT AUTHORITY\SYSTEM' (backup and restore-test tasks) can back up, may create and drop databases (dbcreator) and read the tables the restore test compares; it is not a sysadmin.
+    OK: 'IIS AppPool\INNCO' can use the database (no password needed); the backup tasks can back it up.
+
+==> Settings (appsettings.Production.json)
+    OK: Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.
+
+==> IIS site 'INNCO' (HTTPS on port 443, plain HTTP on this computer only)
+    Certificate: kept the one the site uses now (CN=runnervmm7ud1, valid until 2031-11-14).
+    Public file of the certificate (for the client computers): D:\INNCO\certificates\innco-pmis.cer
+    OK: Site configured: https on port 443 (certificate CDE560DB1CAFCD4A3C42290AEDA8E72756CD4717), http on 127.0.0.1:80 only.
+
+==> Backups (scheduled tasks: full backup daily at 01:30, log backup every hour)
+    OK: Tasks 'INNCO daily backup' and 'INNCO hourly log backup': database and log backups to D:\INNCO\Backup\database, uploaded files to D:\INNCO\Backup\files; kept as long as the setting Backup:RetentionDays says (35 days by default).
+    OK: Task 'INNCO monthly restore test': on day 1 of every month at 03:00 the newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped. Result files: D:\INNCO\Backup\restore-test
+
+==> Database updates (applied by this script) and protection of the audit trail
+    OK: The database structure is up to date; the program does not change it itself any more.
+    OK: The database refuses the program's account to change or delete a row of the audit trail (FnAuditLogs, AiAuditEvents, AiMessages, AiToolCallLogs); it may only add rows.
+
+==> Start and check
+    Waiting for the program to start (the first start can take a few minutes)...
+    OK: API answers (200).
+    OK: User interface answers.
+    OK: Database structure is up to date (134 updates applied, last: 20261111145023_ProgressPrecisionFx1).
+    OK: HTTPS answers on port 443 with the chosen certificate.
+
+==> First backup (runs the scheduled task once)
+    2026-11-14 20:40:48  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261114_2040.bak.enc (11.7 MB), encrypted (file level, AES-256 + HMAC)
+    2026-11-14 20:40:48  Uploaded files OK: D:\INNCO\Backup\files (2 files, each encrypted at file level except the redacted settings copy)
+    2026-11-14 20:41:27  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261114_2041.bak.enc (17.0 MB), encrypted (file level, AES-256 + HMAC)
+    2026-11-14 20:41:27  Uploaded files OK: D:\INNCO\Backup\files (2 files, each encrypted at file level except the redacted settings copy)
+    OK: Backup works.
+    2026-11-14 20:41:27  Uploaded files OK: D:\INNCO\Backup\files (2 files, each encrypted at file level except the redacted settings copy)
+    2026-11-14 20:41:32  Log backup OK: D:\INNCO\Backup\database\log\IRNNCO_20261114_204132.trn.enc (2.9 MB), encrypted (file level, AES-256 + HMAC)
+    OK: Log backup works.
+
+Warnings:
+  - The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+Log file (send this one if something went wrong): D:\INNCO\logs\install-20261114-204053.log
+**********************
+Windows PowerShell transcript end
+End time: 20261114204135
+**********************

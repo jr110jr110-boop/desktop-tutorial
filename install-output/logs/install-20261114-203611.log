@@ -1,0 +1,123 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261114203611
+Username: runnervmm7ud1\runneradmin
+RunAs User: runnervmm7ud1\runneradmin
+Configuration Name: 
+Machine: runnervmm7ud1 (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\pkg\package-output\install.ps1 -AdminPassword Ci#Adm1n-Install-2026
+Process ID: 9980
+PSVersion: 5.1.26100.33648
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.33648
+BuildVersion: 10.0.26100.33648
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+INNCO PMIS installer 1.1
+    Windows:        Microsoft Windows Server 2025 Datacenter (10.0.26100)
+    Computer:       runnervmm7ud1
+    Program folder: D:\INNCO\app
+    Backup folder:  D:\INNCO\Backup
+    Package:        source_sha=50417e73fd2a15558eee268d6d4cfc37db16bc3a
+    Package:        built_utc=2026-11-14T20:33:27Z
+    Package:        sdk=10.0.404
+    Package:        aspnetcore_runtime=Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+    WARNING: The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+==> IIS (web server)
+    OK: IIS is installed.
+
+==> .NET 10 Hosting Bundle
+    Latest .NET 10 release: 10.0.15
+    Downloading https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.15/dotnet-hosting-10.0.15-win.exe
+    Download verified (SHA-512).
+    OK: Installed.
+
+==> SQL Server
+    Instance: .\SQLEXPRESS
+    Version:  Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64)
+    Edition:  Express Edition (64-bit)
+    OK: Connected (SQL Server service account: NT Service\MSSQL$SQLEXPRESS).
+
+==> Folders and permissions
+    OK: D:\INNCO and D:\INNCO\Backup are limited to Administrators, SYSTEM and the services that need them.
+
+==> IIS application pool
+    Created application pool 'INNCO'.
+    Stopped application pool 'INNCO'.
+    OK: No managed code, always running, restarts daily at 03:00, runs as 'IIS AppPool\INNCO'.
+
+==> Program files
+    OK: Program copied to D:\INNCO\app
+
+==> Database 'IRNNCO'
+    OK: SQL Server Express cannot encrypt a backup itself: the backup files are encrypted at file level instead (AES-256 with an HMAC seal; key sealed by DPAPI in D:\INNCO\Backup\keys).
+
+    ====================================================================================
+    ESCROW COPY OF THE BACKUP FILE KEY (shown once; it is in this install log and nowhere else)
+        M1tT46y/GBXc/+YAkHzqL0feVDzmk8XGA2Ayo8ClaQ0tJ3NnnDbAB+I/C0dHUtwYz1euNQHJCb5UAwPdls37+w==
+    The key file in the keys folder is sealed to THIS server (DPAPI). If this server is lost, the encrypted backups and
+    files can be opened on a new server only with this text (install.ps1 -BackupFileKey <text>).
+    Keep it apart from the backups and from the keys folder (a safe, not the off-site backup target). This log file is secret.
+    ====================================================================================
+
+
+    ====================================================================================
+    PASSWORD OF THE BACKUP KEY (shown once; it is in this install log and nowhere else)
+        viDn5Uqn2EH4DEbBaFJRjjQV
+    It protects the private key file D:\INNCO\Backup\keys\INNCO_BackupCert.pvk.
+    A backup can be restored on another server only with that file and this password.
+    Write the password down and keep it, and the keys folder, apart from the backups. This log file is secret.
+    ====================================================================================
+
+    OK: Created a new, empty database. The program creates its tables when it starts.
+    OK: 'NT AUTHORITY\SYSTEM' (backup and restore-test tasks) can back up, may create and drop databases (dbcreator) and read the tables the restore test compares; it is not a sysadmin.
+    OK: 'IIS AppPool\INNCO' can use the database (no password needed); the backup tasks can back it up.
+
+==> Settings (appsettings.Production.json)
+    OK: Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.
+
+==> IIS site 'INNCO' (HTTPS on port 443, plain HTTP on this computer only)
+    Stopped site 'Default Web Site' because it used port 80 or 443.
+    Created site 'INNCO'.
+    Certificate: made a self-signed certificate for runnervmm7ud1, localhost and 172.27.160.1, 10.1.0.55, 127.0.0.1 (valid until 2031-11-14).
+    Public file of the certificate (for the client computers): D:\INNCO\certificates\innco-pmis.cer
+    Firewall: port 443 opened.
+    OK: Site configured: https on port 443 (certificate CDE560DB1CAFCD4A3C42290AEDA8E72756CD4717), http on 127.0.0.1:80 only.
+
+==> Backups (scheduled tasks: full backup daily at 01:30, log backup every hour)
+    OK: Tasks 'INNCO daily backup' and 'INNCO hourly log backup': database and log backups to D:\INNCO\Backup\database, uploaded files to D:\INNCO\Backup\files; kept as long as the setting Backup:RetentionDays says (35 days by default).
+    OK: Task 'INNCO monthly restore test': on day 1 of every month at 03:00 the newest backup is restored into the scratch database IRNNCO_RESTORETEST, checked and dropped. Result files: D:\INNCO\Backup\restore-test
+
+==> Database updates (applied by this script) and protection of the audit trail
+    OK: The database structure is up to date; the program does not change it itself any more.
+    OK: The database refuses the program's account to change or delete a row of the audit trail (FnAuditLogs, AiAuditEvents, AiMessages, AiToolCallLogs); it may only add rows.
+
+==> Start and check
+    Waiting for the program to start (the first start can take a few minutes)...
+    OK: API answers (200).
+    OK: User interface answers.
+    OK: Database structure is up to date (134 updates applied, last: 20261111145023_ProgressPrecisionFx1).
+    OK: HTTPS answers on port 443 with the chosen certificate.
+    OK: The account 'Admin' exists and its temporary password works (the program asks for a new password at the first sign-in).
+    OK: The temporary password is no longer in the settings file.
+
+==> First backup (runs the scheduled task once)
+    2026-11-14 20:40:23  Database backup OK: D:\INNCO\Backup\database\IRNNCO_20261114_2040.bak.enc (11.3 MB), encrypted (file level, AES-256 + HMAC)
+    2026-11-14 20:40:23  Uploaded files OK: D:\INNCO\Backup\files (1 files, each encrypted at file level except the redacted settings copy)
+    OK: Backup works.
+    2026-11-14 20:40:23  Uploaded files OK: D:\INNCO\Backup\files (1 files, each encrypted at file level except the redacted settings copy)
+    2026-11-14 20:40:28  Log backup OK: D:\INNCO\Backup\database\log\IRNNCO_20261114_204028.trn.enc (0.1 MB), encrypted (file level, AES-256 + HMAC)
+    OK: Log backup works.
+
+Warnings:
+  - The Windows time zone is '(UTC) Coordinated Universal Time'. The program records some times in server time; set it to (UTC+03:30) Tehran unless you have a reason not to.
+
+Log file (it holds the password of the backup key: keep it secret): D:\INNCO\logs\install-20261114-203611.log
+**********************
+Windows PowerShell transcript end
+End time: 20261114204030
+**********************
