@@ -456,14 +456,15 @@ namespace Services.NasbNiro
 
         private async Task<IQueryable<BuyOrder>> GetCurrentUserBuyOrdersQueryAsync(CancellationToken cancellationToken)
         {
-            IEnumerable<BuyOrderStatus> buyOrderStatuses =
-                await GetCurrentUserBuyOrderStatusesAsync(cancellationToken);
+            // materialized: a List translates to IN (...) on every provider
+            List<BuyOrderStatus> buyOrderStatuses =
+                (await GetCurrentUserBuyOrderStatusesAsync(cancellationToken)).ToList();
 
             return _buyOrders
                 .AsNoTracking()
                 .Where(WhereWorkOrderOfBuyOrderIsActive)
                 .Where(buyOrder => !buyOrder.Deleted)
-                .Where(x => buyOrderStatuses.Any(s => s == x.Status));
+                .Where(x => buyOrderStatuses.Contains(x.Status));
         }
 
         private async Task<IEnumerable<BuyOrderStatus>> GetCurrentUserBuyOrderStatusesAsync(CancellationToken cancellationToken)

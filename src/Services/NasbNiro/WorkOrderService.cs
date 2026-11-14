@@ -675,8 +675,12 @@ namespace Services.NasbNiro
                     workOrder.Count == workOrderPaginationParams.Count);
             }
 
-            query = query.Where(workOrder =>
-                workOrder.ContractId == workOrderPaginationParams.ContractId);
+            // ContractId <= 0 means "no contract filter" (lists for production drafts, requests, documents)
+            if (workOrderPaginationParams.ContractId > 0)
+            {
+                query = query.Where(workOrder =>
+                    workOrder.ContractId == workOrderPaginationParams.ContractId);
+            }
             #endregion
 
             IQueryable<ResponseWorkOrderDto> resultQuery;

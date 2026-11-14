@@ -260,6 +260,9 @@ namespace Services.NasbNiro.ProjectControl
             return null;
         }
 
+        /// <summary>The responsible unit as the signature slots see it (trimmed, upper case, empty is none).</summary>
+        private static string UnitKey(string unit) => string.IsNullOrWhiteSpace(unit) ? string.Empty : unit.Trim().ToUpperInvariant();
+
         /// <summary>The codes of the activities whose plan differs between the rows of a draft and the live plan (also the activities added or removed since). Empty when the draft is still the plan.</summary>
         public static List<string> Differences(IList<PcBaselineActivity> rows, IList<PcActivity> live, IDictionary<int, decimal> effectiveWeights)
         {
@@ -271,7 +274,8 @@ namespace Services.NasbNiro.ProjectControl
                 decimal? weight = effectiveWeights != null && effectiveWeights.TryGetValue(a.Id, out decimal w) ? w : (decimal?)null;
                 bool weightDiffers = r.EffectiveWeight.HasValue && weight.HasValue && Math.Abs(r.EffectiveWeight.Value - weight.Value) > 0.000001m;
                 if (a.EarlyStart?.Date != r.Start.Date || a.EarlyFinish?.Date != r.Finish.Date || a.DurationDays != r.DurationDays || a.Weight != r.Weight || a.BudgetAtCompletion != r.Budget
-                    || a.WbsNodeId != r.WbsNodeId || a.Phase != r.Phase || a.CalendarId != r.CalendarId || weightDiffers)
+                    || a.WbsNodeId != r.WbsNodeId || a.Phase != r.Phase || a.CalendarId != r.CalendarId || weightDiffers
+                    || UnitKey(a.ResponsibleUnit) != UnitKey(r.ResponsibleUnit))
                     result.Add(r.Code);
             }
             var inRows = new HashSet<int>(rows.Select(r => r.ActivityId));

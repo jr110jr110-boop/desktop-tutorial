@@ -145,6 +145,8 @@ namespace Services.NasbNiro.ProjectControl
                 b.Activities.Add(PcBaselineRows.RowOf(a, weights != null && weights.TryGetValue(a.Id, out decimal w) ? w : (decimal?)null));
             foreach (string unit in acts.Select(a => a.ResponsibleUnit).Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u.Trim().ToUpperInvariant()).Distinct().OrderBy(u => u))
                 b.Signatures.Add(new PcBaselineSignature { UnitRole = unit });
+            // no responsible unit means no signature is required: the baseline waits for the PMO approval directly
+            if (b.Signatures.Count == 0) b.Status = PcBaselineStatus.ManagersSigned;
             return b;
         }
 
