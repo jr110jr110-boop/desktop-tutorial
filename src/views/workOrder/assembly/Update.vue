@@ -62,7 +62,7 @@ const sendRequest = async () => {
   else {
     if (parentId.value) await setAssemblyParent(data.data.id);
     showSuccessNotification(
-      "اسمبلی با موفقیت" + (props.id ? "ویرایش شد" : "افزوده شد")
+      "اسمبلی با موفقیت " + (props.id ? "ویرایش شد" : "افزوده شد")
     );
     router.back();
   }

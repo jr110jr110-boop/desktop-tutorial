@@ -502,14 +502,23 @@ async function sendRequest() {
     showWarnNotification("فیلد نوع عملیات را تکمیل کنید!");
     return;
   }
+  const requiredDates: [string, string][] = [
+    ["startDate", "تاریخ شروع قرارداد"],
+    ["actualStartDate", "تاریخ واقعی شروع"],
+    ["payDate", "تاریخ واریز پیش پرداخت"],
+    ["endDate", "تاریخ پایان پروژه"],
+    ["gurantyDate", "تاریخ پایان گارانتی"],
+    ["tempDate", "تاریخ تحویل موقت"],
+    ["deliverDate", "تاریخ تحویل دائم"],
+  ];
+  for (const [key, label] of requiredDates) {
+    const value = (contract.value as any)[key];
+    if (value == null || value == "") {
+      showWarnNotification(`فیلد ${label} را تکمیل کنید!`);
+      return;
+    }
+  }
   loadings.value.btnLoading = true;
-  contract.value.startDate = new Date().toJSON().slice(0, 10);
-  contract.value.actualStartDate = new Date().toJSON().slice(0, 10);
-  contract.value.payDate = new Date().toJSON().slice(0, 10);
-  contract.value.endDate = new Date().toJSON().slice(0, 10);
-  contract.value.gurantyDate = new Date().toJSON().slice(0, 10);
-  contract.value.tempDate = new Date().toJSON().slice(0, 10);
-  contract.value.deliverDate = new Date().toJSON().slice(0, 10);
   const [data, error] = props.id
     ? await editContract(contract.value)
     : await addContract(contract.value);
@@ -519,6 +528,9 @@ async function sendRequest() {
     await updateContactEquipmentList();
     await uploadAttachFile();
     await sendGuaranty();
+    showSuccessNotification(
+      props.id ? "قرارداد با موفقیت ویرایش شد" : "قرارداد با موفقیت افزوده شد"
+    );
   }
   loadings.value.btnLoading = false;
 }
@@ -631,12 +643,12 @@ onMounted(async () => {
               v-model="contract.tenderCode"
               :loading="loadings.inputLoading"
               class="flex-fill"
-              placeholder="کد مناقصه" />
+              placeholder="کد مناقصه *" />
             <KsInput
               v-model="contract.employerOrderNo"
               :loading="loadings.inputLoading"
               class="flex-fill"
-              placeholder="شماره سفارش کارفرما" />
+              placeholder="شماره سفارش کارفرما *" />
             <KsInput
               v-model="contract.employerContractNo"
               :loading="loadings.inputLoading"
@@ -710,7 +722,7 @@ onMounted(async () => {
               v-model="contract.type"
               :loading="loadings.inputLoading"
               class="flex-fill"
-              placeholder="نوع عملیات"
+              placeholder="نوع عملیات *"
               :options="typeOperation" />
             <KsInputSeperate
               v-model="contract.price"

@@ -52,7 +52,8 @@ async function load() {
   steps.value = (data.steps || []).map((s: any) => ({ ...s }));
 }
 onMounted(load);
-watch(() => route.params.id, load);
+// no load once the route has left this page
+watch(() => route.params.id, (id) => { if (id && route.name === "ProductBankRoutingEdit") load(); });
 
 function addStep(partNumber: string, partName = "") {
   const own = steps.value.filter((s) => (s.partNumber || header.value.partNumber) === partNumber);

@@ -49,6 +49,7 @@ function onCreated(o: any) {
 }
 
 watch(() => route.params.id, async () => {
+  if (route.name !== "SlOrders" && route.name !== "SlOrder") return; // the route has left this page
   await loadOrder();
   if (!route.params.id) list.load();
 });

@@ -125,7 +125,7 @@ export const exportSepidar = (documentIds: number[], markExported: boolean, line
 
 // shared helpers that use the existing endpoints
 export const getProviders = () => call("get", "Provider", undefined, { PageSize: 0 });
-export const getWorkOrders = () => call("get", "WorkOrders", undefined, { PageSize: 0 });
+export const getWorkOrders = () => call("get", "WorkOrders", undefined, { PageSize: 0, IsDeleted: false });
 export const getContracts = () => call("get", "Contracts", undefined, { PageSize: 0 });
 export const getMachines = () => call("get", "Machine");
 

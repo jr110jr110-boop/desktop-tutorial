@@ -50,7 +50,7 @@ async function sendRequest() {
     showErrorNotification(data?.message || error.message);
   else {
     showSuccessNotification(
-      "محصولات با موفقیت" + (props.id ? "ویرایش شد" : "افزوده شد")
+      "محصولات با موفقیت " + (props.id ? "ویرایش شد" : "افزوده شد")
     );
     router.back();
   }

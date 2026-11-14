@@ -41,6 +41,8 @@ const saving = ref(false);
 
 // Quality gates of an item (inspection on receipt, required certificate, shelf life) are changed in their own panel by PMO, QC and QA; a change that reduces a control waits
 // for the second approval of the QA manager and the item keeps its gates until then. The general form below sends the gates as they are, so it never changes them.
+// a new code is given by planning only (InventoryMasterService.cs "WI-WH-002"; RolePlanning = PLANNING,PMO); the others ask through «درخواست کد کالا»
+const canCreateCode = hasRole(InventoryRoles.planning);
 const canQuality = hasRole(InventoryRoles.itemQuality);
 const canDecide = hasRole(InventoryRoles.itemQualityDeciders);
 const quality = ref<any>(null);
@@ -334,7 +336,7 @@ onMounted(() => {
           <button v-if="canQuality" class="btn btn-sm btn-outline-secondary" @click="openChanges()">
             تغییرهای کیفی کالا<span v-if="pendingCount" class="inv-badge warn ms-1">{{ pendingCount }} در انتظار</span>
           </button>
-          <button class="btn btn-sm btn-primary" @click="create">کالای جدید</button>
+          <button v-if="canCreateCode" class="btn btn-sm btn-primary" @click="create">کالای جدید</button>
         </div>
       </div>
 

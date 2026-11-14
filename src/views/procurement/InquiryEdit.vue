@@ -35,19 +35,22 @@ const canFinancial = hasRole(ProcurementRoles.committeeFinancial);
 const canPlanningStep = hasRole(ProcurementRoles.planning);
 const plan = ref<{ amount: number | null; days: number | null; note: string }>({ amount: null, days: null, note: "" });
 const canTechnical = hasRole(ProcurementRoles.technical);
+// the technical judgement of a quote is made by engineering or quality only (the API refuses everybody else, also the buyer)
+const canReview = hasRole(ProcurementRoles.technicalAcceptance);
 const canManagement = hasRole(ProcurementRoles.management);
 const selected = computed(() => inq.value?.quotes?.find((q: any) => q.id === inq.value.selectedQuoteId));
 
 function newQuote() {
   return {
     key: Math.random().toString(36).slice(2), providerId: null, quoteNumber: "", quoteDate: today(), validUntil: "", deliveryDays: null,
-    paymentTerms: "", vatPercent: null, technicallyAccepted: true, technicalScore: null, technicalNote: "", documentId: null, notes: "",
+    paymentTerms: "", vatPercent: null, technicallyAccepted: false, technicalScore: null, technicalNote: "", documentId: null, notes: "",
     prices: Object.fromEntries((request.value?.lines || []).map((l: any) => [l.id, null])) as Record<number, number | null>,
   };
 }
 
 function loadInquiry(dto: any) {
-  inq.value = dto;
+  // the date input takes yyyy-MM-dd; the API gives an ISO date-time
+  inq.value = { ...dto, inquiryDate: (dto.inquiryDate || "").slice(0, 10) };
   chosen.value = dto.selectedQuoteId;
   quotes.value = dto.quotes.map((q: any) => ({
     ...newQuote(), id: q.id, providerId: q.providerId, quoteNumber: q.quoteNumber || "", quoteDate: (q.quoteDate || "").slice(0, 10),
@@ -225,7 +228,7 @@ onMounted(async () => {
         <tfoot>
           <tr><td colspan="3">جمع (ریال)</td><td v-for="q in inq.quotes" :key="q.id" class="num">{{ rial(q.totalAmount) }}</td></tr>
           <tr><td colspan="3">تایید فنی / امتیاز</td><td v-for="q in inq.quotes" :key="q.id">{{ q.technicallyAccepted ? "تایید" : "رد" }} {{ q.technicalScore ?? "" }}
-              <button v-if="canTechnical && inq.status === 0 && inq.id" class="btn btn-sm btn-outline-primary ms-1 d-print-none" @click="review = { quote: q, accepted: q.technicallyAccepted !== false, score: q.technicalScore ?? '', note: '' }">بررسی فنی</button></td></tr>
+              <button v-if="canReview && inq.status === 0 && inq.id" class="btn btn-sm btn-outline-primary ms-1 d-print-none" @click="review = { quote: q, accepted: q.technicallyAccepted || !q.technicalNote, score: q.technicalScore ?? '', note: '' }">بررسی فنی</button></td></tr>
           <tr><td colspan="3">تحویل (روز) / پرداخت</td><td v-for="q in inq.quotes" :key="q.id">{{ q.deliveryDays ?? "" }} / {{ q.paymentTerms }}</td></tr>
         </tfoot>
       </table>
@@ -310,9 +313,11 @@ onMounted(async () => {
                 <input v-model.number="q.vatPercent" :disabled="!canEdit" class="form-control form-control-sm" placeholder="مالیات ٪" type="number" />
               </td>
               <td>
-                <label class="form-check small"><input v-model="q.technicallyAccepted" :disabled="!canEdit" class="form-check-input" type="checkbox" /> قابل قبول</label>
-                <input v-model.number="q.technicalScore" :disabled="!canEdit" class="form-control form-control-sm mb-1" placeholder="امتیاز" type="number" />
-                <input v-model="q.technicalNote" :disabled="!canEdit" class="form-control form-control-sm mb-1" placeholder="یادداشت فنی" />
+                <label class="form-check small"><input v-model="q.technicallyAccepted" class="form-check-input" disabled type="checkbox" /> قابل قبول</label>
+                <input v-model.number="q.technicalScore" class="form-control form-control-sm mb-1" disabled placeholder="امتیاز" type="number" />
+                <input v-model="q.technicalNote" class="form-control form-control-sm mb-1" disabled placeholder="یادداشت فنی" />
+                <button v-if="canReview && inq.status === 0 && inq.id && q.id" class="btn btn-sm btn-outline-primary mb-1" @click="review = { quote: q, accepted: q.technicallyAccepted || !q.technicalNote, score: q.technicalScore ?? '', note: '' }">بررسی فنی</button>
+                <div v-else-if="canEdit" class="inv-muted small mb-1">تایید فنی را مهندسی یا کنترل کیفیت ثبت می‌کند.</div>
                 <input v-if="canEdit" class="form-control form-control-sm" type="file" @change="attach(q, $event)" />
                 <span v-if="q.documentId" class="inv-badge ok">فایل پیوست است</span>
               </td>
@@ -392,22 +397,23 @@ onMounted(async () => {
         </div>
       </div>
     </div>
-  </div>
-  <div v-if="review" class="inv-modal-backdrop" @click.self="review = null">
-    <div class="inv-modal" style="max-width: 460px">
-      <h2 class="inv-title mb-2">بررسی فنی پیشنهاد {{ review.quote.providerName }}</h2>
-      <label class="form-check d-block"><input v-model="review.accepted" class="form-check-input" type="checkbox" /> <span class="form-check-label">از نظر فنی قابل قبول است</span></label>
-      <label class="form-label small mb-0 mt-2">امتیاز فنی (۰ تا ۱۰۰، اختیاری)</label>
-      <input v-model="review.score" class="form-control form-control-sm inv-ltr" inputmode="decimal" />
-      <label class="form-label small mb-0 mt-2">توضیح {{ review.accepted ? "" : "(الزامی)" }}</label>
-      <textarea v-model="review.note" class="form-control form-control-sm" rows="3"></textarea>
-      <p class="inv-muted small mt-2 mb-0">کارشناس خرید نمی‌تواند بررسی فنی را ثبت کند؛ فقط مهندسی یا کیفیت.</p>
-      <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="review = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="sendReview">ثبت</button></div>
-    </div>
     <AttachmentPanel v-if="inq?.id" :owner-type="AttachmentOwner.Inquiry" :owner-id="inq.id" title="مدارک فنی درخواست و پیوست‌های استعلام" />
     <template v-if="inq?.id">
       <AttachmentPanel v-for="q in quotes.filter((x: any) => x.id)" :key="'q' + q.id" :owner-type="AttachmentOwner.Quote" :owner-id="q.id" :title="'پیوست‌های پیشنهاد ' + (q.quoteNumber || q.id)" collapsed />
     </template>
+
+    <div v-if="review" class="inv-modal-backdrop" @click.self="review = null">
+      <div class="inv-modal" style="max-width: 460px">
+        <h2 class="inv-title mb-2">بررسی فنی پیشنهاد {{ review.quote.providerName }}</h2>
+        <label class="form-check d-block"><input v-model="review.accepted" class="form-check-input" type="checkbox" /> <span class="form-check-label">از نظر فنی قابل قبول است</span></label>
+        <label class="form-label small mb-0 mt-2">امتیاز فنی (۰ تا ۱۰۰، اختیاری)</label>
+        <input v-model="review.score" class="form-control form-control-sm inv-ltr" inputmode="decimal" />
+        <label class="form-label small mb-0 mt-2">توضیح {{ review.accepted ? "" : "(الزامی)" }}</label>
+        <textarea v-model="review.note" class="form-control form-control-sm" rows="3"></textarea>
+        <p class="inv-muted small mt-2 mb-0">کارشناس خرید نمی‌تواند بررسی فنی را ثبت کند؛ فقط مهندسی یا کیفیت.</p>
+        <div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-sm btn-outline-secondary" @click="review = null">انصراف</button><button :disabled="busy" class="btn btn-sm btn-primary" @click="sendReview">ثبت</button></div>
+      </div>
+    </div>
   </div>
 </template>
 

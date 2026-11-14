@@ -70,7 +70,7 @@ onMounted(() => {
     :is-edit="!!props.id"
     :btn-loading="loadings.btnLoading"
     :has-transition-group="false"
-    form-title="تامین کننده"
+    form-title="دسته‌بندی تامین کننده"
     @formSubmit="sendRequest">
     <template #formIcon>
       <CopyIcon :fill="Colors.black" class="ms-3" width="24" />

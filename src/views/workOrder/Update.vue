@@ -82,7 +82,7 @@ async function sendRequest() {
   if (!data?.success) showErrorNotification(data?.message || error.message);
   else {
     showSuccessNotification(
-      "دستور ساخت با موفقیت" + (props.id ? "ویرایش شد" : "افزوده شد")
+      "دستور ساخت با موفقیت " + (props.id ? "ویرایش شد" : "افزوده شد")
     );
     router.back();
   }
@@ -210,7 +210,7 @@ onMounted(async () => {
           v-model="workOrder.description"
           :loading="loadings.inputLoading"
           class="mt-5"
-          placeholder="توضیحات" />
+          placeholder="توضیحات *" />
       </div>
     </template>
   </KsUpdateForm>

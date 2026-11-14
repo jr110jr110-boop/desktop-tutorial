@@ -53,7 +53,8 @@ async function load() {
   if (error) return fail(error);
   fill(d);
 }
-watch(() => route.params.id, load, { immediate: true });
+// no load once the route has left this page
+watch(() => route.params.id, (id) => { if (id && route.name === "OfMeeting") load(); }, { immediate: true });
 
 function removeAgenda(i: number) {
   const seq = i + 1;

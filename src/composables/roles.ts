@@ -369,8 +369,11 @@ export const ProcurementRoles = {
   statements: list("PMO,CEO,PLANNING,COMMERCIAL,PROJECTMANAGER,FINANCIAL,FINANCEMANAGER,TREASURY,QC,ENGINEERING,AUDITOR,CONSTRUCTION"),
   planning: list("PLANNING,PMO"),
   management: list("CEO,PMO"),
-  commercial: list("COMMERCIAL,PMO"),
+  // the buyer only (ProcurementRoles.Commercial in the API): the PMO deputy approves purchases and never buys or saves inquiries and orders
+  commercial: list("COMMERCIAL"),
   technical: list("ENGINEERING,QC,CONSTRUCTION,PMO"),
+  /** Technical judgement of a quote (ProcurementRoles.TechnicalAcceptance in the API): engineering and quality only. */
+  technicalAcceptance: list("ENGINEERING,QC"),
   orderApproval: list("PMO,CEO"),
   finance: list("FINANCIAL,FINANCEMANAGER,TREASURY,PMO"),
   serviceAcceptance: list("QC,ENGINEERING,CONSTRUCTION,PLANNING,PMO"),
@@ -378,8 +381,8 @@ export const ProcurementRoles = {
   /** The request dossier: the same set the API opens it to (procurement readers and the shop floor / security). */
   dossier: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER,PRODUCTIONMANAGER,SHOPSUPERVISOR,SECURITY"),
   readers: list("PMO,CEO,PLANNING,COMMERCIAL,FINANCIAL,FINANCEMANAGER,TREASURY,WAREHOUSE,WHSUPERVISOR,ENGINEERING,QC,CONSTRUCTION,ASSEMBLER,ENGINEER"),
-  // the financial committee approval is by the PMO deputy only (see ProcurementService.InquiryActionAsync)
-  committeeFinancial: ["PMO"],
+  // the financial committee approval is by the finance roles (ProcurementRoles.Finance, checked in ProcurementService.InquiryActionAsync "approve-financial")
+  committeeFinancial: list("FINANCIAL,FINANCEMANAGER,TREASURY,PMO"),
 };
 
 /** The numeric id of the signed-in user, read from the name-identifier claim of the access token; null when the token is missing or unreadable. */

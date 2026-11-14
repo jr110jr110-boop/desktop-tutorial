@@ -55,7 +55,8 @@ onMounted(async () => {
   products.value = p || [];
   load();
 });
-watch(() => route.params.id, load);
+// no load once the route has left this page (the id is then missing and Number(undefined) is NaN)
+watch(() => route.params.id, (id) => { if (id && route.name === "ProductBankBomEdit") load(); });
 
 function addHeading(level: number) {
   rows.value.push({ isHeading: true, level, partName: "" });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AttachmentPanel from "@/components/common/AttachmentPanel.vue";
 import { AttachmentOwner } from "@/composables/attachments";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { isSeatDraft, SEAT_DRAFT_TEXT } from "@/composables/ai";
 import ItemPicker from "@/components/inventory/ItemPicker.vue";
@@ -10,7 +10,7 @@ import { getContracts, getWorkOrders, rowsOf } from "@/api/InventoryAPIs";
 import { getInquiries, getPurchaseRequest, purchaseRequestAction, savePurchaseRequest } from "@/api/ProcurementAPIs";
 import { getRequestChain, returnRequest, reviseRequest } from "@/api/Pb6APIs";
 import { fail, jalali, num, ok, printPage, rial, today } from "@/composables/inventory";
-import { formTypes, inquiryStatuses, isVehicleForm, purchaseKinds, requestPriorities, requestSources, requestStatuses } from "@/composables/procurement";
+import { formTypes, inquiryStatuses, isProjectForm, isVehicleForm, purchaseKinds, requestPriorities, requestSources, requestStatuses } from "@/composables/procurement";
 import { hasRole, ProcurementRoles } from "@/composables/roles";
 
 // Purchase request: draft -> submitted -> planning approval (+ CEO approval from the medium purchase limit) -> inquiry.
@@ -153,6 +153,12 @@ const signatures = computed(() => {
   return list;
 });
 
+// the API refuses a contract on a general form without a work order (ProcurementService.Pb6.cs, PurchaseForms.Validate); the progress statement (11) takes it
+const contractLocked = computed(() => !!req.value && !isProjectForm(req.value.formType) && req.value.formType !== 11 && !req.value.workOrderId);
+watch(() => req.value?.formType, () => {
+  if (contractLocked.value && req.value.contractId) req.value.contractId = null;
+});
+
 onMounted(async () => {
   getWorkOrders().then(([l]) => (workOrders.value = rowsOf(l)));
   getContracts().then(([l]) => (contracts.value = rowsOf(l)));
@@ -291,10 +297,11 @@ onMounted(async () => {
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">قرارداد / پروژه</label>
-          <select v-model="req.contractId" :disabled="!canEdit" class="form-select form-select-sm">
+          <select v-model="req.contractId" :disabled="!canEdit || contractLocked" class="form-select form-select-sm">
             <option :value="null">-</option>
             <option v-for="c in contracts" :key="c.id" :value="c.id">{{ c.code }} - {{ c.title }}</option>
           </select>
+          <p v-if="contractLocked && canEdit" class="inv-muted small mb-0">فرم عمومی پروژه نمی‌گیرد؛ برای انتخاب پروژه نوع فرم پروژه‌ای را برگزینید.</p>
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-0">مرکز هزینه</label>
