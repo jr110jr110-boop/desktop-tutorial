@@ -1,0 +1,42 @@
+done COMMERCIAL roles COMMERCIAL menu 134/241 routes 60/226
+done ENGINEERING roles ENGINEERING menu 137/225 routes 68/223
+done FINANCIAL roles FINANCIAL menu 153/240 routes 43/207
+done PMO roles PMO menu 229/243 routes 92/131
+done ASSEMBLER roles ASSEMBLER menu 104/225 routes 52/256
+done WAREHOUSE roles WAREHOUSE menu 124/227 routes 60/236
+done QC roles QC menu 144/232 routes 69/216
+done ENGINEER roles ENGINEER menu 125/225 routes 64/235
+done SECURITY roles SECURITY menu 36/225 routes 24/324
+done CONSTRUCTION roles CONSTRUCTION menu 124/225 routes 63/236
+done PLANNING roles PLANNING menu 156/232 routes 71/204
+done WHSUPERVISOR roles WHSUPERVISOR menu 122/227 routes 57/238
+done QA roles QA menu 131/232 routes 68/229
+done CEO roles CEO menu 220/243 routes 78/140
+done DCC roles DCC menu 91/225 routes 44/269
+done PROJECTMANAGER roles PROJECTMANAGER menu 135/239 routes 72/225
+done PAYROLL roles PAYROLL menu 43/225 routes 24/317
+done TREASURY roles TREASURY menu 101/225 routes 31/259
+done FINANCEMANAGER roles FINANCEMANAGER menu 159/243 routes 59/201
+done PRODUCTIONMANAGER roles PRODUCTIONMANAGER menu 104/225 routes 62/256
+done SHOPSUPERVISOR roles SHOPSUPERVISOR menu 93/225 routes 62/267
+done OPERATOR roles OPERATOR menu 38/225 routes 34/322
+done SALES roles SALES menu 53/241 routes 39/307
+done MAINTENANCE roles MAINTENANCE menu 73/225 routes 49/287
+done SECRETARIAT roles SECRETARIAT menu 36/225 routes 25/324
+done SERVICE roles SERVICE menu 78/239 routes 50/282
+done HR roles HR menu 40/225 routes 26/320
+done AUDITOR roles AUDITOR menu 160/241 routes 71/200
+done unit-engineering roles DCC,ENGINEERING menu 138/225 routes 68/222
+done unit-inventory roles WAREHOUSE,WHSUPERVISOR menu 124/227 routes 60/236
+done unit-projects roles PLANNING,PMO,PROJECTMANAGER menu 229/243 routes 92/131
+done unit-production roles ASSEMBLER,MAINTENANCE,OPERATOR,PRODUCTIONMANAGER,SHOPSUPERVISOR menu 135/225 routes 65/225
+done unit-sales roles SALES,SERVICE menu 80/241 routes 52/280
+done unit-hr roles HR,PAYROLL,SECRETARIAT,SECURITY menu 51/225 routes 27/309
+done unit-quality roles QA,QC menu 144/232 routes 71/216
+done unit-finance roles FINANCEMANAGER,FINANCIAL,TREASURY menu 184/243 routes 59/176
+users 36
+findings 66
+distinct 1
+HTTP-403 1
+INFO-NO-PERSONNEL-FILE 65
+
