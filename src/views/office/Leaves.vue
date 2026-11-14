@@ -26,6 +26,8 @@ const to = ref<string | null>(null);
 const scope = ref<"" | "mine" | "waiting">("");
 const filters = ref<any>({});
 const list = usePagedList((p: any) => getLeaves(p), filters);
+const balanceNote = ref("");
+const note = computed(() => list.notice.value || balanceNote.value);
 const form = ref<{ leave: any | null } | null>(null);
 
 const openId = computed(() => (route.params.id ? Number(route.params.id) : 0));
@@ -58,7 +60,8 @@ onMounted(search);
   <div class="inv-page">
     <div class="inv-card">
       <div class="inv-toolbar"><h1 class="inv-title">مرخصی، ماموریت و اضافه‌کار</h1><button class="btn btn-sm btn-primary" @click="form = { leave: null }">درخواست جدید</button></div>
-      <LeaveBalanceCard :can-pick="isHr || canAll" />
+      <div v-if="note" class="alert alert-info small py-2">{{ note }}</div>
+      <LeaveBalanceCard :can-pick="isHr || canAll" @notice="balanceNote = $event" />
       <div class="inv-filters mb-3">
         <div v-if="isHr || canAll" style="min-width: 220px"><label class="form-label small mb-0">کارمند</label><EmployeePick v-model="employee" placeholder="همه" /></div>
         <div><label class="form-label small mb-0">نوع</label><select v-model="kind" class="form-select form-select-sm"><option value="">همه</option><option v-for="(t, v) in leaveKinds" :key="v" :value="Number(v)">{{ t }}</option></select></div>

@@ -79,6 +79,7 @@ onMounted(list.load);
         <h1 class="inv-title">رویدادهای عملکرد کارکنان</h1>
         <div class="d-flex gap-2"><button v-if="reader" class="btn btn-sm btn-outline-secondary" @click="loadSummary">خلاصه ۹۰ روز اخیر</button><button v-if="writer" class="btn btn-sm btn-primary" @click="edit()">رویداد تازه</button></div>
       </div>
+      <div v-if="list.notice.value" class="alert alert-info small py-2">{{ list.notice.value }}</div>
       <div v-if="reader" class="inv-filters mb-2">
         <div style="min-width: 240px"><label class="form-label small mb-0">کارمند</label><LookupBox :model-value="employee" :fetch="searchEmployees" :label="empLabel" placeholder="نام کارمند" @pick="pickFilter" /></div>
         <div><label class="form-label small mb-0">نوع</label><select v-model="filters.Kind" class="form-select form-select-sm"><option :value="null">همه</option><option v-for="(t, k) in kinds" :key="k" :value="Number(k)">{{ t }}</option></select></div>

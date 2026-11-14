@@ -1,5 +1,6 @@
 import moment from "moment-jalaali";
 import { ref, type Ref } from "vue";
+import { apiErrorText } from "@/composables/apiMessage";
 import { fail } from "@/composables/inventory";
 
 // Names and helpers of the accounting module (releases F1 and F2). Enum values are numbers in the JSON (FinanceDtos, Entities/Finance).
@@ -155,17 +156,32 @@ export function camelize<T = any>(value: any): T {
   return value;
 }
 
+/** True when the API refuses because the signed-in user has no personnel file; that is a calm note on the page, not an error toast. */
+export function isNoPersonnelFile(error: any): boolean {
+  return (typeof error === "string" ? error : apiErrorText(error)).includes("پرونده پرسنلی");
+}
+
 /** Paged list helper (the API answers { data, totalItems }); like usePaged of the quality pages, with a page size option and a fixed extra query. */
 export function usePagedList(fetcher: (params: any) => Promise<any>, filters: Ref<any>, pageSize = 50) {
   const rows = ref<any[]>([]);
   const total = ref(0);
   const page = ref(1);
   const loading = ref(false);
+  const notice = ref("");
   async function load() {
+    notice.value = "";
     loading.value = true;
     const [data, error] = await fetcher({ ...filters.value, PageNumber: page.value, PageSize: pageSize });
     loading.value = false;
-    if (error) return fail(error);
+    if (error) {
+      if (isNoPersonnelFile(error)) {
+        notice.value = typeof error === "string" ? error : apiErrorText(error);
+        rows.value = [];
+        total.value = 0;
+        return;
+      }
+      return fail(error);
+    }
     const d = camelize(data);
     rows.value = Array.isArray(d) ? d : d?.data || [];
     total.value = Array.isArray(d) ? d.length : d?.totalItems ?? rows.value.length;
@@ -178,7 +194,7 @@ export function usePagedList(fetcher: (params: any) => Promise<any>, filters: Re
     page.value += delta;
     return load();
   }
-  return { rows, total, page, loading, load, search, go, pageSize };
+  return { rows, total, page, loading, notice, load, search, go, pageSize };
 }
 
 /**

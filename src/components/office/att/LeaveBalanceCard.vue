@@ -2,21 +2,26 @@
 // Leave balance (days, two decimals): own for everybody, any employee for HR and CEO.
 import { onMounted, ref } from "vue";
 import { getLeaveBalance } from "@/api/OfficeAPIs";
+import { isNoPersonnelFile } from "@/composables/fn";
 import { fail } from "@/composables/inventory";
+import { apiErrorText } from "@/composables/apiMessage";
 import EmployeePick from "./EmployeePick.vue";
 import { days2 } from "./attCommon";
 
 const props = defineProps<{ canPick: boolean }>();
+const emit = defineEmits<{ (e: "notice", text: string): void }>();
 const employee = ref<any>(null);
 const balance = ref<any>(null);
 const loading = ref(false);
 
 async function load() {
   loading.value = true;
+  emit("notice", "");
   const [d, error] = await getLeaveBalance({ employeeId: props.canPick ? employee.value?.id || null : null });
   loading.value = false;
   if (error) {
     balance.value = null;
+    if (isNoPersonnelFile(error)) return emit("notice", typeof error === "string" ? error : apiErrorText(error));
     return fail(error);
   }
   balance.value = d;

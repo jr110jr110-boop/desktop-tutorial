@@ -39,6 +39,7 @@ void camelize;
 
 <template>
   <div>
+    <div v-if="list.notice.value" class="alert alert-info small py-2">{{ list.notice.value }}</div>
     <div class="inv-filters mb-2">
       <FnDate v-model="from" placeholder="از تاریخ" />
       <FnDate v-model="to" placeholder="تا تاریخ" />

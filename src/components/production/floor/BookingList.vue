@@ -54,6 +54,7 @@ onMounted(async () => {
 
 <template>
   <div>
+    <div v-if="list.notice.value" class="alert alert-info small py-2">{{ list.notice.value }}</div>
     <div class="inv-filters mb-3">
       <div v-if="canAll" style="min-width: 14rem"><LookupBox v-model="employee" :fetch="searchEmployees" :label="employeeLabel" placeholder="کارمند" /></div>
       <select v-model="wcId" class="form-select form-select-sm"><option :value="null">همه مراکز کار</option><option v-for="w in workCenters" :key="w.id" :value="w.id">{{ w.title }}</option></select>
