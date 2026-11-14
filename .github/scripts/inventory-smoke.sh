@@ -2396,6 +2396,12 @@ as "$WH_TOKEN" POST $PC/activities "{\"contractId\":$PCT,\"code\":\"PC-Y\",\"tit
 as "$PM_TOKEN" POST $PC/activities "{\"contractId\":$PCT,\"code\":\"PC-PM\",\"title\":\"فعالیت واحد مدیر پروژه\",\"sourceType\":7,\"durationDays\":1,\"responsibleUnit\":\"PROJECTMANAGER\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":1,\"phase\":3}"; nomsg "r1a2 l6: a project manager cannot create an activity for his own unit" "تعیین یا تغییر واحد مسئول"
 as "$PM_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"; PCABODY=$(jq -c --argjson id "$PCA" '.data.data[]|select(.id == $id)' "$B")
 as "$PM_TOKEN" POST $PC/activities "$(jq -c '.responsibleUnit = "PROJECTMANAGER"' <<<"$PCABODY")"; nomsg "r1a2 l6: nor move an existing activity of the engineering unit to his own unit" "تعیین یا تغییر واحد مسئول"
+# company decision 1405/08/24: the project manager reads purchase orders (list, one order, revisions) for supplier-side statements; the other procurement reads stay closed to him
+as "$PM_TOKEN" GET "procurement/orders?PageNumber=1&PageSize=5"; check "pm-po: the project manager reads the purchase-order list" '.success == true and (.data.data|type) == "array"'
+as "$PM_TOKEN" GET "procurement/orders/$PO"; check "pm-po: the project manager reads one purchase order" ".success == true and .data.id == $PO"
+as "$PM_TOKEN" GET "procurement/orders/$PO/revisions"; check "pm-po: the project manager reads the revisions of the order" '.success == true'
+as "$PM_TOKEN" GET "procurement/inquiries?PageNumber=1&PageSize=5"; r403 "pm-po: inquiries stay closed to the project manager"
+as "$PM_TOKEN" GET "procurement/invoices?PageNumber=1&PageSize=5"; r403 "pm-po: supplier invoices stay closed to the project manager"
 as "$PM_TOKEN" POST $PC/activities "$(jq -c . <<<"$PCABODY")"; check "r1a2 l6: (control) the project manager can still save the activity when the unit stays as it is" '.success and .data.responsibleUnit == "ENGINEERING"'
 as "$PLAN_TOKEN" GET "$PC/activities?ContractId=$PCT&PageSize=0"; check "r1a2 l6: the refused saves changed nothing: the activity is still the engineering unit's and the refused code PC-PM was not created" ".success and ([.data.data[]|select(.id == $PCA)][0].responsibleUnit) == \"ENGINEERING\" and ([.data.data[]|select(.code == \"PC-PM\")]|length) == 0"
 # R1a: starting, holding and resuming an activity belongs to the unit that owns it (ResponsibleUnit), planning and the PMO; the manager of another unit is turned away.

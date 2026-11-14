@@ -102,7 +102,7 @@ namespace Services.NasbNiro.AuditSeat
                     DateTimeOffset since = c.Since ?? DateTimeOffset.MinValue;
                     var rows = await c.BoundedAsync(
                         from t in c.Scope(c.Uow.Set<TestReport>().AsNoTracking())
-                        join q in c.Uow.Set<Qualification>().AsNoTracking() on t.ExaminerQualificationId.Value equals q.Id
+                        join q in c.Uow.Set<Qualification>().AsNoTracking() on t.ExaminerQualificationId equals (int?)q.Id
                         where !t.Deleted && t.Status != TestReportStatus.Draft && t.CreateDate >= since && (q.Revoked || q.IssuedDate > t.ReportDate || (q.ExpiryDate != null && q.ExpiryDate < t.ReportDate))
                         orderby t.Id select new { t.Id, t.Number, t.ReportDate, t.ExaminerUserId, q.ExpiryDate, q.Revoked, q.Method });
                     return rows.Where(t => !c.FocusId.HasValue || t.Id == c.FocusId.Value).Select(t =>
