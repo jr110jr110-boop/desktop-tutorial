@@ -411,7 +411,8 @@ namespace Services.NasbNiro.Production
 
         public async Task<ResponseDto<ReleaseCheckResultDto>> ReleaseCheckAsync(int id, CancellationToken ct)
         {
-            if (!_user.IsInRole(ProductionRoles.MasterReaders)) return Bad<ReleaseCheckResultDto>(MfText.NotAllowed);
+            // agent layer: the release check is a read the production agent steps make for themselves (the coordinator holds no role); only a step that entered its own context passes, nothing is decided here
+            if (!_user.IsInRole(ProductionRoles.MasterReaders) && !global::Services.NasbNiro.Agents.AgentMaker.Allows("MF.RELEASE.CHECK")) return Bad<ReleaseCheckResultDto>(MfText.NotAllowed);
             MfProductionOrder order = await _uow.Set<MfProductionOrder>().AsNoTracking().FirstOrDefaultAsync(o => o.Id == id && !o.Deleted, ct);
             if (order == null) return MfText.NotFound<ReleaseCheckResultDto>("دستور تولید پیدا نشد.");
             List<MfOperation> ops = await _uow.Set<MfOperation>().AsNoTracking().Where(o => o.OrderId == id && !o.Deleted).ToListAsync(ct);
