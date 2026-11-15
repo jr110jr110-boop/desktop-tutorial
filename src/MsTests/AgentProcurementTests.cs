@@ -191,11 +191,11 @@ namespace MsTests
             using IServiceScope scope = e.Host.Provider.CreateScope();
             List<IAgentStep> steps = scope.ServiceProvider.GetServices<IAgentStep>().ToList();
             var procurement = steps.Where(s => s.Station == 6 && s.Code != null && !s.Code.StartsWith("TEST.")).ToList();
-            Assert.AreEqual(100, steps.Count, "the registrations of the application");
-            Assert.AreEqual(100, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
+            Assert.AreEqual(141, steps.Count, "the registrations of the application");
+            Assert.AreEqual(141, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
             Assert.AreEqual(33, procurement.Count, "the station 6 steps");
             IAgentStepCatalog catalog = scope.ServiceProvider.GetRequiredService<IAgentStepCatalog>();
-            Assert.AreEqual(100, catalog.All.Count);
+            Assert.AreEqual(141, catalog.All.Count);
             foreach (IAgentStep s in steps)
             {
                 AiSeatDefinition seat = AiSeatCatalog.Find(s.AgentCode);
@@ -215,7 +215,7 @@ namespace MsTests
             string[] agentSteps = steps.Where(s => s.Kind == AgentStepKind.Agent).Select(s => s.Code).OrderBy(c => c, StringComparer.Ordinal).ToArray();
             CollectionAssert.AreEqual(new[]
             {
-                "CON.REVIEW.DRAFT", "CON.TERMS.DRAFT", "INIT.BOM", "INIT.CHARTER.DRAFT", "INIT.CODE", "INIT.PEP.DRAFT", "INIT.START", "INIT.UNITS", "MF.COMPONENTS", "MF.ORDERS.DRAFT", "MF.RELEASE.CHECK", "PLAN.BALANCE.RUN", "PLAN.BASELINE.CREATE", "PLAN.CPM", "PLAN.ITP.ACTIVITIES", "PLAN.PR.BOM", "PLAN.WBS.DICTIONARY", "PLAN.WBS.GENERATE", "PLAN.WEIGHTS", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PO.REQUIREMENTS", "PROC.PR.PRICE.AUTO.PLAN", "PROC.PR.PRICE.AUTO.WH", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "QC.CAPA.IMPLEMENT", "QC.ITP.ENSURE", "QC.ITP.SUBMIT", "QC.ITP.USE", "QC.RELEASE.DRAFT", "SHIP.DRAFT", "WH.KIT.DRAFT", "WH.MR.SUBMIT", "WH.PR.REORDER"
+                "CON.REVIEW.DRAFT", "CON.TERMS.DRAFT", "ENG.INSTANTIATE", "FIN.SEPIDAR.GENERATE", "FIN.STATEMENT.DRAFT", "FIN.STATEMENT.PAYREQUEST", "FIN.STATEMENT.PREPARE", "INIT.BOM", "INIT.CHARTER.DRAFT", "INIT.CODE", "INIT.PEP.DRAFT", "INIT.START", "INIT.UNITS", "MF.COMPONENTS", "MF.ORDERS.DRAFT", "MF.RELEASE.CHECK", "PLAN.BALANCE.RUN", "PLAN.BASELINE.CREATE", "PLAN.CPM", "PLAN.ITP.ACTIVITIES", "PLAN.PR.BOM", "PLAN.WBS.DICTIONARY", "PLAN.WBS.GENERATE", "PLAN.WEIGHTS", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PO.REQUIREMENTS", "PROC.PR.PRICE.AUTO.PLAN", "PROC.PR.PRICE.AUTO.WH", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "QC.CAPA.IMPLEMENT", "QC.ITP.ENSURE", "QC.ITP.SUBMIT", "QC.ITP.USE", "QC.RELEASE.DRAFT", "SHIP.DRAFT", "SL.BID.SUBMIT", "SL.ESTIMATE.FROM-EQUIPMENT", "SL.PROPOSAL.DRAFT", "SV.INVOICE.DRAFT", "SV.ORDER.DRAFT", "WH.KIT.DRAFT", "WH.MR.SUBMIT", "WH.PR.REORDER"
             }, agentSteps);
             // the two registrations of one class have distinct codes and distinct agents
             Assert.AreEqual("AG-WH", steps.Single(s => s.Code == "PROC.PR.SUBMIT.WH").AgentCode);
@@ -261,6 +261,37 @@ namespace MsTests
         }
 
         // ------------------------------------------------------------------------------------------------ the chain
+
+        [TestMethod]
+        public async Task The_Reorder_Step_Does_Not_Recompute_The_List_While_Its_Task_Waits_For_The_Agent_Or_Was_Done_Less_Than_Half_An_Hour_Ago()
+        {
+            Env e = await NewEnv("reorder-throttle");
+            Func<Task<int>> discover = async () => (await e.Host.As(Seeder, sp => sp.GetServices<IAgentStep>().Single(s => s.Code == "WH.PR.REORDER").DiscoverAsync(sp.GetRequiredService<IUnitOfWork>(), DateTime.Today, Ct))).Count;
+            Action<AgentTaskState, DateTimeOffset?> setTask = (state, closed) => e.Host.Write(u =>
+            {
+                u.Set<AgentTask>().RemoveRange(u.Set<AgentTask>().Where(t => t.StepCode == "WH.PR.REORDER").ToList());
+                AppHost.Add(u, new AgentTask { StepCode = "WH.PR.REORDER", Station = 7, AgentCode = "AG-WH", Kind = AgentStepKind.Agent, State = state, TargetType = "ReorderRun", TargetId = 1, ClosedAt = closed, CreateDate = DateTimeOffset.Now.AddHours(-2) });
+                u.SaveChanges();
+            }, Seeder);
+
+            // nothing is under its point: no task is needed
+            Assert.AreEqual(0, await discover());
+            // a queued task of the agent is kept without reading the list (no item is short here: only the open task explains the answer)
+            setTask(AgentTaskState.Queued, null);
+            Assert.AreEqual(1, await discover());
+
+            // a shortage now exists
+            SeedWorld(e, 500_000m);
+            // done a moment ago: the next window picks the shortage up (the list is not read again before)
+            setTask(AgentTaskState.Done, DateTimeOffset.Now.AddMinutes(-5));
+            Assert.AreEqual(0, await discover());
+            // done long ago: the list is read and the shortage is found
+            setTask(AgentTaskState.Done, DateTimeOffset.Now.AddHours(-2));
+            Assert.AreEqual(1, await discover());
+            // a task that waits for a person (fallback) is not shortcut: the real list decides
+            setTask(AgentTaskState.WaitingHumanGate, null);
+            Assert.AreEqual(1, await discover());
+        }
 
         [TestMethod]
         public async Task Smoke_contract_reorder_draft_without_price_source()

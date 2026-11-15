@@ -197,7 +197,9 @@ namespace MsTests
             CollectionAssert.AreEqual(new[] { "WAREHOUSE" }, AiSeatCatalog.Find("AG-WH").Roles);
             CollectionAssert.AreEqual(new[] { "PLANNING" }, AiSeatCatalog.Find("AG-PLAN").Roles);
             CollectionAssert.AreEqual(new[] { "SERVICE" }, AiSeatCatalog.Find("AG-SERVICE").Roles);
-            CollectionAssert.AreEqual(new[] { "FINANCIAL" }, AiSeatCatalog.Find("AG-FIN").Roles);
+            CollectionAssert.AreEqual(new[] { "FINANCIAL", "COMMERCIAL" }, AiSeatCatalog.Find("AG-FIN").Roles);
+            CollectionAssert.AreEqual(new[] { "ENGINEER" }, AiSeatCatalog.Find("AG-ENG").Roles);
+            CollectionAssert.AreEqual(new[] { "SALES" }, AiSeatCatalog.Find("AG-SALES").Roles);   // the maker lines of the sales services (SalesRoles.Writers); the agent decides and approves nothing   // enough for the instantiation (PbRoles.Requesters); the agent signs and releases nothing
             // no agent holds a role that approves what its own station makes
             foreach (AiSeatDefinition d in AiSeatCatalog.All.Where(s => s.Code.StartsWith("AG-")))
                 foreach (string approving in new[] { "CEO", "PMO", "FINANCEMANAGER", "PROJECTMANAGER", "QA" }) CollectionAssert.DoesNotContain(d.Roles, approving, d.Code);

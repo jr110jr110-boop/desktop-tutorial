@@ -100,6 +100,40 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task A_Plan_Drafted_By_Another_Agent_Seat_Is_Submitted_By_The_Quality_Agent_But_A_Plan_Drafted_By_A_Person_Is_Not()
+        {
+            Env e = await NewEnv("itp-other");
+            int contract = SeedContract(e, out int wo);
+            int planSeat = e.Seats["AG-PLAN"].UserId, qcSeat = e.Seats["AG-QC"].UserId;
+            int wo2 = 0, byAgent = 0, byPerson = 0;
+            e.Host.Write(u =>
+            {
+                WorkOrder w2 = AppHost.Add(u, new WorkOrder { Code = "WO-9B", Title = "پمپ ۲", ContractId = contract, Count = 1, EquipmentId = 1 });
+                u.SaveChanges();
+                wo2 = w2.Id;
+                Func<string, int, int, int, Itp> make = (number, workOrder, creator, seq) => AppHost.Add(u, new Itp
+                {
+                    Number = number, WorkOrderId = workOrder, ContractId = contract, Revision = 1, Status = ItpStatus.Draft, CreatorUserId = creator,
+                    Activities = new List<ItpActivity> { new ItpActivity { Seq = seq, ItemNo = "1", Stage = "ساخت", Activity = "بازرسی ابعادی", Status = ItpActivityStatus.Planned } },
+                });
+                // the plan of the first work order was drafted by the planning agent (from the WBS), the other by a person
+                Itp a = make("ITP-PLAN", wo, planSeat, 1);
+                Itp b = make("ITP-HUMAN", wo2, 1001, 1);
+                u.SaveChanges();
+                byAgent = a.Id; byPerson = b.Id;
+            }, Seeder);
+            await Settle(e);
+
+            Itp submitted = e.Host.Read(u => u.Set<Itp>().AsNoTracking().Single(i => i.Id == byAgent));
+            Assert.AreEqual(ItpStatus.Submitted, submitted.Status, Dump(e));
+            Assert.AreEqual(planSeat, submitted.CreatorUserId);
+            Assert.AreEqual(qcSeat, submitted.SubmittedByUserId);
+            Assert.AreEqual(ItpStatus.Draft, e.Host.Read(u => u.Set<Itp>().AsNoTracking().Single(i => i.Id == byPerson).Status), "a plan that a person is still drafting is not taken over by the agent");
+            AgentTask gate = OpenOne(e, "QC.ITP.APPROVE");
+            Assert.AreEqual(byAgent, gate.TargetId);
+        }
+
+        [TestMethod]
         public async Task The_Inspection_Plan_Is_Made_Submitted_And_Used_By_The_Agent_And_Approved_And_Inspected_By_People()
         {
             Env e = await NewEnv("itp");

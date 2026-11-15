@@ -74,6 +74,12 @@ namespace Services.NasbNiro.Agents
         /// state by <see cref="IAgentStep.DiscoverAsync"/>. The task takes them at birth and again at every reconcile while it waits, so the inbox shows the gate only to the roles that are still missing.
         /// </summary>
         public string GateRoles { get; set; }
+
+        /// <summary>
+        /// Optional, for a gate that only one named person may pass (the project manager of the contract authorises a progress statement): read from the state by <see cref="IAgentStep.DiscoverAsync"/> and
+        /// returned by <see cref="IAgentStep.GateInfo"/> as <see cref="AgentGateInfo.UserId"/>. The task keeps it up to date while it waits.
+        /// </summary>
+        public int? GateUserId { get; set; }
     }
 
     public enum AgentStepOutcome

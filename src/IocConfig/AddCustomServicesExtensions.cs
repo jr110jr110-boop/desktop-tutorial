@@ -334,6 +334,10 @@ namespace IocConfig
             Services.NasbNiro.Agents.Steps.QualitySteps.AddQualitySteps(services);
             Services.NasbNiro.Agents.Steps.ShippingSteps.AddShippingSteps(services);
             Services.NasbNiro.Agents.Steps.ProductionSteps.AddProductionSteps(services);
+            Services.NasbNiro.Agents.Steps.FinanceSteps.AddFinanceSteps(services);
+            Services.NasbNiro.Agents.Steps.EngineeringSteps.AddEngineeringSteps(services);
+            Services.NasbNiro.Agents.Steps.SalesSteps.AddSalesSteps(services);
+            Services.NasbNiro.Agents.Steps.ServiceSteps.AddServiceSteps(services);
             Services.NasbNiro.Agents.AgentStationProbes.AddAgentStationProbes(services);
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatRunner, Services.NasbNiro.Ai.AiSeatRunner>();
             services.AddScoped<Services.NasbNiro.Ai.IAiSeatAdminService, Services.NasbNiro.Ai.AiSeatAdminService>();

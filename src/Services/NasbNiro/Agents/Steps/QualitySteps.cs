@@ -92,8 +92,10 @@ namespace Services.NasbNiro.Agents.Steps
     {
         protected static async Task<List<AgentWorkItem>> ByStatusAsync(IUnitOfWork uow, DateTime today, ItpStatus status, bool ownOnly, string summary, string roles, CancellationToken ct)
         {
-            int seat = ownOnly ? await ProcStepCommon.SeatUserIdAsync(uow, AgentCodes.Qc, ct) : 0;
-            var rows = await uow.Set<Itp>().AsNoTracking().Where(i => !i.Deleted && i.Status == status && (!ownOnly || (seat != 0 && i.CreatorUserId == seat)) && i.Activities.Any()).OrderBy(i => i.Id).Take(ProcStepCommon.Cap)
+            // ownOnly: a plan made by ANY agent seat (the QC seat from the template, the planning seat from the ITP activities of the WBS, the production seat): the service lets any planner submit a draft
+            // (QualityActionRules.SubmitProblem has no creator rule), and the client approval is a separate person (the maker/editor check at the gate).
+            int[] seats = ownOnly ? await ProcStepCommon.AllSeatUserIdsAsync(uow, ct) : Array.Empty<int>();
+            var rows = await uow.Set<Itp>().AsNoTracking().Where(i => !i.Deleted && i.Status == status && (!ownOnly || seats.Contains(i.CreatorUserId)) && i.Activities.Any()).OrderBy(i => i.Id).Take(ProcStepCommon.Cap)
                 .Select(i => new { i.Id, i.Number, i.ContractId, i.WorkOrderId }).ToListAsync(ct);
             Dictionary<int, ContractEntity> live = await LiveAsync(uow, today, rows.Select(r => r.ContractId), ct);
             return rows.Where(r => live.ContainsKey(r.ContractId)).Select(r => new AgentWorkItem { TargetType = "Itp", TargetId = r.Id, TargetNumber = r.Number, ContractId = r.ContractId, WorkOrderId = r.WorkOrderId, Summary = summary, GateRoles = roles }).ToList();

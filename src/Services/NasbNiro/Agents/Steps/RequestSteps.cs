@@ -45,8 +45,20 @@ namespace Services.NasbNiro.Agents.Steps
 
         public static int RunId(DateTime day) => day.Year * 10000 + day.Month * 100 + day.Day;
 
+        /// <summary>The reorder list is a heavy computation (every active item, its balances, its use, its orders and requests), so it is not recomputed on every tick of the coordinator (every 2 minutes).</summary>
+        public static readonly TimeSpan Throttle = TimeSpan.FromMinutes(30);
+
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            // Cheap questions first, from the latest task of this very step (no new entity):
+            //  - the agent still has a queued task: it will recompute the list itself when it runs (and close the task as done when nothing is left), so the heavy list is not read here;
+            //  - the agent finished a run less than half an hour ago: a new shortage waits for the next window (the reconciler's repeat guard would not make a task before that anyway).
+            var last = await uow.Set<AgentTask>().AsNoTracking().Where(t => !t.Deleted && t.StepCode == Code).OrderByDescending(t => t.Id)
+                .Select(t => new { t.State, t.IsFallback, t.CreateDate, t.ClosedAt }).FirstOrDefaultAsync(ct);
+            if (last != null && !last.IsFallback && (last.State == AgentTaskState.Queued || last.State == AgentTaskState.Running || last.State == AgentTaskState.Returned))
+                return new List<AgentWorkItem> { Item("ReorderRun", RunId(today), today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), null, null, "کالاهایی از نقطه سفارش مجدد کمتر است و درخواستی برای آن‌ها باز نیست.") };
+            if (last != null && last.State == AgentTaskState.Done && (last.ClosedAt ?? last.CreateDate) > DateTimeOffset.Now - Throttle) return new List<AgentWorkItem>();
+
             // the list of the warehouse screen (read only): one run of the day while an item is under its point and not on an open request
             ResponseDto<List<ReorderRowDto>> list = await _sp.GetRequiredService<IWarehouseReorderService>().GetAsync(new ReorderQuery(), ct);
             if (!list.Success) throw new InvalidOperationException(list.Message);

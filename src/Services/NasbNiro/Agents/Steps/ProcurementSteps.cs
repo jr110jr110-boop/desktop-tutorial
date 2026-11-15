@@ -149,6 +149,13 @@ namespace Services.NasbNiro.Agents.Steps
             return id;
         }
 
+        /// <summary>The user ids of every agent or assistant seat (user names that start with <c>seat.</c>): the documents they made are "made by an agent". A small set (one user per seat).</summary>
+        public static async Task<int[]> AllSeatUserIdsAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            string prefix = AiSeatNames.UserPrefix;
+            return (await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.UserName.StartsWith(prefix)).Select(u => u.Id).Take(200).ToListAsync(ct)).ToArray();
+        }
+
         public static string Roles(params string[] lists) => AgentText.NormalizeRoles(string.Join(",", lists.Where(l => !string.IsNullOrWhiteSpace(l))));
 
         /// <summary>The message of a refusal of a service (Persian, as the service wrote it).</summary>

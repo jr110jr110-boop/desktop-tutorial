@@ -186,8 +186,8 @@ namespace MsTests
                 return 0;
             });
 
-            // the only human Input of the station: the cost budget (no source of it in the system)
-            string[] inputs = Tasks(e).Where(t => t.Kind == AgentStepKind.Input).Select(t => t.StepCode).Distinct().ToArray();
+            // the only human Input of the station: the cost budget (no source of it in the system); the other stations (the engineering BOM input) are not this test's
+            string[] inputs = Tasks(e).Where(t => t.Kind == AgentStepKind.Input && t.StepCode.StartsWith("PLAN.", StringComparison.Ordinal)).Select(t => t.StepCode).Distinct().ToArray();
             CollectionAssert.AreEqual(new[] { "PLAN.BUDGET.INPUT" }, inputs, Dump(e));
         }
 

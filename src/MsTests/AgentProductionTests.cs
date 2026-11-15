@@ -11,6 +11,7 @@ using Entities.Model.NasbNiro.Agents;
 using Entities.Model.NasbNiro.Ai;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Inventory;
+using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
@@ -158,6 +159,48 @@ namespace MsTests
 
             Assert.AreEqual(MfOrderStatus.Draft, Order(e, order.Id).Status, "the agent never releases");
             Assert.AreEqual(0, Tasks(e).Count(t => t.Station == 8 && t.Kind == AgentStepKind.Input), "no Input task: the check names what is missing and its owners fix it where it lives");
+        }
+
+        // ------------------------------------------------------------------------------------------------ a partly covered work order
+
+        [TestMethod]
+        public async Task A_Work_Order_Whose_Baseline_Has_A_Make_Part_Without_An_Order_Gets_Only_The_Missing_Order()
+        {
+            Env e = await NewEnv("partial");
+            int contract = SeedContract(e, out int wo);
+            int top = 0, partA = 0, partB = 0;
+            e.Host.Write(u =>
+            {
+                InventoryItem t = AppHost.Add(u, new InventoryItem { Code = "TOP", Title = "پمپ", Unit = "عدد", PartNumber = "TOP" });
+                InventoryItem a = AppHost.Add(u, new InventoryItem { Code = "P-A", Title = "بدنه", Unit = "عدد", PartNumber = "P-A" });
+                InventoryItem b = AppHost.Add(u, new InventoryItem { Code = "P-B", Title = "شافت", Unit = "عدد", PartNumber = "P-B" });
+                PbBomHeader h = AppHost.Add(u, new PbBomHeader { AssemblyPartNumber = "TOP", Title = "پمپ", Code = "BOM-TOP", Revision = 1 });
+                u.SaveChanges();
+                PbProjectBaseline bl = AppHost.Add(u, new PbProjectBaseline { WorkOrderId = wo, ContractId = contract, ProductId = 1, BomHeaderId = h.Id, IsCurrent = true, CopiedAt = DateTimeOffset.Now, Count = 1 });
+                u.SaveChanges();
+                int sort = 0;
+                foreach (InventoryItem part in new[] { a, b })
+                    AppHost.Add(u, new PbProjectBomLine { BaselineId = bl.Id, SortOrder = ++sort, PartNumber = part.PartNumber, PartName = part.Title, ItemId = part.Id, Qty = 1, TotalQty = 1, Unit = "عدد", MakeOrBuy = PbMakeOrBuy.Make });
+                u.SaveChanges();
+                // the top assembly and part A already have an order (a person made them, nobody touches them again); part B has none
+                foreach (InventoryItem covered in new[] { t, a })
+                    AppHost.Add(u, new MfProductionOrder { Number = "PO-" + covered.Code, WorkOrderId = wo, ContractId = contract, ItemId = covered.Id, Quantity = 1, Unit = "عدد", Status = MfOrderStatus.Draft, EditedByUserId = 1001 });
+                u.SaveChanges();
+                top = t.Id; partA = a.Id; partB = b.Id;
+            }, Seeder);
+
+            await Settle(e);
+            AgentTask draft = Closed(e, "MF.ORDERS.DRAFT");
+            Assert.AreEqual(wo, draft.TargetId);
+            List<MfProductionOrder> orders = e.Host.Read(u => u.Set<MfProductionOrder>().AsNoTracking().Where(o => o.WorkOrderId == wo).ToList());
+            Assert.AreEqual(3, orders.Count, "exactly the missing order was added, nothing was duplicated");
+            Assert.AreEqual(1, orders.Count(o => o.ItemId == top));
+            Assert.AreEqual(1, orders.Count(o => o.ItemId == partA));
+            MfProductionOrder made = orders.Single(o => o.ItemId == partB);
+            Assert.AreEqual(e.Seats["AG-MF"].UserId, made.CreatorUserId);
+            Assert.IsTrue(made.AutoDrafted);
+            Assert.AreEqual(MfOrderStatus.Draft, made.Status);
+            Assert.AreEqual(0, Open(e, "MF.ORDERS.DRAFT").Count, "complete now: no task is made again");
         }
 
         // ------------------------------------------------------------------------------------------------ release, shop floor, QC decision

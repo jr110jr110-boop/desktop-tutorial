@@ -101,7 +101,27 @@ namespace Services.NasbNiro.Agents.Steps
             IQueryable<int> ordered = uow.Set<MfProductionOrder>().AsNoTracking().Where(o => !o.Deleted && o.Status != MfOrderStatus.Cancelled).Select(o => o.WorkOrderId);
             var rows = await uow.Set<WorkOrder>().AsNoTracking().Where(w => !w.Deleted && live.Contains(w.ContractId) && (baselines.Contains(w.Id) || processes.Contains(w.Id)) && !ordered.Contains(w.Id))
                 .OrderBy(w => w.Id).Take(ProcStepCommon.Cap).Select(w => new { w.Id, w.Code, w.ContractId }).ToListAsync(ct);
-            return rows.Select(w => Item("WorkOrder", w.Id, w.Code, w.ContractId, w.Id, "دستور کار مبنای BOM یا فرایند ساخت دارد ولی دستور تولید ندارد.")).ToList();
+            List<AgentWorkItem> result = rows.Select(w => Item("WorkOrder", w.Id, w.Code, w.ContractId, w.Id, "دستور کار مبنای BOM یا فرایند ساخت دارد ولی دستور تولید ندارد.")).ToList();
+
+            // A work order whose baseline asks for a make part that has no live order yet (a part added by a later baseline, or an order that was cancelled): the drafting service is idempotent per item
+            // (DraftFromBaselineAsync skips every part that already has an order), so running it again makes only the missing orders. Only lines bound to an inventory item are compared here (a line that is
+            // matched by its part number is left to the first pass), which keeps the query a plain NOT EXISTS.
+            IQueryable<int> hasOrders = uow.Set<MfProductionOrder>().AsNoTracking().Where(o => !o.Deleted && o.Status != MfOrderStatus.Cancelled).Select(o => o.WorkOrderId);
+            IQueryable<MfProductionOrder> liveOrders = uow.Set<MfProductionOrder>().AsNoTracking().Where(o => !o.Deleted && o.Status != MfOrderStatus.Cancelled);
+            IQueryable<int> liveOrdered = uow.Set<WorkOrder>().AsNoTracking().Where(w => !w.Deleted && live.Contains(w.ContractId) && hasOrders.Contains(w.Id)).Select(w => w.Id);
+            List<int> partial = await (from l in uow.Set<PbProjectBomLine>().AsNoTracking()
+                                       join b in uow.Set<PbProjectBaseline>().AsNoTracking() on l.BaselineId equals b.Id
+                                       where !l.Deleted && !l.IsHeading && !l.IsRemoved && l.MakeOrBuy == PbMakeOrBuy.Make && l.ItemId != null && l.TotalQty > 0
+                                             && b.IsCurrent && !b.Deleted && liveOrdered.Contains(b.WorkOrderId)
+                                             && !liveOrders.Any(o => o.WorkOrderId == b.WorkOrderId && o.ItemId == l.ItemId.Value)
+                                       select b.WorkOrderId).Distinct().OrderBy(id => id).Take(ProcStepCommon.Cap).ToListAsync(ct);
+            partial = partial.Except(rows.Select(r => r.Id)).ToList();
+            if (partial.Count > 0)
+            {
+                var more = await uow.Set<WorkOrder>().AsNoTracking().Where(w => !w.Deleted && partial.Contains(w.Id)).OrderBy(w => w.Id).Select(w => new { w.Id, w.Code, w.ContractId }).ToListAsync(ct);
+                result.AddRange(more.Select(w => Item("WorkOrder", w.Id, w.Code, w.ContractId, w.Id, "مبنای BOM دستور کار قطعه ساخت دارد که هنوز دستور تولید ندارد؛ ایجنت فقط دستورهای کم را تکمیل می‌کند.")));
+            }
+            return result;
         }
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)

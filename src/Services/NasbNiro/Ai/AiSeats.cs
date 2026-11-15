@@ -97,7 +97,7 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = Agents.AgentCodes.Qc, Title = "ایجنت کیفیت", Roles = new[] { "QC" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Ship, Title = "ایجنت بسته‌بندی، ارسال و تحویل", Roles = new[] { "WAREHOUSE" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Service, Title = "ایجنت خدمات پس از فروش", Roles = new[] { "SERVICE" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
-            new AiSeatDefinition { Code = Agents.AgentCodes.Fin, Title = "ایجنت مالی و سپیدار", Roles = new[] { "FINANCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Fin, Title = "ایجنت مالی و سپیدار", Roles = new[] { "FINANCIAL", "COMMERCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
         };
 
         /// <summary>The evaluation user: it reads like the CEO (★), it is not a seat and has no row in AiSeats.</summary>

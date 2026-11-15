@@ -311,7 +311,7 @@ namespace Services.NasbNiro.Agents
 
         private static AgentWorkItem ToItem(AgentTask t) => new AgentWorkItem
         {
-            TargetType = t.TargetType, TargetId = t.TargetId, TargetNumber = t.TargetNumber, ContractId = t.ContractId, WorkOrderId = t.WorkOrderId, Summary = t.Summary,
+            TargetType = t.TargetType, TargetId = t.TargetId, TargetNumber = t.TargetNumber, ContractId = t.ContractId, WorkOrderId = t.WorkOrderId, Summary = t.Summary, GateUserId = t.GateUserId,
         };
 
         /// <summary>The document is still waiting at this step: what the person or the agent sees follows the document.</summary>
@@ -320,6 +320,7 @@ namespace Services.NasbNiro.Agents
             if (task.State == AgentTaskState.Running) return;
             // a gate whose roles follow the state of the document keeps the roles that are still missing (a fallback task keeps the roles of the step)
             if (gateStep && !task.IsFallback && item.GateRoles != null && AgentText.NormalizeRoles(item.GateRoles) is string roles && roles != task.GateRoles) task.GateRoles = AgentText.Cut(roles, 300);
+            if (gateStep && !task.IsFallback && item.GateUserId != task.GateUserId && (item.GateUserId.HasValue || task.GateUserId.HasValue)) task.GateUserId = item.GateUserId;
             if (item.TargetNumber != null && item.TargetNumber != task.TargetNumber) task.TargetNumber = AgentText.Cut(item.TargetNumber, 60);
             if (item.ContractId != task.ContractId) task.ContractId = item.ContractId;
             if (item.WorkOrderId != task.WorkOrderId) task.WorkOrderId = item.WorkOrderId;
