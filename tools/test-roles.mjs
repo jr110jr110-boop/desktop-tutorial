@@ -85,6 +85,16 @@ assert.equal(r.hasRole(r.ProjectControlRoles.resourceWriters), false);
 // the reader list is a superset of the project control readers
 for (const role of r.ProjectControlRoles.readers) assert.ok(r.ProjectControlRoles.resourceReaders.includes(role), role + " is a project control reader");
 
+// resource load and over-allocations (phase 4c): everybody who reads the pool reads the histogram and the alerts; applying a proposal is planning or the PMO, confirming it and accepting an over-allocation are the PMO only
+as("PLANNING");
+assert.equal(r.hasRole(r.ProjectControlRoles.planning), true, "planning applies and rejects proposals");
+assert.equal(r.hasRole(r.ProjectControlRoles.pmo), false, "planning does not confirm a proposal and does not accept an over-allocation");
+as("PMO");
+assert.equal(r.hasRole(r.ProjectControlRoles.planning) && r.hasRole(r.ProjectControlRoles.pmo), true, "the PMO decides, confirms and accepts");
+as("PROJECTMANAGER");
+assert.equal(r.hasRole(r.ProjectControlRoles.resourceReaders), true, "the project manager reads the histogram");
+assert.equal(r.hasRole(r.ProjectControlRoles.planning) || r.hasRole(r.ProjectControlRoles.pmo), false, "the project manager neither applies nor confirms");
+
 // unknown / missing storage
 as(null);
 assert.deepEqual(r.userRoles(), []);

@@ -8,6 +8,8 @@ import PcTabs from "@/components/pc/PcTabs.vue";
 import ResourcePool from "@/components/pc/resources/ResourcePool.vue";
 import ResourceRates from "@/components/pc/resources/ResourceRates.vue";
 import ResourcePlan from "@/components/pc/resources/ResourcePlan.vue";
+import ResourceLoad from "@/components/pc/resources/ResourceLoad.vue";
+import ResourceOverloads from "@/components/pc/resources/ResourceOverloads.vue";
 import { printPage } from "@/composables/inventory";
 import { pcContractId, setPcContract } from "@/composables/projectControl";
 
@@ -15,14 +17,20 @@ import { pcContractId, setPcContract } from "@/composables/projectControl";
 // The planning agent drafts the plan; people review, edit and approve it here. The links of the gate inbox open this page:
 //   /project-control/resources?contract=<id>              the plan of that project
 //   /project-control/resources?tab=rates[&resource=<id>]  the standard rates (of one resource)
+//   /project-control/resources?tab=load[&resource=<id>]   the load histogram (of one resource)
+//   /project-control/resources?tab=overloads&overload=<id> | &proposal=<id>   the over-allocations, with that one selected
 const props = defineProps({ tab: { type: String, default: "pool" } });
 const route = useRoute();
 const current = ref(props.tab);
 const resourceId = ref<number | null>(null);
+const overloadId = ref<number | null>(null);
+const proposalId = ref<number | null>(null);
 const tabs = [
   { key: "pool", title: "منابع" },
   { key: "rates", title: "نرخ استاندارد منابع" },
   { key: "plan", title: "برنامه منابع پروژه" },
+  { key: "load", title: "بار منابع" },
+  { key: "overloads", title: "بیش‌تخصیص‌ها" },
 ];
 
 function applyQuery() {
@@ -34,7 +42,14 @@ function applyQuery() {
   else current.value = props.tab;
   const resource = Number(route.query.resource);
   resourceId.value = resource > 0 ? resource : null;
+  const overload = Number(route.query.overload), proposal = Number(route.query.proposal);
+  overloadId.value = overload > 0 ? overload : null;
+  proposalId.value = proposal > 0 ? proposal : null;
+  // a link to an over-allocation or a proposal always opens the over-allocations
+  if (!wanted && (overloadId.value || proposalId.value)) current.value = "overloads";
 }
+const openOverloads = (id: number) => { resourceId.value = id; current.value = "overloads"; };
+const openLoad = (id: number) => { resourceId.value = id; current.value = "load"; };
 onMounted(applyQuery);
 watch(() => route.query, applyQuery);
 watch(() => props.tab, applyQuery);
@@ -45,7 +60,7 @@ watch(() => props.tab, applyQuery);
     <KsReportHeader title="منابع پروژه" />
     <div class="inv-card">
       <div class="inv-toolbar">
-        <h1 class="inv-title screen-only">منابع، نرخ استاندارد و برنامه منابع</h1>
+        <h1 class="inv-title screen-only">منابع، نرخ استاندارد، برنامه و بار منابع</h1>
         <div class="d-flex flex-wrap gap-2 d-print-none">
           <ContractSelect v-if="current === 'plan'" />
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ</button>
@@ -54,6 +69,8 @@ watch(() => props.tab, applyQuery);
       <PcTabs v-model="current" :tabs="tabs" />
       <ResourcePool v-if="current === 'pool'" />
       <ResourceRates v-else-if="current === 'rates'" :resource-id="resourceId" />
+      <ResourceLoad v-else-if="current === 'load'" :resource-id="resourceId" @overloads="openOverloads" />
+      <ResourceOverloads v-else-if="current === 'overloads'" :overload-id="overloadId" :proposal-id="proposalId" :resource-id="resourceId" @load="openLoad" />
       <template v-else>
         <NeedContract v-if="!pcContractId" />
         <ResourcePlan v-else :contract-id="pcContractId" />

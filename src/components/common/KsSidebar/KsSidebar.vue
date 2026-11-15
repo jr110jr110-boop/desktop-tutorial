@@ -573,6 +573,7 @@ const links = {
     { title: "منابع پروژه", routeName: "ProjectControlResources", disabled: !hasRole(ProjectControlRoles.resourceReaders) },
     { title: "نرخ استاندارد منابع", routeName: "ProjectControlResourceRates", disabled: !hasRole(ProjectControlRoles.resourceReaders) },
     { title: "برنامه منابع پروژه", routeName: "ProjectControlResourcePlan", disabled: !hasRole(ProjectControlRoles.resourceReaders) },
+    { title: "هیستوگرام منابع", routeName: "ProjectControlResourceLoad", disabled: !hasRole(ProjectControlRoles.resourceReaders) },
     { title: "کنترل تغییرات", routeName: "ProjectControlChanges", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "تنظیمات کنترل پروژه", routeName: "ProjectControlSettings", disabled: !hasRole(ProjectControlRoles.readers) },
     { title: "ادعاها", routeName: "ProjectControlClaims", disabled: !hasRole(ProjectControlRoles.readers) },

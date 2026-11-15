@@ -1,4 +1,4 @@
-import type { Resource, ResourceInput, ResourcePlan, ResourceRate } from "@/api/ResourceAPIs";
+import type { LevelingProposal, Resource, ResourceInput, ResourceOverload, ResourcePlan, ResourceRate } from "@/api/ResourceAPIs";
 import { faDigits, faNum } from "@/composables/ceo";
 import { CONFIDENTIAL, jalali } from "@/composables/inventory";
 import { currentUserId, hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
@@ -142,3 +142,39 @@ export const planPath = (contractId: number) => "/project-control/resources?cont
 export const ratesPath = (resourceId?: number) => "/project-control/resources?tab=rates" + (resourceId ? "&resource=" + resourceId : "");
 
 export const resourceLabel = (r: Pick<Resource, "code" | "title">) => `${r.code} - ${r.title}`;
+
+// ---------------------------------------------------------------- phase 4c: the load of the resources, the over-allocations, the levelling proposals
+// The words are those of the API (PcLoadText in PcResourceLoadService): a button the server would refuse is shown disabled with the same words.
+// The planning agent finds the over-allocations and proposes; the planner applies or rejects; a second person (PMO, not the one who applied) confirms or refuses; the PMO alone accepts an over-allocation on purpose.
+
+export const overloadStatuses: Record<number, string> = { 1: "باز", 2: "رفع‌شده", 3: "پذیرفته‌شده", 4: "گذشته، بدون اصلاح" };
+export const proposalStatuses: Record<number, string> = { 1: "پیشنهادشده", 2: "اعمال‌شده", 3: "ردشده", 4: "منسوخ", 5: "بسته‌شده بدون برگرداندن" };
+export const proposalKinds: Record<number, string> = { 1: "جابه‌جایی در محدوده شناوری", 2: "تاخیر فراتر از شناوری" };
+export const PENDING_SECOND = "در انتظار تأیید نفر دوم";
+export const DRAFT_LAYER = "پیش‌نویس";
+export const CONSTRAINT_NOTE = "با اعمال، قید «شروع نه زودتر از» روی فعالیت می‌ماند؛ برگرداندن آن با «عدم‌تایید» نفر دوم است.";
+export const overloadStatusBadge = (s: number) => (s === 1 ? "bad" : s === 3 ? "warn" : s === 4 ? "info" : "ok");
+
+// The buttons are gated by the SERVER: every proposal and over-allocation carries, for the caller, the reason the action would be refused (null: allowed now). The rules (roles, the lock of the project,
+// the applier is not the confirmer, maker is not checker) are those of the actions; the front only shows the button for the status it belongs to, disabled with the server's words.
+
+/** Apply: a proposal that is still «پیشنهادشده». */
+export const proposalApplyGate = (p: LevelingProposal): Gate => (p.status === 1 ? { show: true, reason: p.applyBlockedReason } : hidden);
+export const proposalRejectGate = (p: LevelingProposal): Gate => (p.status === 1 ? { show: true, reason: p.rejectBlockedReason } : hidden);
+
+/** Confirm and refuse: an applied change that waits for the second person. */
+export const proposalConfirmGate = (p: LevelingProposal): Gate => (p.pendingSecondPerson ? { show: true, reason: p.confirmBlockedReason } : hidden);
+
+/** «بستن بدون برگرداندن»: an applied change whose automatic revert is impossible (the server allows it only then). */
+export const proposalCloseGate = (p: LevelingProposal): Gate => (p.pendingSecondPerson ? { show: true, reason: p.closeBlockedReason } : hidden);
+
+/** Accept an over-allocation on purpose. */
+export const overloadAcceptGate = (o: ResourceOverload): Gate => (o.status === 1 ? { show: true, reason: o.acceptBlockedReason } : hidden);
+
+/** Where the over-allocations of a resource, or one proposal, are opened (the links of the gate inbox). */
+export const overloadsPath = (overloadId?: number, proposalId?: number) =>
+  "/project-control/resources?tab=overloads" + (overloadId ? "&overload=" + overloadId : "") + (proposalId ? "&proposal=" + proposalId : "");
+export const loadPath = (resourceId?: number) => "/project-control/resources?tab=load" + (resourceId ? "&resource=" + resourceId : "");
+
+/** A number of the load in the unit of the resource, Persian digits. */
+export const loadNum = (v: number | null | undefined): string => faNum(v, 2);

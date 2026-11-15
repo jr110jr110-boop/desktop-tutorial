@@ -401,3 +401,211 @@ export interface OpenableChange {
 export const getOpenableChanges = (contractId: number): Promise<ApiResult<OpenableChange[]>> =>
   typed(getChanges({ ContractId: contractId, Status: 4 }), (d) =>
     rowsOf(d).filter((c: any) => c.decision === undefined || Number(c.decision) === 1).map((c: any): OpenableChange => ({ id: num(c.id), number: str(c.number), description: str(c.description) })));
+
+// ---------------------------------------------------------------- phase 4c: the load of the resources, the over-allocations and the levelling proposals
+// (api/v1/projectcontrol/resource-load, resource-overloads, leveling-proposals). No money anywhere in these answers. Dates are ISO (yyyy-mm-dd); the pages write them in Shamsi.
+
+export interface LoadItem {
+  contractId: number;
+  contractCode: string;
+  activityId: number;
+  activityCode: string;
+  activityTitle: string;
+  load: number;
+  /** the load comes from a plan that is not approved yet («پیش‌نویس») */
+  isDraft: boolean;
+}
+
+export interface LoadBucket {
+  start: string;
+  end: string;
+  load: number;
+  draftLoad: number;
+  capacity: number;
+  /** the sum of the daily excess over the capacity */
+  over: number;
+  items: LoadItem[];
+}
+
+export interface LoadRow {
+  resourceId: number;
+  code: string;
+  title: string;
+  kind: number;
+  unit: number;
+  capacity: number;
+  peakLoad: number;
+  totalOver: number;
+  buckets: LoadBucket[];
+}
+
+export interface ResourceLoad {
+  from: string;
+  to: string;
+  bucket: "day" | "week";
+  includeOpen: boolean;
+  resources: LoadRow[];
+}
+
+export interface LoadQuery {
+  resourceId?: number | null;
+  /** yyyy-mm-dd */
+  from?: string | null;
+  to?: string | null;
+  bucket?: "day" | "week";
+  includeOpen?: boolean;
+}
+
+export interface LevelingProposal {
+  id: number;
+  overloadId: number;
+  contractId: number;
+  contractCode: string;
+  activityId: number;
+  activityCode: string;
+  activityTitle: string;
+  /** 1 within the float, 2 beyond the float */
+  kind: number;
+  currentStart: string;
+  currentFinish: string;
+  proposedStart: string;
+  proposedFinish: string;
+  shiftDays: number;
+  criticalImpactDays: number;
+  needsChangeRequest: boolean;
+  note: string;
+  /** 1 proposed, 2 applied, 3 rejected, 4 superseded, 5 closed without a revert */
+  status: number;
+  preparedByAgent: boolean;
+  /** applied and not yet confirmed by the second person */
+  pendingSecondPerson: boolean;
+  reverted: boolean;
+  applierUserId: number | null;
+  applierName: string | null;
+  appliedAt: string | null;
+  confirmedByUserId: number | null;
+  confirmedByName: string | null;
+  confirmedAt: string | null;
+  rejectedByUserId: number | null;
+  rejectedByName: string | null;
+  rejectedAt: string | null;
+  rejectReason: string | null;
+  createDate: string;
+  rowVersion: string | null;
+  /** what the server tells THIS caller: null means the action is allowed now, else the Persian reason (the rules the action enforces, the lock of the project and applier != confirmer included) */
+  applyBlockedReason: string | null;
+  rejectBlockedReason: string | null;
+  confirmBlockedReason: string | null;
+  closeBlockedReason: string | null;
+}
+
+export interface ResourceOverload {
+  id: number;
+  resourceId: number;
+  resourceCode: string;
+  resourceTitle: string;
+  resourceUnit: number;
+  fromDate: string;
+  toDate: string;
+  peakLoad: number;
+  peakCapacity: number;
+  /** 1 open, 2 resolved, 3 accepted, 4 lapsed (the days passed without a fix) */
+  status: number;
+  detectedAt: string;
+  resolvedAt: string | null;
+  acceptedByUserId: number | null;
+  acceptedByName: string | null;
+  acceptedAt: string | null;
+  acceptReason: string | null;
+  proposals: LevelingProposal[];
+  rowVersion: string | null;
+  /** null: the caller may accept it now; else the Persian reason */
+  acceptBlockedReason: string | null;
+}
+
+/** One page of a paged list. */
+export interface Paged<T> {
+  rows: T[];
+  page: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface OverloadQuery {
+  resourceId?: number | null;
+  status?: number | null;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ProposalQuery {
+  overloadId?: number | null;
+  contractId?: number | null;
+  status?: number | null;
+}
+
+function toLoadBucket(b: any): LoadBucket {
+  return {
+    start: str(b.start).slice(0, 10), end: str(b.end).slice(0, 10), load: num(b.load), draftLoad: num(b.draftLoad), capacity: num(b.capacity), over: num(b.over),
+    items: (Array.isArray(b.items) ? b.items : []).map((i: any): LoadItem => ({
+      contractId: num(i.contractId), contractCode: str(i.contractCode), activityId: num(i.activityId), activityCode: str(i.activityCode), activityTitle: str(i.activityTitle), load: num(i.load), isDraft: !!i.isDraft,
+    })),
+  };
+}
+
+function toResourceLoad(r: any): ResourceLoad {
+  return {
+    from: str(r.from).slice(0, 10), to: str(r.to).slice(0, 10), bucket: r.bucket === "week" ? "week" : "day", includeOpen: !!r.includeOpen,
+    resources: (Array.isArray(r.resources) ? r.resources : []).map((x: any): LoadRow => ({
+      resourceId: num(x.resourceId), code: str(x.code), title: str(x.title), kind: num(x.kind), unit: num(x.unit), capacity: num(x.capacity), peakLoad: num(x.peakLoad), totalOver: num(x.totalOver),
+      buckets: (Array.isArray(x.buckets) ? x.buckets : []).map(toLoadBucket),
+    })),
+  };
+}
+
+function toProposal(r: any): LevelingProposal {
+  return {
+    id: num(r.id), overloadId: num(r.overloadId), contractId: num(r.contractId), contractCode: str(r.contractCode), activityId: num(r.activityId), activityCode: str(r.activityCode), activityTitle: str(r.activityTitle),
+    kind: num(r.kind), currentStart: str(r.currentStart).slice(0, 10), currentFinish: str(r.currentFinish).slice(0, 10), proposedStart: str(r.proposedStart).slice(0, 10), proposedFinish: str(r.proposedFinish).slice(0, 10),
+    shiftDays: num(r.shiftDays), criticalImpactDays: num(r.criticalImpactDays), needsChangeRequest: !!r.needsChangeRequest, note: str(r.note), status: num(r.status), preparedByAgent: !!r.preparedByAgent,
+    pendingSecondPerson: !!r.pendingSecondPerson, reverted: !!r.reverted, applierUserId: numOrNull(r.applierUserId), applierName: strOrNull(r.applierName), appliedAt: strOrNull(r.appliedAt),
+    confirmedByUserId: numOrNull(r.confirmedByUserId), confirmedByName: strOrNull(r.confirmedByName), confirmedAt: strOrNull(r.confirmedAt), rejectedByUserId: numOrNull(r.rejectedByUserId),
+    rejectedByName: strOrNull(r.rejectedByName), rejectedAt: strOrNull(r.rejectedAt), rejectReason: strOrNull(r.rejectReason), createDate: str(r.createDate), rowVersion: strOrNull(r.rowVersion),
+    applyBlockedReason: strOrNull(r.applyBlockedReason), rejectBlockedReason: strOrNull(r.rejectBlockedReason), confirmBlockedReason: strOrNull(r.confirmBlockedReason), closeBlockedReason: strOrNull(r.closeBlockedReason),
+  };
+}
+
+function toOverload(r: any): ResourceOverload {
+  return {
+    id: num(r.id), resourceId: num(r.resourceId), resourceCode: str(r.resourceCode), resourceTitle: str(r.resourceTitle), resourceUnit: num(r.resourceUnit) || 1, fromDate: str(r.fromDate).slice(0, 10), toDate: str(r.toDate).slice(0, 10),
+    peakLoad: num(r.peakLoad), peakCapacity: num(r.peakCapacity), status: num(r.status), detectedAt: str(r.detectedAt), resolvedAt: strOrNull(r.resolvedAt), acceptedByUserId: numOrNull(r.acceptedByUserId),
+    acceptedByName: strOrNull(r.acceptedByName), acceptedAt: strOrNull(r.acceptedAt), acceptReason: strOrNull(r.acceptReason), proposals: (Array.isArray(r.proposals) ? r.proposals : []).map(toProposal), rowVersion: strOrNull(r.rowVersion),
+    acceptBlockedReason: strOrNull(r.acceptBlockedReason),
+  };
+}
+
+/** The load of one resource (or of all) over the period, against the capacity. The period is at most 370 days; the server refuses a longer one in Persian. */
+export const getResourceLoad = (q: LoadQuery = {}): Promise<ApiResult<ResourceLoad>> =>
+  typed(call("get", base + "resource-load", undefined, clean({ ResourceId: q.resourceId, From: q.from, To: q.to, Bucket: q.bucket, IncludeOpen: q.includeOpen ? true : undefined })), toResourceLoad);
+
+const toPage = <T>(d: any, map: (r: any) => T): Paged<T> => ({
+  rows: rowsOf(d).map(map), page: num(d?.currentPage) || 1, totalItems: num(d?.totalItems ?? d?.totalCount) || rowsOf(d).length, totalPages: num(d?.totalPages) || 1,
+});
+
+/** One page of the over-allocations (never the whole list). */
+export const getOverloads = (q: OverloadQuery = {}): Promise<ApiResult<Paged<ResourceOverload>>> =>
+  typed(call("get", base + "resource-overloads", undefined, clean({ PageNumber: q.page || 1, PageSize: q.pageSize || 10, ResourceId: q.resourceId, Status: q.status })), (d) => toPage(d, toOverload));
+
+/** One over-allocation by id (the link of a gate inbox task). */
+export const getOverload = (id: number): Promise<ApiResult<ResourceOverload>> => typed(call("get", base + "resource-overloads/" + id), toOverload);
+
+/** The PMO accepts an over-allocation on purpose; the reason is mandatory. */
+export const acceptOverload = (o: ResourceOverload, reason: string): Promise<ApiResult<ResourceOverload>> =>
+  typed(call("post", base + "resource-overloads/accept", { id: o.id, reason, rowVersion: o.rowVersion }), toOverload);
+
+/** One levelling proposal by id (the link of a gate inbox task). */
+export const getProposal = (id: number): Promise<ApiResult<LevelingProposal>> => typed(call("get", base + "leveling-proposals/" + id), toProposal);
+
+/** apply and reject (the planner), confirm, refuse and close without a revert (a second person, the PMO); reject, refuse and close need a reason. */
+export const proposalAction = (p: LevelingProposal, action: "apply" | "reject" | "confirm" | "refuse" | "close", reason?: string | null): Promise<ApiResult<LevelingProposal>> =>
+  typed(call("post", base + "leveling-proposals/action", { id: p.id, action, reason: reason || null, rowVersion: p.rowVersion }), toProposal);
