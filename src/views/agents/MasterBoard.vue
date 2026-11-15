@@ -7,7 +7,7 @@ import { enableAgentStep, getAgentBoard, getAgentSteps, getAgentTask, getAgentTa
 import { rowsOf } from "@/api/ApiClient";
 import {
   agentTitleOf, ageShort, ageText, AgentCellStatus, badgeOfState, badgeOfStuck, cellStatuses, cellStatusOrder, fa, jalali, rolesText, startAutoRefresh, stationTitles, stepKinds, stuckReasons,
-  taskLink, taskStates,
+  taskLink, taskStates, faDigits, titleHas, titleParts,
 } from "@/composables/agents";
 import { fail, ok } from "@/composables/inventory";
 import { AgentRoles, hasRole } from "@/composables/roles";
@@ -209,7 +209,7 @@ onBeforeUnmount(() => stop && stop());
                 <template v-else-if="c.status === AgentCellStatus.Failed">
                   <span class="d-block">{{ ageShort(c.oldestHours) }}</span>
                 </template>
-                <template v-else-if="c.status >= AgentCellStatus.Agent">
+                <template v-else-if="c.status >= AgentCellStatus.Agent && c.status !== AgentCellStatus.Done">
                   <span class="d-block">{{ ageShort(c.oldestHours) }}</span>
                 </template>
               </span>
@@ -227,7 +227,7 @@ onBeforeUnmount(() => stop && stop());
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <span :class="badgeOfStuck(s.reason)" class="ag-chip">{{ stuckReasons[s.reason] }}</span>
             <span class="ag-chip">{{ s.stationTitle }}</span>
-            <b>{{ s.title }}</b>
+            <b><template v-for="(p, i) in titleParts(s.title)" :key="i"><bdi v-if="p.code" class="inv-ltr" dir="ltr">{{ p.text }}</bdi><template v-else>{{ p.text }}</template></template></b>
           </div>
           <div class="ag-row-meta mt-1">
             <span v-if="s.contractLabel">{{ s.contractLabel }}</span>
@@ -249,16 +249,16 @@ onBeforeUnmount(() => stop && stop());
       <p class="inv-muted">هر گام یا توسط ایجنت انجام می‌شود یا (وقتی خاموش است) دستی و با انسان. {{ canAdmin ? "کلید گام را فقط PMO تغییر می‌دهد." : "کلیدها را فقط PMO تغییر می‌دهد." }}</p>
       <div class="table-responsive">
         <table class="table table-sm">
-          <thead><tr><th>کد</th><th>عنوان</th><th>نوع</th><th>ایجنت</th><th>وضعیت گام</th><th>صندلی ایجنت</th><th>کار باز</th></tr></thead>
+          <thead><tr><th class="d-none d-md-table-cell">کد</th><th>عنوان</th><th>نوع</th><th class="d-none d-md-table-cell">ایجنت</th><th>وضعیت گام</th><th>صندلی ایجنت</th><th>کار باز</th></tr></thead>
           <tbody>
             <tr v-if="!steps.length"><td colspan="7" class="text-center inv-muted">{{ loading ? "در حال بارگذاری..." : "گامی ثبت نشده است." }}</td></tr>
             <template v-for="g in stepGroups" :key="g.station">
               <tr><td class="ag-station-head" colspan="7">{{ fa(g.station) }}. {{ g.title }}</td></tr>
               <tr v-for="s in g.steps" :key="s.code">
-                <td class="inv-ltr">{{ s.code }}</td>
-                <td>{{ s.title }}</td>
+                <td class="inv-ltr d-none d-md-table-cell">{{ s.code }}</td>
+                <td>{{ s.title }}<div class="inv-ltr small inv-muted d-md-none">{{ s.code }}</div></td>
                 <td>{{ stepKinds[s.kind] }}</td>
-                <td>{{ agentTitleOf(s.agentCode) }}</td>
+                <td class="d-none d-md-table-cell">{{ agentTitleOf(s.agentCode) }}</td>
                 <td>
                   <div class="d-flex align-items-center gap-2">
                     <div class="form-check form-switch m-0">
@@ -291,7 +291,7 @@ onBeforeUnmount(() => stop && stop());
         <div v-else-if="!panelTasks.length" class="ag-empty">کار بازی در این ایستگاه نیست.</div>
         <div v-for="t in panelTasks" :key="t.id" :class="{ on: selected && selected.id === t.id }" class="ag-panel-task" @click="loadDetail(t.id, true)">
           <div class="d-flex flex-wrap gap-2 align-items-center">
-            <b>{{ t.title }}</b>
+            <b><template v-for="(p, i) in titleParts(t.title)" :key="i"><bdi v-if="p.code" class="inv-ltr" dir="ltr">{{ p.text }}</bdi><template v-else>{{ p.text }}</template></template></b>
             <span :class="badgeOfState(t.state)" class="ag-chip">{{ taskStates[t.state] }}</span>
             <span v-if="t.overdue" class="ag-chip bad">با تأخیر</span>
             <span v-if="t.isFallback" class="ag-chip warn">دستی (ایجنت خاموش)</span>
@@ -300,7 +300,7 @@ onBeforeUnmount(() => stop && stop());
             <span>ایجنت: {{ agentTitleOf(t.agentCode) }}</span>
             <span>· {{ ageText(t.ageHours) }}</span>
             <span v-if="t.gateRoles">· {{ rolesText(t.gateRoles) }}</span>
-            <span v-if="t.targetNumber" class="inv-ltr">{{ t.targetNumber }}</span>
+            <span v-if="t.targetNumber && !titleHas(t.title, t.targetNumber)" class="inv-ltr">{{ t.targetNumber }}</span>
           </div>
           <div v-if="t.lastError" class="ag-note bad">{{ t.lastError }}</div>
           <div class="ag-actions" @click.stop>
@@ -320,7 +320,7 @@ onBeforeUnmount(() => stop && stop());
                 <b>{{ taskStates[e.toState] || e.toState }}</b>
                 <span v-if="e.fromState" class="inv-muted"> (از «{{ taskStates[e.fromState] || e.fromState }}»)</span>
               </div>
-              <div class="inv-muted">{{ e.atText || jalali(e.at, true) }}<span v-if="e.seatCode"> · {{ agentTitleOf(e.seatCode) }}</span></div>
+              <div class="inv-muted">{{ e.atText ? faDigits(e.atText) : jalali(e.at, true) }}<span v-if="e.seatCode"> · {{ agentTitleOf(e.seatCode) }}</span></div>
               <div v-if="e.note" class="small" style="overflow-wrap: anywhere">{{ e.note }}</div>
             </div>
           </div>

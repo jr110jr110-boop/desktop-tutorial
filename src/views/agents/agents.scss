@@ -416,3 +416,12 @@
 }
 .ag .table { color: var(--ag-ink); --bs-table-bg: transparent; --bs-table-color: var(--ag-ink); }
 .ag .table th { background: var(--ag-soft) !important; color: var(--ag-ink); }
+
+/* phone: a narrower sticky label so more than one station is visible; the panel fills the screen */
+@media (max-width: 575.98px) {
+  .ag .ag-line { grid-template-columns: 104px repeat(13, minmax(98px, 1fr)); }
+  .ag .ag-line-label { font-size: 0.78rem; padding-inline: 0.2rem; }
+  .ag .ag-hero .ag-tile { flex: 1 1 40%; }
+}
+/* a document number inside a Persian title never breaks at its hyphens */
+.ag .ag-row-title bdi, .ag-panel-task b bdi, .ag .ag-stuck-main b bdi { white-space: nowrap; }

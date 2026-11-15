@@ -7,7 +7,7 @@ import { useRouter } from "vue-router";
 import PromptModal from "@/components/fn/PromptModal.vue";
 import { getAgentInbox, getAgentInboxCounts, returnAgentTask } from "@/api/AgentAPIs";
 import { rowsOf } from "@/api/ApiClient";
-import { agentTitleOf, ageText, badgeOfState, fa, jalali, rolesText, stationTitles, startAutoRefresh, stepKinds, taskLink, tabOfState } from "@/composables/agents";
+import { agentTitleOf, ageText, badgeOfState, fa, jalali, rolesText, stationTitles, startAutoRefresh, stepKinds, taskLink, tabOfState, titleHas, titleParts } from "@/composables/agents";
 import { fail, ok } from "@/composables/inventory";
 
 const router = useRouter();
@@ -132,8 +132,8 @@ onBeforeUnmount(() => stop && stop());
       <div v-for="r in rows" :key="r.id" :class="rowClass(r)" class="ag-row">
         <div class="ag-row-head">
           <span class="ag-chip">{{ r.stationTitle }}</span>
-          <span class="ag-row-title">{{ r.title }}</span>
-          <span v-if="r.targetNumber" class="inv-ltr small">{{ r.targetNumber }}</span>
+          <span class="ag-row-title"><template v-for="(p, i) in titleParts(r.title)" :key="i"><bdi v-if="p.code" class="inv-ltr" dir="ltr">{{ p.text }}</bdi><template v-else>{{ p.text }}</template></template></span>
+          <span v-if="r.targetNumber && !titleHas(r.title, r.targetNumber)" class="inv-ltr small">{{ r.targetNumber }}</span>
           <span :class="kindChip(r)" class="ag-chip">{{ kindText(r) }}</span>
           <span v-if="r.overdue" class="ag-chip bad">با تأخیر</span>
           <span v-else-if="r.dueAt" class="ag-chip">مهلت: {{ jalali(r.dueAt, true) }}</span>

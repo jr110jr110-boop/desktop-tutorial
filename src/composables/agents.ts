@@ -126,3 +126,17 @@ export function startAutoRefresh(fn: () => void, ms = 60000): () => void {
     document.removeEventListener("visibilitychange", onVisible);
   };
 }
+
+/** Persian digits for the date texts the server already wrote ("1405/08/24 07:48" -> «۱۴۰۵/۰۸/۲۴ ۰۷:۴۸»). */
+export const faDigits = (t: string | null | undefined): string => String(t ?? "").replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+
+/** Splits a title at its document numbers («PRQ-1405-00002», «SEP-1405-00001») so the numbers can be shown left-to-right inside the Persian line (no broken digits on a narrow screen). */
+export function titleParts(title: string | null | undefined): { text: string; code: boolean }[] {
+  const out: { text: string; code: boolean }[] = [];
+  for (const part of String(title ?? "").split(/([A-Za-z]{1,6}(?:-[A-Za-z0-9]+)+)/)) {
+    if (part) out.push({ text: part, code: /^[A-Za-z]{1,6}(?:-[A-Za-z0-9]+)+$/.test(part) });
+  }
+  return out;
+}
+/** True when the title already shows the number (then the separate number is not repeated). */
+export const titleHas = (title: string | null | undefined, num: string | null | undefined): boolean => !!num && String(title ?? "").includes(num);
