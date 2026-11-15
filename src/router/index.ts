@@ -604,6 +604,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/project-control/transmittals", name: "ProjectControlTransmittals", component: () => import("@/views/projectControl/Transmittals.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/mdr-templates", name: "ProjectControlMdrTemplates", component: () => import("@/views/projectControl/DocSetup.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/final-books", name: "ProjectControlFinalBooks", component: () => import("@/views/projectControl/FinalBooks.vue"), meta: { roles: ProjectControlRoles.readers } },
+  // resources (priority 4): one page with three tabs; the gate-inbox links are /project-control/resources?contract=<id> (plan) and /project-control/resources?tab=rates[&resource=<id>] (rates)
+  { path: "/project-control/resources", name: "ProjectControlResources", component: () => import("@/views/projectControl/Resources.vue"), meta: { roles: ProjectControlRoles.resourceReaders } },
+  { path: "/project-control/resource-rates", name: "ProjectControlResourceRates", component: () => import("@/views/projectControl/Resources.vue"), props: { tab: "rates" }, meta: { roles: ProjectControlRoles.resourceReaders } },
+  { path: "/project-control/resource-plan", name: "ProjectControlResourcePlan", component: () => import("@/views/projectControl/Resources.vue"), props: { tab: "plan" }, meta: { roles: ProjectControlRoles.resourceReaders } },
   { path: "/project-control/changes", name: "ProjectControlChanges", component: () => import("@/views/projectControl/Changes.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/settings", name: "ProjectControlSettings", component: () => import("@/views/projectControl/Settings.vue"), meta: { roles: ProjectControlRoles.readers } },
   { path: "/project-control/claims", name: "ProjectControlClaims", component: () => import("@/views/projectControl/Claims.vue"), meta: { roles: ProjectControlRoles.readers } },

@@ -43,7 +43,10 @@ watch(() => route.query, applyQuery);
     <div class="inv-card">
       <div class="inv-toolbar">
         <h1 class="inv-title">فضای کار پروژه</h1>
-        <ContractSelect />
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <router-link v-if="pcContractId" :to="{ path: '/project-control/resources', query: { contract: String(pcContractId) } }" class="btn btn-sm btn-outline-primary">برنامه منابع پروژه</router-link>
+          <ContractSelect />
+        </div>
       </div>
       <NeedContract v-if="!pcContractId" />
       <template v-else>

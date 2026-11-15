@@ -530,6 +530,16 @@ export const ProjectControlRoles = {
   forecast: list("PMO,CEO,PROJECTMANAGER,PLANNING,FINANCIAL,FINANCEMANAGER,TREASURY,COMMERCIAL,AUDITOR"),
   /** release of a guarantee (guarantees/release): the money side signs it too, so FINANCEMANAGER is on the list */
   guaranteeRelease: list("COMMERCIAL,FINANCEMANAGER,PMO"),
+  /**
+   * Resources (priority 4; PcResourceRules in PcResourceCommon.cs): the pool, the standard rates, the resource plan and the budget view are read by the project control readers
+   * and the roles that handle rates. Planning and the PMO edit the pool and the plan (the same roles as `planning`); the finance manager proposes a rate, a second person approves it.
+   */
+  resourceReaders: list("PMO,CEO,PROJECTMANAGER,PLANNING,DCC,COMMERCIAL,FINANCIAL,ENGINEERING,ENGINEER,QC,QA,CONSTRUCTION,ASSEMBLER,WAREHOUSE,WHSUPERVISOR,FINANCEMANAGER,PAYROLL,AUDITOR"),
+  resourceWriters: list("PLANNING,PMO"),
+  rateMakers: ["FINANCEMANAGER"],
+  rateApprovers: list("FINANCEMANAGER,CEO"),
+  /** who sees the rate of a sensitive resource (MfPrivacy.PayrollRoles; the PMO does not): the others get null with the hidden flag, shown as «محرمانه» */
+  rateReaders: list("PAYROLL,FINANCEMANAGER,CEO"),
 };
 
 /**

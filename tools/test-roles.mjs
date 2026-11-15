@@ -54,6 +54,37 @@ assert.equal(r.currentRole(), "NEWROLE", "unknown roles keep their order");
 for (const name of Object.keys(r.Roles)) assert.ok(r.RolePriority.includes(name), name + " missing in RolePriority");
 assert.equal(new Set(r.RolePriority).size, r.RolePriority.length, "no duplicates in RolePriority");
 
+// resources (priority 4): readers are the project control readers plus the roles that handle rates; the writers are planning and the PMO
+for (const role of ["FINANCEMANAGER", "PAYROLL", "AUDITOR", "PLANNING", "PROJECTMANAGER", "WHSUPERVISOR"]) {
+  as(role);
+  assert.equal(r.hasRole(r.ProjectControlRoles.resourceReaders), true, role + " reads the resources");
+}
+for (const role of ["SECURITY", "OPERATOR", "TREASURY", "HR", "SALES"]) {
+  as(role);
+  assert.equal(r.hasRole(r.ProjectControlRoles.resourceReaders), false, role + " does not read the resources");
+}
+as("PLANNING");
+assert.equal(r.hasRole(r.ProjectControlRoles.resourceWriters), true);
+assert.equal(r.hasRole(r.ProjectControlRoles.rateMakers), false);
+as("PROJECTMANAGER");
+assert.equal(r.hasRole(r.ProjectControlRoles.resourceWriters), false, "the project manager decides the plan, planning and the PMO edit it");
+as("FINANCEMANAGER");
+assert.equal(r.hasRole(r.ProjectControlRoles.rateMakers) && r.hasRole(r.ProjectControlRoles.rateApprovers), true);
+assert.equal(r.hasRole(r.ProjectControlRoles.resourceWriters), false);
+as("CEO");
+assert.equal(r.hasRole(r.ProjectControlRoles.rateApprovers), true);
+assert.equal(r.hasRole(r.ProjectControlRoles.rateMakers), false);
+as("AUDITOR");
+assert.equal(r.hasRole(r.ProjectControlRoles.rateReaders), false, "the auditor reads rates as «محرمانه»");
+as("PMO");
+assert.equal(r.hasRole(r.ProjectControlRoles.rateReaders), false, "the PMO no longer sees the rates of sensitive resources");
+for (const role of ["CEO", "FINANCEMANAGER"]) { as(role); assert.equal(r.hasRole(r.ProjectControlRoles.rateReaders), true, role + " sees the rates"); }
+as("PAYROLL");
+assert.equal(r.hasRole(r.ProjectControlRoles.rateReaders), true);
+assert.equal(r.hasRole(r.ProjectControlRoles.resourceWriters), false);
+// the reader list is a superset of the project control readers
+for (const role of r.ProjectControlRoles.readers) assert.ok(r.ProjectControlRoles.resourceReaders.includes(role), role + " is a project control reader");
+
 // unknown / missing storage
 as(null);
 assert.deepEqual(r.userRoles(), []);

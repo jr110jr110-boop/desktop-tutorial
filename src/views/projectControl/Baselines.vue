@@ -5,6 +5,7 @@ import KsReportHeader from "@/components/common/KsReportHeader.vue";
 import ContractSelect from "@/components/pc/ContractSelect.vue";
 import NeedContract from "@/components/pc/NeedContract.vue";
 import PcTabs from "@/components/pc/PcTabs.vue";
+import BaselineResources from "@/components/pc/resources/BaselineResources.vue";
 import { baselineAction, createBaseline, deleteCostLine, getActivities, getBaseline, getBaselineActivities, getBaselines, getCostLines, getTerms, getWbs, saveCostLine } from "@/api/ProjectControlAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import BaselinePrint from "@/components/pc/print/BaselinePrint.vue";
@@ -210,6 +211,7 @@ watch(pcContractId, () => { sel.value = null; load(); loadCost(); });
                 <span v-if="pmoGate.pendingReason" class="small text-danger">{{ pmoGate.pendingReason }}</span>
               </template>
             </div>
+            <BaselineResources :baseline-id="sel.id" class="d-print-none" />
             <p class="inv-muted mt-2 mb-0">امضا شده: {{ signedCount }} از {{ sel.signatures.length }}. پس از امضای همه مدیران، معاون PMO تایید می‌کند؛ تایید، خط مبنای قبلی را جایگزین‌شده می‌کند و گام «تایید خط مبنا» از شروع پروژه ثبت می‌شود. تا پایان امضا و تایید، خط مبنای جدید دیگری ساخته نمی‌شود.</p>
           </div>
         </div>
