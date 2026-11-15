@@ -320,7 +320,12 @@ namespace Services.NasbNiro.Agents.Steps
             IQueryable<int> reopened = uow.Set<PcContractReview>().AsNoTracking().Where(r => !r.Deleted && r.ContractId != null && r.Decision == PcReviewDecision.ReviewRequired).Select(r => r.ContractId.Value);
             IQueryable<int> withActivities = uow.Set<PcActivity>().AsNoTracking().Where(a => !a.Deleted).Select(a => a.ContractId);
             IQueryable<int> unweighted = uow.Set<PcActivity>().AsNoTracking().Where(a => !a.Deleted && a.BudgetAtCompletion <= 0m && a.Weight <= 0m).Select(a => a.ContractId);
-            List<ContractEntity> rows = await Open(uow, today).Where(c => withActivities.Contains(c.Id) && accepted.Contains(c.Id) && !reopened.Contains(c.Id) && !unweighted.Contains(c.Id)).OrderBy(c => c.Id).Take(30).ToListAsync(ct);
+            // priority 4: a resource plan that is still being made (or that the planning agent is about to draft from the pool) goes into the baseline first
+            IQueryable<int> resourceOpen = ResFacts.WithOpenPlan(uow);
+            // (the hold for a draft that is about to be made applies only while the draft step is switched on and the pool has a resource for the unit of some activity of the contract)
+            IQueryable<int> resourceToDraft = await ResFacts.DraftingEnabledAsync(uow, ct) && await ResFacts.PoolHasMatchAsync(uow, ct)
+                ? ResFacts.DraftBeforeBaseline(uow, Open(uow, today).Select(c => c.Id)) : uow.Set<PcResourcePlan>().AsNoTracking().Where(p => false).Select(p => p.ContractId);
+            List<ContractEntity> rows = await Open(uow, today).Where(c => withActivities.Contains(c.Id) && accepted.Contains(c.Id) && !reopened.Contains(c.Id) && !unweighted.Contains(c.Id) && !resourceOpen.Contains(c.Id) && !resourceToDraft.Contains(c.Id)).OrderBy(c => c.Id).Take(30).ToListAsync(ct);
             Dictionary<int, decimal> sums = await BudgetsAsync(uow, rows.Select(c => c.Id).ToArray(), ct);
             var items = new List<AgentWorkItem>();
             foreach (ContractEntity c in rows.Where(c => sums.TryGetValue(c.Id, out decimal s) && s > 0m))

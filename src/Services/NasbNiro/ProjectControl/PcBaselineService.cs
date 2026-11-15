@@ -173,7 +173,9 @@ namespace Services.NasbNiro.ProjectControl
         private async Task<string> StaleDraftProblemAsync(PcBaseline b, CancellationToken cancellationToken)
         {
             List<string> diff = await DraftDifferencesAsync(b, cancellationToken);
-            return diff.Count == 0 ? null : "برنامه پس از ساخت این خط مبنا تغییر کرده است (" + string.Join("، ", diff.Distinct().Take(10)) + ")؛ خط مبنای تازه بسازید.";
+            if (diff.Count > 0) return "برنامه پس از ساخت این خط مبنا تغییر کرده است (" + string.Join("، ", diff.Distinct().Take(10)) + ")؛ خط مبنای تازه بسازید.";
+            // priority 4: the approved resource plan is part of what the draft froze
+            return await PcResourceBaseline.SnapshotDiffersAsync(_uow, b.Id, b.ContractId, cancellationToken) ? "طرح منابع تاییدشده پس از ساخت این خط مبنا تغییر کرده است؛ خط مبنای تازه بسازید." : null;
         }
 
         public async Task<ResponseDto<PcBaselineDto>> CreateBaselineAsync(PcBaselineCreateDto dto, CancellationToken cancellationToken)
@@ -189,8 +191,12 @@ namespace Services.NasbNiro.ProjectControl
             string gate = await PcGates.RequireBaselineReviewAsync(_uow, dto.ContractId, cancellationToken);
             if (gate != null) return Bad<PcBaselineDto>(gate);
             PcBaseline pending = existing.FirstOrDefault(b => b.Status == PcBaselineStatus.Draft || b.Status == PcBaselineStatus.ManagersSigned);
-            if (pending != null && (await DraftDifferencesAsync(pending, cancellationToken)).Count == 0)
+            // a draft that the activities OR the approved resource plan have left behind is withdrawn and rebuilt below, not kept
+            if (pending != null && (await DraftDifferencesAsync(pending, cancellationToken)).Count == 0 && !await PcResourceBaseline.SnapshotDiffersAsync(_uow, pending.Id, dto.ContractId, cancellationToken))
                 return Bad<PcBaselineDto>("یک خط مبنای در انتظار امضا یا تایید وجود دارد.");
+            // priority 4: the resource plan is part of the baseline, so a plan that is still being made holds the baseline back (a contract without a resource plan is baselined as before)
+            string resourceProblem = await PcResourceBaseline.CreationProblemAsync(_uow, dto.ContractId, cancellationToken);
+            if (resourceProblem != null) return Bad<PcBaselineDto>(resourceProblem);
             var built = await BuildBaselineAsync(dto.ContractId, 0, dto.Reason ?? "خط مبنای اولیه", cancellationToken);
             if (built.Error != null) return Bad<PcBaselineDto>(built.Error);
             if (pending != null)
@@ -200,6 +206,8 @@ namespace Services.NasbNiro.ProjectControl
                 await _uow.SaveChangesAsync(cancellationToken);
             }
             _uow.Set<PcBaseline>().Add(built.Baseline);
+            // the approved assignments are frozen with the baseline (saved together with it)
+            await PcResourceBaseline.SnapshotAsync(_uow, built.Baseline, dto.ContractId, null, DateTime.Today, cancellationToken);
             await _uow.SaveChangesAsync(cancellationToken);
             return ResponseDtoHelper.Ok(await ToDtoAsync(built.Baseline, cancellationToken));
         }
@@ -239,6 +247,8 @@ namespace Services.NasbNiro.ProjectControl
                     if (gate != null) return Bad<PcBaselineDto>(gate);
                     string stale = await StaleDraftProblemAsync(b, cancellationToken);
                     if (stale != null) return Bad<PcBaselineDto>(stale);
+                    string resourceOpen = await PcResourceBaseline.CreationProblemAsync(_uow, b.ContractId, cancellationToken);
+                    if (resourceOpen != null) return Bad<PcBaselineDto>(resourceOpen);
                     var live = await LiveAsync(b.ContractId, cancellationToken);
                     string planProblem = await PlanRunProblemAsync(b.ContractId, live.Activities, cancellationToken);
                     if (planProblem != null) return Bad<PcBaselineDto>(planProblem);
@@ -504,6 +514,10 @@ namespace Services.NasbNiro.ProjectControl
                 {
                     if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcChangeDto>(PcText.NotAllowed);
                     if (c.Status != PcChangeStatus.Implementing) return Bad<PcChangeDto>("فقط تغییر در حال اجرا بسته می‌شود.");
+                    // priority 4: a resource plan that this request opened and that is still being made is not left without its authority
+                    var openPlan = await _uow.Set<PcResourcePlan>().AsNoTracking().Where(p => !p.Deleted && p.ChangeRequestId == c.Id
+                        && (p.Status == PcResourcePlanStatus.Draft || p.Status == PcResourcePlanStatus.Submitted || p.Status == PcResourcePlanStatus.Returned)).OrderBy(p => p.Id).Select(p => new { p.Version }).FirstOrDefaultAsync(cancellationToken);
+                    if (openPlan != null) return Bad<PcChangeDto>("طرح منابع نسخه " + openPlan.Version + " که با این درخواست تغییر باز شده هنوز باز است (پیش‌نویس، ارسال‌شده یا برگشت‌خورده)؛ ابتدا آن را تایید کنید یا به نتیجه برسانید، سپس درخواست را ببندید.");
                     c.Status = PcChangeStatus.Closed;
                     break;
                 }
@@ -618,6 +632,7 @@ namespace Services.NasbNiro.ProjectControl
             {
                 // a half-built baseline of this attempt is dropped from the context before the claim is saved back
                 foreach (PcBaselineCostPeriod p in _uow.Set<PcBaselineCostPeriod>().Local.Where(x => x.Id == 0).ToList()) _uow.Entry(p).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+                foreach (PcBaselineResource p in _uow.Set<PcBaselineResource>().Local.Where(x => x.Id == 0).ToList()) _uow.Entry(p).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
                 foreach (PcBaseline b in _uow.Set<PcBaseline>().Local.Where(x => x.Id == 0).ToList())
                 {
                     foreach (PcBaselineActivity r in b.Activities.ToList()) _uow.Entry(r).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
@@ -663,6 +678,8 @@ namespace Services.NasbNiro.ProjectControl
             }
             foreach (PcBaseline old in await _uow.Set<PcBaseline>().Where(x => x.ContractId == c.ContractId && x.Status == PcBaselineStatus.Approved).ToListAsync(cancellationToken)) old.Status = PcBaselineStatus.Superseded;
             _uow.Set<PcBaseline>().Add(nb);
+            // the resource rows of the current baseline carry over for the activities that remain; the new version of the resource plan (opened by this request) replaces them when it is approved
+            await PcResourceBaseline.CopyAsync(_uow, terms.CurrentBaselineId.Value, nb, new HashSet<int>(outcome.Activities.Select(a => a.Id)), cancellationToken);
             c.Baseline = nb;
             terms.CurrentBaseline = nb;
             return null;

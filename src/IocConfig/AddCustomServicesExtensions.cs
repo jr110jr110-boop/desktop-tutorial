@@ -331,6 +331,7 @@ namespace IocConfig
             Services.NasbNiro.Agents.Steps.WarehouseSteps.AddWarehouseSteps(services);
             Services.NasbNiro.Agents.Steps.ContractInitSteps.AddContractInitSteps(services);
             Services.NasbNiro.Agents.Steps.PlanningSteps.AddPlanningSteps(services);
+            Services.NasbNiro.Agents.Steps.ResourceSteps.AddResourceSteps(services);
             Services.NasbNiro.Agents.Steps.QualitySteps.AddQualitySteps(services);
             Services.NasbNiro.Agents.Steps.ShippingSteps.AddShippingSteps(services);
             Services.NasbNiro.Agents.Steps.ProductionSteps.AddProductionSteps(services);
@@ -373,6 +374,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProjectControl.IEpmDashboardService, Services.NasbNiro.ProjectControl.EpmDashboardService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcBaselineService, Services.NasbNiro.ProjectControl.PcBaselineService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcResourceService, Services.NasbNiro.ProjectControl.PcResourceService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();
             services.AddHostedService<Services.NasbNiro.ProjectControl.PcSnapshotHostedService>();
             services.AddHostedService<Services.NasbNiro.ProjectBalance.ProjectBalanceHostedService>();

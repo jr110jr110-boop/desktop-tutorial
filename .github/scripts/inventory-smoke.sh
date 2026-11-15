@@ -13177,6 +13177,126 @@ cdrill ag.board; check "agl: the CEO assistant reads the same board through its 
 as "$CEO_TOKEN" GET "$AI/admin/audit?Kind=agent&PageSize=0"; check "agl: the agent runs are in the AI audit trail (kind agent)" '.success and ([.data.data[].kind]|unique) == ["agent"]'
 TOKEN=$ADMIN_TOKEN
 
+# ------------------------------------------------------------------------------------------ RESOURCES (priority 4, phases 4a and 4b): the pool, the standard rates, the resource plan and its baseline rows
+# The planning agent drafts the plan from the pool (covered by the unit tests, the scheduler does not run here); in this script people do what the agent would otherwise start with, and the gates are the real ones.
+as "$ADMIN_TOKEN" GET $AG/steps
+check "res: the catalogue has exactly 148 steps; seven of them are the resource steps, all in station 4 and of the planning agent" '.success and (.data|length) == 148 and ([.data[]|select(.code|startswith("RES."))]|length) == 7 and ([.data[]|select((.code|startswith("RES.")) and .station == 4 and .agentCode == "AG-PLAN")]|length) == 7'
+check "res: the draft step is the one agent step (kind 1); the review and approval are gates (kind 2) and the pool, fix and rate input steps are inputs (kind 4; 6 is a task state)" '([.data[]|select(.code == "RES.PLAN.DRAFT")][0].kind) == 1 and ([.data[]|select(.code == "RES.PLAN.REVIEW" or .code == "RES.PLAN.APPROVE" or .code == "RES.RATE.APPROVE")|.kind]|unique) == [2] and ([.data[]|select(.code == "RES.POOL.INPUT" or .code == "RES.PLAN.FIX" or .code == "RES.RATE.INPUT")|.kind]|unique) == [4]'
+RESNOT="شما مجوز این کار را ندارید."
+FM2ID=$(uid "$FM2_TOKEN"); FMID=$(uid "$FM_TOKEN")
+
+# --- the pool
+as "$ENG_TOKEN" POST $PC/resources '{"code":"RES-X","title":"x","kind":1,"unit":1,"capacity":1}'; nomsg "res: the engineering manager cannot write resources" "$RESNOT"
+as "$SEC_TOKEN" GET "$PC/resources?PageSize=0"; r403 "res: a role outside the readers is refused the pool (403)"
+as "$PLAN_TOKEN" POST $PC/resources '{"code":"RES-WELD","title":"جوشکار","kind":1,"unit":1,"capacity":3,"responsibleUnit":"ENGINEERING"}'
+check "res: planning creates the role resource «جوشکار» (labour, hours, capacity 3); it can carry a rate and is active" '.success and .data.id > 0 and .data.kind == 1 and .data.unit == 1 and .data.capacity == 3 and .data.canCarryRate == true and .data.isActive == true and .data.effectiveRate == null'
+RESW=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/resources '{"code":"RES-INSP","title":"بازرس (یک نفر)","kind":1,"unit":1,"capacity":1,"responsibleUnit":"ENGINEERING"}'; check "res: a labour resource of capacity one is created" '.success and .data.id > 0'; RESI=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/resources '{"code":"RES-LATHE","title":"دستگاه تراش","kind":2,"unit":1,"capacity":1,"responsibleUnit":"CONSTRUCTION"}'; check "res: a machine resource is created" '.success and .data.id > 0 and .data.kind == 2'; RESL=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/resources '{"code":"RES-WELD","title":"تکراری","kind":1,"unit":1,"capacity":1}'; nomsg "res: the code of a resource is unique" "کد منبع تکراری است"
+as "$PLAN_TOKEN" POST $PC/resources '{"code":"RES-BAD","title":"x","kind":1,"unit":1,"capacity":0}'; nomsg "res: a capacity of zero is refused" "ظرفیت منبع باید بیشتر از صفر باشد"
+as "$PLAN_TOKEN" POST $PC/resources "{\"code\":\"RES-BAD\",\"title\":\"x\",\"kind\":2,\"unit\":1,\"capacity\":1,\"employeeId\":${PE1:-1}}"; nomsg "res: an employee link on a machine is refused (the link must match the kind)" "پیوند به کارمند فقط برای منبع نوع نیروی انسانی است"
+as "$PLAN_TOKEN" POST $PC/resources "{\"code\":\"RES-ALI\",\"title\":\"فرد\",\"kind\":1,\"unit\":1,\"capacity\":1,\"employeeId\":${PE1:-1}}"; nomsg "res: a resource linked to an employee must name the role resource whose rate it uses" "منبع نقش مربوط"
+as "$PLAN_TOKEN" POST $PC/resources "{\"code\":\"RES-ALI\",\"title\":\"فرد\",\"kind\":1,\"unit\":1,\"capacity\":1,\"employeeId\":${PE1:-1},\"rateResourceId\":$RESW}"
+check "res: the employee-linked resource is saved, points to the role resource and can never carry a rate" '.success and .data.id > 0 and .data.canCarryRate == false and .data.rateResourceCode == "RES-WELD"'; RESA=$(val .data.id)
+as "$PLAN_TOKEN" GET "$PC/resources?PageSize=0"; check "res: the pool lists exactly the four resources, ordered by code" '.success and ([.data.data[].code]) == ["RES-ALI","RES-INSP","RES-LATHE","RES-WELD"]'
+
+# --- standard rates: the finance manager proposes, a second person approves
+as "$PLAN_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESW,\"rate\":250000,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; nomsg "res: planning cannot propose a rate (the finance manager does)" "$RESNOT"
+as "$FM_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESA,\"rate\":1000,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; nomsg "res: no rate on a resource linked to an employee (salary privacy)" "محرمانگی حقوق"
+as "$FM_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESW,\"rate\":-1,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; nomsg "res: a negative rate is refused" "نرخ باید صفر یا بیشتر باشد"
+as "$FM_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESW,\"rate\":250000,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; check "res: the finance manager proposes 250,000 for the welders: a draft by him" ".success and .data.status == 0 and .data.rate == 250000 and .data.makerUserId == $FMID"
+RSR1=$(val .data.id)
+as "$FM_TOKEN" GET "$PC/resources/$RESW"; check "res: a draft is not a rate (no effective rate yet)" '.success and .data.effectiveRate == null'
+as "$FM2_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"submit\"}"; nomsg "res: only the person who proposed the rate sends it" "پیشنهاددهنده"
+as "$FM_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"submit\"}"; check "res: the maker submits it" '.success and .data.status == 1'
+as "$FM_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"approve\"}"; nomsg "res: the maker cannot approve his own rate" "شخص دیگری"
+as "$PLAN_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"approve\"}"; nomsg "res: planning cannot approve a rate" "$RESNOT"
+as "$FM2_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"reject\"}"; nomsg "res: a rejection needs a reason" "علت رد نرخ"
+as "$FM2_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR1:-0},\"action\":\"approve\"}"; check "res: the second finance manager approves it" ".success and .data.status == 2 and .data.approvedByUserId == $FM2ID"
+as "$FM_TOKEN" GET "$PC/resources/$RESW"; check "res: the approved rate is effective from its date" '.success and .data.effectiveRate == 250000 and .data.rateHidden == false'
+as "$FM_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESI,\"rate\":90000,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; RSR2=$(val .data.id)
+as "$FM_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR2:-0},\"action\":\"submit\"}"
+as "$FM2_TOKEN" POST $PC/resource-rates/action "{\"id\":${RSR2:-0},\"action\":\"approve\"}"; check "res: the rate of the single inspector is approved the same way" '.success and .data.status == 2'
+as "$FM_TOKEN" POST $PC/resource-rates "{\"resourceId\":$RESW,\"rate\":300000,\"effectiveFrom\":\"$(dd -1)T00:00:00\"}"; nomsg "res: one approved rate per resource and date" "نرخ تاییدشده یا در انتظار تایید"
+
+# --- masking: the rate of an individual is hidden from readers outside finance, payroll, the CEO and the PMO
+as "$ENG_TOKEN" GET "$PC/resources/$RESI"; check "res: an engineering manager sees no rate of the single inspector (null, rateHidden)" '.success and .data.effectiveRate == null and .data.rateHidden == true'
+as "$ENG_TOKEN" GET "$PC/resources/$RESW"; check "res: ... but sees the rate of a group of three welders" '.success and .data.effectiveRate == 250000 and .data.rateHidden == false'
+as "$ENG_TOKEN" GET "$PC/resource-rates?ResourceId=$RESI&PageSize=0"; check "res: ... and no amount in the rate list of the inspector" '.success and (.data.data|length) == 1 and .data.data[0].rate == null and .data.data[0].rateHidden == true'
+as "$FM_TOKEN" GET "$PC/resources/$RESI"; check "res: the finance manager sees it (90,000)" '.success and .data.effectiveRate == 90000 and .data.rateHidden == false'
+as "$PAYR_TOKEN" GET "$PC/resources/$RESI"; check "res: so does payroll" '.success and .data.effectiveRate == 90000'
+call GET "$PC/resources/$RESI"; check "res: the PMO does not (the payroll roles only: PAYROLL, FINANCEMANAGER, CEO)" '.success and .data.effectiveRate == null and .data.rateHidden == true'
+as "$FM_TOKEN" GET "$PC/resources/$RESA"; check "res: the employee-linked resource shows the rate of its role to a finance reader" '.success and .data.effectiveRate == 250000'
+
+# --- a project: contract, terms, accepted review, project manager, three activities
+call POST Contracts '{"code":"RES-CT-01","title":"قرارداد آزمون منابع","status":1,"employer":"کارفرمای آزمون"}'; check "res: contract created" '.success and .data.id > 0'
+RSC=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson c "$RSC" '.contractId = $c')"; check "res: contract terms saved" '.success'
+as "$COM_TOKEN" POST $PC/reviews "{\"contractId\":$RSC,$PCREVTICKS}"; RSREV=$(val .data.id)
+as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":${RSREV:-0},\"action\":\"accept\"}"
+as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":${RSREV:-0},\"action\":\"accept\"}"; check "res: the contract review is accepted by two different people" '.success and .data.decision == 1'
+as "$PLAN_TOKEN" POST $PC/initiation/start/$RSC; check "res: initiation started" '.success'
+as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$RSC,\"category\":1}"; check "res: project code generated" '.success and (.data.projectCode|length) == 9'
+as "$PLAN_TOKEN" POST $PC/initiation/action "{\"contractId\":$RSC,\"step\":3,\"note\":\"units notified\"}"
+as "$CEO_TOKEN" POST $PC/initiation/action "{\"contractId\":$RSC,\"step\":4,\"projectManagerUserId\":$PMID}"; check "res: the CEO selects the project manager" '.success'
+actp "{\"contractId\":$RSC,\"code\":\"RES-A\",\"title\":\"طراحی جزئیات\",\"sourceType\":7,\"durationDays\":2,\"responsibleUnit\":\"ENGINEERING\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":300000000,\"phase\":1}"; check "res: activity A (engineering, 2 days)" '.success and .data.id > 0'; RSA=$(val .data.id)
+actp "{\"contractId\":$RSC,\"code\":\"RES-B\",\"title\":\"بازرسی مدارک\",\"sourceType\":7,\"durationDays\":3,\"responsibleUnit\":\"ENGINEERING\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":300000000,\"phase\":1}"; check "res: activity B (engineering, 3 days)" '.success and .data.id > 0'; RSB=$(val .data.id)
+actp "{\"contractId\":$RSC,\"code\":\"RES-C\",\"title\":\"ساخت\",\"sourceType\":7,\"durationDays\":1,\"responsibleUnit\":\"CONSTRUCTION\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":400000000,\"phase\":3}"; check "res: activity C (construction, 1 day)" '.success and .data.id > 0'; RSD=$(val .data.id)
+
+# --- the resource plan: open, assign, mark, submit, return, approve by the project manager of the contract
+as "$ENG_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RSC}"; nomsg "res: the engineering manager cannot open a plan" "$RESNOT"
+as "$PLAN_TOKEN" GET "$PC/resource-plans/contract/$RSC"; nomsg "res: a project without a plan says so" "هنوز طرح منابع ثبت نشده"
+as "$PLAN_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RSC}"
+check "res: planning opens version 1 as a draft; three activities need a resource; the approver is the project manager of the contract" ".success and .data.version == 1 and .data.status == 0 and .data.preparedByAgent == false and .data.activitiesNeedingResource == 3 and .data.unassignedCount == 3 and .data.approverUserId == $PMID and .data.makerUserId == $PLANID"
+RSP=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RSC}"; nomsg "res: one open plan per project" "طرح منابع باز"
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP,\"activityId\":$RSA,\"lines\":[{\"resourceId\":$RESW,\"quantity\":15},{\"resourceId\":$RESL,\"quantity\":8}]}"
+check "res: two resources on activity A; the person who edited is the maker (exactly the planner); two activities are still without a resource" ".success and (.data.assignments|length) == 2 and .data.unassignedCount == 2 and ([.data.assignments[].source]|unique) == [2] and .data.makerUserId == $PLANID"
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP,\"activityId\":$RSB,\"lines\":[{\"resourceId\":$RESW,\"quantity\":22.5},{\"resourceId\":$RESI,\"quantity\":4}]}"; check "res: two resources on activity B" '.success and (.data.assignments|length) == 4 and .data.unassignedCount == 1'
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP,\"activityId\":$RSB,\"lines\":[{\"resourceId\":$RESW,\"quantity\":0}]}"; nomsg "res: a quantity of zero is refused" "باید بیشتر از صفر باشد"
+as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"submit\"}"; nomsg "res: the plan is not submitted while an activity has neither a resource nor the mark" "1 فعالیت"
+as "$PLAN_TOKEN" POST $PC/resource-plans/mark-unassigned "{\"planId\":$RSP,\"allRemaining\":true}"; check "res: the planner marks the rest «بدون منبع»: activity C, nothing left" ".success and .data.unassignedCount == 0 and (.data.markedUnassignedActivityIds) == [$RSD]"
+as "$FM_TOKEN" GET "$PC/resource-plans/$RSP/budget"
+check "res: the budget view of the finance manager: four lines, the machine has no approved rate (counted, not in the total), the total is 9,735,000, all of it labour" '.success and (.data.lines|length) == 4 and .data.noRateCount == 1 and ([.data.lines[]|select(.noApprovedRate == true)][0]|(.resourceCode == "RES-LATHE" and .note == "بدون نرخ مصوب" and .amount == null)) and .data.total == 9735000 and .data.hiddenLineCount == 0 and ([.data.byClass[]|select(.resourceClass == 1)][0].amount) == 9735000 and ([.data.byClass[]|select(.resourceClass == 2)]|length) == 0'
+check "res: ... per resource: the welders 37.5 hours for 9,375,000 and the inspector 4 hours for 360,000" '([.data.byResource[]|select(.resourceCode == "RES-WELD")][0]|(.quantity == 37.5 and .amount == 9375000 and .lineCount == 2)) and ([.data.byResource[]|select(.resourceCode == "RES-INSP")][0]|(.quantity == 4 and .amount == 360000))'
+as "$ENG_TOKEN" GET "$PC/resource-plans/$RSP/budget"
+check "res: the engineering manager's view hides the single inspector's line, leaves it out of the total (9,375,000) and counts it" '.success and .data.hiddenLineCount == 1 and .data.rateHidden == true and .data.total == 9375000 and ([.data.lines[]|select(.resourceCode == "RES-INSP")][0]|(.rate == null and .amount == null and .rateHidden == true))'
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"approve\"}"; nomsg "res: a draft is not approved" "فقط طرح ارسال‌شده"
+as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"submit\"}"; check "res: the planner submits the plan" '.success and .data.status == 1'; RSPV=$(val .data.rowVersion)
+as "$ENG_TOKEN" POST $PC/resource-plans/discard "{\"id\":$RSP}"; nomsg "res: the engineering manager cannot discard a plan" "$RESNOT"
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"approve\"}"; nomsg "res: a decision without the rowVersion is refused" "rowVersion"
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP,\"activityId\":$RSA,\"lines\":[]}"; nomsg "res: a submitted plan is not edited" "پیش‌نویس یا برگشت"
+as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"approve\"}"; nomsg "res: a planner who is not the project manager cannot approve" "مدیر پروژه"
+call POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"approve\"}"; nomsg "res: nor the PMO while the contract has a project manager" "مدیر پروژه"
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"return\",\"rowVersion\":\"$RSPV\"}"; nomsg "res: the project manager returns a plan only with a reason" "علت برگشت"
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"return\",\"note\":\"ظرفیت بازرسی بازبینی شود\",\"rowVersion\":\"$RSPV\"}"; check "res: the project manager returns it with the reason; it is editable again" '.success and .data.status == 3 and .data.editable == true and .data.returnReason == "ظرفیت بازرسی بازبینی شود"'
+as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"submit\"}"; check "res: the planner submits it again" '.success and .data.status == 1'; RSPV=$(val .data.rowVersion)
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP,\"action\":\"approve\",\"rowVersion\":\"$RSPV\"}"; check "res: the project manager of the contract approves it (the decider fields name him)" ".success and .data.status == 2 and .data.approvedByUserId == $PMID and .data.deciderUserId == $PMID and .data.makerUserId == $PLANID"
+
+# --- the baseline: refused while a plan is open, freezes the approved assignments once approved
+as "$PLAN_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RSC}"; check "res: after the approval a new version (2) may be opened before the baseline; it starts as a copy of version 1" '.success and .data.version == 2 and (.data.assignments|length) == 4 and .data.unassignedCount == 0'
+RSP2=$(val .data.id)
+as "$PLAN_TOKEN" POST $PC/baselines "{\"contractId\":$RSC,\"reason\":\"مبنای اولیه\"}"; nomsg "res: no baseline while a resource plan is still being made" "طرح منابع"
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP2,\"activityId\":$RSB,\"lines\":[{\"resourceId\":$RESW,\"quantity\":30},{\"resourceId\":$RESI,\"quantity\":4}]}"; check "res: version 2 changes the welders of activity B to 30 hours" '.success'
+as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP2,\"action\":\"submit\"}"; RSPV2=$(val .data.rowVersion)
+as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RSP2,\"action\":\"approve\",\"rowVersion\":\"$RSPV2\"}"; check "res: the project manager approves version 2" '.success and .data.status == 2'
+as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$RSC,\"forecast\":false,\"mirror\":true}"; check "res: the plan is calculated" '.success and .data.hasCycle == false'
+as "$PLAN_TOKEN" POST $PC/baselines "{\"contractId\":$RSC,\"reason\":\"مبنای اولیه\"}"; check "res: the baseline is drafted now (three activities, two unit signatures)" '.success and .data.number == 0 and .data.status == 0 and .data.activityCount == 3 and (.data.signatures|length) == 2'
+RSBL=$(val .data.id)
+as "$ENG_TOKEN" POST $PC/baselines/action "{\"id\":${RSBL:-0},\"action\":\"sign\"}"; check "res: engineering signs" '.success'
+as "$PROD_TOKEN" POST $PC/baselines/action "{\"id\":${RSBL:-0},\"action\":\"sign\"}"; check "res: construction signs" '.success and .data.status == 1'
+call POST $PC/baselines/action "{\"id\":${RSBL:-0},\"action\":\"approve\"}"; check "res: the PMO approves the baseline" '.success and .data.status == 2 and .data.isCurrent == true'
+as "$FM_TOKEN" GET "$PC/baselines/${RSBL:-0}/resources"
+check "res: exactly four resource rows are frozen with the baseline, with the quantities of version 2 and the rates of that day" '.success and (.data|length) == 4 and ([.data[]|select(.resourceCode == "RES-WELD" and .activityCode == "RES-B")][0]|(.quantity == 30 and .rateAtBaseline == 250000)) and ([.data[]|select(.resourceCode == "RES-LATHE")][0]|(.quantity == 8 and .rateAtBaseline == null)) and ([.data[]|select(.resourceCode == "RES-INSP")][0].rateAtBaseline) == 90000'
+as "$ENG_TOKEN" GET "$PC/baselines/${RSBL:-0}/resources"; check "res: the engineering manager sees the frozen rows without the rate of the single inspector" '.success and (.data|length) == 4 and ([.data[]|select(.resourceCode == "RES-INSP")][0]|(.rateAtBaseline == null and .rateHidden == true)) and ([.data[]|select(.resourceCode == "RES-WELD" and .activityCode == "RES-B")][0].rateAtBaseline) == 250000'
+as "$PLAN_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RSC}"; nomsg "res: after the baseline a new version opens only through an approved change request" "درخواست تغییر"
+as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP2,\"activityId\":$RSA,\"lines\":[]}"; nomsg "res: an approved plan is not edited" "پیش‌نویس یا برگشت"
+as "$PLAN_TOKEN" DELETE "$PC/resources/$RESW"; nomsg "res: a resource with an assignment is not deleted (deactivate it)" "غیرفعال"
+as "$PLAN_TOKEN" POST $PC/resources/$RESL/deactivate; check "res: ... it is deactivated instead" '.success and .data.isActive == false'
+as "$PLAN_TOKEN" POST $PC/resources/$RESL/activate; check "res: ... and activated again" '.success and .data.isActive == true'
+TOKEN=$ADMIN_TOKEN
+
 # ------------------------------------------------------------------------------------------ access fixes found by the UI crawl
 # the work-centre page fills its calendar select from projectcontrol/calendars: the production roles read it, a role outside the list is refused
 as "$MPM_TOKEN" GET "projectcontrol/calendars?PageNumber=1&PageSize=50"; check "acc: the production manager reads the working calendars (the work-centre page needs them)" '.success'

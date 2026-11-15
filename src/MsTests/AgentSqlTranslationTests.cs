@@ -10,6 +10,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Agents;
+using Services.NasbNiro.Agents.Steps;
+using Entities.Model.NasbNiro.Contracts;
+using Entities.Model.NasbNiro.ProjectControl;
+using Microsoft.EntityFrameworkCore;
 
 namespace MsTests
 {
@@ -71,6 +75,46 @@ namespace MsTests
             Assert.IsTrue(steps >= 100, "steps found: " + steps);
             Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
             Assert.IsTrue(Swallow.Swallowed - before >= 100, "queries that reached the command stage (so they were translated): " + (Swallow.Swallowed - before));
+        }
+
+        /// <summary>
+        /// Priority 4: the discovery of RES.PLAN.DRAFT and the hold on PLAN.BASELINE.CREATE run their big queries only when the pool has a resource, which the empty answers above never give;
+        /// here the same queries are built and translated without being run.
+        /// </summary>
+        [TestMethod]
+        public void The_Queries_Behind_The_Resource_Steps_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                DateTime today = DateTime.Today;
+                IQueryable<int> live = ConFacts.Live(uow, today).Select(c => c.Id);
+                IQueryable<int> before = ResFacts.DraftBeforeBaseline(uow, live);
+                IQueryable<int> durations = ResFacts.WithDurations(uow), openPlans = ResFacts.WithOpenPlan(uow);
+                IQueryable<int> afterChange = ResFacts.DraftAfterChange(uow).Where(id => durations.Contains(id) && !openPlans.Contains(id));
+                string draft = ConFacts.Live(uow, today).Where(c => before.Contains(c.Id) || afterChange.Contains(c.Id)).OrderBy(c => c.Id).Take(200).ToQueryString();
+                string baseline = ConFacts.Live(uow, today).Where(c => !openPlans.Contains(c.Id) && !before.Contains(c.Id)).OrderBy(c => c.Id).Take(30).ToQueryString();
+                Assert.IsTrue(draft.Contains("PcResourcePlans") && draft.Contains("PcChangeRequests"), draft);
+                Assert.IsTrue(draft.Contains("PcBaselines"), "the change draft needs the baseline of the request: " + draft);
+                Assert.IsTrue(baseline.Contains("PcResourcePlans"), baseline);
+                string match = ResFacts.WithMatch(uow).ToQueryString();
+                Assert.IsTrue(match.Contains("PcResources") && match.Contains("PcActivities"), match);
+
+                // the queries of the three plan steps (Draft, Submitted and Returned) are built by the same functions that GapsAsync and the approve step run, and translated for every status;
+                // the later ones (activities, assigned, skipped, manager) are fed sample ids because an empty reader never gets that far in this host
+                foreach (PcResourcePlanStatus status in new[] { PcResourcePlanStatus.Draft, PcResourcePlanStatus.Submitted, PcResourcePlanStatus.Returned })
+                {
+                    string plans = ResFacts.PlanRows(uow, status, today).ToQueryString();
+                    Assert.IsTrue(plans.Contains("PcResourcePlans") && plans.Contains("TOP("), status + ": " + plans);
+                }
+                int[] ids = { 1, 2, 3 };
+                Assert.IsTrue(ResFacts.ActivityRows(uow, ids).ToQueryString().Contains("PcActivities"));
+                Assert.IsTrue(ResFacts.AssignedRows(uow, ids).ToQueryString().Contains("PcActivityResources"));
+                Assert.IsTrue(ResFacts.SkippedRows(uow, ids).ToQueryString().Contains("PcResourcePlanSkips"));
+                Assert.IsTrue(ResFacts.ManagerRows(uow, ids).ToQueryString().Contains("PcContractTerms"));
+                Assert.IsTrue(ConFacts.Live(uow, today).Where(c => ids.Contains(c.Id)).ToQueryString().Length > 0);
+            }
         }
     }
 }

@@ -56,6 +56,7 @@ namespace Services.NasbNiro
             await p.Live<PcContractAmendment>("الحاقیه‌های قرارداد", x => x.ContractId == contractId);
             await p.Live<PcGuaranteeInfo>("ضمانت‌نامه‌های کنترل پروژه", x => x.ContractId == contractId);
             await p.Live<PcShipment>("محموله‌ها", x => x.ContractId == contractId);
+            await p.Live<PcResourcePlan>("طرح منابع پروژه", x => x.ContractId == contractId);
 
             // procurement
             await p.Any<PurchaseRequest>("درخواست‌های خرید", x => x.ContractId == contractId);

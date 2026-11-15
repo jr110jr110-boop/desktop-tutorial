@@ -19,6 +19,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
             builder.AddProjectControlR1Configurations(); // R1c: new tables and columns
             builder.AddProjectControlP7Configurations(); // P-B7a: progress approval, registers, daily report extension
             builder.AddProjectControlP7bConfigurations(); // P-B7b: engineering document control (EDMS) and the tender register
+            builder.AddProjectControlResourceConfigurations(); // priority 4: resource pool, standard rates, resource plan
 
             // ------------------------------------------------------------------ settings, calendars
             builder.Entity<PcSetting>(b =>
