@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90  # the unit suite alone now takes about 40 minutes
     defaults:
       run:
         shell: bash
