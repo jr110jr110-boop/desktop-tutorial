@@ -19,6 +19,19 @@ using ViewModels.NasbNiro.ProjectControlDtos;
 
 namespace Services.NasbNiro.ProjectControl
 {
+    /// <summary>A read-only plan run of one contract that can be repeated with other "start no earlier than" dates without reading the database again.</summary>
+    public sealed class PcPlanPreviewSession
+    {
+        private readonly Func<Dictionary<int, DateTime>, CpmResult> _run;
+        internal PcPlanPreviewSession(CpmResult baseRun, Func<Dictionary<int, DateTime>, CpmResult> run) { Base = baseRun; _run = run; }
+
+        /// <summary>The plan run as the schedule stands (no constraint added).</summary>
+        public CpmResult Base { get; }
+
+        /// <summary>The plan run with the given activities started no earlier than the given dates; null when the run has a cycle.</summary>
+        public CpmResult Run(Dictionary<int, DateTime> startNoEarlierThan) => _run(startNoEarlierThan);
+    }
+
     public interface IPcScheduleService
     {
         Task<ResponseDto<PagedList<PcCalendarDto>>> GetCalendarsAsync(PaginationParams query, CancellationToken cancellationToken);
@@ -45,6 +58,15 @@ namespace Services.NasbNiro.ProjectControl
 
         /// <summary>Read only plan run with some durations replaced (change request scenario). Null when the contract has no activities or the network has a cycle.</summary>
         Task<CpmResult> PreviewPlanAsync(int contractId, Dictionary<int, int> durationOverride, CancellationToken cancellationToken);
+
+        /// <summary>Read only plan run with a "start no earlier than" date set on some activities (resource levelling, phase 4c): what the dates and the finish of the project would be. Null as for <see cref="PreviewPlanAsync"/>.</summary>
+        Task<CpmResult> PreviewStartConstraintsAsync(int contractId, Dictionary<int, DateTime> startNoEarlierThan, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Loads the activities and the plan context of a contract ONCE and returns a session that runs the plan in memory with different "start no earlier than" dates (resource levelling): one load per contract per run,
+        /// not one per question. Null when the contract has no activity, does not exist or has a cycle.
+        /// </summary>
+        Task<PcPlanPreviewSession> OpenPlanPreviewAsync(int contractId, CancellationToken cancellationToken);
 
         /// <summary>Plan run on tracked activities (the caller already changed them) that writes the dates and mirrors them to the legacy fields. The caller saves.</summary>
         Task<CpmResult> ApplyPlanNoSaveAsync(int contractId, CancellationToken cancellationToken);
@@ -1072,21 +1094,44 @@ namespace Services.NasbNiro.ProjectControl
             };
         }
 
-        private async Task<CpmResult> PlanRunAsync(int contractId, List<PcActivity> acts, Dictionary<int, int> durationOverride, CancellationToken cancellationToken)
+        private static CpmResult RunNodes(PlanContext ctx, List<PcActivity> acts, Dictionary<int, int> durationOverride, Dictionary<int, DateTime> startNoEarlierThan)
+        {
+            var nodes = acts.Select(a => NodeOf(a, durationOverride != null && durationOverride.TryGetValue(a.Id, out int dur) ? dur : a.DurationDays, ctx.Calendars)).ToList();
+            if (startNoEarlierThan != null)
+                foreach (CpmNode n in nodes.Where(n => startNoEarlierThan.ContainsKey(n.Id))) { n.Constraint = PcConstraint.StartNoEarlierThan; n.ConstraintDate = startNoEarlierThan[n.Id].Date; }
+            var links = ctx.Dependencies.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
+            CpmResult result = PcCpm.Run(nodes, links, ctx.Calendar, ctx.Start, false, null, ctx.CriticalFloat);
+            return result.HasCycle ? null : result;
+        }
+
+        private async Task<CpmResult> PlanRunAsync(int contractId, List<PcActivity> acts, Dictionary<int, int> durationOverride, CancellationToken cancellationToken, Dictionary<int, DateTime> startNoEarlierThan = null)
         {
             if (acts.Count == 0) return null;
             PlanContext ctx = await LoadPlanContextAsync(contractId, acts, cancellationToken);
             if (ctx == null) return null;
-            var nodes = acts.Select(a => NodeOf(a, durationOverride != null && durationOverride.TryGetValue(a.Id, out int dur) ? dur : a.DurationDays, ctx.Calendars)).ToList();
-            var links = ctx.Dependencies.Select(d => new CpmLink { PredecessorId = d.PredecessorId, SuccessorId = d.SuccessorId, Type = d.Type, Lag = d.LagDays }).ToList();
-            CpmResult result = PcCpm.Run(nodes, links, ctx.Calendar, ctx.Start, false, null, ctx.CriticalFloat);
-            return result.HasCycle ? null : result;
+            return RunNodes(ctx, acts, durationOverride, startNoEarlierThan);
+        }
+
+        public async Task<PcPlanPreviewSession> OpenPlanPreviewAsync(int contractId, CancellationToken cancellationToken)
+        {
+            List<PcActivity> acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
+            if (acts.Count == 0) return null;
+            PlanContext ctx = await LoadPlanContextAsync(contractId, acts, cancellationToken);
+            if (ctx == null) return null;
+            CpmResult baseRun = RunNodes(ctx, acts, null, null);
+            return baseRun == null ? null : new PcPlanPreviewSession(baseRun, sne => RunNodes(ctx, acts, null, sne));
         }
 
         public async Task<CpmResult> PreviewPlanAsync(int contractId, Dictionary<int, int> durationOverride, CancellationToken cancellationToken)
         {
             List<PcActivity> acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
             return await PlanRunAsync(contractId, acts, durationOverride, cancellationToken);
+        }
+
+        public async Task<CpmResult> PreviewStartConstraintsAsync(int contractId, Dictionary<int, DateTime> startNoEarlierThan, CancellationToken cancellationToken)
+        {
+            List<PcActivity> acts = await _uow.Set<PcActivity>().AsNoTracking().Where(a => a.ContractId == contractId && !a.Deleted).OrderBy(a => a.Id).ToListAsync(cancellationToken);
+            return await PlanRunAsync(contractId, acts, null, cancellationToken, startNoEarlierThan);
         }
 
         public async Task<CpmResult> ApplyPlanNoSaveAsync(int contractId, CancellationToken cancellationToken)

@@ -31110,6 +31110,125 @@ namespace DataLayer.Migrations
                     b.ToTable("PcLessons", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcLevelingProposal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ActivityId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("AppliedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime?>("AppliedConstraintDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ApplierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CriticalImpactDays")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CurrentFinish")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CurrentStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MakerUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("NeedsChangeRequest")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OverloadId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("PreparedByAgent")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("PriorConstraintDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PriorConstraintType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ProposedFinish")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ProposedStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Reverted")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("ShiftDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActivityId");
+
+                    b.HasIndex("OverloadId", "Status");
+
+                    b.HasIndex("Status", "ContractId");
+
+                    b.ToTable("PcLevelingProposals", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcManualProgress", b =>
                 {
                     b.Property<int>("Id")
@@ -32606,6 +32725,85 @@ namespace DataLayer.Migrations
                     b.HasIndex("Kind", "IsActive");
 
                     b.ToTable("PcResources", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceOverload", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AcceptReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("AcceptedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("DetectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTime>("FromDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("NoProposalAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("PeakCapacity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("PeakLoad")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ResourceId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ToDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId", "FromDate")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PcResourceOverloads_OneOpenPerStart")
+                        .HasFilter("[Deleted] = 0 AND [Status] = 1");
+
+                    b.HasIndex("Status", "FromDate");
+
+                    b.ToTable("PcResourceOverloads", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourcePlan", b =>
@@ -45947,6 +46145,25 @@ namespace DataLayer.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcLevelingProposal", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcActivity", "Activity")
+                        .WithMany()
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcResourceOverload", "Overload")
+                        .WithMany()
+                        .HasForeignKey("OverloadId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Activity");
+
+                    b.Navigation("Overload");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcManualProgress", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcActivity", "Activity")
@@ -46206,6 +46423,17 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Calendar");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceOverload", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcResource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Resource");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourcePlan", b =>

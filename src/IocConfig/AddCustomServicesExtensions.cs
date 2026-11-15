@@ -375,6 +375,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcScheduleService, Services.NasbNiro.ProjectControl.PcScheduleService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcBaselineService, Services.NasbNiro.ProjectControl.PcBaselineService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcResourceService, Services.NasbNiro.ProjectControl.PcResourceService>();
+            services.AddScoped<Services.NasbNiro.ProjectControl.IPcResourceLoadService, Services.NasbNiro.ProjectControl.PcResourceLoadService>();
             services.AddScoped<Services.NasbNiro.ProjectControl.IPcReportService, Services.NasbNiro.ProjectControl.PcReportService>();
             services.AddHostedService<Services.NasbNiro.ProjectControl.PcSnapshotHostedService>();
             services.AddHostedService<Services.NasbNiro.ProjectBalance.ProjectBalanceHostedService>();

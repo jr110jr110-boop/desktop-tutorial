@@ -23,8 +23,9 @@ namespace WebApi.Controllers.ProjectControl
         private const string Readers = ProjectControlRoles.Readers + ",FINANCEMANAGER,PAYROLL,AUDITOR";
 
         private readonly IPcResourceService _resources;
+        private readonly IPcResourceLoadService _load;
 
-        public ProjectControlResourceController(IPcResourceService resources) { _resources = resources; }
+        public ProjectControlResourceController(IPcResourceService resources, IPcResourceLoadService load) { _resources = resources; _load = load; }
 
         [HttpGet("resources")]
         [Authorize(Roles = Readers)]
@@ -89,5 +90,33 @@ namespace WebApi.Controllers.ProjectControl
         [HttpGet("baselines/{id:int}/resources")]
         [Authorize(Roles = Readers)]
         public async Task<IActionResult> BaselineResourcesAsync(int id, CancellationToken ct) => Ok(await _resources.GetBaselineResourcesAsync(id, ct));
+
+        // ------------------------------------------------------------------------------------------ phase 4c: load, over-allocations, levelling proposals
+
+        [HttpGet("resource-load")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> LoadAsync([FromQuery] PcResourceLoadQuery query, CancellationToken ct) => Ok(await _load.GetLoadAsync(query, ct));
+
+        [HttpGet("resource-overloads")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> OverloadsAsync([FromQuery] PcResourceOverloadQuery query, CancellationToken ct) => Ok((await _load.GetOverloadsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("resource-overloads/{id:int}")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> OverloadAsync(int id, CancellationToken ct) => Ok(await _load.GetOverloadAsync(id, ct));
+
+        [HttpPost("resource-overloads/accept")]
+        public async Task<IActionResult> AcceptOverloadAsync([FromBody] PcOverloadAcceptDto dto, CancellationToken ct) => Ok(await _load.AcceptOverloadAsync(dto, ct));
+
+        [HttpGet("leveling-proposals")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> ProposalsAsync([FromQuery] PcLevelingProposalQuery query, CancellationToken ct) => Ok((await _load.GetProposalsAsync(query, ct)).ToPaginatedResultSafe());
+
+        [HttpGet("leveling-proposals/{id:int}")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> ProposalAsync(int id, CancellationToken ct) => Ok(await _load.GetProposalAsync(id, ct));
+
+        [HttpPost("leveling-proposals/action")]
+        public async Task<IActionResult> ProposalActionAsync([FromBody] PcLevelingActionDto dto, CancellationToken ct) => Ok(await _load.ProposalActionAsync(dto, ct));
     }
 }

@@ -204,6 +204,10 @@ namespace Services.NasbNiro.Finance
             Alert(pc.OverdueMilestones > 0, "info", $"{pc.OverdueMilestones} مرحله پرداخت از موعد گذشته است", "/project-control/milestones");
             Alert(pc.OverdueClientResponses > 0, "info", $"{pc.OverdueClientResponses} پاسخ کارفرما به مدارک ارسالی عقب افتاده است", "/project-control/transmittals");
             Alert(pc.PenaltyExposure > 0, "warning", "جریمه تاخیر محاسبه‌شده وجود دارد", "/project-control/penalties");
+            // resource load (priority 4): over-allocations that are open until resolved, and the accepted ones apart (read directly, so the constructor stays as it is)
+            d.PcOverloadedResources = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcResourceOverload>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == Entities.Model.NasbNiro.ProjectControl.PcOverloadStatus.Open, ct);
+            d.PcOverloadsAccepted = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcResourceOverload>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == Entities.Model.NasbNiro.ProjectControl.PcOverloadStatus.Accepted, ct);
+            Alert(d.PcOverloadedResources > 0, "warning", $"{d.PcOverloadedResources} منبع بیش‌تخصیص‌یافته (بار طرح‌های تاییدشده بیش از ظرفیت) باز است", "/project-control/resources?tab=overloads");
             // office automation: open decisions of approved minutes past their due date (read directly, so the constructor stays as it is)
             d.OverdueDecisions = await (from dec in _uow.Set<OfDecision>().AsNoTracking()
                                         join meeting in _uow.Set<OfMeeting>().AsNoTracking() on dec.MeetingId equals meeting.Id

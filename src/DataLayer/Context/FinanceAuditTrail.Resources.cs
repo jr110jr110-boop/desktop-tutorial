@@ -31,6 +31,15 @@ namespace DataLayer.Context
                 "PlanId", "ActivityId", "ResourceId", "Quantity", "Distribution", "ResponsibleRole", "Source", "EditedByUserId",
             }, "منبع فعالیت");
             AuditPd(typeof(Pc.PcResourcePlanSkip), new[] { "PlanId", "ActivityId", "MarkedByUserId" }, "فعالیت بدون منبع در طرح منابع");
+            AuditPd(typeof(Pc.PcResourceOverload), new[]
+            {
+                "ResourceId", "FromDate", "ToDate", "PeakLoad", "PeakCapacity", "Status", "DetectedAt", "ResolvedAt", "AcceptedByUserId", "AcceptedAt", "AcceptReason", "Deleted",
+            }, "بیش‌تخصیص منبع");
+            AuditPd(typeof(Pc.PcLevelingProposal), new[]
+            {
+                "OverloadId", "ContractId", "ActivityId", "Kind", "CurrentStart", "CurrentFinish", "ProposedStart", "ProposedFinish", "ShiftDays", "CriticalImpactDays", "NeedsChangeRequest", "Status", "PreparedByAgent", "MakerUserId",
+                "PriorConstraintType", "PriorConstraintDate", "AppliedConstraintDate", "ApplierUserId", "AppliedAt", "ConfirmedByUserId", "ConfirmedAt", "RejectedByUserId", "RejectedAt", "RejectReason", "Reverted", "Deleted",
+            }, "پیشنهاد تسطیح منابع");
             AuditPd(typeof(Pc.PcBaselineResource), new[] { "BaselineId", "ActivityId", "ResourceId", "Quantity", "Distribution", "RateAtBaseline" }, "منبع ثبت‌شده در خط‌مبنا");
         }
     }

@@ -13180,8 +13180,8 @@ TOKEN=$ADMIN_TOKEN
 # ------------------------------------------------------------------------------------------ RESOURCES (priority 4, phases 4a and 4b): the pool, the standard rates, the resource plan and its baseline rows
 # The planning agent drafts the plan from the pool (covered by the unit tests, the scheduler does not run here); in this script people do what the agent would otherwise start with, and the gates are the real ones.
 as "$ADMIN_TOKEN" GET $AG/steps
-check "res: the catalogue has exactly 148 steps; seven of them are the resource steps, all in station 4 and of the planning agent" '.success and (.data|length) == 148 and ([.data[]|select(.code|startswith("RES."))]|length) == 7 and ([.data[]|select((.code|startswith("RES.")) and .station == 4 and .agentCode == "AG-PLAN")]|length) == 7'
-check "res: the draft step is the one agent step (kind 1); the review and approval are gates (kind 2) and the pool, fix and rate input steps are inputs (kind 4; 6 is a task state)" '([.data[]|select(.code == "RES.PLAN.DRAFT")][0].kind) == 1 and ([.data[]|select(.code == "RES.PLAN.REVIEW" or .code == "RES.PLAN.APPROVE" or .code == "RES.RATE.APPROVE")|.kind]|unique) == [2] and ([.data[]|select(.code == "RES.POOL.INPUT" or .code == "RES.PLAN.FIX" or .code == "RES.RATE.INPUT")|.kind]|unique) == [4]'
+check "res: the catalogue has exactly 153 steps; twelve of them are the resource steps (phases 4a, 4b and 4c), all in station 4 and of the planning agent" '.success and (.data|length) == 153 and ([.data[]|select(.code|startswith("RES."))]|length) == 12 and ([.data[]|select((.code|startswith("RES.")) and .station == 4 and .agentCode == "AG-PLAN")]|length) == 12'
+check "res: the agent steps are the draft, the load check and the levelling proposal (kind 1); the review, the approvals, the levelling decision and its confirmation are gates (kind 2); the pool, fix, rate and over-allocation steps are inputs (kind 4; 6 is a task state)" '([.data[]|select(.code == "RES.PLAN.DRAFT" or .code == "RES.LOAD.CHECK" or .code == "RES.LEVEL.PROPOSE")|.kind]|unique) == [1] and ([.data[]|select(.code == "RES.PLAN.REVIEW" or .code == "RES.PLAN.APPROVE" or .code == "RES.RATE.APPROVE" or .code == "RES.LEVEL.DECIDE" or .code == "RES.LEVEL.CONFIRM")|.kind]|unique) == [2] and ([.data[]|select(.code == "RES.POOL.INPUT" or .code == "RES.PLAN.FIX" or .code == "RES.RATE.INPUT" or .code == "RES.LOAD.RESOLVE")|.kind]|unique) == [4]'
 RESNOT="شما مجوز این کار را ندارید."
 FM2ID=$(uid "$FM2_TOKEN"); FMID=$(uid "$FM_TOKEN")
 
@@ -13295,6 +13295,117 @@ as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RSP2,\"activi
 as "$PLAN_TOKEN" DELETE "$PC/resources/$RESW"; nomsg "res: a resource with an assignment is not deleted (deactivate it)" "غیرفعال"
 as "$PLAN_TOKEN" POST $PC/resources/$RESL/deactivate; check "res: ... it is deactivated instead" '.success and .data.isActive == false'
 as "$PLAN_TOKEN" POST $PC/resources/$RESL/activate; check "res: ... and activated again" '.success and .data.isActive == true'
+TOKEN=$ADMIN_TOKEN
+
+# ------------------------------------------------------------------------------------------ RESOURCE LOAD (priority 4, phase 4c): the histogram, the over-allocation alerts, the levelling proposal and its two gates
+# Every date is computed from the next Monday so the numbers are the same on every run. The resource works Monday to Friday (the calendar of the pc block), capacity 2 days; each project loads it 2 a day for five days.
+RLM=$(date -d "next monday" +%Y-%m-%d); rld() { date -d "$RLM $1 days" +%Y-%m-%d; }
+RLTXT_ACCEPT_PMO="پذیرش بیش‌تخصیص (نگه‌داشتن آن به‌عمد) فقط با PMO است؛ برنامه‌ریز مالک طرح آن را نمی‌پذیرد."
+RLTXT_DECIDE="اعمال یا رد پیشنهاد تسطیح با برنامه‌ریز یا PMO است."
+RLTXT_CONFIRM="تایید یا عدم‌تایید جابه‌جایی برنامه با نفر دوم (PMO) است."
+RLTXT_SAMEUSER="تایید جابه‌جایی باید توسط شخص دیگری غیر از کسی که آن را اعمال کرده انجام شود (تفکیک وظایف)."
+RLTXT_REJECT="علت رد پیشنهاد را بنویسید."
+RLTXT_ACTION="عملیات نامعتبر است."
+RLTXT_REFUSE="علت عدم‌تایید جابه‌جایی را بنویسید."
+RLTXT_TOOLONG="بازه‌ی نمایش حداکثر ۳۷۰ روز است؛ بازه‌ی کوتاه‌تری انتخاب کنید."
+RLTXT_ACCEPTREASON="علت پذیرش بیش‌تخصیص را بنویسید."
+RLADM=$(uid "$ADMIN_TOKEN")
+reslsettle() {
+  local i; for i in 1 2 3; do airun AG-MASTER; airun AG-PLAN; done; airun AG-MASTER
+  RLOUT=$(val .data.outputs)
+  case "$RLOUT" in *"errors=0") ok "resl: the coordinator run that settled the agents reconciled every step without one error";; *) bad "resl: the coordinator run that settled the agents reconciled every step without one error (outputs '$RLOUT')";; esac
+}
+# reslproject CODE DURATION-OF-THE-SECOND-ACTIVITY (0: none): a live contract, an accepted review, a project manager, one activity of 5 days that gets 10 days of the resource, an approved plan, the plan calculated
+reslproject() {
+  local code=$1 long=$2
+  call POST Contracts "{\"code\":\"$code\",\"title\":\"قرارداد بار منابع $code\",\"status\":1,\"employer\":\"کارفرمای آزمون\",\"contractDate\":\"$(dd -5)T00:00:00+00:00\"}"; check "resl: contract $code created" '.success and (.data.id|type) == "number"'
+  RLC=$(val .data.id)
+  as "$PLAN_TOKEN" POST $PC/terms "$(echo "$PCTERMS" | jq -c --argjson c "$RLC" --arg s "$RLM" '.contractId = $c | .scheduleStartDate = ($s + "T00:00:00")')"; check "resl: $code terms saved, the schedule starts on the Monday $RLM" '.success'
+  as "$COM_TOKEN" POST $PC/reviews "{\"contractId\":$RLC,$PCREVTICKS}"; RLREV=$(val .data.id)
+  as "$COM2_TOKEN" POST $PC/reviews/action "{\"id\":${RLREV:-0},\"action\":\"accept\"}"
+  as "$ADMIN_TOKEN" POST $PC/reviews/action "{\"id\":${RLREV:-0},\"action\":\"accept\"}"; check "resl: $code review accepted" '.success and .data.decision == 1'
+  as "$PLAN_TOKEN" POST $PC/initiation/start/$RLC; check "resl: $code initiation started" '.success'
+  as "$PLAN_TOKEN" POST $PC/terms/generate-code "{\"contractId\":$RLC,\"category\":1}"; check "resl: $code project code generated" '.success and (.data.projectCode|length) == 9'
+  as "$PLAN_TOKEN" POST $PC/initiation/action "{\"contractId\":$RLC,\"step\":3,\"note\":\"units notified\"}"
+  as "$CEO_TOKEN" POST $PC/initiation/action "{\"contractId\":$RLC,\"step\":4,\"projectManagerUserId\":$PMID}"; check "resl: $code project manager selected" '.success'
+  actp "{\"contractId\":$RLC,\"code\":\"$code-1\",\"title\":\"فعالیت بار $code\",\"sourceType\":7,\"durationDays\":5,\"responsibleUnit\":\"ENGINEERING\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":100000000,\"phase\":1}"; check "resl: $code-1 (5 days)" '.success and (.data.id|type) == "number"'; RLA=$(val .data.id)
+  if [ "$long" != "0" ]; then actp "{\"contractId\":$RLC,\"code\":\"$code-2\",\"title\":\"فعالیت طولانی $code\",\"sourceType\":7,\"durationDays\":$long,\"responsibleUnit\":\"ENGINEERING\",\"progressMethod\":0,\"weight\":0,\"budgetAtCompletion\":100000000,\"phase\":1}"; check "resl: $code-2 ($long days, it gives $code-1 its float)" '.success and (.data.id|type) == "number"'; fi
+  as "$PLAN_TOKEN" POST $PC/resource-plans/open "{\"contractId\":$RLC}"; check "resl: $code plan opened" '.success and .data.version == 1'; RLP=$(val .data.id)
+  as "$PLAN_TOKEN" POST $PC/resource-plans/assignments "{\"planId\":$RLP,\"activityId\":$RLA,\"lines\":[{\"resourceId\":$RLR,\"quantity\":10}]}"; check "resl: $code-1 gets 10 days of the resource" '.success and (.data.assignments|length) == 1'
+  as "$PLAN_TOKEN" POST $PC/resource-plans/mark-unassigned "{\"planId\":$RLP,\"allRemaining\":true}"; check "resl: $code: the rest is marked without a resource" '.success and .data.unassignedCount == 0'
+  as "$PLAN_TOKEN" POST $PC/resource-plans/action "{\"id\":$RLP,\"action\":\"submit\"}"; RLPV=$(val .data.rowVersion)
+  as "$PM_TOKEN" POST $PC/resource-plans/action "{\"id\":$RLP,\"action\":\"approve\",\"rowVersion\":\"$RLPV\"}"; check "resl: the project manager approves the plan of $code" '.success and .data.status == 2'
+  as "$PLAN_TOKEN" POST $PC/cpm/run "{\"contractId\":$RLC,\"forecast\":false,\"mirror\":true}"; check "resl: $code calculated: the first activity starts on $RLM and ends on $(rld 4)" ".success and .data.hasCycle == false and ([.data.items[]|select(.code == \"$code-1\")][0]|(.earlyStart|startswith(\"$RLM\")) and (.earlyFinish|startswith(\"$(rld 4)\")))"
+}
+as "$PLAN_TOKEN" POST $PC/resources "{\"code\":\"RESL-ROLE\",\"title\":\"جوشکار پروژه‌ها\",\"kind\":1,\"unit\":2,\"capacity\":2,\"calendarId\":$PCCAL,\"responsibleUnit\":\"ENGINEERING\"}"; check "resl: the role resource (days, capacity 2, Monday to Friday) is created" '.success and (.data.id|type) == "number" and .data.unit == 2 and .data.capacity == 2'; RLR=$(val .data.id)
+reslproject RESL-X 0; RLXC=$RLC; RLX1=$RLA
+reslproject RESL-Y 12; RLYC=$RLC; RLY1=$RLA
+
+# --- the histogram: two projects add up
+as "$ENG_TOKEN" GET "$PC/resource-load?ResourceId=$RLR&From=$RLM&To=$(rld 13)&Bucket=day"; check "resl: a reader (engineering manager) reads the load of the resource: exactly the five working days of the first week carry 4 against the capacity 2 (over 2), each from the two projects" ".success and ([.data.resources[0].buckets[]|select(.load > 0)]|length) == 5 and ([.data.resources[0].buckets[]|select(.load > 0)|.start[0:10]]) == [\"$RLM\",\"$(rld 1)\",\"$(rld 2)\",\"$(rld 3)\",\"$(rld 4)\"] and ([.data.resources[0].buckets[]|select(.load > 0)|.load]|unique) == [4] and ([.data.resources[0].buckets[]|select(.load > 0)|.capacity]|unique) == [2] and ([.data.resources[0].buckets[]|select(.load > 0)|.over]|unique) == [2] and ([.data.resources[0].buckets[]|select(.load > 0)|(.items|length)]|unique) == [2] and .data.resources[0].peakLoad == 4"
+as "$PLAN_TOKEN" GET "$PC/resource-load?ResourceId=$RLR&From=$RLM&To=$(rld 13)&Bucket=week"; check "resl: the week bucket adds the days of the week: 20" '.success and ([.data.resources[0].buckets[]|select(.load > 0)|.load]|add) == 20'
+as "$PLAN_TOKEN" GET "$PC/resource-load?ResourceId=$RLR&From=$RLM&To=$(rld 400)"; nomsg "resl: a period of more than 370 days is refused in Persian" "$RLTXT_TOOLONG"
+as "$SEC_TOKEN" GET "$PC/resource-load?ResourceId=$RLR&From=$RLM&To=$(rld 13)"; r403 "resl: a role outside the readers is refused the load (403)"
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&PageSize=0"; check "resl: nothing is opened until the agent checks (the people do not detect over-allocations)" '.success and (.data.data|length) == 0'
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "resl: before the first check no resource is over-allocated anywhere (the contracts of the earlier blocks carry loads inside their capacity) and none is accepted" '.success and .data.pcOverloadedResources == 0 and .data.pcOverloadsAccepted == 0'
+
+# --- the agent finds it and proposes
+reslsettle
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&PageSize=0"
+check "resl: the agent check opened exactly one over-allocation: $RLM to $(rld 4), peak 4 against the capacity 2, open" ".success and (.data.data|length) == 1 and (.data.data[0]|(.fromDate|startswith(\"$RLM\")) and (.toDate|startswith(\"$(rld 4)\")) and .peakLoad == 4 and .peakCapacity == 2 and .status == 1 and .resourceCode == \"RESL-ROLE\")"
+RLO=$(val '.data.data[0].id')
+check "resl: with one proposal made by the agent: move RESL-Y-1 (it has float; RESL-X-1 is critical) by exactly 5 working days to $(rld 7), within the float, no effect on the critical path" '(.data.data[0].proposals|length) == 1 and (.data.data[0].proposals[0]|.activityCode == "RESL-Y-1" and .kind == 1 and .shiftDays == 5 and .criticalImpactDays == 0 and .status == 1 and .preparedByAgent == true and .needsChangeRequest == false)'
+check "resl: ... starting on the second Monday" ".data.data[0].proposals[0].proposedStart|startswith(\"$(rld 7)\")"
+RLPR=$(val '.data.data[0].proposals[0].id')
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LOAD.RESOLVE&PageNumber=1&PageSize=50"; check "resl: the planning inbox has exactly one open alert for it, linked to the over-allocation" ".success and ([.data.data[]|select(.state < 10)]|length) == 1 and ([.data.data[]|select(.state < 10)][0].link) == \"/project-control/resources?tab=overloads&overload=$RLO\""
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LEVEL.DECIDE&PageNumber=1&PageSize=50"; check "resl: and exactly one decision gate, linked to the proposal" ".success and ([.data.data[]|select(.state < 10)]|length) == 1 and ([.data.data[]|select(.state < 10)][0].link) == \"/project-control/resources?tab=overloads&proposal=$RLPR\""
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "resl: the CEO dashboard counts exactly one over-allocated resource, none accepted, with its alert linked to the page" '.success and .data.pcOverloadedResources == 1 and .data.pcOverloadsAccepted == 0 and (.data.alerts|map(select(.link == "/project-control/resources?tab=overloads"))|length) == 1'
+
+# --- who may do what
+as "$PLAN_TOKEN" POST $PC/resource-overloads/accept "{\"id\":$RLO,\"reason\":\"فوری\"}"; nomsg "resl: the planner cannot accept an over-allocation (the PMO does)" "$RLTXT_ACCEPT_PMO"
+as "$ENG_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"apply\"}"; nomsg "resl: the engineering manager cannot apply a proposal" "$RLTXT_DECIDE"
+as "$PLAN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"confirm\"}"; nomsg "resl: the planner cannot confirm" "$RLTXT_CONFIRM"
+as "$PLAN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"reject\"}"; nomsg "resl: a rejection needs a reason" "$RLTXT_REJECT"
+as "$PLAN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"nonsense\"}"; nomsg "resl: an unknown action is a Persian refusal, not an error" "$RLTXT_ACTION"
+
+# --- apply, second person, resolved
+as "$PLAN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"apply\"}"; check "resl: the planner applies it through the schedule: applied, waiting for the second person" '.success and .data.status == 2 and .data.pendingSecondPerson == true and .data.confirmedAt == null'
+as "$PLAN_TOKEN" GET "$PC/activities/$RLY1"; check "resl: RESL-Y-1 now starts on the second Monday (the schedule moved it)" ".success and (.data.earlyStart|startswith(\"$(rld 7)\")) and .data.constraintType == 1"
+call POST $PC/leveling-proposals/action "{\"id\":$RLPR,\"action\":\"confirm\"}"; check "resl: the PMO (a second person) confirms" '.success and .data.status == 2 and .data.pendingSecondPerson == false and .data.confirmedAt != null'
+reslsettle
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&PageSize=0"; check "resl: the next check resolves the over-allocation: one row, resolved, none open" '.success and (.data.data|length) == 1 and .data.data[0].status == 2 and .data.data[0].resolvedAt != null'
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LOAD.RESOLVE&PageNumber=1&PageSize=50"; check "resl: and its alert in the inbox is closed" '.success and ([.data.data[]|select(.state < 10)]|length) == 0'
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LEVEL.CONFIRM&PageNumber=1&PageSize=50"; check "resl: the confirmation gate is closed too" '.success and ([.data.data[]|select(.state < 10)]|length) == 0'
+
+# --- a third project overloads it again; the PMO accepts that one on purpose, with a reason
+reslproject RESL-Z 0; RLZC=$RLC
+reslsettle
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&Status=1&PageSize=0"; check "resl: a third project opens exactly one new over-allocation on the same days (peak 4, capacity 2)" ".success and (.data.data|length) == 1 and (.data.data[0]|(.fromDate|startswith(\"$RLM\")) and (.toDate|startswith(\"$(rld 4)\")) and .peakLoad == 4 and .peakCapacity == 2)"
+RLO2=$(val '.data.data[0].id')
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "resl: the CEO tile counts exactly one open over-allocation" '.success and .data.pcOverloadedResources == 1 and .data.pcOverloadsAccepted == 0'
+as "$PLAN_TOKEN" GET "$PC/leveling-proposals?OverloadId=$RLO2&PageSize=0"; check "resl: the agent made exactly one proposal for it, still proposed" '.success and (.data.data|length) == 1 and .data.data[0].status == 1'
+RLPZ=$(val '.data.data[0].id')
+# the person who applies a change, though a PMO, is not the second person
+as "$ADMIN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPZ,\"action\":\"apply\"}"; check "resl: the PMO user applies the proposal himself: applied, waiting for a second person" '.success and .data.status == 2 and .data.pendingSecondPerson == true and .data.applierUserId == '"$RLADM"
+as "$ADMIN_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPZ,\"action\":\"confirm\"}"; nomsg "resl: ... and cannot confirm his own change (maker is not checker)" "$RLTXT_SAMEUSER"
+as "$PMO2_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPZ,\"action\":\"refuse\",\"reason\":\" \"}"; nomsg "resl: the second PMO must give a reason to refuse" "$RLTXT_REFUSE"
+as "$PMO2_TOKEN" POST $PC/leveling-proposals/action "{\"id\":$RLPZ,\"action\":\"refuse\",\"reason\":\"منبع جایگزین موجود نیست\"}"; check "resl: the second PMO refuses it: the change is taken back" '.success and .data.status == 3 and .data.reverted == true and .data.rejectReason == "منبع جایگزین موجود نیست"'
+as "$PLAN_TOKEN" GET "$PC/activities/$(jq -r '.data.activityId' "$B")"; check "resl: ... the activity has no constraint again (the schedule was changed back through the schedule service)" '.success and .data.constraintType == 0'
+as "$PLAN_TOKEN" GET "$PC/resource-overloads/$RLO2"; check "resl: the over-allocation is still open after the refusal" '.success and .data.status == 1'
+# accepted on purpose by the PMO with a reason
+as "$ADMIN_TOKEN" POST $PC/resource-overloads/accept "{\"id\":$RLO2,\"reason\":\"  \"}"; nomsg "resl: the PMO must give a reason" "$RLTXT_ACCEPTREASON"
+as "$ADMIN_TOKEN" POST $PC/resource-overloads/accept "{\"id\":$RLO2,\"reason\":\"تحویل فوری کارفرما؛ اضافه‌کاری هماهنگ شد\"}"; check "resl: the PMO accepts it with a reason: accepted, by that user, with the reason in the record" ".success and .data.status == 3 and .data.acceptReason == \"تحویل فوری کارفرما؛ اضافه‌کاری هماهنگ شد\" and .data.acceptedByUserId == $RLADM and (.data.acceptedAt|type) == \"string\""
+reslsettle
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "resl: the CEO tile now counts none open and one accepted (counted apart), and the alert is gone" '.success and .data.pcOverloadedResources == 0 and .data.pcOverloadsAccepted == 1 and (.data.alerts|map(select(.link == "/project-control/resources?tab=overloads"))|length) == 0'
+# force one more check: a change of the resource moves the state the check watches, so the agent must run again
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LOAD.CHECK&PageNumber=1&PageSize=50"; RLCK1=$(jq -r '.data.data|length' "$B")
+as "$PLAN_TOKEN" POST $PC/resources "{\"id\":$RLR,\"code\":\"RESL-ROLE\",\"title\":\"جوشکار پروژه‌ها (بازبینی)\",\"kind\":1,\"unit\":2,\"capacity\":2,\"calendarId\":$PCCAL,\"responsibleUnit\":\"ENGINEERING\"}"; check "resl: the resource is edited (a change the check watches)" '.success'
+reslsettle
+as "$PLAN_TOKEN" GET "$AG/tasks?StepCode=RES.LOAD.CHECK&PageNumber=1&PageSize=50"; RLCK2=$(jq -r '.data.data|length' "$B")
+[ "$RLCK2" = "$((RLCK1 + 1))" ] && ok "resl: the agent ran the check once more after the change ($RLCK1 to $RLCK2 tasks)" || bad "resl: the agent ran the check once more after the change (tasks $RLCK1 then $RLCK2)"
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&Status=3&PageSize=0"; check "resl: the accepted row stays and that check did not reopen it" '.success and (.data.data|length) == 1'
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&Status=1&PageSize=0"; check "resl: no open over-allocation is left" '.success and (.data.data|length) == 0'
+as "$PLAN_TOKEN" GET "$PC/resource-overloads?ResourceId=$RLR&Status=2&PageSize=0"; check "resl: and the first one stays resolved (not lapsed)" '.success and (.data.data|length) == 1'
 TOKEN=$ADMIN_TOKEN
 
 # ------------------------------------------------------------------------------------------ access fixes found by the UI crawl

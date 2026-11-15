@@ -67,6 +67,28 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.HasOne(x => x.Plan).WithMany(x => x.Skips).HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(x => x.Activity).WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Restrict);
             });
+            builder.Entity<PcResourceOverload>(b =>
+            {
+                b.ToTable("PcResourceOverloads");
+                b.Property(x => x.PeakLoad).HasPrecision(18, 4);
+                b.Property(x => x.PeakCapacity).HasPrecision(18, 4);
+                b.Property(x => x.AcceptReason).HasMaxLength(1000);
+                b.HasIndex(x => new { x.Status, x.FromDate });
+                // one open over-allocation per resource and first day
+                b.HasIndex(x => new { x.ResourceId, x.FromDate }).IsUnique().HasFilter("[Deleted] = 0 AND [Status] = 1").HasDatabaseName("IX_PcResourceOverloads_OneOpenPerStart");
+                b.HasOne(x => x.Resource).WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<PcLevelingProposal>(b =>
+            {
+                b.ToTable("PcLevelingProposals");
+                b.Property(x => x.Note).HasMaxLength(1000);
+                b.Property(x => x.RejectReason).HasMaxLength(1000);
+                b.HasIndex(x => new { x.OverloadId, x.Status });
+                b.HasIndex(x => new { x.Status, x.ContractId });
+                b.HasIndex(x => x.ActivityId);
+                b.HasOne(x => x.Overload).WithMany().HasForeignKey(x => x.OverloadId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Activity).WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Restrict);
+            });
             builder.Entity<PcBaselineResource>(b =>
             {
                 b.ToTable("PcBaselineResources");

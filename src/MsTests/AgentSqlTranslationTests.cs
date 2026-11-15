@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Agents;
 using Services.NasbNiro.Agents.Steps;
+using Services.NasbNiro.ProjectControl;
 using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.ProjectControl;
 using Microsoft.EntityFrameworkCore;
@@ -114,6 +115,40 @@ namespace MsTests
                 Assert.IsTrue(ResFacts.SkippedRows(uow, ids).ToQueryString().Contains("PcResourcePlanSkips"));
                 Assert.IsTrue(ResFacts.ManagerRows(uow, ids).ToQueryString().Contains("PcContractTerms"));
                 Assert.IsTrue(ConFacts.Live(uow, today).Where(c => ids.Contains(c.Id)).ToQueryString().Length > 0);
+            }
+        }
+
+        /// <summary>Phase 4c: the queries behind the load check, the levelling steps and the load model translate to SQL Server without being run.</summary>
+        [TestMethod]
+        public void The_Queries_Behind_The_Load_And_Levelling_Steps_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                DateTime today = DateTime.Today;
+                string open = LvlFacts.OpenOverloads(uow).ToQueryString();
+                Assert.IsTrue(open.Contains("PcResourceOverloads") && open.Contains("TOP("), open);
+                string need = LvlFacts.NeedingProposal(uow, DateTimeOffset.Now, DateTimeOffset.Now).ToQueryString();
+                Assert.IsTrue(need.Contains("PcResourceOverloads") && need.Contains("PcLevelingProposals"), need);
+                foreach (PcLevelingStatus status in new[] { PcLevelingStatus.Proposed, PcLevelingStatus.Applied })
+                {
+                    string proposals = LvlFacts.Proposals(uow, status).ToQueryString();
+                    Assert.IsTrue(proposals.Contains("PcLevelingProposals") && proposals.Contains("TOP("), status + ": " + proposals);
+                }
+                Assert.IsTrue(LvlFacts.ApprovedPlanIds(uow).ToQueryString().Contains("PcResourcePlans"));
+                // the cheap questions of the check step and the change stamp: awaited against the swallowing connection, so a query the server could not translate throws here
+                var problems = new List<string>();
+                foreach (Func<Task> ask in new Func<Task>[] { () => LvlFacts.HasLoadAsync(uow, CancellationToken.None), () => LvlFacts.AnyOpenAsync(uow, CancellationToken.None), () => LvlFacts.StampAsync(uow, CancellationToken.None), () => LvlFacts.LatestChangeAsync(uow, CancellationToken.None) })
+                    try { ask().GetAwaiter().GetResult(); }
+                    catch (Exception ex) { string text = ex.ToString(); if (text.Contains("could not be translated") || text.Contains("cannot be translated") || text.Contains("LINQ expression") || text.Contains("Translation of")) problems.Add(ex.Message.Split('\n')[0]); }
+                Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
+                int[] ids = { 1, 2, 3 };
+                string plans = LoadModel.PlanQuery(uow, ids, true).ToQueryString();
+                Assert.IsTrue(plans.Contains("PcResourcePlans"), plans);
+                Assert.IsTrue(LoadModel.RowQuery(uow, ids, 5).ToQueryString().Contains("PcActivityResources"));
+                Assert.IsTrue(LoadModel.RowQuery(uow, ids, null).ToQueryString().Contains("PcActivityResources"));
+                Assert.IsTrue(LoadModel.ActivityQuery(uow, ids).ToQueryString().Contains("PcActivities"));
             }
         }
     }

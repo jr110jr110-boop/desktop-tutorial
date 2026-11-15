@@ -56,6 +56,10 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int PcOverdueClientResponses { get; set; }
         public decimal PcPenaltyExposure { get; set; }
 
+        /// <summary>Resources that the approved plans load beyond their capacity and nobody has resolved or accepted («منابع بیش‌تخصیص‌یافته»), and the ones the PMO accepted on purpose (counted apart).</summary>
+        public int PcOverloadedResources { get; set; }
+        public int PcOverloadsAccepted { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 
