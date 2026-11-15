@@ -94,7 +94,8 @@ namespace Services.NasbNiro.Agents
         public const string StepNotFound = "گام ایجنت پیدا نشد.";
         public const string NotYourGate = "این کار در کارتابل نقش شما نیست.";
         public const string NotAtGate = "فقط کاری که منتظر تصمیم، کار فیزیکی یا ورود اطلاعات است برگشت می‌خورد.";
-        public const string NoProducer = "ایجنتی که این سند را آماده کرده پیدا نشد؛ برگشت ممکن نیست.";
+        public const string NoProducer = "این سند را ایجنت آماده نکرده است؛ برگشت به ایجنت ندارد. سند را در صفحه خودش اصلاح یا رد کنید.";
+        public const string ProducerBusy = "ایجنت هم‌اکنون روی همین سند کار باز دارد؛ پس از پایان آن دوباره تلاش کنید.";
         public const string WrongAgent = "این گام به ایجنت دیگری تعلق دارد و این ایجنت آن را اجرا نمی‌کند.";
         public const string StepUnknown = "گام این کار در فهرست گام‌ها نیست.";
         public const string StepSwitchedOff = "گام یا ایجنت غیرفعال است؛ کار به یک انسان سپرده شد.";

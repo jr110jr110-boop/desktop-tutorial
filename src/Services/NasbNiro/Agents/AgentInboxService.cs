@@ -160,7 +160,7 @@ namespace Services.NasbNiro.Agents
                     && t.State == AgentTaskState.Done).OrderByDescending(t => t.Id).FirstOrDefaultAsync(ct);
                 if (producer == null) return AgentText.Bad<AgentInboxItemDto>(AgentText.NoProducer);
                 bool open = await _uow.Set<AgentTask>().AnyAsync(t => !t.Deleted && t.StepCode == producer.StepCode && t.TargetType == producer.TargetType && t.TargetId == producer.TargetId && t.State < AgentTaskState.Done, ct);
-                if (open) return AgentText.Bad<AgentInboxItemDto>(AgentText.NoProducer);
+                if (open) return AgentText.Bad<AgentInboxItemDto>(AgentText.ProducerBusy);
                 producer.State = AgentTaskState.Returned; producer.ClosedAt = null; producer.ClosedReason = null; producer.NextAttemptAt = null; producer.AttemptCount = 0; producer.LastError = null;
                 producer.EscalatedAt = null;
                 producer.ReturnReason = reason; producer.ReturnedAt = now; producer.ReturnedByUserId = _user.UserId;
