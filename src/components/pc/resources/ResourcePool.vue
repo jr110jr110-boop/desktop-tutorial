@@ -44,6 +44,11 @@ async function openForm(r: Resource | null) {
   roleResources.value = (roles || []).filter((x) => !x.employeeId && !x.rateResourceId && x.id !== r?.id);
 }
 
+// priority 4d: a machine linked to a work centre reads its capacity and calendar from the work centre (one truth with production); they are shown, not typed, and it is counted in hours
+// only a machine counted in hours reads through: an old link of a machine counted in days or pieces stays editable with its own numbers, and a new or changed link is made in hours
+const linkIsNew = computed(() => !editing.value || editing.value.kind !== 2 || editing.value.workCenterId !== form.value?.workCenterId);
+const linkedMachine = computed(() => !!form.value && form.value.kind === 2 && !!form.value.workCenterId && (form.value.unit === 1 || linkIsNew.value));
+watch(linkedMachine, (v) => { if (v && form.value && linkIsNew.value) form.value.unit = 1; });
 const kindUnitLocked = computed(() => !!editing.value?.hasAssignments);
 const linkText = computed(() => (form.value ? linkLabel(form.value.kind) : null));
 // the link field of the kind: employee (labour), work center (machine), provider (subcontract)
@@ -138,7 +143,7 @@ watch([kind, active], load);
             <td>{{ r.title }}</td>
             <td>{{ resourceKinds[r.kind] }}</td>
             <td>{{ resourceUnits[r.unit] }}</td>
-            <td>{{ qty(r.capacity) }}</td>
+            <td>{{ qty(r.capacity) }}<span v-if="r.capacityFromWorkCenter" class="inv-badge info ms-1" :title="'ظرفیت و تقویم از مرکز کار ' + (r.workCenterCode || '') + ' خوانده می‌شود'">از مرکز کار</span></td>
             <td>{{ r.responsibleUnit ? unitManagerTitles[r.responsibleUnit] || r.responsibleUnit : "—" }}</td>
             <td>
               <span v-if="linkOf(r)">{{ linkOf(r) }}</span><span v-else class="inv-muted">—</span>
@@ -179,14 +184,15 @@ watch([kind, active], load);
           </div>
           <div class="col-md-3">
             <label class="form-label small mb-0">واحد شمارش *</label>
-            <select v-model.number="form.unit" :disabled="kindUnitLocked" :title="kindUnitLocked ? ResourceTexts.kindUnitLocked : ''" class="form-select form-select-sm">
+            <select v-model.number="form.unit" :disabled="kindUnitLocked || linkedMachine" :title="kindUnitLocked ? ResourceTexts.kindUnitLocked : ''" class="form-select form-select-sm">
               <option v-for="(n, k) in resourceUnits" :key="k" :value="Number(k)">{{ n }}</option>
             </select>
           </div>
-          <div class="col-md-3"><label class="form-label small mb-0">ظرفیت *</label><input v-model.number="form.capacity" class="form-control form-control-sm" type="number" min="0" step="any" /></div>
+          <div class="col-md-3"><label class="form-label small mb-0">ظرفیت *</label><input v-model.number="form.capacity" :disabled="linkedMachine" class="form-control form-control-sm" type="number" min="0" step="any" />
+            <div v-if="linkedMachine" class="small inv-muted">از مرکز کار خوانده می‌شود{{ editing?.capacityFromWorkCenter ? ": " + qty(editing.capacity) : " (پس از ذخیره)" }}؛ ظرفیت = ماشین‌های موازی × کارایی × بهره‌وری.</div></div>
           <div class="col-md-3">
             <label class="form-label small mb-0">تقویم کاری</label>
-            <select v-model="form.calendarId" class="form-select form-select-sm"><option :value="null">تقویم پروژه</option><option v-for="c in calendars" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+            <select v-model="form.calendarId" :disabled="linkedMachine" class="form-select form-select-sm"><option :value="null">{{ linkedMachine ? "تقویم مرکز کار" : "تقویم پروژه" }}</option><option v-for="c in calendars" :key="c.id" :value="c.id">{{ c.name }}</option></select>
           </div>
           <div class="col-md-4">
             <label class="form-label small mb-0">واحد مسئول</label>

@@ -10,6 +10,7 @@ import ResourceRates from "@/components/pc/resources/ResourceRates.vue";
 import ResourcePlan from "@/components/pc/resources/ResourcePlan.vue";
 import ResourceLoad from "@/components/pc/resources/ResourceLoad.vue";
 import ResourceOverloads from "@/components/pc/resources/ResourceOverloads.vue";
+import ResourcePerformance from "@/components/pc/resources/ResourcePerformance.vue";
 import { printPage } from "@/composables/inventory";
 import { pcContractId, setPcContract } from "@/composables/projectControl";
 
@@ -19,6 +20,7 @@ import { pcContractId, setPcContract } from "@/composables/projectControl";
 //   /project-control/resources?tab=rates[&resource=<id>]  the standard rates (of one resource)
 //   /project-control/resources?tab=load[&resource=<id>]   the load histogram (of one resource)
 //   /project-control/resources?tab=overloads&overload=<id> | &proposal=<id>   the over-allocations, with that one selected
+//   /project-control/resources?tab=performance&contract=<id>   «بودجه و عملکرد منابع» of that project and the cost proposals of the agent (gate RES.COST.REVIEW)
 const props = defineProps({ tab: { type: String, default: "pool" } });
 const route = useRoute();
 const current = ref(props.tab);
@@ -31,6 +33,7 @@ const tabs = [
   { key: "plan", title: "برنامه منابع پروژه" },
   { key: "load", title: "بار منابع" },
   { key: "overloads", title: "بیش‌تخصیص‌ها" },
+  { key: "performance", title: "بودجه و عملکرد منابع" },
 ];
 
 function applyQuery() {
@@ -62,7 +65,7 @@ watch(() => props.tab, applyQuery);
       <div class="inv-toolbar">
         <h1 class="inv-title screen-only">منابع، نرخ استاندارد، برنامه و بار منابع</h1>
         <div class="d-flex flex-wrap gap-2 d-print-none">
-          <ContractSelect v-if="current === 'plan'" />
+          <ContractSelect v-if="current === 'plan' || current === 'performance'" />
           <button class="btn btn-sm btn-outline-secondary" @click="printPage">چاپ</button>
         </div>
       </div>
@@ -71,6 +74,10 @@ watch(() => props.tab, applyQuery);
       <ResourceRates v-else-if="current === 'rates'" :resource-id="resourceId" />
       <ResourceLoad v-else-if="current === 'load'" :resource-id="resourceId" @overloads="openOverloads" />
       <ResourceOverloads v-else-if="current === 'overloads'" :overload-id="overloadId" :proposal-id="proposalId" :resource-id="resourceId" @load="openLoad" />
+      <template v-else-if="current === 'performance'">
+        <NeedContract v-if="!pcContractId" />
+        <ResourcePerformance v-else :contract-id="pcContractId" />
+      </template>
       <template v-else>
         <NeedContract v-if="!pcContractId" />
         <ResourcePlan v-else :contract-id="pcContractId" />

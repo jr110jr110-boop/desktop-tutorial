@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { rowsOf } from "@/api/ApiClient";
 import { generateWeekly, getWeeklyReports, releaseWeekly, saveWeekly } from "@/api/ProjectRegistersAPIs";
 import JDate from "@/components/pc/JDate.vue";
 import { fail, ok, printPage, today } from "@/composables/inventory";
 import { hasRole, ProjectControlRoles } from "@/composables/roles";
 import { weeklyStates } from "@/composables/tasks";
+import { faNum } from "@/composables/ceo";
+import { toWeeklyResources } from "@/api/ResourceAPIs";
+import { overloadsPath, resourceUnits } from "@/composables/resources";
 
 // Weekly report: the figures come from progress, issues, risks, tasks and daily reports; the manager edits the summary and the PMO releases it.
 const props = defineProps({ contractId: { type: Number, required: true } });
@@ -13,6 +16,8 @@ const rows = ref<any[]>([]);
 const sel = ref<any>(null);
 const date = ref<string | null>(today());
 const isPmo = hasRole(ProjectControlRoles.pmo);
+// the section «منابع» (priority 4e): quantities of the project's resources, never amounts; a report made before the section existed has none
+const resources = computed(() => toWeeklyResources(sel.value?.auto?.resources));
 
 async function load() {
   const [d, e] = await getWeeklyReports({ ContractId: props.contractId, PageSize: 60 });
@@ -62,6 +67,20 @@ watch(() => props.contractId, () => { sel.value = null; load(); });
               <tr><th>وظایف بسته / معوق</th><td>{{ sel.auto.tasksClosed }} / {{ sel.auto.tasksOverdue }}</td><td colspan="2"></td></tr>
             </tbody>
           </table>
+          <div v-if="resources" class="mb-2" data-test="weekly-resources">
+            <h6 class="mb-1">منابع</h6>
+            <table class="table table-sm mb-1">
+              <tbody>
+                <tr><th>بیش‌تخصیص باز</th><td>{{ faNum(resources.openOverloads, 0) }}</td><th>پذیرفته‌شده / گذشته بدون اصلاح</th><td>{{ faNum(resources.acceptedOverloads, 0) }} / {{ faNum(resources.lapsedOverloads, 0) }}</td></tr>
+                <tr><th>طرح منابع منتظر تایید</th><td>{{ faNum(resources.plansWaitingApproval, 0) }}</td><th>منابع بدون نرخ مصوب</th><td>{{ faNum(resources.resourcesWithoutRate, 0) }}</td></tr>
+              </tbody>
+            </table>
+            <div v-if="resources.top.length" class="small">
+              بیشترین بار چهار هفته‌ی آینده:
+              <span v-for="(t, i) in resources.top" :key="t.resourceId"><template v-if="i">، </template><span class="inv-ltr">{{ t.code }}</span> {{ t.title }} ({{ faNum(t.load, 2) }} {{ resourceUnits[t.unit] }})</span>
+            </div>
+            <router-link v-if="resources.openOverloads > 0" :to="overloadsPath()" class="small d-print-none">بیش‌تخصیص‌ها</router-link>
+          </div>
           <ul v-if="sel.auto.highlights?.length"><li v-for="(h, i) in sel.auto.highlights" :key="i">{{ h }}</li></ul>
           <label class="form-label small mb-0">خلاصه مدیریتی</label><textarea v-model="sel.summary" :disabled="sel.state === 1" class="form-control form-control-sm mb-2" rows="4"></textarea>
           <label class="form-label small mb-0">برنامه هفته بعد</label><textarea v-model="sel.nextWeekPlan" :disabled="sel.state === 1" class="form-control form-control-sm" rows="3"></textarea>

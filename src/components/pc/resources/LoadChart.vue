@@ -3,7 +3,7 @@
 // Dependency-free SVG (the same approach as LineChart.vue). The chart scrolls sideways inside its own box at phone width; every bar is a button (keyboard and screen reader) that selects the bucket.
 import { computed } from "vue";
 import type { LoadBucket } from "@/api/ResourceAPIs";
-import { faDate, loadNum, DRAFT_LAYER } from "@/composables/resources";
+import { faDate, loadNum, DRAFT_LAYER, PRODUCTION_LAYER } from "@/composables/resources";
 
 const props = defineProps({
   buckets: { type: Array as () => LoadBucket[], required: true },
@@ -18,23 +18,26 @@ const BAR = 26; // width of one slot
 const L = 52, R = 10, T = 14, B = 46;
 const width = computed(() => L + R + Math.max(1, props.buckets.length) * BAR);
 const yMax = computed(() => {
-  const m = Math.max(0, ...props.buckets.map((b) => Math.max(b.load, b.capacity)));
+  const m = Math.max(0, ...props.buckets.map((b) => Math.max(b.load + b.productionLoad, b.capacity)));
   return m <= 0 ? 1 : m * 1.08;
 });
 const y = (v: number) => T + (1 - v / yMax.value) * (props.height - T - B);
 const baseY = computed(() => props.height - B);
 
-interface Bar { b: LoadBucket; x: number; over: number; draft: number; normal: number; label: string; aria: string; capY: number }
+interface Bar { b: LoadBucket; x: number; over: number; draft: number; production: number; normal: number; label: string; aria: string; capY: number }
 const bars = computed<Bar[]>(() =>
   props.buckets.map((b, i) => {
-    const over = Math.min(Math.max(b.over, 0), b.load);
-    const draft = Math.min(Math.max(b.draftLoad, 0), Math.max(b.load - over, 0));
-    const normal = Math.max(b.load - over - draft, 0);
+    // the production layer (priority 4d) sits on the project load and counts toward the over-allocation, which is the top part of the bar
+    const total = b.load + b.productionLoad;
+    const over = Math.min(Math.max(b.over, 0), total);
+    const production = Math.min(Math.max(b.productionLoad, 0), Math.max(total - over, 0));
+    const draft = Math.min(Math.max(b.draftLoad, 0), Math.max(total - over - production, 0));
+    const normal = Math.max(total - over - production - draft, 0);
     const label = faDate(b.start);
     const range = props.weekly ? `${faDate(b.start)} تا ${faDate(b.end)}` : faDate(b.start);
     return {
-      b, x: L + i * BAR, over, draft, normal, label, capY: y(b.capacity),
-      aria: `${range}: بار ${loadNum(b.load)}${props.unitText ? " " + props.unitText : ""}، ظرفیت ${loadNum(b.capacity)}${b.over > 0 ? "، بیش‌تخصیص " + loadNum(b.over) : ""}${b.draftLoad > 0 ? "، " + loadNum(b.draftLoad) + " از آن " + DRAFT_LAYER : ""}`,
+      b, x: L + i * BAR, over, draft, production, normal, label, capY: y(b.capacity),
+      aria: `${range}: بار ${loadNum(b.load)}${props.unitText ? " " + props.unitText : ""}${b.productionLoad > 0 ? "، " + PRODUCTION_LAYER + " " + loadNum(b.productionLoad) : ""}، ظرفیت ${loadNum(b.capacity)}${b.over > 0 ? "، بیش‌تخصیص " + loadNum(b.over) : ""}${b.draftLoad > 0 ? "، " + loadNum(b.draftLoad) + " از آن " + DRAFT_LAYER : ""}`,
     };
   })
 );
@@ -46,6 +49,7 @@ const summary = computed(() => {
   const over = props.buckets.filter((b) => b.over > 0).length;
   return `نمودار بار منبع: ${loadNum(props.buckets.length)} ${props.weekly ? "هفته" : "روز"}، ${over ? loadNum(over) + " مورد بیش‌تخصیص" : "بدون بیش‌تخصیص"}`;
 });
+const hasProduction = computed(() => props.buckets.some((b) => b.productionLoad > 0));
 const pick = (r: Bar) => emit("select", r.b.start);
 </script>
 
@@ -54,6 +58,7 @@ const pick = (r: Bar) => emit("select", r.b.start);
     <div class="d-flex flex-wrap gap-3 small mb-1" aria-hidden="true">
       <span><i class="lc-sw lc-fill-normal"></i> بار تاییدشده</span>
       <span><i class="lc-sw lc-hatch"></i> {{ DRAFT_LAYER }}</span>
+      <span v-if="hasProduction"><i class="lc-sw lc-fill-production"></i> {{ PRODUCTION_LAYER }} (دستورهای تولید همین مرکز کار)</span>
       <span><i class="lc-sw lc-fill-over"></i> بیش از ظرفیت{{ weekly ? " (در نمای هفتگی: جمع بیش‌تخصیص روزهای هفته)" : "" }}</span>
       <span><i class="lc-line"></i> ظرفیت</span>
       <span v-if="unitText" class="inv-muted">{{ unitText }}</span>
@@ -77,7 +82,8 @@ const pick = (r: Bar) => emit("select", r.b.start);
           <rect v-if="selected === r.b.start" :x="r.x + 1" :y="T" :width="BAR - 2" :height="baseY - T" class="lc-selected" />
           <rect :x="r.x + 4" :y="y(r.normal)" :width="BAR - 8" :height="Math.max(0, baseY - y(r.normal))" class="lc-fill-normal" />
           <rect :x="r.x + 4" :y="y(r.normal + r.draft)" :width="BAR - 8" :height="Math.max(0, y(r.normal) - y(r.normal + r.draft))" class="lc-fill-draft" />
-          <rect :x="r.x + 4" :y="y(r.normal + r.draft + r.over)" :width="BAR - 8" :height="Math.max(0, y(r.normal + r.draft) - y(r.normal + r.draft + r.over))" class="lc-fill-over" />
+          <rect :x="r.x + 4" :y="y(r.normal + r.draft + r.production)" :width="BAR - 8" :height="Math.max(0, y(r.normal + r.draft) - y(r.normal + r.draft + r.production))" class="lc-fill-production" />
+          <rect :x="r.x + 4" :y="y(r.normal + r.draft + r.production + r.over)" :width="BAR - 8" :height="Math.max(0, y(r.normal + r.draft + r.production) - y(r.normal + r.draft + r.production + r.over))" class="lc-fill-over" />
           <text v-if="i % every === 0" :x="r.x + BAR / 2" :y="baseY + 14" text-anchor="end" class="lc-text" :transform="`rotate(-40 ${r.x + BAR / 2} ${baseY + 14})`">{{ r.label }}</text>
         </g>
         <path :d="capacityPath" fill="none" class="lc-cap" stroke-width="2" stroke-dasharray="5 3" />
@@ -86,12 +92,12 @@ const pick = (r: Bar) => emit("select", r.b.start);
       <table class="visually-hidden">
         <caption>{{ summary }}</caption>
         <thead>
-          <tr><th scope="col">{{ weekly ? "هفته" : "روز" }}</th><th scope="col">بار</th><th scope="col">ظرفیت</th><th scope="col">بیش‌تخصیص</th><th scope="col">{{ DRAFT_LAYER }}</th></tr>
+          <tr><th scope="col">{{ weekly ? "هفته" : "روز" }}</th><th scope="col">بار</th><th scope="col">ظرفیت</th><th scope="col">بیش‌تخصیص</th><th scope="col">{{ DRAFT_LAYER }}</th><th scope="col">{{ PRODUCTION_LAYER }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="r in bars" :key="r.b.start">
             <th scope="row">{{ weekly ? faDate(r.b.start) + " تا " + faDate(r.b.end) : faDate(r.b.start) }}</th>
-            <td>{{ loadNum(r.b.load) }}</td><td>{{ loadNum(r.b.capacity) }}</td><td>{{ loadNum(r.b.over) }}</td><td>{{ loadNum(r.b.draftLoad) }}</td>
+            <td>{{ loadNum(r.b.load) }}</td><td>{{ loadNum(r.b.capacity) }}</td><td>{{ loadNum(r.b.over) }}</td><td>{{ loadNum(r.b.draftLoad) }}</td><td>{{ loadNum(r.b.productionLoad) }}</td>
           </tr>
         </tbody>
       </table>
@@ -106,6 +112,7 @@ const pick = (r: Bar) => emit("select", r.b.start);
 .lc-fill-normal { fill: rgb(var(--primary)); background: rgb(var(--primary)); }
 .lc-fill-over { fill: rgb(var(--danger)); background: rgb(var(--danger)); }
 .lc-fill-draft { fill: url(#lcHatch); }
+.lc-fill-production { fill: rgb(var(--secondary)); background: rgb(var(--secondary)); }
 .lc-hatch { background: repeating-linear-gradient(45deg, rgba(var(--primary), 0.25), rgba(var(--primary), 0.25) 3px, rgb(var(--primary)) 3px, rgb(var(--primary)) 5px); }
 .lc-hatch-bg { fill: rgba(var(--primary), 0.25); }
 .lc-hatch-line { stroke: rgb(var(--primary)); }

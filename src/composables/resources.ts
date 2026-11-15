@@ -152,6 +152,8 @@ export const proposalStatuses: Record<number, string> = { 1: "پیشنهادشد
 export const proposalKinds: Record<number, string> = { 1: "جابه‌جایی در محدوده شناوری", 2: "تاخیر فراتر از شناوری" };
 export const PENDING_SECOND = "در انتظار تأیید نفر دوم";
 export const DRAFT_LAYER = "پیش‌نویس";
+/** The layer of the production load (work orders at the linked work centre) in the histogram of a machine resource (priority 4d). */
+export const PRODUCTION_LAYER = "بار تولید";
 export const CONSTRAINT_NOTE = "با اعمال، قید «شروع نه زودتر از» روی فعالیت می‌ماند؛ برگرداندن آن با «عدم‌تایید» نفر دوم است.";
 export const overloadStatusBadge = (s: number) => (s === 1 ? "bad" : s === 3 ? "warn" : s === 4 ? "info" : "ok");
 

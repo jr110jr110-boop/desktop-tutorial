@@ -4,6 +4,7 @@ import { approvePlan, charterAction, getCharter, getPlan, saveCharter, savePlan 
 import { fail, jalali, ok } from "@/composables/inventory";
 import { hasRole, isRole, ProjectControlRoles } from "@/composables/roles";
 import { signGate } from "@/composables/pendingRoles";
+import CharterResourceList from "@/components/pc/project/CharterResourceList.vue";
 
 // Project charter (13 sections, WI-PL-007) and project execution plan PEP (WI-PL-006). Gates: the project manager accepts the authority,
 // the CEO approves the charter, the PMO deputy approves the PEP. An approved document can be changed only through change control.
@@ -30,6 +31,7 @@ const isCharter = computed(() => props.kind === "charter");
 const ceoGate = signGate(["CEO"]);
 // the API (ApprovePlanAsync) lets the project manager or the CEO approve the PEP, not the PMO deputy
 const pepGate = signGate(["PROJECTMANAGER", "CEO"]);
+const listRef = ref<InstanceType<typeof CharterResourceList> | null>(null);
 const approved = computed(() => !!doc.value?.approvedAt);
 const canEdit = computed(() => !approved.value && hasRole(isCharter.value ? ProjectControlRoles.charter : ProjectControlRoles.planningOrPm));
 
@@ -41,6 +43,7 @@ async function load() {
 }
 
 async function save() {
+  if (isCharter.value && listRef.value?.problem) return fail(listRef.value.problem);
   busy.value = true;
   const [data, error] = await (isCharter.value ? saveCharter : savePlan)({ ...doc.value, contractId: props.contractId });
   busy.value = false;
@@ -73,7 +76,11 @@ watch(() => [props.contractId, props.kind], load);
     <div class="row g-2">
       <div v-for="f in fields" :key="f[0]" class="col-md-6">
         <label class="form-label small mb-0">{{ f[1] }}</label>
-        <textarea v-model="doc[f[0]]" :disabled="!canEdit" class="form-control form-control-sm" rows="3"></textarea>
+        <textarea v-model="doc[f[0]]" :disabled="!canEdit || (isCharter && f[0] === 'preAssignedResources' && !!doc.preAssignedTextLocked)" class="form-control form-control-sm" rows="3"></textarea>
+        <template v-if="isCharter && f[0] === 'preAssignedResources'">
+          <div v-if="doc.preAssignedTextLocked" class="small inv-muted">متن قدیمی؛ فهرست زیر مرجع است و این متن فقط‌خواندنی است.</div>
+          <CharterResourceList ref="listRef" v-model="doc.preAssignedList" :editable="canEdit" />
+        </template>
       </div>
     </div>
     <div class="d-flex flex-wrap gap-2 align-items-end mt-3 d-print-none">

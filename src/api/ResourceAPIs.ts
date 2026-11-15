@@ -51,6 +51,10 @@ export interface Resource {
   /** the approved rate that applies today; null when there is none or when it is hidden */
   effectiveRate: number | null;
   rateHidden: boolean;
+  /** phase 4d: a machine linked to a work centre reads its capacity (and calendar) from the work centre; the form shows them read only */
+  capacityFromWorkCenter: boolean;
+  workCenterCode: string | null;
+  workCenterDayHours: number | null;
   rowVersion: string | null;
 }
 
@@ -231,7 +235,8 @@ function toResource(r: any): Resource {
     employeeId: numOrNull(r.employeeId), workCenterId: numOrNull(r.workCenterId), providerId: numOrNull(r.providerId),
     rateResourceId: numOrNull(r.rateResourceId), rateResourceCode: strOrNull(r.rateResourceCode),
     isActive: !!r.isActive, notes: strOrNull(r.notes), hasAssignments: !!r.hasAssignments, canCarryRate: !!r.canCarryRate,
-    effectiveRate: numOrNull(r.effectiveRate), rateHidden: !!r.rateHidden, rowVersion: strOrNull(r.rowVersion),
+    effectiveRate: numOrNull(r.effectiveRate), rateHidden: !!r.rateHidden, capacityFromWorkCenter: !!r.capacityFromWorkCenter, workCenterCode: strOrNull(r.workCenterCode),
+    workCenterDayHours: numOrNull(r.workCenterDayHours), rowVersion: strOrNull(r.rowVersion),
   };
 }
 
@@ -421,6 +426,8 @@ export interface LoadBucket {
   end: string;
   load: number;
   draftLoad: number;
+  /** phase 4d: the hours of production (work orders) at the linked work centre; a separate layer that counts toward the over-allocation */
+  productionLoad: number;
   capacity: number;
   /** the sum of the daily excess over the capacity */
   over: number;
@@ -434,6 +441,8 @@ export interface LoadRow {
   kind: number;
   unit: number;
   capacity: number;
+  /** the linked work centre of a machine (null: no production layer) */
+  workCenterId: number | null;
   peakLoad: number;
   totalOver: number;
   buckets: LoadBucket[];
@@ -546,7 +555,7 @@ export interface ProposalQuery {
 
 function toLoadBucket(b: any): LoadBucket {
   return {
-    start: str(b.start).slice(0, 10), end: str(b.end).slice(0, 10), load: num(b.load), draftLoad: num(b.draftLoad), capacity: num(b.capacity), over: num(b.over),
+    start: str(b.start).slice(0, 10), end: str(b.end).slice(0, 10), load: num(b.load), draftLoad: num(b.draftLoad), productionLoad: num(b.productionLoad), capacity: num(b.capacity), over: num(b.over),
     items: (Array.isArray(b.items) ? b.items : []).map((i: any): LoadItem => ({
       contractId: num(i.contractId), contractCode: str(i.contractCode), activityId: num(i.activityId), activityCode: str(i.activityCode), activityTitle: str(i.activityTitle), load: num(i.load), isDraft: !!i.isDraft,
     })),
@@ -557,7 +566,7 @@ function toResourceLoad(r: any): ResourceLoad {
   return {
     from: str(r.from).slice(0, 10), to: str(r.to).slice(0, 10), bucket: r.bucket === "week" ? "week" : "day", includeOpen: !!r.includeOpen,
     resources: (Array.isArray(r.resources) ? r.resources : []).map((x: any): LoadRow => ({
-      resourceId: num(x.resourceId), code: str(x.code), title: str(x.title), kind: num(x.kind), unit: num(x.unit), capacity: num(x.capacity), peakLoad: num(x.peakLoad), totalOver: num(x.totalOver),
+      resourceId: num(x.resourceId), code: str(x.code), title: str(x.title), kind: num(x.kind), unit: num(x.unit), capacity: num(x.capacity), workCenterId: numOrNull(x.workCenterId), peakLoad: num(x.peakLoad), totalOver: num(x.totalOver),
       buckets: (Array.isArray(x.buckets) ? x.buckets : []).map(toLoadBucket),
     })),
   };
@@ -609,3 +618,265 @@ export const getProposal = (id: number): Promise<ApiResult<LevelingProposal>> =>
 /** apply and reject (the planner), confirm, refuse and close without a revert (a second person, the PMO); reject, refuse and close need a reason. */
 export const proposalAction = (p: LevelingProposal, action: "apply" | "reject" | "confirm" | "refuse" | "close", reason?: string | null): Promise<ApiResult<LevelingProposal>> =>
   typed(call("post", base + "leveling-proposals/action", { id: p.id, action, reason: reason || null, rowVersion: p.rowVersion }), toProposal);
+
+
+// ---------------------------------------------------------------- phase 4d: the MS Project import (api/v1/projectcontrol/resource-plans/import[/preview])
+// The file is not stored: the preview and the commit both carry the XML text; the commit also carries the reviewed mapping. The rates and costs of the file are never read by the server.
+
+export interface MspResourceRow {
+  mspUid: number;
+  name: string;
+  code: string | null;
+  /** 0 material, 1 work, 2 cost */
+  type: number;
+  /** code | title | normalized | none */
+  matchKind: string;
+  suggestedResourceId: number | null;
+  suggestedCode: string | null;
+  suggestedTitle: string | null;
+  assignmentCount: number;
+}
+
+export interface MspAssignmentRow {
+  taskUid: number;
+  taskName: string;
+  wbs: string | null;
+  activityId: number | null;
+  activityCode: string | null;
+  activityMatch: string;
+  mspResourceUid: number;
+  mspResourceName: string;
+  resourceId: number | null;
+  resourceCode: string | null;
+  unit: number | null;
+  workHours: number;
+  quantity: number;
+  /** ok | resourceUnmatched | activityUnmatched | zeroWork | duplicate */
+  status: string;
+  statusText: string;
+}
+
+export interface MspCounts {
+  assignments: number;
+  ok: number;
+  resourceUnmatched: number;
+  activityUnmatched: number;
+  zeroWork: number;
+  duplicate: number;
+  resourcesInFile: number;
+  resourcesMatched: number;
+}
+
+export interface MspPreview {
+  contractId: number;
+  planId: number;
+  projectName: string | null;
+  ratesNote: string;
+  keepNote: string;
+  warnings: string[];
+  resources: MspResourceRow[];
+  rows: MspAssignmentRow[];
+  counts: MspCounts;
+}
+
+export interface MspNewResource {
+  code: string;
+  title: string;
+  kind: number;
+  unit: number;
+  capacity: number;
+  responsibleUnit: string | null;
+}
+
+/** One line of the reviewed mapping: an existing pool resource, a new one, or neither (the rows of that MS Project resource are skipped). */
+export interface MspMapping {
+  mspUid: number;
+  resourceId: number | null;
+  create: MspNewResource | null;
+}
+
+export interface MspImportResult {
+  created: number;
+  updated: number;
+  resourcesCreated: number;
+  skippedResourceUnmatched: number;
+  skippedActivityUnmatched: number;
+  skippedZeroWork: number;
+  skippedDuplicate: number;
+  total: number;
+  ratesNote: string;
+  keepNote: string;
+  plan: ResourcePlan | null;
+}
+
+const toMspPreview = (r: any): MspPreview => ({
+  contractId: num(r.contractId), planId: num(r.planId), projectName: strOrNull(r.projectName), ratesNote: str(r.ratesNote), keepNote: str(r.keepNote), warnings: (Array.isArray(r.warnings) ? r.warnings : []).map(str),
+  resources: (Array.isArray(r.resources) ? r.resources : []).map((x: any): MspResourceRow => ({
+    mspUid: num(x.mspUid), name: str(x.name), code: strOrNull(x.code), type: num(x.type), matchKind: str(x.matchKind) || "none", suggestedResourceId: numOrNull(x.suggestedResourceId),
+    suggestedCode: strOrNull(x.suggestedCode), suggestedTitle: strOrNull(x.suggestedTitle), assignmentCount: num(x.assignmentCount),
+  })),
+  rows: (Array.isArray(r.rows) ? r.rows : []).map((x: any): MspAssignmentRow => ({
+    taskUid: num(x.taskUid), taskName: str(x.taskName), wbs: strOrNull(x.wbs), activityId: numOrNull(x.activityId), activityCode: strOrNull(x.activityCode), activityMatch: str(x.activityMatch),
+    mspResourceUid: num(x.mspResourceUid), mspResourceName: str(x.mspResourceName), resourceId: numOrNull(x.resourceId), resourceCode: strOrNull(x.resourceCode), unit: numOrNull(x.unit),
+    workHours: num(x.workHours), quantity: num(x.quantity), status: str(x.status), statusText: str(x.statusText),
+  })),
+  counts: {
+    assignments: num(r.counts?.assignments), ok: num(r.counts?.ok), resourceUnmatched: num(r.counts?.resourceUnmatched), activityUnmatched: num(r.counts?.activityUnmatched), zeroWork: num(r.counts?.zeroWork),
+    duplicate: num(r.counts?.duplicate), resourcesInFile: num(r.counts?.resourcesInFile), resourcesMatched: num(r.counts?.resourcesMatched),
+  },
+});
+
+const toMspResult = (r: any): MspImportResult => ({
+  created: num(r.created), updated: num(r.updated), resourcesCreated: num(r.resourcesCreated), skippedResourceUnmatched: num(r.skippedResourceUnmatched), skippedActivityUnmatched: num(r.skippedActivityUnmatched),
+  skippedZeroWork: num(r.skippedZeroWork), skippedDuplicate: num(r.skippedDuplicate), total: num(r.total), ratesNote: str(r.ratesNote), keepNote: str(r.keepNote), plan: r.plan ? toPlan(r.plan) : null,
+});
+
+/** The most the server reads of an MSPDI file (the file is refused above it, in Persian). */
+export const MSP_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Reads the file and shows, without saving anything, how its resources and assignments map to the pool and to the activities of the open plan. */
+export const previewMspImport = (contractId: number, xml: string): Promise<ApiResult<MspPreview>> =>
+  typed(call("post", base + "resource-plans/import/preview", { contractId, xml, resources: [] }), toMspPreview);
+
+/** Puts the matched assignments of the reviewed mapping into the open plan (source: import). */
+export const commitMspImport = (contractId: number, xml: string, mapping: MspMapping[]): Promise<ApiResult<MspImportResult>> =>
+  typed(call("post", base + "resource-plans/import", {
+    contractId, xml, resources: mapping.map((m) => ({ mspUid: m.mspUid, resourceId: m.resourceId, create: m.create })),
+  }), toMspResult);
+
+// ---------------------------------------------------------------- phase 4d: budget and performance of the resources of a project, the cost proposals
+// (GET resource-performance/contract/{id}?asOf, GET resource-cost-proposals, POST resource-cost-proposals/decide). Aggregated actuals only: never one line per person. An amount that could show one person's pay is null with a hidden flag.
+
+export interface PerfRow {
+  resourceId: number | null;
+  resourceCode: string | null;
+  resourceTitle: string | null;
+  resourceClass: number;
+  unit: number | null;
+  baselineQuantity: number;
+  baselineAmount: number | null;
+  plannedToDateQuantity: number;
+  plannedToDateAmount: number | null;
+  planQuantity: number;
+  planAmount: number | null;
+  actualQuantity: number | null;
+  actualAmount: number | null;
+  actualBasis: string | null;
+  actualNote: string | null;
+  varianceQuantity: number | null;
+  varianceAmount: number | null;
+  planVsBaselineAmount: number | null;
+  noApprovedRate: boolean;
+  rateHidden: boolean;
+  note: string | null;
+}
+
+export interface PerfPeriod {
+  key: string;
+  text: string;
+  from: string;
+  to: string;
+  resourceClass: number;
+  quantity: number;
+  amount: number | null;
+}
+
+export interface PerfTie {
+  source: string;
+  tied: boolean;
+  note: string;
+}
+
+export interface ResourcePerformance {
+  contractId: number;
+  asOf: string;
+  hasBaseline: boolean;
+  baselineNumber: number | null;
+  planVersion: number | null;
+  rows: PerfRow[];
+  byClass: PerfRow[];
+  periods: PerfPeriod[];
+  ties: PerfTie[];
+  baselineTotal: number;
+  plannedToDateTotal: number;
+  planTotal: number;
+  actualTotal: number;
+  noRateCount: number;
+  hiddenLineCount: number;
+  rateHidden: boolean;
+}
+
+const toPerfRow = (x: any): PerfRow => ({
+  resourceId: numOrNull(x.resourceId), resourceCode: strOrNull(x.resourceCode), resourceTitle: strOrNull(x.resourceTitle), resourceClass: num(x.resourceClass), unit: numOrNull(x.unit),
+  baselineQuantity: num(x.baselineQuantity), baselineAmount: numOrNull(x.baselineAmount), plannedToDateQuantity: num(x.plannedToDateQuantity), plannedToDateAmount: numOrNull(x.plannedToDateAmount),
+  planQuantity: num(x.planQuantity), planAmount: numOrNull(x.planAmount), actualQuantity: numOrNull(x.actualQuantity), actualAmount: numOrNull(x.actualAmount), actualBasis: strOrNull(x.actualBasis),
+  actualNote: strOrNull(x.actualNote), varianceQuantity: numOrNull(x.varianceQuantity), varianceAmount: numOrNull(x.varianceAmount), planVsBaselineAmount: numOrNull(x.planVsBaselineAmount),
+  noApprovedRate: !!x.noApprovedRate, rateHidden: !!x.rateHidden, note: strOrNull(x.note),
+});
+
+const toPerformance = (r: any): ResourcePerformance => ({
+  contractId: num(r.contractId), asOf: str(r.asOf).slice(0, 10), hasBaseline: !!r.hasBaseline, baselineNumber: numOrNull(r.baselineNumber), planVersion: numOrNull(r.planVersion),
+  rows: (Array.isArray(r.rows) ? r.rows : []).map(toPerfRow), byClass: (Array.isArray(r.byClass) ? r.byClass : []).map(toPerfRow),
+  periods: (Array.isArray(r.periods) ? r.periods : []).map((x: any): PerfPeriod => ({ key: str(x.key), text: str(x.text), from: str(x.from).slice(0, 10), to: str(x.to).slice(0, 10), resourceClass: num(x.resourceClass), quantity: num(x.quantity), amount: numOrNull(x.amount) })),
+  ties: (Array.isArray(r.ties) ? r.ties : []).map((x: any): PerfTie => ({ source: str(x.source), tied: !!x.tied, note: str(x.note) })),
+  baselineTotal: num(r.baselineTotal), plannedToDateTotal: num(r.plannedToDateTotal), planTotal: num(r.planTotal), actualTotal: num(r.actualTotal), noRateCount: num(r.noRateCount),
+  hiddenLineCount: num(r.hiddenLineCount), rateHidden: !!r.rateHidden,
+});
+
+export const getResourcePerformance = (contractId: number, asOf?: string | null): Promise<ApiResult<ResourcePerformance>> =>
+  typed(call("get", base + "resource-performance/contract/" + contractId, undefined, clean({ asOf })), toPerformance);
+
+export interface CostProposal {
+  id: number;
+  contractId: number;
+  contractCode: string;
+  planId: number;
+  planVersion: number;
+  resourceClass: number;
+  amount: number | null;
+  /** what the cost baseline already holds for this class (the proposal is the difference) */
+  existingAmount: number;
+  /** the version the person decides on; sent back with the decision */
+  rowVersion: string | null;
+  rateHidden: boolean;
+  excludedNoRate: number;
+  excludedSensitive: number;
+  lineCount: number;
+  /** 1 proposed, 2 accepted, 3 rejected, 4 superseded */
+  status: number;
+  preparedByAgent: boolean;
+  costLineId: number | null;
+  rejectReason: string | null;
+  createDate: string;
+}
+
+const toProposalCost = (x: any): CostProposal => ({
+  id: num(x.id), contractId: num(x.contractId), contractCode: str(x.contractCode), planId: num(x.planId), planVersion: num(x.planVersion), resourceClass: num(x.resourceClass), amount: numOrNull(x.amount), existingAmount: num(x.existingAmount), rowVersion: strOrNull(x.rowVersion),
+  rateHidden: !!x.rateHidden, excludedNoRate: num(x.excludedNoRate), excludedSensitive: num(x.excludedSensitive), lineCount: num(x.lineCount), status: num(x.status), preparedByAgent: !!x.preparedByAgent,
+  costLineId: numOrNull(x.costLineId), rejectReason: strOrNull(x.rejectReason), createDate: str(x.createDate),
+});
+
+export const getCostProposals = (contractId: number | null, status?: number | null): Promise<ApiResult<CostProposal[]>> =>
+  typed(call("get", base + "resource-cost-proposals", undefined, clean({ ContractId: contractId, Status: status, PageSize: 0 })), (d) => rowsOf(d).map(toProposalCost));
+
+/** Accept writes the line of the cost baseline through its own path (a person with the planning role); reject needs a reason. The agent never decides. */
+export const decideCostProposal = (id: number, action: "accept" | "reject", rowVersion: string | null, reason?: string | null): Promise<ApiResult<CostProposal>> =>
+  typed(call("post", base + "resource-cost-proposals/decide", { id, action, rowVersion: rowVersion || null, reason: reason || null }), toProposalCost);
+
+// ---------------------------------------------------------------- phase 4e: the resource section of the weekly report
+
+export interface WeeklyResources {
+  openOverloads: number;
+  acceptedOverloads: number;
+  lapsedOverloads: number;
+  plansWaitingApproval: number;
+  resourcesWithoutRate: number;
+  top: { resourceId: number; code: string; title: string; unit: number; load: number }[];
+}
+
+export const toWeeklyResources = (r: any): WeeklyResources | null =>
+  !r ? null : {
+    openOverloads: num(r.openOverloads), acceptedOverloads: num(r.acceptedOverloads), lapsedOverloads: num(r.lapsedOverloads), plansWaitingApproval: num(r.plansWaitingApproval),
+    resourcesWithoutRate: num(r.resourcesWithoutRate),
+    top: (Array.isArray(r.top) ? r.top : []).map((t: any) => ({ resourceId: num(t.resourceId), code: str(t.code), title: str(t.title), unit: num(t.unit) || 1, load: num(t.load) })),
+  };

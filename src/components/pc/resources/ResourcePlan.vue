@@ -4,10 +4,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import JDate from "@/components/pc/JDate.vue";
 import PromptModal from "@/components/fn/PromptModal.vue";
+import MspImport from "@/components/pc/resources/MspImport.vue";
+import ResourcePlanPrint from "@/components/pc/print/ResourcePlanPrint.vue";
 import { deleteAssignment, discardPlan, getBudget, getOpenableChanges, getPlan, getPlanActivities, getPlanVersions, getResources, isNoPlan, markUnassigned, openPlan, planAction, saveAssignments } from "@/api/ResourceAPIs";
 import type { Budget, OpenableChange, PlanActivity, PlanAssignment, Resource, ResourcePlan } from "@/api/ResourceAPIs";
 import { fail, ok } from "@/composables/inventory";
-import { resourceClasses, unitTitle } from "@/composables/projectControl";
+import { resourceClasses, unitTitle, usePcPrint } from "@/composables/projectControl";
 import {
   assignmentSources, CONFIDENTIAL, distributions, faDateTime, money, NO_APPROVED_RATE, planDecideGate, planDiscardGate, planEditable, planStatusBadge, planStatuses, planSubmitGate, PREPARED_BY_AGENT, qty,
   resourceKinds, resourceLabel, ResourceTexts, unitText,
@@ -31,6 +33,12 @@ const returning = ref(false);
 const discarding = ref<{ reason: string } | null>(null);
 const opening = ref<{ changeRequestId: number | null; changes: OpenableChange[] } | null>(null);
 const canWrite = hasRole(ProjectControlRoles.resourceWriters);
+const importing = ref(false);
+const { job, run } = usePcPrint();
+function imported(updated: ResourcePlan | null) {
+  if (updated) plan.value = updated;
+  loadPlan();
+}
 const canReadActivities = hasRole(ProjectControlRoles.readers);
 
 const latestVersion = computed(() => Math.max(plan.value?.version || 0, ...versions.value.map((v) => v.version)));
@@ -302,8 +310,12 @@ watch(asOf, loadBudget);
           <option value="need">فقط بدون منبع</option>
           <option value="done">دارای منبع یا «بدون منبع»</option>
         </select>
+        <button v-if="editable && canWrite" class="btn btn-sm btn-outline-primary" @click="importing = !importing">ورود از MS Project</button>
+        <button class="btn btn-sm btn-outline-secondary" @click="run('plan', { plan, budget })">چاپ برنامه منابع پروژه</button>
         <button v-if="editable && plan.unassignedCount" :disabled="busy" class="btn btn-sm btn-outline-secondary ms-auto" @click="markAll">همه بدون‌منبع‌ها را «بدون منبع» علامت بزن</button>
       </div>
+
+      <MspImport v-if="importing && editable" :contract-id="contractId" @done="imported" @close="importing = false" />
 
       <div class="table-responsive">
         <table class="table table-sm align-middle">
@@ -449,6 +461,7 @@ watch(asOf, loadBudget);
         <div v-else class="inv-muted small">بودجه خوانده نشد.</div>
       </div>
 
+      <ResourcePlanPrint v-if="job?.kind === 'plan'" :plan="job.data.plan" :budget="job.data.budget" />
       <PromptModal v-if="returning" title="برگشت طرح منابع" :fields="[{ key: 'note', label: 'علت برگشت طرح', type: 'textarea', required: true, maxlength: 1000 }]" confirm-text="برگشت" @confirm="giveBack" @cancel="returning = false" />
     </template>
   </div>

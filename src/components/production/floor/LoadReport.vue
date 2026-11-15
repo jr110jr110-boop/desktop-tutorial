@@ -17,6 +17,9 @@ const wcId = ref<number | null>(null);
 const workCenters = ref<any[]>([]);
 const report = ref<any>(null);
 const busy = ref(false);
+// the layer «بار پروژه‌ها»: the hours that the approved resource plans put on the work centre through a linked machine resource (priority 4d). It is on by default and shown apart from the load of the work orders.
+const projectLayer = ref(true);
+const anyLayer = computed(() => (report.value?.rows || []).some((r: any) => (r.cells || []).some((c: any) => c.hasProjectLayer)));
 
 const heads = computed(() => (report.value?.rows?.[0]?.cells || []).map((c: any) => persianOf(c.weekStartText, c.weekStart)));
 const limit = computed(() => report.value?.threshold ?? (parseAmount(threshold.value) || 100));
@@ -46,6 +49,7 @@ onMounted(async () => {
         <input v-model="threshold" class="form-control form-control-sm fn-num" placeholder="آستانه (درصد)" style="max-width: 9rem" title="آستانه اضافه‌بار به درصد" />
         <select v-model="wcId" class="form-select form-select-sm"><option :value="null">همه مراکز کار</option><option v-for="w in workCenters" :key="w.id" :value="w.id">{{ w.title }}</option></select>
         <button :disabled="busy" class="btn btn-sm btn-secondary" @click="load">نمایش</button>
+        <label class="form-check small mb-0 d-flex align-items-center gap-1"><input v-model="projectLayer" type="checkbox" class="form-check-input" /> بار پروژه‌ها</label>
       </div>
 
       <template v-if="report">
@@ -64,11 +68,17 @@ onMounted(async () => {
                   <div class="fn-num inv-muted">ظرفیت {{ hoursText(c.capacityHours) }}</div>
                   <div class="fn-num">بار {{ hoursText(c.loadHours) }}</div>
                   <div class="fn-num">برنامه {{ hoursText(c.scheduledHours) }}</div>
+                  <template v-if="projectLayer && c.hasProjectLayer">
+                    <div class="fn-num lr-project">بار پروژه‌ها {{ hoursText(c.projectLoadHours) }}</div>
+                    <div class="fn-num inv-muted">مانده برای دستورها {{ hoursText(c.availableHours) }}</div>
+                  </template>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p v-if="projectLayer && anyLayer" class="inv-muted small">«بار پروژه‌ها»: ساعت‌هایی که طرح منابع تاییدشده‌ی پروژه‌ها از راه منبع ماشینِ وصل‌به‌این مرکز کار می‌گیرد؛ جدا از بار دستورها نشان داده می‌شود، از ظرفیت باقی‌مانده کم می‌شود و در درصد بار آمده است. اگر یک کار هم در پروژه و هم در دستور تولید ثبت شده باشد، دو بار شمرده می‌شود.</p>
+        <p v-else-if="!projectLayer && anyLayer" class="inv-muted small">لایه‌ی بار پروژه‌ها پنهان است؛ درصد بار هر خانه همچنان با احتساب آن است.</p>
         <p class="inv-muted small">سلول قرمز: بار بیش از {{ limit }} درصد ظرفیت. «بار» نیاز بدون محدودیت ظرفیت و «برنامه» ساعت جای‌گذاری‌شده با ظرفیت محدود است؛ بار بدون ظرفیت با خط تیره نشان داده می‌شود.</p>
 
         <h2 class="h6 mt-3">فهرست اضافه‌بارها</h2>
@@ -94,5 +104,6 @@ onMounted(async () => {
 .lr-cell { min-width: 7.5rem; line-height: 1.35; }
 .lr-bar { height: 6px; background: #e9ecef; border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
 .lr-bar > div { height: 100%; background: #198754; }
+.lr-project { color: #0d6efd; }
 .lr-bar > div.over { background: #dc3545; }
 </style>

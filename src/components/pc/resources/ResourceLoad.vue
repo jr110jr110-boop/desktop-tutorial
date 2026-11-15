@@ -4,14 +4,17 @@
 import { computed, onMounted, ref, watch } from "vue";
 import FnDate from "@/components/fn/FnDate.vue";
 import LoadChart from "@/components/pc/resources/LoadChart.vue";
+import ResourceLoadPrint from "@/components/pc/print/ResourceLoadPrint.vue";
+import { usePcPrint } from "@/composables/projectControl";
 import { getResourceLoad, getResources } from "@/api/ResourceAPIs";
 import type { LoadBucket, LoadRow, Resource, ResourceLoad } from "@/api/ResourceAPIs";
 import { fail, today } from "@/composables/inventory";
-import { DRAFT_LAYER, faDate, loadNum, resourceLabel, resourceUnits } from "@/composables/resources";
+import { DRAFT_LAYER, PRODUCTION_LAYER, faDate, loadNum, resourceLabel, resourceUnits } from "@/composables/resources";
 
 const props = defineProps({ resourceId: { type: Number, default: null } });
 const emit = defineEmits<{ (e: "overloads", resourceId: number): void }>();
 
+const { job, run } = usePcPrint();
 const MAX_DAYS = 370;
 const addDays = (iso: string, n: number) => {
   const d = new Date(iso + "T00:00:00Z");
@@ -100,6 +103,7 @@ watch(() => props.resourceId, (v) => { resourceFilter.value = v; });
         <option value="week">هفتگی</option>
       </select>
       <label class="form-check small mb-0"><input v-model="includeOpen" type="checkbox" class="form-check-input" /> نمایش طرح‌های {{ DRAFT_LAYER }}</label>
+      <button class="btn btn-sm btn-outline-secondary" :disabled="!rows.length" @click="run('load', { rows, from, to, bucket })">چاپ بار منابع</button>
     </div>
     <p v-if="problem" class="inv-muted text-danger">{{ problem }}</p>
     <p v-else-if="includeOpen" class="small inv-muted">طرحِ در دست تهیه (پیش‌نویس، ارسال‌شده یا برگشت‌خورده) هر پروژه جای طرح تاییدشده‌ی همان پروژه را می‌گیرد و هاشورخورده نشان داده می‌شود.</p>
@@ -132,7 +136,8 @@ watch(() => props.resourceId, (v) => { resourceFilter.value = v; });
         </div>
         <LoadChart :buckets="current.buckets" :unit-text="unitOf(current)" :weekly="bucket === 'week'" :selected="selected" @select="selected = $event" />
         <div v-if="pickedBucket" class="mt-3">
-          <h2 class="inv-title">{{ bucketText(pickedBucket) }}: بار {{ loadNum(pickedBucket.load) }} از ظرفیت {{ loadNum(pickedBucket.capacity) }}</h2>
+          <h2 class="inv-title">{{ bucketText(pickedBucket) }}: بار {{ loadNum(pickedBucket.load + pickedBucket.productionLoad) }} از ظرفیت {{ loadNum(pickedBucket.capacity) }}</h2>
+          <p v-if="pickedBucket.productionLoad > 0" class="small mb-1">{{ PRODUCTION_LAYER }}: {{ loadNum(pickedBucket.productionLoad) }} {{ unitOf(current) }} (دستورهای تولید مرکز کار وصل‌شده؛ در بیش‌تخصیص حساب می‌شود)</p>
           <p v-if="pickedBucket.over > 0" class="text-danger small mb-1">بیش‌تخصیص این بازه: {{ loadNum(pickedBucket.over) }} {{ unitOf(current) }}</p>
           <div v-if="!byProject.length" class="inv-muted">فعالیتی در این بازه این منبع را نمی‌خواهد.</div>
           <div v-for="g in byProject" :key="g.code" class="mb-2">
@@ -149,5 +154,6 @@ watch(() => props.resourceId, (v) => { resourceFilter.value = v; });
       </div>
       <div v-else-if="resourceFilter && data" class="inv-muted">منبع در این بازه پیدا نشد.</div>
     </template>
+    <ResourceLoadPrint v-if="job?.kind === 'load'" :rows="job.data.rows" :from="job.data.from" :to="job.data.to" :bucket="job.data.bucket" />
   </div>
 </template>
