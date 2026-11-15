@@ -30,6 +30,10 @@ namespace Services.NasbNiro.ProjectControl
         public const string SameUser = PcText.SameUser;
         public const string RowVersionMissing = "برای تایید یا برگشت طرح، نسخه ردیف (rowVersion) همان طرحی که دیده‌اید باید همراه درخواست باشد؛ صفحه را دوباره باز کنید.";
         public const string SensitivityChange = "ظرفیت یا پیوند کارمند منبعی که نرخ یا ردیف خط مبنا دارد، میزان حساسیت هزینه‌ی آن را (هزینه‌ی یک فرد) عوض می‌کند و فقط با نقش‌های حقوق و دستمزد ممکن است.";
+        public const string NoApprovedPlan = "برای این قرارداد طرح منابعِ تاییدشده‌ای وجود ندارد.";
+        public const string ImportNeedsOpenPlan = "برای ثبت از MS Project باید طرح منابعِ باز (پیش‌نویس یا برگشت‌خورده) برای این قرارداد وجود داشته باشد؛ ابتدا طرح را باز کنید.";
+        public const string CentreAlreadyLinked = "این مرکز کار پیش‌تر به منبع ماشین فعال دیگری وصل است؛ هر مرکز کار فقط به یک منبع ماشین (به ساعت) وصل می‌شود تا بار آن دو بار شمرده نشود.";
+        public const string LinkedMachineUnit = "منبع ماشینِ وصل‌شده به مرکز کار باید به «ساعت» شمرده شود (ظرفیت و تقویم آن از مرکز کار خوانده می‌شود).";
         public const string RateDuplicate = "برای این منبع و این تاریخ، نرخ تاییدشده یا در انتظار تایید وجود دارد.";
     }
 

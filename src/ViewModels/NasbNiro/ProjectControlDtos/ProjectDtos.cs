@@ -156,6 +156,10 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string Risks { get; set; }
         public string Stakeholders { get; set; }
         public string PreAssignedResources { get; set; }
+
+        /// <summary>Priority 4d: the structured list of pre-assigned resources picked from the pool. When it has rows, the free text above is kept for history and read only.</summary>
+        public List<PcCharterResourceDto> PreAssignedList { get; set; }
+        public bool PreAssignedTextLocked { get; set; }
         public string ManagerAuthority { get; set; }
         public DateTimeOffset? ManagerAcceptedAt { get; set; }
         public DateTimeOffset? ApprovedAt { get; set; }

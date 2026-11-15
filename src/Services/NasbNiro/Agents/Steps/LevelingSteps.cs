@@ -84,7 +84,17 @@ namespace Services.NasbNiro.Agents.Steps
             DateTimeOffset? resources = await uow.Set<PcResource>().AsNoTracking().MaxAsync(r => (DateTimeOffset?)r.ModifyDate, ct);
             DateTimeOffset? calendars = await uow.Set<PcCalendar>().AsNoTracking().MaxAsync(c => (DateTimeOffset?)c.ModifyDate, ct);
             DateTimeOffset? terms = await uow.Set<PcContractTerms>().AsNoTracking().MaxAsync(t => (DateTimeOffset?)t.ModifyDate, ct);
-            return new[] { plans, activities, resources, calendars, terms }.Where(v => v.HasValue).Select(v => v.Value).DefaultIfEmpty(DateTimeOffset.FromUnixTimeSeconds(1)).Max();
+            // priority 4d: the capacity of a linked machine resource is its work centre's
+            DateTimeOffset? centres = await uow.Set<Entities.Model.NasbNiro.Production.MfWorkCenter>().AsNoTracking().Where(w => uow.Set<PcResource>().Any(r => !r.Deleted && r.WorkCenterId == w.Id)).MaxAsync(w => (DateTimeOffset?)w.ModifyDate, ct);
+            // and the production load of a linked work centre (only when some resource is linked, so nothing else is read): a work order or an operation that changed moves the check
+            DateTimeOffset? production = null;
+            if (await uow.Set<PcResource>().AsNoTracking().AnyAsync(r => !r.Deleted && r.IsActive && r.Kind == PcResourceKind.Machine && r.Unit == PcResourceUnit.Hour && r.WorkCenterId != null, ct))
+            {
+                DateTimeOffset? orders = await uow.Set<Entities.Model.NasbNiro.Production.MfProductionOrder>().AsNoTracking().MaxAsync(o => (DateTimeOffset?)o.ModifyDate, ct);
+                DateTimeOffset? operations = await uow.Set<Entities.Model.NasbNiro.Production.MfOperation>().AsNoTracking().MaxAsync(o => (DateTimeOffset?)o.ModifyDate, ct);
+                production = new DateTimeOffset?[] { orders, operations }.Max();
+            }
+            return new[] { plans, activities, resources, calendars, terms, centres, production }.Where(v => v.HasValue).Select(v => v.Value).DefaultIfEmpty(DateTimeOffset.FromUnixTimeSeconds(1)).Max();
         }
 
         /// <summary>The latest change as a number that differs when it moved (the key of the check task).</summary>

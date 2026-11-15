@@ -793,10 +793,12 @@ namespace Services.NasbNiro.ProjectControl
             auto.TasksOverdue = await _uow.Set<TmTask>().CountAsync(t => !t.Deleted && t.ContractId == contractId && t.DueDate != null && t.DueDate < today && t.Status != TmTaskStatus.Closed && t.Status != TmTaskStatus.Rejected, ct);
             auto.DailyReports = await _uow.Set<PcDailyReport>().CountAsync(d => !d.Deleted && d.ContractId == contractId && d.State == 1 && d.ReportDate >= start && d.ReportDate <= end.Date, ct);
             auto.HseEvents = await _uow.Set<PcDailyHse>().CountAsync(h => !h.Report.Deleted && h.Report.ContractId == contractId && h.Report.ReportDate >= start && h.Report.ReportDate <= end.Date, ct);
+            auto.Resources = await PcResourceReportSection.BuildAsync(_uow, contractId, today, ct);
             if (auto.LateActivities > 0) auto.Highlights.Add(auto.LateActivities.ToString(CultureInfo.InvariantCulture) + " فعالیت دچار تاخیر است.");
             if (auto.HighRisks > 0) auto.Highlights.Add(auto.HighRisks.ToString(CultureInfo.InvariantCulture) + " ریسک با امتیاز بالا باز است.");
             if (auto.TasksOverdue > 0) auto.Highlights.Add(auto.TasksOverdue.ToString(CultureInfo.InvariantCulture) + " وظیفه معوق است.");
             if (auto.HseEvents > 0) auto.Highlights.Add(auto.HseEvents.ToString(CultureInfo.InvariantCulture) + " رویداد HSE در گزارش‌های روزانه ثبت شده است.");
+            if (auto.Resources.OpenOverloads > 0) auto.Highlights.Add(auto.Resources.OpenOverloads.ToString(CultureInfo.InvariantCulture) + " بیش‌تخصیص باز روی منابع پروژه هست.");
             return auto;
         }
 

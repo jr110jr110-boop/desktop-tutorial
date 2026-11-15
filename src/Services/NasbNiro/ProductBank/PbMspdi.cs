@@ -13,6 +13,9 @@ namespace Services.NasbNiro.ProductBank
     {
         public int Uid { get; set; }
         public string Name { get; set; }
+
+        /// <summary>The WBS code of the task as the file states it (empty when it has none); the project control resource import matches activities with it.</summary>
+        public string Wbs { get; set; }
         public int OutlineLevel { get; set; }
         public bool IsSummary { get; set; }
         public bool IsMilestone { get; set; }
@@ -96,26 +99,38 @@ namespace Services.NasbNiro.ProductBank
         /// <summary>DurationFormat values of MSPDI that count elapsed time: elapsed minutes, hours, days, weeks, months and elapsed percent.</summary>
         private static readonly HashSet<int> ElapsedFormats = new HashSet<int> { 4, 6, 8, 10, 12, 20 };
 
+        /// <summary>
+        /// Reads the text as XML with DTD processing prohibited and no resolver (the file is user input: no external entity is ever fetched). Null when the text is not well-formed XML or contains a DTD.
+        /// The one place where an MSPDI file is turned into a document; the task reader and the resource reader both use it.
+        /// </summary>
+        public static XDocument LoadDocument(string xml)
+        {
+            try
+            {
+                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
+                using (var sr = new System.IO.StringReader(xml.TrimStart('\uFEFF')))
+                using (XmlReader reader = XmlReader.Create(sr, settings))
+                    return XDocument.Load(reader);
+            }
+            catch (XmlException) { return null; }
+        }
+
         public static (List<MspdiTask> Tasks, string ProjectName, string Error, List<string> Warnings) ParseWithWarnings(string xml)
         {
             var warnings = new List<string>();
             var tasks = new List<MspdiTask>();
             if (string.IsNullOrWhiteSpace(xml)) return (tasks, null, "فایل XML خالی است.", warnings);
             if (xml.Length > MaxXmlLength) return (tasks, null, "فایل XML از حد مجاز (۸ مگابایت) بزرگ‌تر است.", warnings);
-            XDocument doc;
-            try
-            {
-                // DTD processing is off: the file is user input.
-                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
-                using (var sr = new System.IO.StringReader(xml.TrimStart('﻿')))
-                using (XmlReader reader = XmlReader.Create(sr, settings))
-                    doc = XDocument.Load(reader);
-            }
-            catch (XmlException)
-            {
-                return (tasks, null, "فایل XML معتبر نیست؛ از Project گزینهٔ Save As ← XML Format را بزنید.", warnings);
-            }
+            XDocument doc = LoadDocument(xml);
+            if (doc == null) return (tasks, null, "فایل XML معتبر نیست؛ از Project گزینهٔ Save As ← XML Format را بزنید.", warnings);
+            return ParseWithWarnings(doc);
+        }
 
+        /// <summary>The tasks of an already loaded MSPDI document (the resource reader loads the file once and reads both from the same document).</summary>
+        public static (List<MspdiTask> Tasks, string ProjectName, string Error, List<string> Warnings) ParseWithWarnings(XDocument doc)
+        {
+            var warnings = new List<string>();
+            var tasks = new List<MspdiTask>();
             XElement root = doc.Root;
             if (root == null || root.Name.LocalName != "Project") return (tasks, null, "این فایل خروجی XML نرم‌افزار Microsoft Project نیست.", warnings);
             XNamespace ns = root.Name.Namespace;
@@ -146,6 +161,7 @@ namespace Services.NasbNiro.ProductBank
                 {
                     Uid = uid,
                     Name = ((string)t.Element(ns + "Name") ?? "").Trim(),
+                    Wbs = ((string)t.Element(ns + "WBS") ?? "").Trim(),
                     OutlineLevel = Math.Max(1, level),
                     IsSummary = (string)t.Element(ns + "Summary") == "1",
                     IsMilestone = (string)t.Element(ns + "Milestone") == "1",

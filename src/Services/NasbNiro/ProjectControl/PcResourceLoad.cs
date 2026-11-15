@@ -136,6 +136,12 @@ namespace Services.NasbNiro.ProjectControl
         public decimal Capacity { get; set; }
         public int? CalendarId { get; set; }
 
+        /// <summary>Priority 4d: the work centre a machine resource is linked to; its capacity, calendar and day length are then read from it (<see cref="PcWorkCentreLink"/>).</summary>
+        public int? WorkCenterId { get; set; }
+
+        /// <summary>The hours of a working day of the work centre (shifts x hours per shift) for a linked resource; null for any other.</summary>
+        public decimal? FixedHours { get; set; }
+
         /// <summary>Material and subcontract capacity is not a rate of use: they never raise an over-allocation.</summary>
         public bool Detectable => Kind != PcResourceKind.Material && Kind != PcResourceKind.Subcontract;
     }
@@ -157,6 +163,9 @@ namespace Services.NasbNiro.ProjectControl
         public int ActivityId;
         public decimal Value;
         public bool IsDraft;
+
+        /// <summary>Priority 4d: the cell is the load of the work orders (production) on the work centre of a linked machine resource, not of a project activity (its ActivityId is 0).</summary>
+        public bool IsProduction;
     }
 
     /// <summary>
@@ -189,6 +198,7 @@ namespace Services.NasbNiro.ProjectControl
         /// </summary>
         public decimal HoursOf(LoadResource r)
         {
+            if (r.FixedHours.HasValue) return r.FixedHours.Value;
             if (r.CalendarId.HasValue && CalendarHours.TryGetValue(r.CalendarId.Value, out decimal own) && own > 0m) return own;
             return ResourceHours.TryGetValue(r.Id, out decimal h) ? h : PcResourceRules.DefaultDayHours;
         }
@@ -255,8 +265,8 @@ namespace Services.NasbNiro.ProjectControl
             uow.Set<PcResourcePlan>().AsNoTracking().Where(p => !p.Deleted && contractIds.Contains(p.ContractId)
                 && (p.Status == PcResourcePlanStatus.Approved || (includeOpen && (p.Status == PcResourcePlanStatus.Draft || p.Status == PcResourcePlanStatus.Submitted || p.Status == PcResourcePlanStatus.Returned))));
 
-        public static IQueryable<LoadRow> RowQuery(IUnitOfWork uow, int[] planIds, int? resourceId) =>
-            uow.Set<PcActivityResource>().AsNoTracking().Where(x => planIds.Contains(x.PlanId) && !x.Activity.Deleted && !x.Resource.Deleted && (resourceId == null || x.ResourceId == resourceId))
+        public static IQueryable<LoadRow> RowQuery(IUnitOfWork uow, int[] planIds, int? resourceId, int[] onlyResources = null) =>
+            uow.Set<PcActivityResource>().AsNoTracking().Where(x => planIds.Contains(x.PlanId) && !x.Activity.Deleted && !x.Resource.Deleted && (resourceId == null || x.ResourceId == resourceId) && (onlyResources == null || onlyResources.Contains(x.ResourceId)))
                 .OrderBy(x => x.PlanId).ThenBy(x => x.ActivityId).ThenBy(x => x.ResourceId)
                 .Select(x => new LoadRow { PlanId = x.PlanId, ActivityId = x.ActivityId, ResourceId = x.ResourceId, Quantity = x.Quantity, Distribution = x.Distribution });
 
@@ -272,7 +282,11 @@ namespace Services.NasbNiro.ProjectControl
         public static IQueryable<Entities.Model.NasbNiro.Contracts.ContractEntity> LiveContracts(IUnitOfWork uow) =>
             uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(c => !c.Deleted && c.Status == Entities.Model.NasbNiro.Contracts.ContractStatus.Current);
 
-        public static async Task<LoadModel> LoadAsync(IUnitOfWork uow, DateTime today, int? resourceId, bool includeOpen, DateTime from, DateTime to, CancellationToken ct)
+        /// <param name="includeProduction">Priority 4d: add the load of the work orders on the work centre of every linked machine resource of the model as cells of their own (ActivityId 0, IsProduction); nothing is added when no resource is linked.</param>
+        /// <param name="onlyResources">Only the assignments of these resources are read (the project layer of the production view asks for the linked machines only).</param>
+        /// <param name="alsoResources">Resources that are loaded into the model even when they have no assignment (the histogram shows a linked machine that only carries production load).</param>
+        public static async Task<LoadModel> LoadAsync(IUnitOfWork uow, DateTime today, int? resourceId, bool includeOpen, DateTime from, DateTime to, CancellationToken ct,
+            bool includeProduction = false, int[] onlyResources = null, int[] alsoResources = null)
         {
             var model = new LoadModel();
             var live = await LiveContracts(uow).OrderBy(c => c.Id).Select(c => new { c.Id, c.Code }).ToListAsync(ct);
@@ -288,7 +302,7 @@ namespace Services.NasbNiro.ProjectControl
                 if (chosen != null) model.Plans[chosen.Id] = new LoadPlan { Id = chosen.Id, ContractId = chosen.ContractId, MakerUserId = chosen.MakerUserId, EditorUserIds = chosen.EditorUserIds, IsDraft = chosen.Status != PcResourcePlanStatus.Approved };
             }
             int[] planIds = model.Plans.Keys.OrderBy(i => i).ToArray();
-            if (planIds.Length > 0) model.Rows.AddRange(await RowQuery(uow, planIds, resourceId).ToListAsync(ct));
+            if (planIds.Length > 0) model.Rows.AddRange(await RowQuery(uow, planIds, resourceId, onlyResources).ToListAsync(ct));
             foreach (LoadRow r in model.Rows) r.IsDraft = model.Plans[r.PlanId].IsDraft;
 
             int[] activityIds = model.Rows.Select(r => r.ActivityId).Distinct().OrderBy(i => i).ToArray();
@@ -296,11 +310,13 @@ namespace Services.NasbNiro.ProjectControl
                 foreach (LoadActivity a in await ActivityQuery(uow, activityIds).ToListAsync(ct)) { a.ContractCode = codes.TryGetValue(a.ContractId, out string code) ? code : null; model.Activities[a.Id] = a; }
 
             // the resources: the ones the rows name, and the one that was asked for even when it has no row
-            int[] resourceIds = model.Rows.Select(r => r.ResourceId).Concat(resourceId.HasValue ? new[] { resourceId.Value } : Array.Empty<int>()).Distinct().OrderBy(i => i).ToArray();
+            int[] resourceIds = model.Rows.Select(r => r.ResourceId).Concat(resourceId.HasValue ? new[] { resourceId.Value } : Array.Empty<int>()).Concat(alsoResources ?? Array.Empty<int>()).Distinct().OrderBy(i => i).ToArray();
             if (resourceIds.Length > 0)
                 foreach (LoadResource r in await uow.Set<PcResource>().AsNoTracking().Where(r => resourceIds.Contains(r.Id) && !r.Deleted)
-                    .Select(r => new LoadResource { Id = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = r.Capacity, CalendarId = r.CalendarId }).ToListAsync(ct))
+                    .Select(r => new LoadResource { Id = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = r.Capacity, CalendarId = r.CalendarId, WorkCenterId = r.Kind == PcResourceKind.Machine && r.Unit == PcResourceUnit.Hour ? r.WorkCenterId : null }).ToListAsync(ct))
                     model.Resources[r.Id] = r;
+            // one source of truth with production: a machine resource linked to a work centre takes capacity, calendar and day length from it
+            await PcWorkCentreLink.ApplyAsync(uow, model.Resources.Values, ct);
 
             int[] termContracts = model.Activities.Values.Select(a => a.ContractId).Distinct().ToArray();
             if (termContracts.Length > 0)
@@ -311,6 +327,7 @@ namespace Services.NasbNiro.ProjectControl
             foreach (IGrouping<int, LoadRow> g in model.Rows.GroupBy(r => r.ResourceId))
                 model.ResourceHours[g.Key] = g.Where(r => model.Activities.ContainsKey(r.ActivityId)).Select(r => model.HoursOfActivity(model.Activities[r.ActivityId])).DefaultIfEmpty(PcResourceRules.DefaultDayHours).Max();
             model.Spread(from, to);
+            if (includeProduction) await PcWorkCentreLink.AddProductionCellsAsync(uow, model, today, from, to, ct);
             return model;
         }
 

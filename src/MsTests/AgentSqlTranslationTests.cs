@@ -151,5 +151,42 @@ namespace MsTests
                 Assert.IsTrue(LoadModel.ActivityQuery(uow, ids).ToQueryString().Contains("PcActivities"));
             }
         }
+
+        [TestMethod]
+        public void The_Queries_Behind_The_Resource_Cost_And_Production_Link_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                DateTime today = DateTime.Today;
+                string need = ResCostFacts.NeedingProposal(uow).ToQueryString();
+                Assert.IsTrue(need.Contains("PcResourcePlans") && need.Contains("PcResourceCostProposals"), need);
+                Assert.IsTrue(ResCostFacts.WithOpenProposals(uow).ToQueryString().Contains("PcResourceCostProposals"));
+                int[] ids = { 1, 2, 3 };
+                string counts = PcResourceReportSection.OverloadCounts(uow, ids).ToQueryString();
+                Assert.IsTrue(counts.Contains("PcResourceOverloads") && counts.Contains("GROUP BY"), counts);
+                Assert.IsTrue(LoadModel.RowQuery(uow, ids, null, new[] { 4, 5 }).ToQueryString().Contains("PcActivityResources"));
+                // the awaited queries run against the swallowing connection, so one that the server could not translate throws here
+                var problems = new List<string>();
+                var model = new LoadModel();
+                foreach (Func<Task> ask in new Func<Task>[]
+                {
+                    () => PcWorkCentreLink.LinksAsync(uow, CancellationToken.None),
+                    () => PcWorkCentreLink.ProjectLayerAsync(uow, today, today, today.AddDays(30), new List<PcWorkCentreLink.Link> { new PcWorkCentreLink.Link { ResourceId = 1, WorkCenterId = 1, Unit = PcResourceUnit.Hour } }, CancellationToken.None),
+                    () => PcWorkCentreLink.AddProductionCellsAsync(uow, model, today, today, today.AddDays(30), CancellationToken.None),
+                    () => PcResourceActuals.LoadAsync(uow, 1, today, CancellationToken.None),
+                    // the queries that an empty database would skip behind its own empty-list checks
+                    () => PcResourceData.EffectiveRatesAsync(uow, new[] { 1, 2, 3 }, today, CancellationToken.None),
+                    () => Services.NasbNiro.Production.MfScheduler.ComputeAsync(uow, today, CancellationToken.None, true),
+                    () => LvlFacts.StampAsync(uow, CancellationToken.None),
+                    () => PcResourceReportSection.BuildAsync(uow, 1, today, CancellationToken.None),
+                    () => LvlFacts.LatestChangeAsync(uow, CancellationToken.None),
+                })
+                    try { ask().GetAwaiter().GetResult(); }
+                    catch (Exception ex) { string text = ex.ToString(); if (text.Contains("could not be translated") || text.Contains("cannot be translated") || text.Contains("LINQ expression") || text.Contains("Translation of")) problems.Add(ex.Message.Split('\n')[0]); }
+                Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
+            }
+        }
     }
 }

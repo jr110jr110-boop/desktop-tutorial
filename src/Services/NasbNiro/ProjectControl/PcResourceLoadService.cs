@@ -162,7 +162,9 @@ namespace Services.NasbNiro.ProjectControl
             string bucket = (Clean(query.Bucket) ?? "day").ToLowerInvariant();
             if (bucket != "day" && bucket != "week") return Bad<PcResourceLoadDto>(PcLoadText.BadBucket);
 
-            LoadModel model = await LoadModel.LoadAsync(_uow, today, query.ResourceId, query.IncludeOpen, from, to, cancellationToken);
+            // priority 4d: the machine resources linked to a work centre also carry the production layer, and show even without a project assignment
+            int[] linkedIds = (await PcWorkCentreLink.LinksAsync(_uow, cancellationToken)).Select(l => l.ResourceId).ToArray();
+            LoadModel model = await LoadModel.LoadAsync(_uow, today, query.ResourceId, query.IncludeOpen, from, to, cancellationToken, true, null, query.ResourceId.HasValue ? null : linkedIds);
             if (query.ResourceId.HasValue && !model.Resources.ContainsKey(query.ResourceId.Value)) return NotFound<PcResourceLoadDto>(PcResourceText.ResourceNotFound);
 
             var result = new PcResourceLoadDto { From = from, To = to, Bucket = bucket, IncludeOpen = query.IncludeOpen };
@@ -172,7 +174,7 @@ namespace Services.NasbNiro.ProjectControl
                 // the cells are grouped by day once; a bucket is filled from the days it holds
                 Dictionary<DateTime, List<LoadCell>> byDay = cellsOf[r.Id].GroupBy(c => c.Date).ToDictionary(g => g.Key, g => g.ToList());
                 if (!query.ResourceId.HasValue && byDay.Count == 0) continue;
-                var row = new PcResourceLoadRowDto { ResourceId = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = r.Capacity };
+                var row = new PcResourceLoadRowDto { ResourceId = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = r.Capacity, WorkCenterId = r.WorkCenterId };
                 var itemsOf = new Dictionary<PcLoadBucketDto, Dictionary<(int Activity, bool Draft), decimal>>();
                 PcLoadBucketDto current = null;
                 DateTime currentKey = DateTime.MinValue;
@@ -188,16 +190,17 @@ namespace Services.NasbNiro.ProjectControl
                     }
                     current.End = d;
                     decimal cap = model.Capacity(r, d);
-                    decimal load = 0m, draft = 0m;
+                    decimal load = 0m, draft = 0m, production = 0m;
                     if (byDay.TryGetValue(d, out List<LoadCell> list))
                         foreach (LoadCell c in list)
                         {
+                            if (c.IsProduction) { production += c.Value; continue; }
                             load += c.Value;
                             if (c.IsDraft) draft += c.Value;
                             var k = (c.ActivityId, c.IsDraft);
                             itemsOf[current][k] = (itemsOf[current].TryGetValue(k, out decimal sum) ? sum : 0m) + c.Value;
                         }
-                    current.Load += load; current.DraftLoad += draft; current.Capacity += cap; current.Over += Math.Max(0m, load - cap);
+                    current.Load += load; current.DraftLoad += draft; current.ProductionLoad += production; current.Capacity += cap; current.Over += Math.Max(0m, load + production - cap);
                 }
                 // the activities behind a bucket are returned only for one named resource (the screen asks for them when a resource is chosen)
                 if (query.ResourceId.HasValue)
@@ -211,7 +214,7 @@ namespace Services.NasbNiro.ProjectControl
                         b.Items = b.Items.OrderByDescending(i => i.Load).ThenBy(i => i.ContractCode, StringComparer.Ordinal).ThenBy(i => i.ActivityCode, StringComparer.Ordinal).ThenBy(i => i.ActivityId).ToList();
                     }
                 // the picture of all resources keeps the buckets that carry load; one named resource keeps every bucket of the period (its capacity line)
-                if (!query.ResourceId.HasValue) row.Buckets = row.Buckets.Where(b => b.Load > 0m).ToList();
+                if (!query.ResourceId.HasValue) row.Buckets = row.Buckets.Where(b => b.Load > 0m || b.ProductionLoad > 0m).ToList();
                 row.PeakLoad = row.Buckets.Count == 0 ? 0m : row.Buckets.Max(b => b.Load);
                 row.TotalOver = row.Buckets.Sum(b => b.Over);
                 result.Resources.Add(row);
@@ -399,7 +402,7 @@ namespace Services.NasbNiro.ProjectControl
         {
             if (!AgentMaker.Allows("RES.LOAD.CHECK") || !_user.IsInRole(PcResourceRules.Writers)) return Bad<PcLoadCheckResultDto>(PcLoadText.NotAllowed);
             DateTime today = DateTime.Today, horizonEnd = today.AddDays(PcLoadRules.HorizonDays - 1);
-            LoadModel model = await LoadModel.LoadAsync(_uow, today, null, false, today, horizonEnd, cancellationToken);
+            LoadModel model = await LoadModel.LoadAsync(_uow, today, null, false, today, horizonEnd, cancellationToken, true);
             List<PcResourceOverload> existing = await _uow.Set<PcResourceOverload>().Where(o => !o.Deleted && (o.Status == PcOverloadStatus.Open || o.Status == PcOverloadStatus.Accepted)).OrderBy(o => o.ResourceId).ThenBy(o => o.FromDate).ThenBy(o => o.Id).ToListAsync(cancellationToken);
             var result = new PcLoadCheckResultDto();
             DateTimeOffset now = DateTimeOffset.Now;
@@ -509,7 +512,7 @@ namespace Services.NasbNiro.ProjectControl
             List<PcLevelingProposal> waiting = live.Where(p => p.Status == PcLevelingStatus.Proposed && p.NeedsChangeRequest && p.ModifyDate < latestChange).ToList();
             if (live.Count > waiting.Count) return ResponseDtoHelper.Ok(0);
 
-            LoadModel model = await LoadModel.LoadAsync(_uow, today, overload.ResourceId, false, today, horizonEnd, cancellationToken);
+            LoadModel model = await LoadModel.LoadAsync(_uow, today, overload.ResourceId, false, today, horizonEnd, cancellationToken, true);
             if (!model.Resources.TryGetValue(overload.ResourceId, out LoadResource res)) return NotFound<int>(PcResourceText.ResourceNotFound);
             DateTime runFrom = overload.FromDate < today ? today : overload.FromDate, runTo = overload.ToDate;
             Dictionary<DateTime, decimal> baseLoad = model.LoadOf(res.Id);
@@ -517,7 +520,7 @@ namespace Services.NasbNiro.ProjectControl
             HashSet<int> rejected = new HashSet<int>(await _uow.Set<PcLevelingProposal>().AsNoTracking().Where(p => !p.Deleted && p.OverloadId == overloadId && p.Status == PcLevelingStatus.Rejected).Select(p => p.ActivityId).ToListAsync(cancellationToken));
 
             // the activities that load the resource in the run, with the float of a fresh plan run of their project (each contract is loaded once for the whole run)
-            int[] inRun = model.Cells.Where(c => c.Date >= runFrom && c.Date <= runTo).Select(c => c.ActivityId).Distinct().OrderBy(i => i).ToArray();
+            int[] inRun = model.Cells.Where(c => !c.IsProduction && c.Date >= runFrom && c.Date <= runTo).Select(c => c.ActivityId).Distinct().OrderBy(i => i).ToArray();
             var sessions = new Dictionary<int, PcPlanPreviewSession>();
             HashSet<int> locked = await LockedContractsAsync(model.Activities.Values.Select(a => a.ContractId), cancellationToken);
             var candidates = new List<Candidate>();

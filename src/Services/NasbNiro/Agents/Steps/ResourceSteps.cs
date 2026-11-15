@@ -35,6 +35,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, ResLevelProposeStep>();
             services.AddScoped<IAgentStep, ResLevelDecideStep>();
             services.AddScoped<IAgentStep, ResLevelConfirmStep>();
+            services.AddScoped<IAgentStep, ResCostProposeStep>();
+            services.AddScoped<IAgentStep, ResCostReviewStep>();
             return services;
         }
     }

@@ -280,6 +280,15 @@ namespace ViewModels.NasbNiro.ProductionDtos
         public decimal? LoadPercent { get; set; }
 
         public bool Overloaded { get; set; }
+
+        /// <summary>Priority 4d: the hours of the week that the approved resource plans of the projects put on the machine resources linked to this work centre («بار پروژه‌ها»), a layer apart from <see cref="LoadHours"/>. Zero when no resource is linked.</summary>
+        public decimal ProjectLoadHours { get; set; }
+
+        /// <summary>Capacity less the project layer (never below zero): what is left for the work orders. Equal to <see cref="CapacityHours"/> when no resource is linked.</summary>
+        public decimal AvailableHours { get; set; }
+
+        /// <summary>True when a machine resource of the project resource pool is linked to the work centre (the project layer is then read from the resource plans).</summary>
+        public bool HasProjectLayer { get; set; }
     }
 
     public class LoadRowDto

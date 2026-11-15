@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Entities.Model.NasbNiro.ProjectControl;
 using Services.NasbNiro.ProjectControl;
 using ViewModels.NasbNiro.ProjectControlDtos;
 using WebApi.Extensions;
@@ -24,8 +25,9 @@ namespace WebApi.Controllers.ProjectControl
 
         private readonly IPcResourceService _resources;
         private readonly IPcResourceLoadService _load;
+        private readonly IPcResourcePerformanceService _performance;
 
-        public ProjectControlResourceController(IPcResourceService resources, IPcResourceLoadService load) { _resources = resources; _load = load; }
+        public ProjectControlResourceController(IPcResourceService resources, IPcResourceLoadService load, IPcResourcePerformanceService performance) { _resources = resources; _load = load; _performance = performance; }
 
         [HttpGet("resources")]
         [Authorize(Roles = Readers)]
@@ -118,5 +120,25 @@ namespace WebApi.Controllers.ProjectControl
 
         [HttpPost("leveling-proposals/action")]
         public async Task<IActionResult> ProposalActionAsync([FromBody] PcLevelingActionDto dto, CancellationToken ct) => Ok(await _load.ProposalActionAsync(dto, ct));
+
+        // ------------------------------------------------------------------------------------------ phase 4d: MS Project import, budget and performance of the resources, cost proposals
+
+        [HttpPost("resource-plans/import/preview")]
+        public async Task<IActionResult> ImportPreviewAsync([FromBody] PcMspImportRequestDto dto, CancellationToken ct) => Ok(await _resources.PreviewImportAsync(dto, ct));
+
+        [HttpPost("resource-plans/import")]
+        public async Task<IActionResult> ImportAsync([FromBody] PcMspImportRequestDto dto, CancellationToken ct) => Ok(await _resources.ImportAsync(dto, ct));
+
+        [HttpGet("resource-performance/contract/{contractId:int}")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> PerformanceAsync(int contractId, [FromQuery] DateTime? asOf, CancellationToken ct) => Ok(await _performance.GetPerformanceAsync(contractId, asOf, ct));
+
+        [HttpGet("resource-cost-proposals")]
+        [Authorize(Roles = Readers)]
+        public async Task<IActionResult> CostProposalsAsync([FromQuery] int? contractId, [FromQuery] PcCostProposalStatus? status, [FromQuery] int pageNumber, [FromQuery] int pageSize, CancellationToken ct) =>
+            Ok((await _performance.GetProposalsAsync(contractId, status, pageNumber, pageSize, ct)).ToPaginatedResultSafe());
+
+        [HttpPost("resource-cost-proposals/decide")]
+        public async Task<IActionResult> DecideCostProposalAsync([FromBody] PcCostProposalDecideDto dto, CancellationToken ct) => Ok(await _performance.DecideProposalAsync(dto, ct));
     }
 }

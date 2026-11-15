@@ -21,6 +21,7 @@ namespace DataLayer.Context
                 "ResourceId", "Rate", "EffectiveFrom", "Status", "MakerUserId", "SubmittedAt", "ApprovedByUserId", "ApprovedAt", "RejectedByUserId", "RejectedAt", "RejectReason", "Deleted",
             }, "نرخ استاندارد منبع");
             SpecialProperties[(typeof(Pc.PcBaselineResource), "RateAtBaseline")] = Special.Marker;   // the rate frozen with a baseline is as private as the rate itself
+            SpecialProperties[(typeof(Pc.PcResourceCostProposal), "Amount")] = Special.Marker;   // a class amount can be one small group's cost
             SpecialProperties[(typeof(Pc.PcResourceRate), "Rate")] = Special.Marker;   // the amount is hidden from most roles: the trail shows that it changed, never what it was
             AuditPd(typeof(Pc.PcResourcePlan), new[]
             {
@@ -41,6 +42,8 @@ namespace DataLayer.Context
                 "PriorConstraintType", "PriorConstraintDate", "AppliedConstraintDate", "ApplierUserId", "AppliedAt", "ConfirmedByUserId", "ConfirmedAt", "RejectedByUserId", "RejectedAt", "RejectReason", "Reverted", "Deleted",
             }, "پیشنهاد تسطیح منابع");
             AuditPd(typeof(Pc.PcBaselineResource), new[] { "BaselineId", "ActivityId", "ResourceId", "Quantity", "Distribution", "RateAtBaseline" }, "منبع ثبت‌شده در خط‌مبنا");
+            AuditPd(typeof(Pc.PcCharterResource), new[] { "ContractId", "ResourceId", "Quantity", "Note" }, "منبع از پیش تخصیص‌یافته منشور");
+            AuditPd(typeof(Pc.PcResourceCostProposal), new[] { "ContractId", "PlanId", "PlanVersion", "ResourceClass", "Amount", "ExcludedNoRate", "ExcludedSensitive", "LineCount", "Status", "PreparedByAgent", "CostLineId", "DecidedByUserId", "DecidedAt", "RejectReason", "Deleted" }, "پیشنهاد هزینه منابع");
         }
     }
 }

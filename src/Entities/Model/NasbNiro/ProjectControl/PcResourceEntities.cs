@@ -154,4 +154,57 @@ namespace Entities.Model.NasbNiro.ProjectControl
         public PcResourceDistribution Distribution { get; set; }
         public decimal? RateAtBaseline { get; set; }
     }
+
+    // ------------------------------------------------------------------------------------------ priority 4, phases 4d and 4e
+
+    /// <summary>A resource of the pool that the project charter names as pre-assigned (the structured list next to the free text of the charter).</summary>
+    public class PcCharterResource
+    {
+        public int Id { get; set; }
+        public int ContractId { get; set; }
+        public int ResourceId { get; set; }
+        public PcResource Resource { get; set; }
+        public decimal Quantity { get; set; }
+        public string Note { get; set; }
+    }
+
+    public enum PcCostProposalStatus { Proposed = 1, Accepted = 2, Rejected = 3, Superseded = 4 }
+
+    /// <summary>
+    /// A proposed line of the cost baseline (CBS) by resource class, made by the planning agent (RES.COST.PROPOSE) from an approved resource plan: quantity x approved standard rate. It is never a cost-baseline line by itself:
+    /// the owner of the cost baseline accepts it (the line is then written through the existing cost-baseline path) or rejects it (RES.COST.REVIEW).
+    /// </summary>
+    public class PcResourceCostProposal : BaseEntity
+    {
+        public int ContractId { get; set; }
+
+        /// <summary>The approved resource plan the amounts come from.</summary>
+        public int PlanId { get; set; }
+        public int PlanVersion { get; set; }
+        public PcResourceClass ResourceClass { get; set; }
+
+        /// <summary>The amount proposed as a NEW cost-baseline line: the sum of quantity x approved rate of the lines of the class (rate present, not payroll-sensitive) less what the cost baseline already holds for that class.</summary>
+        public decimal Amount { get; set; }
+
+        /// <summary>What the cost baseline already held for this resource class when the proposal was made (the proposal is for the difference).</summary>
+        public decimal ExistingAmount { get; set; }
+
+        /// <summary>Lines left out because the resource had no approved rate, and lines left out because they are payroll-sensitive (a small labour group): counted, never priced.</summary>
+        public int ExcludedNoRate { get; set; }
+        public int ExcludedSensitive { get; set; }
+        public int LineCount { get; set; }
+
+        public PcCostProposalStatus Status { get; set; }
+        public bool PreparedByAgent { get; set; }
+
+        /// <summary>The cost-baseline line written when the proposal was accepted.</summary>
+        public int? CostLineId { get; set; }
+        public PcCostBaselineLine CostLine { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string RejectReason { get; set; }
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
 }

@@ -583,6 +583,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public int TasksOverdue { get; set; }
         public int DailyReports { get; set; }
         public int HseEvents { get; set; }
+
+        /// <summary>Priority 4e: the «منابع» section (null in a report made before it existed).</summary>
+        public PcWeeklyResourcesDto Resources { get; set; }
         public List<string> Highlights { get; set; } = new List<string>();
     }
 

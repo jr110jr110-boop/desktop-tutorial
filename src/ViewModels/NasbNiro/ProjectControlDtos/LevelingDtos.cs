@@ -44,6 +44,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public decimal DraftLoad { get; set; }
         public decimal Capacity { get; set; }
         public decimal Over { get; set; }
+
+        /// <summary>Priority 4d: the hours that the work orders (production) need on the work centre linked to the resource («بار تولید»), a layer apart from <see cref="Load"/>; it counts toward <see cref="Over"/>. Zero without a link.</summary>
+        public decimal ProductionLoad { get; set; }
         public List<PcLoadItemDto> Items { get; set; } = new List<PcLoadItemDto>();
     }
 
@@ -55,6 +58,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public PcResourceKind Kind { get; set; }
         public PcResourceUnit Unit { get; set; }
         public decimal Capacity { get; set; }
+
+        /// <summary>Priority 4d: the work centre the machine resource is linked to (its capacity and calendar come from it); null for any other resource.</summary>
+        public int? WorkCenterId { get; set; }
         public decimal PeakLoad { get; set; }
         public decimal TotalOver { get; set; }
         public List<PcLoadBucketDto> Buckets { get; set; } = new List<PcLoadBucketDto>();

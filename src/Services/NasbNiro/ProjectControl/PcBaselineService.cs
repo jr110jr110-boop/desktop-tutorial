@@ -27,6 +27,9 @@ namespace Services.NasbNiro.ProjectControl
         Task<ResponseDto<PcCostLineDto>> SaveCostLineAsync(PcCostLineDto dto, CancellationToken cancellationToken);
         Task<ResponseDto<bool>> DeleteCostLineAsync(int id, CancellationToken cancellationToken);
 
+        /// <summary>The same checks as a NEW cost line (role, amount, contract, baseline lock) but the line is only added to the unit of work, not saved: the caller saves it together with its own change, in one transaction.</summary>
+        Task<ResponseDto<PcCostBaselineLine>> StageCostLineAsync(PcCostLineDto dto, CancellationToken cancellationToken);
+
         Task<ResponseDto<PagedList<PcChangeDto>>> GetChangesAsync(PcChangeQuery query, CancellationToken cancellationToken);
         Task<ResponseDto<PcChangeDto>> GetChangeAsync(int id, CancellationToken cancellationToken);
         Task<ResponseDto<PcChangeDto>> SaveChangeAsync(PcChangeDto dto, CancellationToken cancellationToken);
@@ -287,6 +290,19 @@ namespace Services.NasbNiro.ProjectControl
             IQueryable<PcCostLineDto> proj = q.OrderBy(l => l.Id).Select(l => new PcCostLineDto
                 { Id = l.Id, ContractId = l.ContractId, WbsNodeId = l.WbsNodeId, ActivityId = l.ActivityId, CostClass = l.CostClass, ResourceClass = l.ResourceClass, Amount = l.Amount, Description = l.Description, BaselineId = l.BaselineId });
             return ResponseDtoHelper.Ok(await PagedList<PcCostLineDto>.CreateAsync(proj, query.PageNumber, query.PageSize, cancellationToken));
+        }
+
+        public async Task<ResponseDto<PcCostBaselineLine>> StageCostLineAsync(PcCostLineDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null || !Enum.IsDefined(typeof(PcCostClass), dto.CostClass)) return Bad<PcCostBaselineLine>(PcText.InvalidData);
+            if (!_user.IsInRole(ProjectControlRoles.Planning)) return Bad<PcCostBaselineLine>(PcText.NotAllowed);
+            if (dto.Amount < 0) return Bad<PcCostBaselineLine>("مبلغ نمی‌تواند منفی باشد.");
+            if (!await _uow.Set<ContractEntity>().AnyAsync(c => c.Id == dto.ContractId && !c.Deleted, cancellationToken)) return PcText.NotFound<PcCostBaselineLine>(PcText.ContractNotFound);
+            // R1c (H1, M4): the cost lines are the breakdown of the cost baseline; once the baseline is approved they change only through a change request
+            if (await PcPlanLock.IsLockedAsync(_uow, dto.ContractId, cancellationToken)) return Bad<PcCostBaselineLine>(PcPlanLock.Refusal);
+            var l = new PcCostBaselineLine { ContractId = dto.ContractId, WbsNodeId = dto.WbsNodeId, ActivityId = dto.ActivityId, CostClass = dto.CostClass, ResourceClass = dto.ResourceClass, Amount = dto.Amount, Description = Clean(dto.Description) };
+            _uow.Set<PcCostBaselineLine>().Add(l);
+            return ResponseDtoHelper.Ok(l);
         }
 
         public async Task<ResponseDto<PcCostLineDto>> SaveCostLineAsync(PcCostLineDto dto, CancellationToken cancellationToken)

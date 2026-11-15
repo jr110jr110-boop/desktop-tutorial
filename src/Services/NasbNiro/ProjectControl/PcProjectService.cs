@@ -673,11 +673,11 @@ namespace Services.NasbNiro.ProjectControl
 
         // ============================================================================ charter and PEP
 
-        private static PcCharterDto ToDto(PcProjectCharter c, int contractId, Dictionary<int, string> names) => new PcCharterDto
+        private static PcCharterDto ToDto(PcProjectCharter c, int contractId, Dictionary<int, string> names, List<PcCharterResourceDto> list = null) => new PcCharterDto
         {
             ContractId = contractId, Overview = c?.Overview, ScopeDescription = c?.ScopeDescription, Requirements = c?.Requirements, Deliverables = c?.Deliverables, Boundaries = c?.Boundaries,
             TimeBaselineEstimate = c?.TimeBaselineEstimate, CostEstimate = c?.CostEstimate, AlternativesAnalysis = c?.AlternativesAnalysis, Assumptions = c?.Assumptions, Constraints = c?.Constraints,
-            Risks = c?.Risks, Stakeholders = c?.Stakeholders, PreAssignedResources = c?.PreAssignedResources, ManagerAuthority = c?.ManagerAuthority, ManagerAcceptedAt = c?.ManagerAcceptedAt,
+            Risks = c?.Risks, Stakeholders = c?.Stakeholders, PreAssignedResources = c?.PreAssignedResources, PreAssignedList = list ?? new List<PcCharterResourceDto>(), PreAssignedTextLocked = list != null && list.Count > 0, ManagerAuthority = c?.ManagerAuthority, ManagerAcceptedAt = c?.ManagerAcceptedAt,
             ApprovedAt = c?.ApprovedAt, ApprovedByName = names.Name(c?.ApprovedByUserId), RowVersion = c?.RowVersion == null ? null : Convert.ToBase64String(c.RowVersion),
         };
 
@@ -685,8 +685,13 @@ namespace Services.NasbNiro.ProjectControl
         {
             PcProjectCharter c = await _uow.Set<PcProjectCharter>().AsNoTracking().FirstOrDefaultAsync(x => x.ContractId == contractId && !x.Deleted, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { c?.ApprovedByUserId }, cancellationToken);
-            return ResponseDtoHelper.Ok(ToDto(c, contractId, names));
+            return ResponseDtoHelper.Ok(ToDto(c, contractId, names, await CharterListAsync(contractId, cancellationToken)));
         }
+
+        /// <summary>Priority 4d: the structured list of pre-assigned resources of the charter (the pool resource, the quantity and a note).</summary>
+        private async Task<List<PcCharterResourceDto>> CharterListAsync(int contractId, CancellationToken ct) =>
+            await _uow.Set<PcCharterResource>().AsNoTracking().Where(x => x.ContractId == contractId).OrderBy(x => x.Resource.Code).ThenBy(x => x.Id)
+                .Select(x => new PcCharterResourceDto { ResourceId = x.ResourceId, ResourceCode = x.Resource.Code, ResourceTitle = x.Resource.Title, Quantity = x.Quantity, Note = x.Note }).ToListAsync(ct);
 
         public async Task<ResponseDto<PcCharterDto>> SaveCharterAsync(PcCharterDto dto, CancellationToken cancellationToken)
         {
@@ -704,11 +709,35 @@ namespace Services.NasbNiro.ProjectControl
             c.Overview = Clean(dto.Overview); c.ScopeDescription = Clean(dto.ScopeDescription); c.Requirements = Clean(dto.Requirements); c.Deliverables = Clean(dto.Deliverables);
             c.Boundaries = Clean(dto.Boundaries); c.TimeBaselineEstimate = Clean(dto.TimeBaselineEstimate); c.CostEstimate = Clean(dto.CostEstimate);
             c.AlternativesAnalysis = Clean(dto.AlternativesAnalysis); c.Assumptions = Clean(dto.Assumptions); c.Constraints = Clean(dto.Constraints); c.Risks = Clean(dto.Risks);
-            c.Stakeholders = Clean(dto.Stakeholders); c.PreAssignedResources = Clean(dto.PreAssignedResources); c.ManagerAuthority = Clean(dto.ManagerAuthority);
+            // priority 4d: with a structured list the free text is kept as it was (history) and is not edited
+            List<PcCharterResource> current = await _uow.Set<PcCharterResource>().Where(x => x.ContractId == dto.ContractId).ToListAsync(cancellationToken);
+            if (dto.PreAssignedList != null)
+            {
+                if (dto.PreAssignedList.GroupBy(l => l.ResourceId).Any(g => g.Count() > 1)) return Bad<PcCharterDto>("یک منبع بیش از یک بار در فهرست منابع از پیش تخصیص‌یافته آمده است.");
+                int[] resourceIds = dto.PreAssignedList.Select(l => l.ResourceId).ToArray();
+                Dictionary<int, PcResource> pool = await _uow.Set<PcResource>().AsNoTracking().Where(r => resourceIds.Contains(r.Id) && !r.Deleted).ToDictionaryAsync(r => r.Id, cancellationToken);
+                foreach (PcCharterResourceDto l in dto.PreAssignedList)
+                {
+                    if (!pool.TryGetValue(l.ResourceId, out PcResource res)) return Bad<PcCharterDto>("منبع پیدا نشد.");
+                    if (!res.IsActive && !current.Any(x => x.ResourceId == l.ResourceId)) return Bad<PcCharterDto>("منبع «" + res.Code + "» غیرفعال است.");
+                    if (l.Quantity <= 0m || l.Quantity > 1_000_000_000m) return Bad<PcCharterDto>("مقدار منبع «" + res.Code + "» باید بیشتر از صفر باشد.");
+                    string note = Clean(l.Note);
+                    if (note != null && note.Length > 500) return Bad<PcCharterDto>("یادداشت حداکثر ۵۰۰ نویسه است.");
+                }
+                foreach (PcCharterResource old in current.Where(x => !resourceIds.Contains(x.ResourceId)).ToList()) { _uow.Set<PcCharterResource>().Remove(old); current.Remove(old); }
+                foreach (PcCharterResourceDto l in dto.PreAssignedList)
+                {
+                    PcCharterResource row = current.FirstOrDefault(x => x.ResourceId == l.ResourceId);
+                    if (row == null) { row = new PcCharterResource { ContractId = dto.ContractId, ResourceId = l.ResourceId }; _uow.Set<PcCharterResource>().Add(row); current.Add(row); }
+                    row.Quantity = Math.Round(l.Quantity, 4, MidpointRounding.AwayFromZero); row.Note = Clean(l.Note);
+                }
+            }
+            bool listed = current.Count > 0;
+            c.Stakeholders = Clean(dto.Stakeholders); if (!listed) c.PreAssignedResources = Clean(dto.PreAssignedResources); c.ManagerAuthority = Clean(dto.ManagerAuthority);
             c.ModifyDate = now; c.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateConcurrencyException) { return Bad<PcCharterDto>(PcText.Concurrency); }
-            return ResponseDtoHelper.Ok(ToDto(c, c.ContractId, new Dictionary<int, string>()));
+            return ResponseDtoHelper.Ok(ToDto(c, c.ContractId, new Dictionary<int, string>(), await CharterListAsync(c.ContractId, cancellationToken)));
         }
 
         public async Task<ResponseDto<PcCharterDto>> CharterActionAsync(string action, PcApproveDto dto, CancellationToken cancellationToken)
@@ -739,7 +768,7 @@ namespace Services.NasbNiro.ProjectControl
             c.ModifyDate = now; c.ModifierUserId = Me;
             await _uow.SaveChangesAsync(cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { c.ApprovedByUserId }, cancellationToken);
-            return ResponseDtoHelper.Ok(ToDto(c, c.ContractId, names));
+            return ResponseDtoHelper.Ok(ToDto(c, c.ContractId, names, await CharterListAsync(c.ContractId, cancellationToken)));
         }
 
         private static PcPlanDto ToDto(PcProjectPlan p, int contractId, Dictionary<int, string> names) => new PcPlanDto

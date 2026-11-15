@@ -99,6 +99,28 @@ namespace DataLayer.Configurations.EF.NasbNiro.ProjectControl
                 b.HasOne<PcActivity>().WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<PcResource>().WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
             });
+            // phases 4d and 4e
+            builder.Entity<PcCharterResource>(b =>
+            {
+                b.ToTable("PcCharterResources");
+                b.Property(x => x.Quantity).HasPrecision(18, 4);
+                b.Property(x => x.Note).HasMaxLength(500);
+                b.HasIndex(x => new { x.ContractId, x.ResourceId }).IsUnique();
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Resource).WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<PcResourceCostProposal>(b =>
+            {
+                b.ToTable("PcResourceCostProposals");
+                b.Property(x => x.Amount).HasPrecision(22, 2);
+                b.Property(x => x.ExistingAmount).HasPrecision(22, 2);
+                b.Property(x => x.RejectReason).HasMaxLength(1000);
+                b.HasOne(x => x.CostLine).WithMany().HasForeignKey(x => x.CostLineId).OnDelete(DeleteBehavior.SetNull);
+                b.HasIndex(x => new { x.ContractId, x.Status });
+                b.HasIndex(x => new { x.PlanId, x.ResourceClass });
+                b.HasOne<Entities.Model.NasbNiro.Contracts.ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne<PcResourcePlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
+            });
         }
     }
 }

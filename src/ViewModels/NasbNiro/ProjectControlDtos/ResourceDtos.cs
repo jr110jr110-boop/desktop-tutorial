@@ -43,6 +43,11 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         /// <summary>The approved rate that applies today (the rate of the role resource for an employee-linked one); null when none or hidden.</summary>
         public decimal? EffectiveRate { get; set; }
         public bool RateHidden { get; set; }
+
+        /// <summary>Priority 4d: the capacity and the calendar of a machine resource linked to a work centre are read from the work centre (read only here); the three fields tell the form.</summary>
+        public bool CapacityFromWorkCenter { get; set; }
+        public string WorkCenterCode { get; set; }
+        public decimal? WorkCenterDayHours { get; set; }
         public string RowVersion { get; set; }
     }
 

@@ -29117,6 +29117,38 @@ namespace DataLayer.Migrations
                     b.ToTable("PcChangeRequests", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcCharterResource", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ResourceId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("ContractId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("PcCharterResources", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcClaim", b =>
                 {
                     b.Property<int>("Id")
@@ -32725,6 +32757,93 @@ namespace DataLayer.Migrations
                     b.HasIndex("Kind", "IsActive");
 
                     b.ToTable("PcResources", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceCostProposal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CostLineId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ExcludedNoRate")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ExcludedSensitive")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ExistingAmount")
+                        .HasPrecision(22, 2)
+                        .HasColumnType("decimal(22,2)");
+
+                    b.Property<int>("LineCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("PlanId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PlanVersion")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("PreparedByAgent")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ResourceClass")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CostLineId");
+
+                    b.HasIndex("ContractId", "Status");
+
+                    b.HasIndex("PlanId", "ResourceClass");
+
+                    b.ToTable("PcResourceCostProposals", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceOverload", b =>
@@ -45798,6 +45917,23 @@ namespace DataLayer.Migrations
                     b.Navigation("Contract");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcCharterResource", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcResource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Resource");
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcClaim", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", "Contract")
@@ -46423,6 +46559,28 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Calendar");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceCostProposal", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcCostBaselineLine", "CostLine")
+                        .WithMany()
+                        .HasForeignKey("CostLineId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcResourcePlan", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CostLine");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.ProjectControl.PcResourceOverload", b =>

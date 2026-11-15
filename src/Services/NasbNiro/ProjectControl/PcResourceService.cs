@@ -46,13 +46,19 @@ namespace Services.NasbNiro.ProjectControl
 
         Task<ResponseDto<PcResourceBudgetDto>> GetBudgetAsync(int planId, DateTime? asOf, CancellationToken cancellationToken);
         Task<ResponseDto<List<PcBaselineResourceDto>>> GetBaselineResourcesAsync(int baselineId, CancellationToken cancellationToken);
+
+        /// <summary>Priority 4d: reads an MS Project (MSPDI) file and shows, without saving anything, how its resources and assignments map to the pool and to the activities of the open plan.</summary>
+        Task<ResponseDto<PcMspPreviewDto>> PreviewImportAsync(PcMspImportRequestDto dto, CancellationToken cancellationToken);
+
+        /// <summary>Priority 4d: puts the assignments of the reviewed mapping into the open resource plan (Source = Import). Rates and costs of the file are never imported.</summary>
+        Task<ResponseDto<PcMspImportResultDto>> ImportAsync(PcMspImportRequestDto dto, CancellationToken cancellationToken);
     }
 
     /// <summary>
     /// Resource pool, standard rates, resource plan and assignments of project control (priority 4, phases 4a and 4b). The planning agent drafts the plan; people review, submit and approve it.
     /// Maker and checker differ; an AI seat never submits or approves (the data layer refuses it too). A standard rate is never set on a resource linked to a person, and what could show one person's cost is masked.
     /// </summary>
-    public class PcResourceService : IPcResourceService
+    public partial class PcResourceService : IPcResourceService
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -79,7 +85,11 @@ namespace Services.NasbNiro.ProjectControl
         private async Task<List<PcResourceDto>> ToDtosAsync(List<PcResource> rows, CancellationToken ct)
         {
             int[] ids = rows.Select(r => r.Id).ToArray();
-            int[] calendarIds = rows.Where(r => r.CalendarId.HasValue).Select(r => r.CalendarId.Value).Distinct().ToArray();
+            // priority 4d: a machine resource linked to a work centre reads its capacity and calendar from it (one source of truth with production)
+            int[] centreIds = rows.Where(r => PcWorkCentreLink.IsLinked(r)).Select(r => r.WorkCenterId.Value).Distinct().ToArray();
+            Dictionary<int, MfWorkCenter> centres = centreIds.Length == 0 ? new Dictionary<int, MfWorkCenter>() : await _uow.Set<MfWorkCenter>().AsNoTracking().Where(w => centreIds.Contains(w.Id) && !w.Deleted).ToDictionaryAsync(w => w.Id, ct);
+            MfWorkCenter CentreOf(PcResource r) => PcWorkCentreLink.IsLinked(r) && centres.TryGetValue(r.WorkCenterId.Value, out MfWorkCenter w) ? w : null;
+            int[] calendarIds = rows.Select(r => CentreOf(r)?.CalendarId ?? r.CalendarId).Where(c => c.HasValue).Select(c => c.Value).Distinct().ToArray();
             Dictionary<int, string> calendars = calendarIds.Length == 0 ? new Dictionary<int, string>() : await _uow.Set<PcCalendar>().AsNoTracking().Where(c => calendarIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
             int[] roleIds = rows.Where(r => r.RateResourceId.HasValue).Select(r => r.RateResourceId.Value).Distinct().ToArray();
             Dictionary<int, string> roleCodes = roleIds.Length == 0 ? new Dictionary<int, string>() : await _uow.Set<PcResource>().AsNoTracking().Where(r => roleIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.Code, ct);
@@ -89,10 +99,13 @@ namespace Services.NasbNiro.ProjectControl
             return rows.Select(r =>
             {
                 bool hidden = !sees && PcResourceRules.IsSensitive(r);
+                MfWorkCenter wc = CentreOf(r);
+                int? calendarId = wc != null ? wc.CalendarId : r.CalendarId;
                 return new PcResourceDto
                 {
-                    Id = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = r.Capacity, CalendarId = r.CalendarId,
-                    CalendarName = r.CalendarId.HasValue && calendars.TryGetValue(r.CalendarId.Value, out string cn) ? cn : null, ResponsibleUnit = r.ResponsibleUnit,
+                    Id = r.Id, Code = r.Code, Title = r.Title, Kind = r.Kind, Unit = r.Unit, Capacity = wc != null ? PcWorkCentreLink.CapacityOf(wc) : r.Capacity, CalendarId = calendarId,
+                    CapacityFromWorkCenter = wc != null, WorkCenterCode = wc?.Code, WorkCenterDayHours = wc != null ? PcWorkCentreLink.DayHoursOf(wc) : (decimal?)null,
+                    CalendarName = calendarId.HasValue && calendars.TryGetValue(calendarId.Value, out string cn) ? cn : null, ResponsibleUnit = r.ResponsibleUnit,
                     EmployeeId = r.EmployeeId, WorkCenterId = r.WorkCenterId, ProviderId = r.ProviderId, RateResourceId = r.RateResourceId,
                     RateResourceCode = r.RateResourceId.HasValue && roleCodes.TryGetValue(r.RateResourceId.Value, out string rc) ? rc : null,
                     IsActive = r.IsActive, Notes = r.Notes, HasAssignments = used.Contains(r.Id), CanCarryRate = PcResourceRules.CanCarryRate(r),
@@ -127,6 +140,29 @@ namespace Services.NasbNiro.ProjectControl
             if (dto == null) return Bad<PcResourceDto>(PcText.InvalidData);
             if (IsAi || !_user.IsInRole(PcResourceRules.Writers)) return Bad<PcResourceDto>(PcResourceText.NotAllowed);
             string code = Clean(dto.Code), title = Clean(dto.Title);
+            // priority 4d: a machine linked to a work centre AND counted in hours takes its capacity and calendar from it; the typed values are not used.
+            // A NEW or CHANGED link needs the unit hour (and the work centre must not already be read by another active linked machine); a machine that was already linked with another unit stays editable and keeps its own numbers.
+            if (dto.WorkCenterId.HasValue && dto.Kind == PcResourceKind.Machine)
+            {
+                MfWorkCenter centre = await _uow.Set<MfWorkCenter>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == dto.WorkCenterId.Value && !w.Deleted, cancellationToken);
+                if (centre == null) return Bad<PcResourceDto>("مرکز کار پیدا نشد.");
+                PcResource before = dto.Id > 0 ? await _uow.Set<PcResource>().AsNoTracking().FirstOrDefaultAsync(r => r.Id == dto.Id && !r.Deleted, cancellationToken) : null;
+                bool linkIsNew = before == null || before.Kind != PcResourceKind.Machine || before.WorkCenterId != dto.WorkCenterId;
+                if (dto.Unit != PcResourceUnit.Hour)
+                {
+                    if (linkIsNew) return Bad<PcResourceDto>(PcResourceText.LinkedMachineUnit);
+                }
+                else
+                {
+                    bool becomesLinked = linkIsNew || before.Unit != PcResourceUnit.Hour;
+                    if (becomesLinked && (before == null || before.IsActive))
+                    {
+                        string other = await _uow.Set<PcResource>().AsNoTracking().Where(r => !r.Deleted && r.IsActive && r.Kind == PcResourceKind.Machine && r.Unit == PcResourceUnit.Hour && r.WorkCenterId == dto.WorkCenterId && r.Id != dto.Id).OrderBy(r => r.Id).Select(r => r.Code).FirstOrDefaultAsync(cancellationToken);
+                        if (other != null) return Bad<PcResourceDto>(PcResourceText.CentreAlreadyLinked + " (" + other + ")");
+                    }
+                    dto.Capacity = PcWorkCentreLink.StoredCapacityOf(centre); dto.CalendarId = centre.CalendarId;
+                }
+            }
             string shape = PcResourceRules.ValidateShape(code, title, dto.Kind, dto.Unit, dto.Capacity, dto.EmployeeId, dto.WorkCenterId, dto.ProviderId, dto.RateResourceId);
             if (shape != null) return Bad<PcResourceDto>(shape);
             string unit = PcResourceRules.Upper(dto.ResponsibleUnit);

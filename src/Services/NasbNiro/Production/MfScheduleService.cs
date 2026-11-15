@@ -10,6 +10,7 @@ using Entities.Model.NasbNiro.Production;
 using Entities.Model.NasbNiro.ProjectControl;
 using Microsoft.EntityFrameworkCore;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.ProjectControl;
 using ViewModels.NasbNiro.Pagination;
 using ViewModels.NasbNiro.ProductionDtos;
 
@@ -138,30 +139,41 @@ namespace Services.NasbNiro.Production
             MfScheduleData data = await MfScheduler.ComputeAsync(uow, from, ct, true);
             var report = new LoadReportDto { From = from, FromText = MfText.Date(from), Weeks = weeks, Threshold = threshold };
             DateTime firstWeek = MfScheduler.WeekStart(from);
+            // priority 4d: the machine resources of the project resource pool that are linked to a work centre put their project load on it; it is a layer of its own and it reduces what is available for the work orders
+            var links = await PcWorkCentreLink.LinksAsync(uow, ct);
+            PcWorkCentreLink.ProjectLayer layer = await PcWorkCentreLink.ProjectLayerAsync(uow, DateTime.Today, from, firstWeek.AddDays(7 * weeks - 1), links, ct);
+            Dictionary<(int WorkCenterId, DateTime Day), decimal> projectLayer = layer.Hours;
+            // work that is both a project activity of the linked machine and a production order tied to that activity is counted once: as project load
+            Dictionary<(int WorkCenterId, DateTime Day), decimal> sameWork = PcWorkCentreLink.TiedDemand(data, layer.Tied);
+            HashSet<int> linkedCentres = new HashSet<int>(links.Select(l => l.WorkCenterId));
             foreach (MfCenter c in data.Centers.Values.Where(c => !workCenterId.HasValue || c.Wc.Id == workCenterId.Value).OrderBy(c => c.Wc.Code, StringComparer.Ordinal))
             {
                 var row = new LoadRowDto { WorkCenterId = c.Wc.Id, Code = c.Wc.Code, Title = c.Wc.Title };
                 for (int w = 0; w < weeks; w++)
                 {
                     DateTime ws = firstWeek.AddDays(7 * w);
-                    decimal capacity = 0, load = 0, scheduled = 0;
+                    decimal capacity = 0, load = 0, scheduled = 0, project = 0;
                     for (int d = 0; d < 7; d++)
                     {
                         DateTime day = ws.AddDays(d);
                         if (day < from) continue;
                         capacity += c.Capacity(day);
-                        load += data.Demand.GetValueOrDefault((c.Wc.Id, day));
+                        load += data.Demand.GetValueOrDefault((c.Wc.Id, day)) - sameWork.GetValueOrDefault((c.Wc.Id, day));
                         scheduled += data.Scheduled.GetValueOrDefault((c.Wc.Id, day));
+                        project += projectLayer.GetValueOrDefault((c.Wc.Id, day));
                     }
                     capacity = Math.Round(capacity, 2, MidpointRounding.AwayFromZero);
                     load = Math.Round(load, 2, MidpointRounding.AwayFromZero);
                     scheduled = Math.Round(scheduled, 2, MidpointRounding.AwayFromZero);
-                    decimal? percent = capacity > 0 ? Math.Round(load / capacity * 100m, 1, MidpointRounding.AwayFromZero) : (decimal?)null;
-                    bool over = capacity > 0 ? load > capacity * threshold / 100m : load > 0;
+                    project = Math.Round(project, 2, MidpointRounding.AwayFromZero);
+                    decimal total = load + project;
+                    decimal? percent = capacity > 0 ? Math.Round(total / capacity * 100m, 1, MidpointRounding.AwayFromZero) : (decimal?)null;
+                    bool over = capacity > 0 ? total > capacity * threshold / 100m : total > 0;
                     var cell = new LoadCellDto
                     {
                         WorkCenterId = c.Wc.Id, WorkCenterCode = c.Wc.Code, WeekStart = ws, WeekStartText = MfText.Date(ws), CapacityHours = capacity, LoadHours = load, ScheduledHours = scheduled,
                         LoadPercent = percent, Overloaded = over,
+                        ProjectLoadHours = project, AvailableHours = Math.Max(0m, capacity - project), HasProjectLayer = linkedCentres.Contains(c.Wc.Id),
                     };
                     row.Cells.Add(cell);
                     if (over) report.Overloads.Add(cell);

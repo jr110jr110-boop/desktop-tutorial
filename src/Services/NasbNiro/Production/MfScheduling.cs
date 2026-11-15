@@ -227,6 +227,14 @@ namespace Services.NasbNiro.Production
             return result;
         }
 
+        /// <summary>The hours that ONE order needs on ONE work centre and day when nothing waits for capacity (the share of that order in <see cref="MfScheduleData.Demand"/>). Used to count work once when it is both a project activity of a linked resource and a production order.</summary>
+        internal static Dictionary<(int, DateTime), decimal> OrderDemandAt(MfScheduleData data, MfOrderPlan plan, int centreId)
+        {
+            var own = new Dictionary<(int, DateTime), decimal>();
+            PlanOrder(data, plan, false, own);
+            return own.Where(kv => kv.Key.Item1 == centreId).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
         /// <summary>One pass over one order. Finite: the hours already given to a day are not available again. Infinite: only the demand is recorded.</summary>
         private static void PlanOrder(MfScheduleData data, MfOrderPlan plan, bool finite, Dictionary<(int, DateTime), decimal> used)
         {
