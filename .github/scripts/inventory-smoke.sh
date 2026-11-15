@@ -13151,7 +13151,7 @@ as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=WH.PR.REORDER&PageNumber=1&PageSize=50
 check "agl: one reorder task, done by the agent, names the draft request it made" '.success and (.data.data|length) == 1 and (.data.data[0]|(.state == 10 and .agentCode == "AG-WH" and .kind == 1 and .outputType == "PurchaseRequest" and (.outputId|type) == "number"))'
 AGLPR=$(val '.data.data[0].outputId'); AGLT=$(val '.data.data[0].id')
 as "$ADMIN_TOKEN" GET "procurement/requests/${AGLPR:-0}"
-check "agl: the draft is from the reorder point, made by the agent's service user, with every item of the list ($AGLN lines) and the new item for 80; nobody approved it" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"صندلی هوش مصنوعی\")) and (.data.lines|length) == $AGLN and ([.data.lines[]|select(.itemId == $AGL1 and .quantity == 80)]|length) == 1"
+check "agl: the draft is from the reorder point, made by the agent's service user, with every item of the list ($AGLN lines) and the new item for 80; nobody approved it" ".success and .data.status == 0 and .data.source == 2 and (.data.creatorName|contains(\"(ایجنت)\")) and (.data.lines|length) == $AGLN and ([.data.lines[]|select(.itemId == $AGL1 and .quantity == 80)]|length) == 1"
 as "$ADMIN_TOKEN" GET "$AG/tasks/${AGLT:-0}"; check "agl: the task keeps its history from queued to done, each event by the seat AG-WH" '.success and ([.data.events[].toState]|(first == 1 and last == 10)) and ([.data.events[].seatCode]|unique) == ["AG-WH"]'
 # the agent does not submit a request without prices: a planner gets an input task, the storekeeper does not see it
 as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=PROC.PR.PRICE.WH&OpenOnly=true&PageNumber=1&PageSize=50"

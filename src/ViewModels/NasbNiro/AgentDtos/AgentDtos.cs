@@ -52,6 +52,9 @@ namespace ViewModels.NasbNiro.AgentDtos
         public bool IsFallback { get; set; }
         public string LastError { get; set; }
         public string ReturnReason { get; set; }
+
+        /// <summary>True when the return to the agent can work for this row (the step has a return action of its own, or an agent step produced the document). Only the inbox fills it.</summary>
+        public bool CanReturn { get; set; }
     }
 
     public class AgentInboxCountsDto

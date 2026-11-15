@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
+using Entities.Identity;
 using Entities.Model.NasbNiro.Agents;
 using Entities.Model.NasbNiro.Ai;
 using Entities.Model.NasbNiro.Contracts;
@@ -710,6 +711,41 @@ namespace MsTests
             Assert.AreEqual(AgentTaskState.Done, Tasks(e).Single(x => x.StepCode == AgentStepCode).State);
         }
 
+        [TestMethod]
+        public async Task The_Inbox_Flag_CanReturn_Agrees_With_The_Return_Endpoint_For_An_Agent_Made_Document_A_Human_Made_One_And_An_Input_Row()
+        {
+            Env e = NewEnv("canreturn");
+            // doc 1: made by the agent, then waits at a gate without a return action of its own
+            e.World.AgentDocs[1] = "D-1";
+            await RunJob(e, "AG-PROC");
+            e.World.AgentDocs.TryRemove(1, out _);
+            e.World.GateDocs[1] = "D-1";
+            // doc 2: made by a human, no agent step ever touched it
+            e.World.GateDocs[2] = "D-2";
+            // doc 3: a fallback input row (the agent step is switched off, a person does it by hand)
+            Assert.IsTrue((await e.Host.As(Pmo, p => p.GetRequiredService<IAgentBoardService>().EnableStepAsync(new AgentStepEnableDto { Code = AgentStepCode, Enabled = false }, Ct))).Success);
+            e.World.AgentDocs[3] = "D-3";
+            await Reconcile(e);
+
+            int gateMade = TaskOf(e, GateStepCode, 1).Id;
+            int gateHuman = TaskOf(e, GateStepCode, 2).Id;
+            AgentTask input = TaskOf(e, AgentStepCode, 3);
+            Assert.AreEqual(AgentTaskState.WaitingInput, input.State);
+            // the input row is shown to the people of its fallback role: give the planner that role by reading the inbox as a person who holds both
+            ClaimsPrincipal both = AppHost.Principal(53, "planner.buyer", "PLANNING", "COMMERCIAL");
+
+            var inbox = await e.Host.As(both, p => p.GetRequiredService<IAgentInboxService>().GetInboxAsync(new AgentInboxQuery(), Ct));
+            Assert.IsTrue(inbox.Success, inbox.Message);
+            Assert.IsTrue(inbox.Data.Single(d => d.Id == gateMade).CanReturn, "an agent made the document");
+            Assert.IsFalse(inbox.Data.Single(d => d.Id == gateHuman).CanReturn, "a human made the document");
+            Assert.IsFalse(inbox.Data.Single(d => d.Id == input.Id).CanReturn, "an input row");
+
+            Func<int, Task<ResponseDto<AgentInboxItemDto>>> back = id => e.Host.As(both, p => p.GetRequiredService<IAgentInboxService>().ReturnAsync(new AgentReturnDto { Id = id, Reason = "اصلاح شود" }, Ct));
+            Assert.AreEqual(AgentText.NoProducer, (await back(gateHuman)).Message);
+            Assert.AreEqual(AgentText.NoProducer, (await back(input.Id)).Message);
+            Assert.IsTrue((await back(gateMade)).Success, "the flag said it works");
+        }
+
         // ------------------------------------------------------------------------------------------------ the board, the tasks, the steps
 
         [TestMethod]
@@ -814,6 +850,22 @@ namespace MsTests
             int running = await on.Host.As(Pmo, p => p.GetRequiredService<IAiSeatRunner>().RunDueAsync(DateTime.Now, Ct));
             Assert.AreEqual(13, running, "absent means on: all thirteen agents ran");
             Assert.AreEqual(13, on.Host.Read(u => u.Set<AiSeatRun>().Count(r => r.Status == AiSeatRunStatus.Succeeded)));
+        }
+
+        [TestMethod]
+        public async Task A_Process_Agent_User_Reads_As_Agent_And_An_Installed_Legacy_Name_Is_Updated_While_Detection_Keeps_Working()
+        {
+            Env e = NewEnv("lastname");
+            await e.Host.AsSystem(p => p.GetRequiredService<IAiSeatProvisioner>().EnsureAsync(Ct));
+            Func<string, string> last = name => e.Host.Read(u => u.Set<User>().AsNoTracking().Single(x => x.UserName == name).LastName);
+            Assert.AreEqual(AiSeatNames.AgentLastName, last("seat.ag-proc"));
+            Assert.AreEqual(AiSeatNames.LegacyLastName, last("seat.ceo-brief"), "the first seats keep their text");
+            // an installed database carries the old text: the next ensure writes the new one, and leaves a name a person chose
+            e.Host.Write(u => { u.Set<User>().Single(x => x.UserName == "seat.ag-proc").LastName = AiSeatNames.LegacyLastName; u.Set<User>().Single(x => x.UserName == "seat.ag-plan").LastName = "custom"; u.SaveChanges(); }, Pmo);
+            await e.Host.AsSystem(p => p.GetRequiredService<IAiSeatProvisioner>().EnsureAsync(Ct));
+            Assert.AreEqual(AiSeatNames.AgentLastName, last("seat.ag-proc"));
+            Assert.AreEqual("custom", last("seat.ag-plan"));
+            Assert.IsTrue(AiSeatNames.IsSeatUser("seat.ag-proc"), "detection is by the user name, so both texts keep working");
         }
 
         [TestMethod]

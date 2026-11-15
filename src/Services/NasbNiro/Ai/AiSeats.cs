@@ -26,6 +26,18 @@ namespace Services.NasbNiro.Ai
 
         public static string UserName(string code) => UserPrefix + code.ToLowerInvariant();
 
+        /// <summary>The display last name of the first (non process) seats and of every seat user installed before the word «ایجنت» became the governing wording.</summary>
+        public const string LegacyLastName = "(صندلی هوش مصنوعی)";
+
+        /// <summary>The display last name of the process agents (codes AG-*).</summary>
+        public const string AgentLastName = "(ایجنت)";
+
+        /// <summary>The last name a seat user carries: process agents read as «ایجنت», the other seats keep the legacy text.</summary>
+        public static string LastNameFor(string code) => !string.IsNullOrEmpty(code) && code.StartsWith("AG-", StringComparison.OrdinalIgnoreCase) ? AgentLastName : LegacyLastName;
+
+        /// <summary>True for a last name this system wrote itself (the old or the new text), so an update never overwrites a name a person chose.</summary>
+        public static bool IsSystemLastName(string lastName) => lastName == LegacyLastName || lastName == AgentLastName;
+
         public static bool IsSeatUser(string userName) => !string.IsNullOrWhiteSpace(userName) && userName.Trim().StartsWith(UserPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -367,7 +379,7 @@ namespace Services.NasbNiro.Ai
             {
                 user = new User
                 {
-                    UserName = name, Name = d.Title, LastName = "(صندلی هوش مصنوعی)", Email = name + "@pmis.local", EmailConfirmed = true,
+                    UserName = name, Name = d.Title, LastName = AiSeatNames.LastNameFor(d.Code), Email = name + "@pmis.local", EmailConfirmed = true,
                     LockoutEnabled = true, LockoutEnd = DateTimeOffset.MaxValue, IsActive = true, IsDeleted = false, BirthDate = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero),
                 };
                 // no password: PasswordHash stays empty, so no password can ever match
@@ -377,6 +389,12 @@ namespace Services.NasbNiro.Ai
                     user = await _users.FindByNameAsync(name);
                     if (user == null) throw new InvalidOperationException("کاربر سرویس صندلی ساخته نشد: " + string.Join("؛ ", created.Errors.Select(e => e.Description)));
                 }
+            }
+            string wantLast = AiSeatNames.LastNameFor(d.Code);
+            if (user.LastName != wantLast && AiSeatNames.IsSystemLastName(user.LastName))
+            {
+                user.LastName = wantLast;
+                await _users.UpdateAsync(user);
             }
             if (!user.IsActive || user.IsDeleted || !user.LockoutEnabled || !user.LockoutEnd.HasValue || user.LockoutEnd.Value < DateTimeOffset.Now.AddYears(50) || !string.IsNullOrEmpty(user.PasswordHash))
             {

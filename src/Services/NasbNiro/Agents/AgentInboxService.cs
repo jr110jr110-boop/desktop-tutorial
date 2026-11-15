@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Results;
@@ -71,13 +72,50 @@ namespace Services.NasbNiro.Agents
         private bool Mine(AgentTask t) =>
             (t.GateUserId.HasValue && t.GateUserId.Value == _user.UserId && _user.UserId > 0) || (!string.IsNullOrWhiteSpace(t.GateRoles) && _user.IsInRole(t.GateRoles));
 
-        private static AgentInboxItemDto ToDto(AgentTask t, DateTimeOffset now)
+        /// <summary>
+        /// The one rule of the producer: the last finished agent step that prepared the document of the task. The return endpoint and the canReturn flag of the inbox both use it, so they can never disagree.
+        /// An input row has no producer (a person is asked for a value; nothing was prepared).
+        /// </summary>
+        internal static Expression<Func<AgentTask, bool>> ProducerOf(AgentTask t) =>
+            p => !p.Deleted && p.Id != t.Id && p.TargetType == t.TargetType && p.TargetId == t.TargetId && p.Kind == AgentStepKind.Agent && p.State == AgentTaskState.Done;
+
+        private static bool IsInputRow(AgentTask t) => t.Kind == AgentStepKind.Input || t.State == AgentTaskState.WaitingInput;
+
+        private async Task<AgentTask> FindProducerAsync(AgentTask task, CancellationToken ct)
+        {
+            if (IsInputRow(task)) return null;
+            return await _uow.Set<AgentTask>().Where(ProducerOf(task)).OrderByDescending(t => t.Id).FirstOrDefaultAsync(ct);
+        }
+
+        /// <summary>Which of the tasks can be returned to the agent: the step has a return action of its own, or a producer exists. Two queries at most, whatever the number of rows.</summary>
+        private async Task<HashSet<int>> ReturnableIdsAsync(List<AgentTask> tasks, CancellationToken ct)
+        {
+            var ok = new HashSet<int>();
+            var needProducer = new List<AgentTask>();
+            foreach (AgentTask t in tasks)
+            {
+                if (_catalog.Find(t.StepCode) is IAgentReturnable) ok.Add(t.Id);
+                else if (!IsInputRow(t)) needProducer.Add(t);
+            }
+            if (needProducer.Count == 0) return ok;
+            List<string> types = needProducer.Select(t => t.TargetType).Distinct().ToList();
+            List<int> ids = needProducer.Select(t => t.TargetId).Distinct().ToList();
+            List<AgentTask> candidates = await _uow.Set<AgentTask>().AsNoTracking().Where(p => !p.Deleted && p.Kind == AgentStepKind.Agent && p.State == AgentTaskState.Done && types.Contains(p.TargetType) && ids.Contains(p.TargetId)).ToListAsync(ct);
+            foreach (AgentTask t in needProducer)
+            {
+                Func<AgentTask, bool> rule = ProducerOf(t).Compile();
+                if (candidates.Any(rule)) ok.Add(t.Id);
+            }
+            return ok;
+        }
+
+        private static AgentInboxItemDto ToDto(AgentTask t, DateTimeOffset now, bool canReturn = false)
         {
             var d = new AgentInboxItemDto
             {
                 Id = t.Id, StepCode = t.StepCode, Station = t.Station, AgentCode = t.AgentCode, Kind = t.Kind, State = t.State, Title = t.Title, TargetType = t.TargetType, TargetId = t.TargetId,
                 TargetNumber = t.TargetNumber, ContractId = t.ContractId, Summary = t.Summary, OutputType = t.OutputType, OutputNumber = t.OutputNumber, GateRoles = t.GateRoles, Link = t.Link,
-                CreatedAt = t.CreateDate, DueAt = t.DueAt, IsFallback = t.IsFallback, LastError = t.LastError, ReturnReason = t.ReturnReason,
+                CreatedAt = t.CreateDate, DueAt = t.DueAt, IsFallback = t.IsFallback, LastError = t.LastError, ReturnReason = t.ReturnReason, CanReturn = canReturn,
             };
             AgentTaskView.Fill(d, now);
             return d;
@@ -111,7 +149,8 @@ namespace Services.NasbNiro.Agents
                 };
             }
             // the late ones first, then the oldest
-            List<AgentInboxItemDto> rows = mine.Select(t => ToDto(t, now)).OrderByDescending(d => d.Overdue).ThenBy(d => d.Id).ToList();
+            HashSet<int> returnable = await ReturnableIdsAsync(mine, ct);
+            List<AgentInboxItemDto> rows = mine.Select(t => ToDto(t, now, returnable.Contains(t.Id))).OrderByDescending(d => d.Overdue).ThenBy(d => d.Id).ToList();
             int size = query.PageSize <= 0 ? 0 : Math.Min(query.PageSize, 200);
             return ResponseDtoHelper.Ok(await PagedList<AgentInboxItemDto>.CreateAsync(rows, query.PageNumber, size, ct));
         }
@@ -156,8 +195,7 @@ namespace Services.NasbNiro.Agents
             else
             {
                 // no return action of its own: the agent that prepared the document does its step again
-                AgentTask producer = await _uow.Set<AgentTask>().Where(t => !t.Deleted && t.Id != task.Id && t.TargetType == task.TargetType && t.TargetId == task.TargetId && t.Kind == AgentStepKind.Agent
-                    && t.State == AgentTaskState.Done).OrderByDescending(t => t.Id).FirstOrDefaultAsync(ct);
+                AgentTask producer = await FindProducerAsync(task, ct);
                 if (producer == null) return AgentText.Bad<AgentInboxItemDto>(AgentText.NoProducer);
                 bool open = await _uow.Set<AgentTask>().AnyAsync(t => !t.Deleted && t.StepCode == producer.StepCode && t.TargetType == producer.TargetType && t.TargetId == producer.TargetId && t.State < AgentTaskState.Done, ct);
                 if (open) return AgentText.Bad<AgentInboxItemDto>(AgentText.ProducerBusy);
