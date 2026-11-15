@@ -26,6 +26,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddFinanceConfigurations();
             builder.AddLedgerConfigurations();
             builder.AddAssetsPayrollConfigurations();
+            builder.AddSepidarTransferConfigurations();   // Sepidar transfer per document (SpTransferType, SpOutboxItem, SpOutboxAttempt)
             builder.AddCompletenessConfigurations();
             builder.AddCompletenessM2Configurations();
             builder.AddCompletenessM3Configurations();

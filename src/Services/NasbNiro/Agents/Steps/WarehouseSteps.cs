@@ -12,7 +12,9 @@ using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.ProjectBalance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Entities.Model.NasbNiro.Quality;
 using Services.NasbNiro.Inventory;
+using Services.NasbNiro.Quality;
 using Services.NasbNiro.ProjectBalance;
 using ViewModels.NasbNiro.InventoryDtos;
 using ViewModels.NasbNiro.ProjectBalanceDtos;
@@ -30,6 +32,7 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, KitDraftStep>();
             services.AddScoped<IAgentStep, MaterialRequestSubmitStep>();
             services.AddScoped<IAgentStep, MaterialRequestApproveStep>();
+            services.AddScoped<IAgentStep, IssueDraftStep>();
             services.AddScoped<IAgentStep, MaterialIssueStep>();
             services.AddScoped<IAgentStep, DocumentConfirmStep>();
             services.AddScoped<IAgentStep, InspectionStep>();
@@ -173,6 +176,139 @@ namespace Services.NasbNiro.Agents.Steps
         }
     }
 
+    /// <summary>
+    /// The planning of the draft issue of the warehouse agent: everything is loaded once and computed in memory, so the discovery stays bounded (at most one page of requests per run). A request is planned only when the
+    /// draft can really be saved and later confirmed: plain (not lot or serial tracked) lines, one warehouse of a usable kind (the warehouse named on the request when it names one), the project rule of the warehouse,
+    /// no open nonconformity report on an item, and enough free stock (the stock less the other open drafts, the sales reservations and what the plans of this run already took).
+    /// </summary>
+    internal static class IssueDraftPlanner
+    {
+        /// <summary>The description of every draft the agent makes; also the mark that a request was drafted by the agent once (a deleted or rejected draft is not made again).</summary>
+        public const string AgentDraftDescription = "پیش‌نویس حواله ساخته‌شده توسط ایجنت انبار";
+
+        /// <summary>The warehouse kinds that an agent draft may take stock from.</summary>
+        public static readonly WarehouseKind[] UsableKinds = { WarehouseKind.General, WarehouseKind.RawMaterial, WarehouseKind.Parts, WarehouseKind.FinishedGoods };
+
+        public sealed class Plan
+        {
+            public int WarehouseId { get; set; }
+            public List<SaveDocumentLineDto> Lines { get; set; }
+        }
+
+        /// <summary>Open requests that no draft (live) and no earlier agent draft (any state) covers, and whose open lines are all plain items with stock somewhere.</summary>
+        public static IQueryable<MaterialRequest> Candidates(IUnitOfWork uow)
+        {
+            IQueryable<InventoryDocument> drafts = uow.Set<InventoryDocument>().AsNoTracking().Where(d => !d.Deleted && d.Status == InventoryDocumentStatus.Draft && d.MaterialRequestId != null);
+            IQueryable<InventoryDocument> byAgent = uow.Set<InventoryDocument>().AsNoTracking().Where(d => d.MaterialRequestId != null && d.Type == InventoryDocumentType.Issue && d.Description != null && d.Description.StartsWith(AgentDraftDescription));
+            IQueryable<StockBalance> balances = uow.Set<StockBalance>().AsNoTracking();
+            return uow.Set<MaterialRequest>().AsNoTracking().Where(m => !m.Deleted && m.Status == MaterialRequestStatus.Approved && m.Lines.Any(l => l.IssuedQuantity < l.Quantity)
+                && !drafts.Any(d => d.MaterialRequestId == m.Id) && !byAgent.Any(d => d.MaterialRequestId == m.Id)
+                && !m.Lines.Any(l => l.IssuedQuantity < l.Quantity && (l.Item.TrackingMode != ItemTrackingMode.None
+                    || balances.Where(b => b.ItemId == l.ItemId && b.LotId == null).Sum(b => b.Quantity) < l.Quantity - l.IssuedQuantity)));
+        }
+
+        /// <summary>The plan of each request that can be drafted now (requests without a plan are not in the answer). Processed in the order of the ids; the stock one plan takes is not taken again.</summary>
+        public static async Task<Dictionary<int, Plan>> PlanAsync(IUnitOfWork uow, IReadOnlyCollection<int> requestIds, CancellationToken ct)
+        {
+            var result = new Dictionary<int, Plan>();
+            if (requestIds.Count == 0) return result;
+            List<int> ids = requestIds.Distinct().OrderBy(x => x).ToList();
+            var requests = await uow.Set<MaterialRequest>().AsNoTracking().Where(m => ids.Contains(m.Id)).Select(m => new { m.Id, m.WarehouseId, m.WorkOrderId }).ToListAsync(ct);
+            var lineRows = await uow.Set<MaterialRequestLine>().AsNoTracking().Where(l => ids.Contains(l.MaterialRequestId) && l.IssuedQuantity < l.Quantity)
+                .OrderBy(l => l.MaterialRequestId).ThenBy(l => l.RowNumber).Select(l => new { l.MaterialRequestId, l.ItemId, Open = l.Quantity - l.IssuedQuantity }).ToListAsync(ct);
+            int[] itemIds = lineRows.Select(l => l.ItemId).Distinct().ToArray();
+            if (itemIds.Length == 0) return result;
+
+            var warehouses = (await uow.Set<Warehouse>().AsNoTracking().Where(w => !w.Deleted && w.IsActive).Select(w => new { w.Id, w.Kind, w.WorkOrderId }).ToListAsync(ct))
+                .Where(w => UsableKinds.Contains(w.Kind)).OrderBy(w => w.Id).ToList();
+            int[] warehouseIds = warehouses.Select(w => w.Id).ToArray();
+            var balances = await uow.Set<StockBalance>().AsNoTracking().Where(b => itemIds.Contains(b.ItemId) && b.LotId == null && b.Quantity > 0 && warehouseIds.Contains(b.WarehouseId))
+                .OrderBy(b => b.WarehouseId).ThenBy(b => b.Id).Select(b => new { b.ItemId, b.WarehouseId, b.LocationId, b.Quantity }).ToListAsync(ct);
+
+            // what other open drafts already take, per warehouse and item (any document that takes stock out of its source warehouse)
+            var draftLines = await uow.Set<InventoryDocumentLine>().AsNoTracking()
+                .Where(l => itemIds.Contains(l.ItemId) && !l.Document.Deleted && l.Document.Status == InventoryDocumentStatus.Draft)
+                .Select(l => new { l.Document.Type, l.Document.WarehouseId, l.ItemId, l.Quantity }).ToListAsync(ct);
+            var taken = new Dictionary<(int Warehouse, int Item), decimal>();
+            foreach (var d in draftLines.Where(x => InventoryDocumentRules.IsOutgoing(x.Type) || InventoryDocumentRules.IsTransfer(x.Type)))
+                taken[(d.WarehouseId, d.ItemId)] = (taken.TryGetValue((d.WarehouseId, d.ItemId), out decimal t) ? t : 0m) + d.Quantity;
+            Dictionary<int, decimal> reserved = await Sales.SlReservations.ReservedAsync(uow, itemIds, ct);
+
+            // an open nonconformity report on an item holds its goods
+            HashSet<int> heldItems = (await uow.Set<NonConformance>().AsNoTracking().Where(n => !n.Deleted && (n.Status == NcrStatus.Open || n.Status == NcrStatus.Approved) && itemIds.Contains(n.ItemId)).ToListAsync(ct))
+                .Where(n => NonconformingHoldRules.Holds(n)).Select(n => n.ItemId).ToHashSet();
+
+            var total = balances.GroupBy(b => b.ItemId).ToDictionary(g => g.Key, g => g.Sum(b => b.Quantity) - taken.Where(k => k.Key.Item == g.Key).Sum(k => k.Value) - (reserved.TryGetValue(g.Key, out decimal r) ? r : 0m));
+
+            foreach (var request in requests.OrderBy(r => r.Id))
+            {
+                var needs = lineRows.Where(l => l.MaterialRequestId == request.Id).GroupBy(l => l.ItemId).Select(g => new { ItemId = g.Key, Open = g.Sum(x => x.Open) }).ToList();
+                if (needs.Count == 0 || needs.Any(n => heldItems.Contains(n.ItemId) || !total.TryGetValue(n.ItemId, out decimal free) || free < n.Open)) continue;
+                foreach (var warehouse in warehouses)
+                {
+                    if (request.WarehouseId.HasValue && request.WarehouseId.Value != warehouse.Id) continue;
+                    if (warehouse.WorkOrderId.HasValue && request.WorkOrderId.HasValue && warehouse.WorkOrderId != request.WorkOrderId) continue;
+                    var lines = new List<SaveDocumentLineDto>();
+                    bool all = true;
+                    foreach (var need in needs)
+                    {
+                        decimal inWarehouse = balances.Where(b => b.WarehouseId == warehouse.Id && b.ItemId == need.ItemId).Sum(b => b.Quantity) - (taken.TryGetValue((warehouse.Id, need.ItemId), out decimal t) ? t : 0m);
+                        var row = balances.FirstOrDefault(b => b.WarehouseId == warehouse.Id && b.ItemId == need.ItemId && b.Quantity >= need.Open);
+                        if (row == null || inWarehouse < need.Open) { all = false; break; }
+                        lines.Add(new SaveDocumentLineDto { ItemId = need.ItemId, Quantity = need.Open, LocationId = row.LocationId });
+                    }
+                    if (!all) continue;
+                    foreach (var line in lines)
+                    {
+                        taken[(warehouse.Id, line.ItemId)] = (taken.TryGetValue((warehouse.Id, line.ItemId), out decimal t) ? t : 0m) + line.Quantity;
+                        total[line.ItemId] -= line.Quantity;
+                    }
+                    result[request.Id] = new Plan { WarehouseId = warehouse.Id, Lines = lines };
+                    break;
+                }
+            }
+            return result;
+        }
+    }
+
+    /// <summary>WH.ISSUE.DRAFT (Agent): an approved material request with a quantity left to issue, no draft issue yet (and never one made by the agent before), and enough plain (not lot or serial tracked) free stock in ONE usable warehouse for every open line gets a DRAFT issue
+    /// from the warehouse agent. The draft is never confirmed here: the storekeeper counts and hands over the goods and confirms it (WH.DOC.CONFIRM). Requests that need a lot or serial choice, or stock from several warehouses, stay with the storekeeper (WH.MR.ISSUE).</summary>
+    internal sealed class IssueDraftStep : WhStep
+    {
+        public override string Code => "WH.ISSUE.DRAFT";
+        public override string AgentCode => AgentCodes.Wh;
+        public override string Title => "ایجنت انبار: پیش‌نویس حواله برای درخواست کالای تاییدشده";
+        public override AgentStepKind Kind => AgentStepKind.Agent;
+        public override string FallbackRoles => InventoryRoles.RoleWarehouse;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await IssueDraftPlanner.Candidates(uow).OrderBy(m => m.Id).Take(ProcStepCommon.Cap)
+                .Select(m => new { m.Id, m.Number, m.WorkOrderId, ContractId = m.WorkOrderId == null ? (int?)null : m.WorkOrder.ContractId, Open = m.Lines.Count(l => l.IssuedQuantity < l.Quantity) }).ToListAsync(ct);
+            Dictionary<int, IssueDraftPlanner.Plan> plans = await IssueDraftPlanner.PlanAsync(uow, rows.Select(r => r.Id).ToList(), ct);
+            return rows.Where(m => plans.ContainsKey(m.Id)).Select(m => Item("MaterialRequest", m.Id, m.Number, m.ContractId, m.WorkOrderId, $"{m.Open} ردیف درخواست تاییدشده موجودی آزاد کافی در یک انبار دارد و حواله پیش‌نویس ندارد.")).ToList();
+        }
+
+        public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
+        {
+            IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
+            if (!await IssueDraftPlanner.Candidates(uow).AnyAsync(m => m.Id == item.TargetId, ct)) return AgentStepResult.Waiting("درخواستی که حواله پیش‌نویس نداشته باشد و موجودی کافی داشته باشد پیدا نشد.");
+            var plan = (await IssueDraftPlanner.PlanAsync(uow, new[] { item.TargetId }, ct)).GetValueOrDefault(item.TargetId);
+            if (plan == null) return AgentStepResult.Waiting("موجودی آزاد ساده در یک انبار قابل‌استفاده برای همهٔ ردیف‌ها نیست؛ انباردار حواله را تنظیم می‌کند.");
+            ResponseDto<DocumentDto> saved = await services.GetRequiredService<IInventoryDocumentService>().SaveDraftAsync(new SaveDocumentDto
+            {
+                Type = InventoryDocumentType.Issue, DocumentDate = DateTime.Today, WarehouseId = plan.WarehouseId, MaterialRequestId = item.TargetId, WorkOrderId = item.WorkOrderId, ContractId = item.ContractId,
+                Description = IssueDraftPlanner.AgentDraftDescription + "؛ انباردار پس از شمارش و تحویل کالا آن را تایید می‌کند.", Lines = plan.Lines,
+            }, ct);
+            if (!saved.Success) return ProcStepCommon.Refusal(saved);
+            string draft = string.IsNullOrWhiteSpace(saved.Data.Number) ? "(شمارهٔ " + saved.Data.Id.ToString(CultureInfo.InvariantCulture) + ")" : saved.Data.Number;
+            string request = string.IsNullOrWhiteSpace(item.TargetNumber) ? "(شمارهٔ " + item.TargetId.ToString(CultureInfo.InvariantCulture) + ")" : item.TargetNumber;
+            return AgentStepResult.Done("InventoryDocument", saved.Data.Id, saved.Data.Number, $"ایجنت انبار حواله پیش‌نویس {draft} را برای درخواست {request} ساخت؛ تایید با انباردار است.");
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = InventoryRoles.RoleWarehouse, Link = MrLink(item.TargetId), Title = "پیش‌نویس حواله برای درخواست " + item.TargetNumber };
+    }
+
     /// <summary>WH.MR.ISSUE: an approved material request with a quantity left to issue is picked and issued by the warehouse (physical work).</summary>
     internal sealed class MaterialIssueStep : WhStep
     {
@@ -184,10 +320,19 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             IQueryable<InventoryDocument> drafts = uow.Set<InventoryDocument>().AsNoTracking().Where(d => !d.Deleted && d.Status == InventoryDocumentStatus.Draft && d.MaterialRequestId != null);
+            // a request that the warehouse agent is drafting (an open WH.ISSUE.DRAFT task) or can draft now is not given to the storekeeper as well: one task per request
+            IQueryable<int> drafting = uow.Set<AgentTask>().AsNoTracking().Where(t => !t.Deleted && t.StepCode == "WH.ISSUE.DRAFT" && t.TargetType == "MaterialRequest" && t.State < AgentTaskState.Done).Select(t => t.TargetId);
             var rows = await uow.Set<MaterialRequest>().AsNoTracking().Where(m => !m.Deleted && m.Status == MaterialRequestStatus.Approved && m.Lines.Any(l => l.IssuedQuantity < l.Quantity)
-                                                                                 && !drafts.Any(d => d.MaterialRequestId == m.Id))
+                                                                                 && !drafts.Any(d => d.MaterialRequestId == m.Id) && !drafting.Contains(m.Id))
                 .OrderBy(m => m.Id).Take(ProcStepCommon.Cap)
                 .Select(m => new { m.Id, m.Number, m.WorkOrderId, ContractId = m.WorkOrderId == null ? (int?)null : m.WorkOrder.ContractId, Open = m.Lines.Count(l => l.IssuedQuantity < l.Quantity) }).ToListAsync(ct);
+            if (rows.Count > 0)
+            {
+                List<int> ids = rows.Select(r => r.Id).ToList();
+                List<int> draftable = await IssueDraftPlanner.Candidates(uow).Where(m => ids.Contains(m.Id)).Select(m => m.Id).ToListAsync(ct);
+                Dictionary<int, IssueDraftPlanner.Plan> plans = await IssueDraftPlanner.PlanAsync(uow, draftable, ct);
+                rows = rows.Where(r => !plans.ContainsKey(r.Id)).ToList();
+            }
             return rows.Select(m => Item("MaterialRequest", m.Id, m.Number, m.ContractId, m.WorkOrderId, $"{m.Open} ردیف درخواست تاییدشده هنوز کامل حواله نشده است.")).ToList();
         }
 

@@ -263,6 +263,7 @@ namespace MsTests
             CollectionAssert.AreEquivalent(new[]
             {
                 "SV.UNIT.CONFIRM", "SV.ORDER.DRAFT", "SV.ORDER.START", "SV.ORDER.FIELDWORK", "SV.GOODWILL.DECIDE", "SV.WARRANTY.DECIDE", "SV.ORDER.CLOSE", "SV.INVOICE.DRAFT",
+                "SV.REQUEST.ASSIGN", "SV.REQUEST.RESOLVE", "SV.REQUEST.CLOSE",
             }, steps.Select(s => s.Code).ToList());
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-SERVICE"));
             CollectionAssert.AreEquivalent(new[] { "SV.ORDER.DRAFT", "SV.INVOICE.DRAFT" }, steps.Where(s => s.Kind == AgentStepKind.Agent).Select(s => s.Code).ToList());

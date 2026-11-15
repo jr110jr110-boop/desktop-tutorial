@@ -83,6 +83,28 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = ProcurementRoles.Commercial, Link = InquiryText.Link(item), Title = "ثبت پیشنهادهای استعلام " + item.TargetNumber };
     }
 
+    /// <summary>PROC.INQUIRY.FIX: a returned inquiry goes back in front of the buyer (its maker role) with the reason; it closes when the buyer makes the next revision (the old one is then superseded) or cancels it.</summary>
+    internal sealed class FixInquiryStep : ProcStep
+    {
+        public override string Code => "PROC.INQUIRY.FIX";
+        public override string AgentCode => AgentCodes.Proc;
+        public override string Title => "اصلاح و ارسال دوباره استعلام برگشتی";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<PurchaseInquiry>().AsNoTracking()
+                .Where(i => !i.Deleted && i.Status == InquiryStatus.Returned && i.SupersededByInquiryId == null
+                    && i.PurchaseRequest.Status != PurchaseRequestStatus.Closed && i.PurchaseRequest.Status != PurchaseRequestStatus.Rejected && !i.PurchaseRequest.Deleted)
+                .OrderBy(i => i.Id).Take(ProcStepCommon.Cap)
+                .Select(i => new { i.Id, i.Number, ContractId = i.PurchaseRequest.ContractId, i.PurchaseRequest.WorkOrderId, i.ReturnReason }).ToListAsync(ct);
+            return rows.Select(r => Item("PurchaseInquiry", r.Id, r.Number, r.ContractId, r.WorkOrderId,
+                "استعلام برگشت خورده است؛ نسخه جدید بسازید یا آن را ابطال کنید." + (string.IsNullOrWhiteSpace(r.ReturnReason) ? "" : " علت: " + r.ReturnReason))).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = ProcurementRoles.Commercial, Link = InquiryText.Link(item), Title = "اصلاح استعلام برگشتی " + item.TargetNumber };
+    }
+
     /// <summary>PROC.INQ.TECH: engineering or quality judges each quote (never the person who registered the inquiry).</summary>
     internal sealed class TechnicalGateStep : ProcStep
     {

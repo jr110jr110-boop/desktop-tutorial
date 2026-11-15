@@ -191,11 +191,11 @@ namespace MsTests
             using IServiceScope scope = e.Host.Provider.CreateScope();
             List<IAgentStep> steps = scope.ServiceProvider.GetServices<IAgentStep>().ToList();
             var procurement = steps.Where(s => s.Station == 6 && s.Code != null && !s.Code.StartsWith("TEST.")).ToList();
-            Assert.AreEqual(155, steps.Count, "the registrations of the application");
-            Assert.AreEqual(155, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
-            Assert.AreEqual(33, procurement.Count, "the station 6 steps");
+            Assert.AreEqual(164, steps.Count, "the registrations of the application");
+            Assert.AreEqual(164, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
+            Assert.AreEqual(34, procurement.Count, "the station 6 steps");
             IAgentStepCatalog catalog = scope.ServiceProvider.GetRequiredService<IAgentStepCatalog>();
-            Assert.AreEqual(155, catalog.All.Count);
+            Assert.AreEqual(164, catalog.All.Count);
             foreach (IAgentStep s in steps)
             {
                 AiSeatDefinition seat = AiSeatCatalog.Find(s.AgentCode);
@@ -215,7 +215,7 @@ namespace MsTests
             string[] agentSteps = steps.Where(s => s.Kind == AgentStepKind.Agent).Select(s => s.Code).OrderBy(c => c, StringComparer.Ordinal).ToArray();
             CollectionAssert.AreEqual(new[]
             {
-                "CON.REVIEW.DRAFT", "CON.TERMS.DRAFT", "ENG.INSTANTIATE", "FIN.SEPIDAR.GENERATE", "FIN.STATEMENT.DRAFT", "FIN.STATEMENT.PAYREQUEST", "FIN.STATEMENT.PREPARE", "INIT.BOM", "INIT.CHARTER.DRAFT", "INIT.CODE", "INIT.PEP.DRAFT", "INIT.START", "INIT.UNITS", "MF.COMPONENTS", "MF.ORDERS.DRAFT", "MF.RELEASE.CHECK", "PLAN.BALANCE.RUN", "PLAN.BASELINE.CREATE", "PLAN.CPM", "PLAN.ITP.ACTIVITIES", "PLAN.PR.BOM", "PLAN.WBS.DICTIONARY", "PLAN.WBS.GENERATE", "PLAN.WEIGHTS", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PO.REQUIREMENTS", "PROC.PR.PRICE.AUTO.PLAN", "PROC.PR.PRICE.AUTO.WH", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "QC.CAPA.IMPLEMENT", "QC.ITP.ENSURE", "QC.ITP.SUBMIT", "QC.ITP.USE", "QC.RELEASE.DRAFT", "RES.COST.PROPOSE", "RES.LEVEL.PROPOSE", "RES.LOAD.CHECK", "RES.PLAN.DRAFT", "SHIP.DRAFT", "SL.BID.SUBMIT", "SL.ESTIMATE.FROM-EQUIPMENT", "SL.PROPOSAL.DRAFT", "SV.INVOICE.DRAFT", "SV.ORDER.DRAFT", "WH.KIT.DRAFT", "WH.MR.SUBMIT", "WH.PR.REORDER"
+                "CON.REVIEW.DRAFT", "CON.TERMS.DRAFT", "ENG.INSTANTIATE", "FIN.SEPIDAR.GENERATE", "FIN.STATEMENT.DRAFT", "FIN.STATEMENT.PAYREQUEST", "FIN.STATEMENT.PREPARE", "INIT.BOM", "INIT.CHARTER.DRAFT", "INIT.CODE", "INIT.PEP.DRAFT", "INIT.START", "INIT.UNITS", "MF.COMPONENTS", "MF.ORDERS.DRAFT", "MF.RELEASE.CHECK", "PLAN.BALANCE.RUN", "PLAN.BASELINE.CREATE", "PLAN.CPM", "PLAN.ITP.ACTIVITIES", "PLAN.PR.BOM", "PLAN.WBS.DICTIONARY", "PLAN.WBS.GENERATE", "PLAN.WEIGHTS", "PROC.INQ.OPEN", "PROC.INQ.SELECT", "PROC.PAY.DRAFT", "PROC.PO.DRAFT", "PROC.PO.REQUIREMENTS", "PROC.PR.PRICE.AUTO.PLAN", "PROC.PR.PRICE.AUTO.WH", "PROC.PR.REVISE.PLAN", "PROC.PR.REVISE.WH", "PROC.PR.SUBMIT.PLAN", "PROC.PR.SUBMIT.WH", "QC.CAPA.IMPLEMENT", "QC.ITP.ENSURE", "QC.ITP.SUBMIT", "QC.ITP.USE", "QC.RELEASE.DRAFT", "RES.COST.PROPOSE", "RES.LEVEL.PROPOSE", "RES.LOAD.CHECK", "RES.PLAN.DRAFT", "SHIP.DRAFT", "SL.BID.SUBMIT", "SL.ESTIMATE.FROM-EQUIPMENT", "SL.PROPOSAL.DRAFT", "SP.OUTBOX.PREPARE", "SP.OUTBOX.SEND", "SV.INVOICE.DRAFT", "SV.ORDER.DRAFT", "WH.ISSUE.DRAFT", "WH.KIT.DRAFT", "WH.MR.SUBMIT", "WH.PR.REORDER"
             }, agentSteps);
             // the two registrations of one class have distinct codes and distinct agents
             Assert.AreEqual("AG-WH", steps.Single(s => s.Code == "PROC.PR.SUBMIT.WH").AgentCode);

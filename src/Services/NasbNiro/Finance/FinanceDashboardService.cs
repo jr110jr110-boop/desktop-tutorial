@@ -83,6 +83,13 @@ namespace Services.NasbNiro.Finance
             if (d.UnapprovedReconciliations > 0) d.Alerts.Add($"{d.UnapprovedReconciliations} مغایرت‌گیری بانکی تایید نشده است.");
             if (d.ReceivablesOverdue > 0) d.Alerts.Add($"مطالبات سررسیدگذشته: {d.ReceivablesOverdue:0} ریال.");
             if (d.SetupProblems > 0) d.Alerts.Add($"{d.SetupProblems} مورد تنظیمات مالی ناقص است.");
+            if (_user.IsInRole(Sp.SpRoles.Readers))
+            {
+                // the failed Sepidar items: for the readers of that page only (the restricted ones only for the readers of payroll)
+                bool seesPay = Production.MfPrivacy.SeesPayroll(_user);
+                int sepidarFailed = await _uow.Set<Entities.Model.NasbNiro.Finance.SpOutboxItem>().AsNoTracking().CountAsync(i => i.Status == Entities.Model.NasbNiro.Finance.SpOutboxStatus.Failed && (seesPay || !i.PayrollRestricted), ct);
+                if (sepidarFailed > 0) d.Alerts.Add($"{sepidarFailed} قلم انتقال به سپیدار ناموفق مانده است.");
+            }
             return ResponseDtoHelper.Ok(d);
         }
 
@@ -172,6 +179,13 @@ namespace Services.NasbNiro.Finance
             Alert(dto.IssuedChequesDue7Amount > dto.CashAndBank, "danger", "چک‌های صادره ۷ روز آینده از نقد و بانک بیشتر است", "/fn/treasury/cash-position");
             Alert(dto.ReceivablesOverdue > 0, "warning", $"مطالبات سررسیدگذشته {dto.ReceivablesOverdue:0} ریال", "/fn/receivables/ageing");
             Alert(dto.FinanceSetupProblems > 0, "warning", $"{dto.FinanceSetupProblems} مورد تنظیمات مالی ناقص است", "/fn/setup-check");
+            // the failed Sepidar items are shown to the readers of that page only (and the restricted ones only to the readers of payroll)
+            if (_user.IsInRole(Sp.SpRoles.Readers))
+            {
+                bool sees = Production.MfPrivacy.SeesPayroll(_user);
+                int sepidarFailed = await _uow.Set<Entities.Model.NasbNiro.Finance.SpOutboxItem>().AsNoTracking().CountAsync(i => i.Status == Entities.Model.NasbNiro.Finance.SpOutboxStatus.Failed && (sees || !i.PayrollRestricted), ct);
+                Alert(sepidarFailed > 0, "warning", $"{sepidarFailed} قلم انتقال به سپیدار ناموفق مانده است", "/fn/sepidar-transfer");
+            }
             return dto;
         }
     }

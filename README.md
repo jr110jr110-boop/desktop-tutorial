@@ -96,3 +96,31 @@
 
 
 جزئیات و توضیحات بیشتر این موارد را می‌توانید در گروه [ASP.NET Core Identity](http://www.dotnettips.info/search/label/asp.net%20core%20identity) پیگیری نمائید.
+
+Sepidar transfer (sender configuration)
+------
+Finance work is done inside Orchestra. Only the kinds of documents that the owner switches on (page «انتقال به سپیدار», kinds all OFF by default) are queued as items; a person approves each item; then the configured sender hands it over. The sender is chosen by configuration, never in code:
+
+| Setting | Meaning |
+|---|---|
+| `Sepidar:Sender` | `None` (default: approved items wait in the queue, nothing is sent, no error), `File` or `Api` |
+| `Sepidar:FileDropFolder` | for `File`: the folder where each approved item is written as one JSON file (`sepidar-<itemId>-<hash16>.json`); a path with `..` is refused; a repeat of the same item writes the same file |
+| `Sepidar:MaxAttempts` | automatic send attempts per item (default 5, 1 to 20); waits between failures: 5 minutes, 30 minutes, 2 hours, 12 hours; after the last one the item stays failed until a person retries or cancels it |
+| `Sepidar:Api:BaseUrl` and credentials | reserved for the real API client (user secrets or environment variables only; never in `appsettings.json`, never logged) |
+
+`Api` is a placeholder (`ApiSepidarSender`, `IsConfigured` is false): the real client is written there when the owner delivers the Sepidar API. Use the key `item id + ":" + payload hash` (`SepidarEnvelope.IdempotencyKey`) as the idempotency key of the call.
+
+**Drop-folder permissions (`Sepidar:Sender = File`).** The folder in `Sepidar:FileDropFolder` must exist and be writable by the account that runs the API process (and only by it plus the account that picks the files up for Sepidar); the sender never creates parents, never follows a path with `..`, and a missing or unwritable folder is a refused attempt with a short Persian text (the exception text, which may hold a path, is never shown). Files hold the transferred data of finance documents: keep the folder off shared drives. The two keys that matter in operation are `Sepidar:Sender` and `Sepidar:MaxAttempts`; `Sepidar:FileDropFolder` is needed only for `File`.
+
+**Who does what.** Reading the page: finance manager, CEO, auditor. Approving, rejecting, retrying and cancelling an item: finance manager or CEO, never the maker or editor of the source document and never an AI seat. Switching a kind on or off: finance manager or CEO. A kind is switched on with a first day (`FromDate`): only documents finalised on or after that day are queued. A restricted item (a payroll total, or a voucher with a protected labour line or a line on an employee detail account) is visible only to the readers of payroll (payroll, finance manager, CEO) in the list, the detail, the summary and the task texts.
+
+**Old monthly packages and the new per-document transfer (page «بسته‌های ماهانهٔ سپیدار», api `finance/sepidar`).** The same data must not reach Sepidar twice: a kind cannot be switched on while an old package of the kind in the table below exists (not superseded, not rejected) whose period ends on or after the first day of the new kind. Choose a first day after the last monthly package, or retire the monthly packages of that period first.
+
+| Per-document kind | Old monthly package kinds that carry the same data |
+|---|---|
+| `SALES_INVOICE` | sales invoices for the taxpayers' system, VAT return |
+| `PURCHASE_INVOICE` | VAT return |
+| `PAYROLL_SUMMARY` | payroll insurance list, payroll tax list |
+| `VOUCHER`, `RECEIPT`, `PAYMENT` | none |
+
+Not done on purpose: the monthly background job is not switched off by the new transfer (the check above is the guard); the fixed-asset voucher and other auto vouchers are ordinary vouchers and follow the `VOUCHER` kind.

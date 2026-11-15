@@ -32,6 +32,9 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, SvWarrantyDecideStep>();
             services.AddScoped<IAgentStep, SvOrderCloseStep>();
             services.AddScoped<IAgentStep, SvInvoiceDraftStep>();
+            services.AddScoped<IAgentStep, SvRequestAssignStep>();
+            services.AddScoped<IAgentStep, SvRequestResolveStep>();
+            services.AddScoped<IAgentStep, SvRequestCloseStep>();
             return services;
         }
     }
@@ -47,6 +50,13 @@ namespace Services.NasbNiro.Agents.Steps
         protected static string UnitLink(int id) => "/service/units/" + id.ToString(CultureInfo.InvariantCulture);
         protected static string RequestLink(int id) => "/service/requests/" + id.ToString(CultureInfo.InvariantCulture);
         protected static string OrderLink(int id) => "/service/orders/" + id.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>The task goes to the person who owns the request (the assignee) when there is one; the roles stay as the fallback.</summary>
+        protected static AgentWorkItem Named(AgentWorkItem item, int? userId)
+        {
+            if (userId.HasValue && userId.Value > 0) { item.GateUserId = userId; item.GateRoles = null; }
+            return item;
+        }
 
         protected static DateTime Since(DateTime today) => today.Date.AddDays(-LiveDays);
 
@@ -246,5 +256,55 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = SvRoles.Writers, Link = OrderLink(item.TargetId), Title = "پیش‌نویس فاکتور دستور " + item.TargetNumber };
+    }
+
+    /// <summary>SV.REQUEST.ASSIGN (Input): an open request that nobody is responsible for yet: the service person names the responsible user (the request rules stay as they are).</summary>
+    internal sealed class SvRequestAssignStep : SvStep
+    {
+        public override string Code => "SV.REQUEST.ASSIGN";
+        public override string Title => "تعیین مسئول درخواست خدمات";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct) =>
+            (await uow.Set<SvServiceRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == SvRequestStatus.Open && r.AssignedToUserId == null && r.ReceivedAt >= Since(today))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap).Select(r => new { r.Id, r.Number }).ToListAsync(ct))
+                .Select(r => Item("SvServiceRequest", r.Id, r.Number, null, null, $"درخواست {r.Number} مسئول ندارد؛ مسئول پیگیری را تعیین کنید.", SvRoles.Writers)).ToList();
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = SvRoles.Writers, Link = RequestLink(item.TargetId), Title = "تعیین مسئول درخواست " + item.TargetNumber };
+    }
+
+    /// <summary>SV.REQUEST.RESOLVE (Input): every service order of the request is closed or cancelled (at least one closed) but the request is still open: the person writes the resolution.</summary>
+    internal sealed class SvRequestResolveStep : SvStep
+    {
+        public override string Code => "SV.REQUEST.RESOLVE";
+        public override string Title => "ثبت راه‌حل درخواست خدمات پس از بسته شدن دستورها";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct) =>
+            (await uow.Set<SvServiceRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status != SvRequestStatus.Resolved && r.Status != SvRequestStatus.Closed && r.ReceivedAt >= Since(today)
+                    // a request that needs no service order (spare parts, a technical question) is pushed to its resolution once somebody has taken it
+                    && (uow.Set<SvServiceOrder>().Any(o => o.RequestId == r.Id && !o.Deleted && o.Status == SvOrderStatus.Closed)
+                        || ((r.Type == SvRequestType.SpareParts || r.Type == SvRequestType.TechnicalQuery) && r.Status != SvRequestStatus.Open))
+                    && !uow.Set<SvServiceOrder>().Any(o => o.RequestId == r.Id && !o.Deleted && o.Status != SvOrderStatus.Closed && o.Status != SvOrderStatus.Cancelled))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap).Select(r => new { r.Id, r.Number, r.AssignedToUserId, r.Type }).ToListAsync(ct))
+                .Select(r => Named(Item("SvServiceRequest", r.Id, r.Number, null, null,
+                    r.Type == SvRequestType.SpareParts || r.Type == SvRequestType.TechnicalQuery ? $"درخواست {r.Number} نیازی به دستور خدمات ندارد؛ شرح پاسخ یا راه‌حل را ثبت کنید تا درخواست رفع شود." : $"دستورهای خدمات درخواست {r.Number} بسته شده‌اند؛ شرح راه‌حل را ثبت کنید تا درخواست رفع شود.", SvRoles.Writers), r.AssignedToUserId)).ToList();
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = item.GateUserId.HasValue ? null : SvRoles.Writers, UserId = item.GateUserId, Link = RequestLink(item.TargetId), Title = "ثبت راه‌حل درخواست " + item.TargetNumber };
+    }
+
+    /// <summary>SV.REQUEST.CLOSE (gate): a resolved request is closed by a person (only a resolved request can be closed).</summary>
+    internal sealed class SvRequestCloseStep : SvStep
+    {
+        public override string Code => "SV.REQUEST.CLOSE";
+        public override string Title => "بستن درخواست خدمات رفع‌شده";
+        public override AgentStepKind Kind => AgentStepKind.HumanGate;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct) =>
+            (await uow.Set<SvServiceRequest>().AsNoTracking().Where(r => !r.Deleted && r.Status == SvRequestStatus.Resolved && r.ReceivedAt >= Since(today))
+                .OrderBy(r => r.Id).Take(ProcStepCommon.Cap).Select(r => new { r.Id, r.Number, r.AssignedToUserId }).ToListAsync(ct))
+                .Select(r => Named(Item("SvServiceRequest", r.Id, r.Number, null, null, $"درخواست {r.Number} رفع شده است؛ پس از اطمینان از رضایت مشتری آن را ببندید.", SvRoles.Writers), r.AssignedToUserId)).ToList();
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = item.GateUserId.HasValue ? null : SvRoles.Writers, UserId = item.GateUserId, Link = RequestLink(item.TargetId), Title = "بستن درخواست " + item.TargetNumber };
     }
 }

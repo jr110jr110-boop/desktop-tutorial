@@ -41,6 +41,7 @@ namespace Services.NasbNiro.Agents.Steps
             // inquiry: opened by the procurement agent, quotes by the buyer, technical and planning gates, selection by the agent (or by the buyer when it cannot), committee
             services.AddScoped<IAgentStep, OpenInquiryStep>();
             services.AddScoped<IAgentStep, QuotesInputStep>();
+            services.AddScoped<IAgentStep, FixInquiryStep>();
             services.AddScoped<IAgentStep, TechnicalGateStep>();
             services.AddScoped<IAgentStep, PlanningGateStep>();
             services.AddScoped<IAgentStep, SelectQuoteStep>();

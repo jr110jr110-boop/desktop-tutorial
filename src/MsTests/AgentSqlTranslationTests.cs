@@ -118,6 +118,72 @@ namespace MsTests
             }
         }
 
+        /// <summary>Runs a query against the swallowing connection: only a failure to TRANSLATE counts (an empty reader cannot materialise rows).</summary>
+        private static void Probe(string what, Action run)
+        {
+            try { run(); }
+            catch (Exception ex)
+            {
+                string text = ex.ToString();
+                if (text.Contains("could not be translated") || text.Contains("cannot be translated") || text.Contains("LINQ expression") || text.Contains("Translation of"))
+                    Assert.Fail(what + ": " + ex.Message.Split('\n')[0]);
+            }
+        }
+
+        /// <summary>The Sepidar transfer: the queries behind prepare (a change check per kind), send, the fix gate and the approval gate, and the dashboard alert, translated for every kind without being run.</summary>
+        [TestMethod]
+        public void The_Queries_Behind_The_Sepidar_Transfer_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                foreach (Services.NasbNiro.Finance.Sp.SpSource source in Services.NasbNiro.Finance.Sp.SpCatalog.All)
+                {
+                    string need = Services.NasbNiro.Finance.Sp.SpFacts.NeedingWork(uow, source, DateTime.Today).OrderBy(r => r.Id).Select(r => r.Id).Take(Services.NasbNiro.Finance.Sp.SpFacts.Cap).ToQueryString();
+                    Assert.IsTrue(need.Contains("SpOutboxItems") && need.Contains("TOP("), source.Code + ": " + need);
+                    Assert.IsTrue(need.Contains("RowVersion"), source.Code + " compares the row version in SQL: " + need);
+                    string gone = Services.NasbNiro.Finance.Sp.SpFacts.NoLongerFinal(uow, source).OrderBy(i => i.Id).Take(Services.NasbNiro.Finance.Sp.SpFacts.Cap).ToQueryString();
+                    Assert.IsTrue(gone.Contains("SpOutboxItems") && gone.Contains("NOT EXISTS"), source.Code + " finds the items whose source is no longer final in SQL: " + gone);
+                }
+                string sendable = Services.NasbNiro.Finance.Sp.SpFacts.Sendable(uow, DateTimeOffset.Now).OrderBy(i => i.Id).Take(200).Select(i => new { i.Id, i.SourceNumber, i.AttemptCount, i.Title }).ToQueryString();
+                Assert.IsTrue(sendable.Contains("SpTransferTypes") && sendable.Contains("SpOutboxItems"), sendable);
+                Assert.IsTrue(Services.NasbNiro.Finance.Sp.SpFacts.NeedingFix(uow).OrderBy(i => i.Id).Take(200).ToQueryString().Contains("SpOutboxItems"));
+                Assert.IsTrue(Services.NasbNiro.Finance.Sp.SpFacts.OfEnabled(uow, Entities.Model.NasbNiro.Finance.SpOutboxStatus.AwaitingApproval).OrderBy(i => i.Id).Take(200).ToQueryString().Contains("SpTransferTypes"));
+                // the awaited ones run against the swallowing connection (the first-level queries of the steps)
+                foreach (IAgentStep step in scope.ServiceProvider.GetServices<IAgentStep>().Where(x => x.Code.StartsWith("SP.OUTBOX.", StringComparison.Ordinal)))
+                    Probe(step.Code, () => step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult());
+                string stale = Services.NasbNiro.Finance.Sp.SpFacts.StaleSendingToRecover(uow, DateTimeOffset.Now, false).OrderBy(i => i.Id).Take(50).ToQueryString();
+                Assert.IsTrue(stale.Contains("SpOutboxItems") && stale.Contains("LastAttemptAt"), stale);
+                string staleOff = Services.NasbNiro.Finance.Sp.SpFacts.StaleSendingToRecover(uow, DateTimeOffset.Now, true).OrderBy(i => i.Id).Take(50).ToQueryString();
+                Assert.IsTrue(staleOff.Contains("SpTransferTypes") && staleOff.Contains("SpOutboxItems"), staleOff);
+                Probe("sendable count", () => Services.NasbNiro.Finance.Sp.SpFacts.Sendable(uow, DateTimeOffset.Now).CountAsync().GetAwaiter().GetResult());
+                Probe("failed count", () => uow.Set<Entities.Model.NasbNiro.Finance.SpOutboxItem>().AsNoTracking().CountAsync(i => i.Status == Entities.Model.NasbNiro.Finance.SpOutboxStatus.Failed && (true || !i.PayrollRestricted)).GetAwaiter().GetResult());
+            }
+        }
+
+        /// <summary>The three gap steps (the returned inquiry, the service request and the issue draft): their discovery queries translate, including the ones that an empty answer never reaches.</summary>
+        [TestMethod]
+        public void The_Queries_Behind_The_Gap_Steps_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                string[] codes = { "PROC.INQUIRY.FIX", "SV.REQUEST.ASSIGN", "SV.REQUEST.RESOLVE", "SV.REQUEST.CLOSE", "WH.ISSUE.DRAFT" };
+                foreach (string code in codes)
+                {
+                    IAgentStep step = scope.ServiceProvider.GetServices<IAgentStep>().Single(x => x.Code == code);
+                    Probe(code, () => step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult());
+                }
+                // the stock plan of the issue draft runs only for a request that was found: translate it with sample ids
+                int[] ids = { 1, 2 };
+                string balances = uow.Set<Entities.Model.NasbNiro.Inventory.StockBalance>().AsNoTracking().Where(b => ids.Contains(b.ItemId) && b.LotId == null && b.Quantity > 0)
+                    .OrderBy(b => b.WarehouseId).ThenBy(b => b.Id).Select(b => new { b.ItemId, b.WarehouseId, b.LocationId, b.Quantity }).ToQueryString();
+                Assert.IsTrue(balances.Contains("StockBalances"), balances);
+            }
+        }
+
         /// <summary>Phase 4c: the queries behind the load check, the levelling steps and the load model translate to SQL Server without being run.</summary>
         [TestMethod]
         public void The_Queries_Behind_The_Load_And_Levelling_Steps_Translate_To_Sql_Server()
