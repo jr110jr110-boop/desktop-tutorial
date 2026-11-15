@@ -54,6 +54,10 @@ export const payrollStatuses: Record<number, string> = { 0: "پیش‌نویس",
 export const outboxKinds: Record<number, string> = {
   1: "فاکتورهای فروش (سامانه مودیان)", 2: "اظهارنامه ارزش افزوده فصلی", 3: "لیست بیمه حقوق", 4: "لیست مالیات حقوق",
 };
+/** SpOutboxStatus (Sepidar transfer per document): the same numbers as the API. */
+export const spStatuses: Record<number, string> = { 1: "پیش‌نویس", 2: "منتظر تایید", 3: "تاییدشده، آماده ارسال", 4: "در حال ارسال", 5: "ارسال‌شده", 6: "ناموفق", 7: "ردشده", 8: "لغوشده", 9: "جایگزین‌شده" };
+export const spStatusBadge = (s: number) => (s === 5 ? "ok" : s === 6 || s === 7 ? "bad" : s === 3 || s === 4 ? "info" : s === 2 ? "warn" : "");
+export const spAttemptOutcomes: Record<number, string> = { 0: "شروع شد", 1: "موفق", 2: "ناموفق" };
 export const outboxStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "آماده", 2: "خروجی گرفته شد", 3: "ارسال‌شده", 4: "پذیرفته‌شده", 5: "ردشده", 6: "جایگزین‌شده" };
 export const monthNames = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 export const seasonNames: Record<number, string> = { 1: "بهار", 2: "تابستان", 3: "پاییز", 4: "زمستان" };

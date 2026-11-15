@@ -347,6 +347,12 @@ export const FnRoles = {
   payrollReaders: list("PAYROLL,FINANCEMANAGER,CEO"),
   /** Sepidar outbox (payroll packages are filtered by payrollReaders in the API) */
   outbox: list("FINANCIAL,FINANCEMANAGER,TREASURY,CEO,PMO,PAYROLL,AUDITOR"),
+  /** Sepidar transfer per document (SpRoles in the API): the queue, the kinds and the summary are read by these roles only (the auditor reads, never decides) */
+  sepidarTransfer: list("FINANCEMANAGER,CEO,AUDITOR"),
+  /** approve, reject, retry and cancel an item (SpRoles.Deciders); the maker of the source document and an agent seat never approve (the server says so) */
+  sepidarTransferDeciders: ["FINANCEMANAGER", "CEO"],
+  /** switch a transferable kind on or off (SpRoles.TypeSwitchers) */
+  sepidarTransferSwitchers: list("FINANCEMANAGER,CEO"),
   /** prepares the non-payroll packages */
   outboxPrepare: list("FINANCIAL,FINANCEMANAGER"),
   // release F3

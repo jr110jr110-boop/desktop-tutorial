@@ -509,6 +509,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: "/fn/payroll/payslips", name: "FnPayslips", component: () => import("@/views/fn/Payslips.vue"), meta: { roles: FnRoles.payrollReaders } },
   { path: "/fn/payroll/reports", name: "FnPayrollReports", component: () => import("@/views/fn/PayrollReports.vue"), meta: { roles: FnRoles.payrollReaders } },
   { path: "/fn/sepidar", name: "FnSepidar", component: () => import("@/views/fn/Sepidar.vue"), meta: { roles: FnRoles.outbox } },
+  { path: "/fn/sepidar-transfer", name: "FnSepidarTransfer", component: () => import("@/views/fn/SepidarTransfer.vue"), meta: { roles: FnRoles.sepidarTransfer } },
   { path: "/fn/audit", name: "FnAudit", component: () => import("@/views/fn/AuditTrail.vue"), meta: { roles: FnRoles.auditReaders } },
   { path: "/fn/close-checklist", name: "FnCloseChecklist", component: () => import("@/views/fn/CloseChecklist.vue"), meta: { roles: FnRoles.readers } },
   { path: "/fn/finance-settings", name: "FnFinanceSettings", component: () => import("@/views/fn/FinanceSettings.vue"), meta: { roles: FnRoles.readers } },

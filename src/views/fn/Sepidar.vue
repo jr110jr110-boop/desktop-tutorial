@@ -113,7 +113,7 @@ onMounted(refresh);
   <div class="inv-page">
     <div class="inv-card screen-only">
       <div class="inv-toolbar">
-        <h1 class="inv-title">صندوق خروجی سپیدار (مالیات و بیمه)</h1>
+        <h1 class="inv-title">بسته‌های ماهانهٔ سپیدار (مالیات و بیمه)</h1>
         <button v-if="canGenerateAny" class="btn btn-sm btn-primary" @click="form = { kind: 1, year: String(now.year), month: now.month, season: Math.ceil(now.month / 3), note: '' }">ساخت بسته جدید</button>
       </div>
       <div v-if="summary" class="fn-tiles mb-3">

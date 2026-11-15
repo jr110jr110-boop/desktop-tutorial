@@ -254,6 +254,19 @@ export const ackOutboxPackage = async (id: number, text: string): Promise<[any, 
   }
 };
 
+// ---------------------------------------------------------------- Sepidar transfer per document (api/v1/finance/sepidar/transfer)
+const spt = "finance/sepidar/transfer/";
+export const getSpTypes = () => get(spt + "types");
+export const switchSpType = (code: string, isEnabled: boolean, rowVersion?: string | null, note?: string | null, fromDate?: string | null) => post(spt + "types/switch", { code, isEnabled, rowVersion: rowVersion || null, note: note || null, fromDate: fromDate || null });
+export const getSpItems = (params: any) => get(spt + "items", params);
+export const getSpItem = (id: number) => get(spt + "items/" + id);
+/** action: approve or reject (a reason is required to reject); the row version is the one the person saw */
+export const decideSpItem = (id: number, action: "approve" | "reject", rowVersion: string | null, reason?: string) => post(spt + "decide", { id, action, rowVersion: rowVersion || null, reason: reason || null });
+export const bulkApproveSpItems = (items: { id: number; rowVersion: string | null }[]) => post(spt + "bulk-approve", { items });
+/** action: retry or cancel (a reason is required to cancel) */
+export const fixSpItem = (id: number, action: "retry" | "cancel", rowVersion: string | null, reason?: string) => post(spt + "fix", { id, action, rowVersion: rowVersion || null, reason: reason || null });
+export const getSpSummary = () => get(spt + "summary");
+
 // ---------------------------------------------------------------- F3: controls, audit, migration, Sepidar export
 const ad = "finance/audit";
 const ent = "finance/entities";

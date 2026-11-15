@@ -113,7 +113,7 @@ onMounted(async () => {
   <div class="inv-page">
     <div class="inv-card screen-only">
       <div class="inv-toolbar"><h1 class="inv-title">خروجی کامل اسناد برای سپیدار</h1></div>
-      <p v-if="enabled === false" class="alert alert-warning py-2">این مسیر خروجی در تنظیمات غیرفعال است؛ مسیر عادی «صندوق خروجی سپیدار» است.</p>
+      <p v-if="enabled === false" class="alert alert-warning py-2">این مسیر خروجی در تنظیمات غیرفعال است؛ مسیر عادی «بسته‌های ماهانهٔ سپیدار» است.</p>
       <PcTabs v-model="tab" :tabs="tabs" />
 
       <template v-if="tab === 'export'">
