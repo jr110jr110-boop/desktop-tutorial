@@ -155,7 +155,7 @@ onBeforeUnmount(() => stop && stop());
         <div v-if="refused[r.id]" class="ag-note warn">{{ refused[r.id] }}</div>
         <div class="ag-actions">
           <button :disabled="!taskLink(router, r.link)" :title="taskLink(router, r.link) ? '' : 'صفحه این سند در دسترس نیست.'" class="btn btn-sm btn-primary" @click="open(r)">باز کردن سند</button>
-          <button :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="dialog = r">برگشت به ایجنت</button>
+          <button v-if="r.canReturn" :disabled="busy" class="btn btn-sm btn-outline-secondary" @click="dialog = r">برگشت به ایجنت</button>
         </div>
       </div>
     </div>

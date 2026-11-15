@@ -21,7 +21,7 @@ export type AgentPageParams = { PageNumber?: number; PageSize?: number; [key: st
 /**
  * GET agents/inbox?Kind&Station&ContractId&PageNumber&PageSize. Kind: 2 HumanGate (waits for a decision), 3 Physical, 4 Input (also the tasks an agent that is off left to people), 1 Agent (only those fallback tasks).
  * Returns a paged list of AgentInboxItemDto { id, stepCode, station, stationTitle, agentCode, kind, state, title, targetType, targetId, targetNumber, contractId, summary, outputType, outputNumber,
- * gateRoles, link, createdAt, createdAtText, ageHours, dueAt, overdue, isFallback, lastError, returnReason }. Who: every signed-in person (a seat is refused).
+ * gateRoles, link, createdAt, createdAtText, ageHours, dueAt, overdue, isFallback, lastError, returnReason, canReturn (the return button shows only when true) }. Who: every signed-in person (a seat is refused).
  */
 export const getAgentInbox = (params?: AgentPageParams) => get(ag + "inbox", params);
 /** AgentInboxCountsDto { humanGate, physical, input, total, overdue }. */
