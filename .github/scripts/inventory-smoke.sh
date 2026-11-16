@@ -114,6 +114,10 @@ safety_set() {
   sid=$(val '.data.id')
   as "$PMO2_TOKEN" POST safety/changes/decide "{\"id\":${sid:-0},\"approve\":true,\"note\":\"تایید خودکار آزمون\"}"
 }
+# ENG-E1: the day of the engineering control is put ahead at once, before any inquiry or contract of this script exists, so that every chain below stays legacy for it (as the old chains stay legacy for the other control days where
+# they must). The block ENGE1 after the sp: block puts it back to 0 for its own data and ahead again after it.
+safety_set Quality Engineering.ControlStartDate 14990101
+check "enge1 setup: the day of the engineering control is put ahead before any data of this script exists, so the existing chains stay legacy for it (a second person approves the weakening)" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "0" and .data.newValue == "14990101"'
 # own_pw NAME : R1a2 (M-2) the receiver of a sensitive role chooses a password of his own, with the current one (the answer comes with fresh tokens). The new password is the registered one with
 # "-Own" added; login() maps the pair, so the lines further down keep naming the password of the registration. The fresh access token (it carries the roles the user has now) stays in OWN_TOKEN.
 # The refusal of an approval before this step is checked once, with ceo.ci below.
@@ -13511,6 +13515,175 @@ as "$FM_TOKEN" POST $SPB/fix "{\"id\":${SPI:-0},\"action\":\"cancel\",\"reason\"
 as "$FM_TOKEN" POST $SPB/types/switch '{"code":"VOUCHER","isEnabled":false}'; check "sp: the voucher kind is switched off again" '.success and .data.isEnabled == false'
 as "$AUD_TOKEN" GET $SPB/types; check "sp: every kind is off again, so nothing else in this script is queued" '.success and ([.data[]|select(.isEnabled)]|length) == 0'
 as "$ADMIN_TOKEN" GET $AG/steps; check "sp: the four steps are in the catalogue at station 13 for the finance agent, with the right kinds" '.success and ([.data[]|select(.code|startswith("SP.OUTBOX."))]|length) == 4 and ([.data[]|select((.code|startswith("SP.OUTBOX.")) and .station == 13 and .agentCode == "AG-FIN")]|length) == 4 and ([.data[]|select(.code == "SP.OUTBOX.PREPARE" or .code == "SP.OUTBOX.SEND")|.kind]|unique) == [1] and ([.data[]|select(.code == "SP.OUTBOX.APPROVE")][0].kind) == 2 and ([.data[]|select(.code == "SP.OUTBOX.FIX")][0].kind) == 4'
+TOKEN=$ADMIN_TOKEN
+
+# ------------------------------------------------------------------------------------------ ENGE1: the engineering control (reference list, platform dossier, case, tender package, clarification, handover, waiver, debts, distribution)
+# Self-contained: its own users (an engineer and two engineering managers), its own products, inquiries and contracts. The day of the engineering control was put ahead at the start of this script (so every chain above
+# stays legacy and untouched, as Design.ControlStartDate does for the design control); here it goes back to 0 (the one cut-over instant of Package G) for the data of this block and is put ahead again at the end.
+TOKEN=$ADMIN_TOKEN
+EN=engineering
+safety_set Quality Engineering.ControlStartDate 0
+check "enge1 cut-over: the day of the engineering control goes back to 0, the cut-over instant of Package G (a second person approves)" '.success and .data.status == "Approved" and .data.newValue == "0"'
+user2 enge1.eng.ci 8 'Ci#En1Eng-User-2026' 09120000950 0012349501
+user2 enge1.mgr.ci 4 'Ci#En1Mg-User-2026' 09120000951 0012349502
+user2 enge1.mgr2.ci 4 'Ci#En1Mg2-User-2026' 09120000952 0012349503
+E_ENG=$(login enge1.eng.ci 'Ci#En1Eng-User-2026'); E_MG=$(login enge1.mgr.ci 'Ci#En1Mg-User-2026'); E_MG2=$(login enge1.mgr2.ci 'Ci#En1Mg2-User-2026')
+[ -n "$E_ENG" ] && [ -n "$E_MG" ] && [ -n "$E_MG2" ] && ok "enge1: login of the engineer (role ENGINEER) and two engineering managers (role ENGINEERING)" || bad "enge1: login of the engineer (role ENGINEER) and two engineering managers (role ENGINEERING)"
+E_MGID=$(uid "$E_MG")
+as "$SEC_TOKEN" GET $EN/overview; nomsg "enge1: the security role cannot read the engineering overview" "مجوز"
+
+# --- the reference list of documents: the engineer prepares and sends, an engineering manager approves, the engineer cannot
+as "$E_ENG" POST $EN/reference/lists '{"code":"VDDR-ENGE1","title":"فهرست مدارک مرجع آزمون کنترل مهندسی","standardSource":"API 612","lines":[{"documentType":"DWG","discipline":"مکانیک","title":"نقشه مونتاژ","required":true,"tenderStage":true},{"documentType":"DATASHEET","discipline":"مکانیک","title":"برگه اطلاعات","required":true,"tenderStage":false},{"documentType":"NOTE","discipline":"مکانیک","title":"یادداشت محاسبات","required":false,"tenderStage":false}]}'
+check "enge1 reference: the engineer saves a draft list of 3 lines (2 required, 1 of the tender stage)" '.success and (.data.id|type) == "number" and .data.status == 0 and .data.code == "VDDR-ENGE1" and .data.lineCount == 3 and .data.requiredCount == 2 and .data.tenderStageCount == 1'
+ERL=$(val .data.id)
+as "$E_ENG" POST $EN/reference/lists/action "{\"id\":$ERL,\"action\":\"submit\"}"; check "enge1 reference: the list is sent for approval" '.success and .data.status == 1 and .data.touchedByMe == true'
+ERLRV=$(val .data.rowVersion)
+as "$E_ENG" POST $EN/reference/lists/action "{\"id\":$ERL,\"action\":\"approve\",\"rowVersion\":\"$ERLRV\"}"; nomsg "enge1 reference: the engineer who sent the list cannot approve it" "مجوز"
+as "$E_MG" POST $EN/reference/lists/action "{\"id\":$ERL,\"action\":\"approve\",\"rowVersion\":\"$ERLRV\"}"; check "enge1 reference: an engineering manager approves the list; it is the current one" ".success and .data.status == 2 and .data.isCurrent == true and .data.approvedByUserId == $E_MGID"
+as "$SL_TOKEN" GET $EN/reference/current; check "enge1 reference: the current list is readable by sales and is the approved one" '.success and .data.code == "VDDR-ENGE1" and .data.status == 2'
+
+# --- two platforms (products of the product bank) and the dossier of the first: assessed, supplied line by line, declared complete, confirmed by a manager
+as "$ENG_TOKEN" POST product-bank/products '{"code":"66.11.00.000.2","title":"توربین آزمون کنترل مهندسی الف","platform":"T"}'; check "enge1: platform one (product) saved" '.success and .data.code == "66.11.00.000.2"'; EP1=$(val .data.id)
+as "$ENG_TOKEN" POST product-bank/products '{"code":"66.12.00.000.2","title":"توربین آزمون کنترل مهندسی ب","platform":"T"}'; check "enge1: platform two (product) saved" '.success and .data.code == "66.12.00.000.2"'; EP2=$(val .data.id)
+as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP1,\"action\":\"assess\"}"
+as "$E_ENG" GET $EN/platforms/$EP1; check "enge1 platform: the dossier of platform one is assessed against the approved list: 2 required documents, both missing, 1 of them of the tender stage, not yet completable" '.success and .data.status == 1 and .data.requiredCount == 2 and .data.missingCount == 2 and .data.tenderStageMissingCount == 1 and (.data.lines|length) == 3 and .data.canComplete == false'
+LDW=$(jq -r '[.data.lines[]|select(.documentType == "DWG")][0].id' "$B"); LDS=$(jq -r '[.data.lines[]|select(.documentType == "DATASHEET")][0].id' "$B")
+upload_as "$E_ENG" enge1-dwg; ED1=$UPLOADED; upload_as "$E_ENG" enge1-ds; ED2=$UPLOADED
+as "$E_ENG" POST $EN/platforms/supply "{\"lineId\":$LDW,\"documentId\":\"$ED1\"}"; check "enge1 platform: the drawing is supplied with its file; the tender-stage gap is closed, one required document is still missing" '.success and .data.missingCount == 1 and .data.tenderStageMissingCount == 0'
+as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP1,\"action\":\"complete\"}"; nomsg "enge1 platform: a dossier with a required document missing cannot be declared complete" "ردیف‌های الزامی کامل نشده‌اند"
+as "$E_ENG" POST $EN/platforms/supply "{\"lineId\":$LDS,\"documentId\":\"$ED2\"}"; check "enge1 platform: the datasheet is supplied; nothing required is missing" '.success and .data.missingCount == 0 and .data.canComplete == true'
+as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP1,\"action\":\"complete\"}"; check "enge1 platform: the engineer declares the dossier complete; it waits for a manager" '.success and .data.status == 2'
+as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP1,\"action\":\"confirm\"}"; nomsg "enge1 platform: the engineer who supplied the documents cannot confirm them" "مجوز"
+as "$E_MG" POST $EN/platforms/action "{\"productId\":$EP1,\"action\":\"confirm\"}"; check "enge1 platform: an engineering manager confirms the dossier; platform one is complete" '.success and .data.status == 3 and .data.confirmedByName != null'
+
+# --- scenario A: inquiry of platform one: case, classification chain (engineer proposes, manager confirms, the CEO approves), the sales chokepoint, tender package, win, handover, release, distribution
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"توربین کنترل مهندسی الف\",\"productType\":4,\"quantity\":1,\"requiredDeliveryDate\":\"$(dd 90)T00:00:00\",\"proposalDueDate\":\"$(dd 10)T00:00:00\"}"; check "enge1 A: inquiry registered" '.success and .data.status == 1 and (.data.id|type) == "number"'
+EAI=$(val .data.id)
+as "$E_ENG" POST $EN/cases/action "{\"action\":\"open\",\"inquiryId\":$EAI}"; check "enge1 A: the engineering case of the inquiry is opened: classifying, numbered" ".success and .data.status == 1 and .data.inquiryId == $EAI and (.data.number|test(\"^ENG-[0-9]{4}-[0-9]{4}\$\")) and .data.classification == 0"
+EAC=$(val .data.id)
+as "$E_ENG" POST $EN/cases/action "{\"action\":\"open\",\"inquiryId\":$EAI}"; nomsg "enge1 A: a second case for the same inquiry is refused" "پروندهٔ مهندسی وجود دارد"
+as "$SL2_TOKEN" GET "$EN/cases/gate?inquiryId=$EAI"; check "enge1 A: the gate of the inquiry says it is controlled, not legacy, and not passed until the tender package is released" '.success and .data.controlled == true and .data.legacy == false and .data.passed == false and (.data.blockedReason|contains("بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است"))'
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"propose\",\"classification\":1,\"productId\":$EP1,\"basis\":\"توربین ساخته‌شده با همین مشخصات پیش‌تر تحویل شده است\"}"; check "enge1 A: the engineer proposes platform one as the platform of the case; it waits for the manager" ".success and .data.status == 2 and .data.proposedClassification == 1 and .data.proposedProductId == $EP1 and .data.proposedByAgent == false"
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"confirm\"}"; nomsg "enge1 A: the engineer cannot confirm the classification" "مجوز"
+as "$E_MG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"confirm\"}"; check "enge1 A: an engineering manager confirms; the case waits for the CEO" '.success and .data.status == 3'
+as "$E_MG2" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"approve\"}"; nomsg "enge1 A: an engineering manager cannot approve in the place of the CEO" "مجوز"
+as "$CEO_TOKEN" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"approve\"}"; check "enge1 A: the CEO approves: platform one, the tender package is being prepared" ".success and .data.status == 4 and .data.classification == 1 and .data.productId == $EP1 and .data.platformIncomplete == false"
+slbid "$EAI" "ENGE1-A" 90
+as "$SL_TOKEN" POST $SL/estimates "{\"inquiryId\":$EAI,\"overheadPercent\":10,\"contingencyPercent\":0,\"targetMarginPercent\":20,\"lines\":[{\"kind\":1,\"description\":\"مواد توربین\",\"unit\":\"عدد\",\"quantity\":5,\"unitCost\":2000000}]}"; check "enge1 A: estimate: material 5 x 2,000,000 = 10,000,000; overhead 10 % = 1,000,000; total 11,000,000; price at a 20 % margin = 13,750,000" '.success and .data.totalCost == 11000000 and .data.price == 13750000'
+EAE=$(val .data.id)
+as "$SL_TOKEN" POST $SL/estimates/action "{\"id\":$EAE,\"action\":\"finalize\"}"; check "enge1 A: estimate finalized" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/proposals "{\"inquiryId\":$EAI,\"estimateId\":$EAE,\"validityDays\":30,\"deliveryWeeks\":8}"; check "enge1 A: proposal drafted at 13,750,000: within the sales ceiling, not below cost" '.success and .data.status == 1 and .data.price == 13750000 and .data.needsCeo == false and .data.belowCost == false'
+EAP=$(val .data.id)
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$EAP,\"action\":\"approve\"}"; nomsg "enge1 A: the approval of the proposal waits for the technical package of engineering (the one message of the sales chokepoint)" "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است"
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"draft-tender\"}"; check "enge1 A: the tender package is made from the tender-stage documents of the platform (1 document: the drawing)" '.success and .data.status == 4 and (.data.tenderPackageId|type) == "number" and .data.tenderDocumentCount == 1'
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"release-tender\"}"; nomsg "enge1 A: the engineer cannot release the package" "مجوز"
+as "$E_MG2" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"release-tender\"}"; check "enge1 A: a manager who did not touch the package releases it to commercial" '.success and .data.status == 5 and .data.tenderReleasedByName != null'
+as "$SL2_TOKEN" GET "$EN/cases/gate?inquiryId=$EAI"; check "enge1 A: the gate of the inquiry is passed" '.success and .data.controlled == true and .data.passed == true'
+as "$SL2_TOKEN" POST $SL/proposals/action "{\"id\":$EAP,\"action\":\"approve\"}"; check "enge1 A: the proposal is approved now (the sales approval passes the engineering chokepoint)" '.success and .data.status == 2'
+as "$SL_TOKEN" POST $SL/proposals/action "{\"id\":$EAP,\"action\":\"submit\"}"; check "enge1 A: proposal sent to the customer" '.success and .data.status == 3'
+as "$SL_TOKEN" POST $SL/proposals/result "{\"id\":$EAP,\"result\":\"won\",\"reasonId\":$SLRW}"; check "enge1 A: the proposal is won and the system drafts the contract" '.success and .data.status == 5 and .data.contractId > 0'
+EAK=$(val .data.contractId)
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"award\"}"; check "enge1 A: the case follows the win: awarded, with the contract" ".success and .data.status == 6 and .data.contractId == $EAK"
+as "$E_ENG" POST $EN/handovers/action "{\"action\":\"draft\",\"caseId\":$EAC}"; check "enge1 A: the handover of round 1 is drafted from the platform dossier: 3 lines, nothing required missing, the lock is open" '.success and .data.status == 0 and .data.round == 1 and (.data.number|test("^EHO-[0-9]{4}-[0-9]{4}$")) and (.data.lines|length) == 3 and .data.missingRequiredCount == 0 and .data.lockMessage == null and .data.complete == true and .data.platformDossierConfirmed == true and .data.canSubmit == false'
+EAH=$(val .data.id)
+as "$E_MG" GET $EN/handovers/$EAH; check "enge1 A: the manager (who did not prepare the draft) is offered the submission" '.success and .data.canSubmit == true and .data.submitBlockedReason == null'
+as "$E_ENG" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"submit\"}"; nomsg "enge1 A: the engineer cannot send the handover to the PMO" "مجوز"
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"submit\"}"; check "enge1 A: the manager sends the complete handover to the PMO: no waiver, no debt" '.success and .data.status == 1 and .data.complete == true and .data.waiverId == null and (.data.debts|length) == 0'
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"accept\"}"; nomsg "enge1 A: an engineering manager cannot accept in the place of the PMO" "مجوز"
+call POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"accept\"}"; check "enge1 A: the PMO accepts the handover" '.success and .data.status == 3'
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"release\"}"; nomsg "enge1 A: only the PMO releases the accepted documents to execution" "مجوز"
+as "$PMO2_TOKEN" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"release\"}"; check "enge1 A: the second PMO user releases them to execution" '.success and .data.status == 4 and .data.releasedByName != null'
+as "$E_MG" GET "$EN/cases/$EAC"; check "enge1 A: the case is released to execution" '.success and .data.status == 10'
+as "$E_ENG" POST $EN/handovers/action "{\"id\":$EAH,\"action\":\"distribute\"}"; check "enge1 A: the engineering agent notifies the six units; none has confirmed" '.success and (.data.distribution|length) == 6 and ([.data.distribution[]|select(.acknowledged == false)]|length) == 6'
+as "$E_ENG" GET "$EN/distributions?handoverId=$EAH"; EADID6=$(jq -r '[.data[]|select(.unit == 6)][0].id' "$B")
+as "$QA_TOKEN" POST $EN/handovers/action "{\"action\":\"acknowledge\",\"distributionId\":$EADID6}"; nomsg "enge1 A: the QA role cannot confirm the receipt of the planning unit (each unit confirms with its own roles)" "مجوز"
+EACKN=0
+for U in "1 QA_TOKEN" "2 QC_TOKEN" "3 MPM_TOKEN" "4 COM_TOKEN" "5 WH_TOKEN" "6 PLAN_TOKEN"; do
+  read -r EAUNIT EATOK <<<"$U"; EACKN=$((EACKN+1))
+  as "$E_ENG" GET "$EN/distributions?handoverId=$EAH"; EADID=$(jq -r --argjson u "$EAUNIT" '[.data[]|select(.unit == $u)][0].id' "$B")
+  as "${!EATOK}" POST $EN/handovers/action "{\"action\":\"acknowledge\",\"distributionId\":$EADID}"; check "enge1 A: unit $EAUNIT confirms the receipt with its own role (confirmed so far: $EACKN)" ".success and ([.data.distribution[]|select(.acknowledged == true)]|length) == $EACKN"
+done
+as "$E_ENG" GET "$EN/distributions?handoverId=$EAH&onlyOpen=true"; check "enge1 A: all six units confirmed: nothing open" '.success and (.data|length) == 0'
+as "$PLAN_TOKEN" POST $EN/handovers/action "{\"action\":\"acknowledge\",\"distributionId\":$EADID}"; nomsg "enge1 A: a unit confirms only once" "قبلاً"
+as "$E_MG" GET "$EN/cases/gate?contractId=$EAK"; check "enge1 A: the gate of the contract is controlled and not legacy" '.success and .data.controlled == true and .data.legacy == false'
+
+# --- scenario B: a contract of an incomplete platform: the handover is locked, the CEO waiver (CEO only, one use, snapshot), the PMO return voids the debts, the debts follow the documents
+call POST Contracts "{\"code\":\"ENGE1-B\",\"title\":\"قرارداد آزمون کنترل مهندسی ب\",\"status\":1,\"employer\":\"کارفرمای آزمون\",\"contractDate\":\"$(dd -5)T00:00:00+00:00\"}"; check "enge1 B: contract created" '.success and (.data.id|type) == "number"'
+EBK=$(val .data.id)
+call POST WorkOrders "{\"contractId\":$EBK,\"equipmentId\":$SLEQ,\"code\":\"ENGE1-B-WO\",\"title\":\"توربین ب\",\"description\":\"x\",\"count\":1}"; check "enge1 B: work order created" '.success and .data.id > 0'
+as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP2,\"action\":\"assess\"}"
+as "$E_ENG" GET $EN/platforms/$EP2; check "enge1 B: platform two is assessed: 2 required documents missing" '.success and .data.status == 1 and .data.missingCount == 2'
+LBDW=$(jq -r '[.data.lines[]|select(.documentType == "DWG")][0].id' "$B"); LBDS=$(jq -r '[.data.lines[]|select(.documentType == "DATASHEET")][0].id' "$B")
+as "$E_ENG" POST $EN/cases/action "{\"action\":\"open\",\"contractId\":$EBK}"; check "enge1 B: the case of the contract is opened" '.success and .data.status == 1 and .data.classification == 0'
+EBC=$(val .data.id)
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"propose\",\"classification\":1,\"productId\":$EP2,\"basis\":\"توربین ساخته‌شده با مشخصات نزدیک و مدارک ناقص\"}"; check "enge1 B: platform two is proposed" '.success and .data.status == 2'
+as "$E_MG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"confirm\"}"; check "enge1 B: the manager confirms" '.success and .data.status == 3'
+as "$CEO_TOKEN" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"approve\"}"; check "enge1 B: the CEO approves; a case of a contract is awarded at once, and it carries the warning of the incomplete platform (2 required documents)" '.success and .data.status == 6 and .data.platformIncomplete == true and .data.platformMissingRequired == 2'
+as "$E_ENG" POST $EN/handovers/action "{\"action\":\"draft\",\"caseId\":$EBC}"; check "enge1 B: the handover of round 1 is drafted: 2 required documents missing, the lock message says so, the manager cannot submit" '.success and .data.status == 0 and .data.round == 1 and .data.missingRequiredCount == 2 and .data.complete == false and (.data.lockMessage|contains("تحویل مدارک به PMO قفل است")) and .data.platformDossierConfirmed == false and .data.canSubmit == false and .data.canRequestWaiver == false'
+EBH=$(val .data.id)
+as "$E_MG" GET $EN/handovers/$EBH; check "enge1 B: the manager is offered the emergency waiver, not the submission" '.success and .data.canRequestWaiver == true and .data.canSubmit == false and (.data.submitBlockedReason|contains("قفل"))'
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"submit\"}"; nomsg "enge1 B: the lock refuses the submission" "تحویل مدارک به PMO قفل است"
+as "$E_ENG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 30)T00:00:00\"}"; nomsg "enge1 B: the engineer cannot request the waiver (the engineering manager does)" "مجوز"
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"کوتاه\",\"debtDueDate\":\"$(dd 30)T00:00:00\"}"; nomsg "enge1 B: the waiver needs a real reason" "دلیل معافیت"
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd -1)T00:00:00\"}"; nomsg "enge1 B: the due date of the debts must be after today" "سررسید تسویهٔ بدهی مدارک باید از فردا به بعد باشد"
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 400)T00:00:00\"}"; nomsg "enge1 B: the due date cannot be beyond the longest allowed (90 days)" "سررسید تسویهٔ بدهی مدارک بیش از"
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 30)T00:00:00\"}"; check "enge1 B: the manager requests the waiver: the snapshot names the 2 missing documents and the unconfirmed dossier" '.success and .data.status == 0 and (.data.number|test("^EWV-[0-9]{4}-[0-9]{4}$")) and (.data.missingLines|length) == 2 and .data.dossierUnconfirmed == true'
+EBW=$(val .data.id); EBWRV=$(val .data.rowVersion)
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 30)T00:00:00\"}"; nomsg "enge1 B: a second open waiver for the same handover is refused" "معافیت باز"
+as "$E_MG2" POST $EN/waivers/decide "{\"id\":$EBW,\"decision\":\"approve\",\"rowVersion\":\"$EBWRV\"}"; nomsg "enge1 B: an engineering manager cannot decide the waiver (CEO only)" "مدیرعامل"
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"submit\"}"; nomsg "enge1 B: while the waiver is not decided the lock holds" "تحویل مدارک به PMO قفل است"
+as "$CEO_TOKEN" POST $EN/waivers/decide "{\"id\":$EBW,\"decision\":\"approve\",\"rowVersion\":\"$EBWRV\"}"; check "enge1 B: the CEO approves the waiver" '.success and .data.status == 1 and .data.decidedByName != null and .data.used == false and .data.covers == true'
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"submit\"}"; check "enge1 B: the handover passes the lock with the waiver: incomplete, 2 open debts, the waiver is used" ".success and .data.status == 1 and .data.complete == false and .data.waiverId == $EBW and (.data.debts|length) == 2 and ([.data.debts[]|select(.status == 0)]|length) == 2 and .data.waiver.used == true"
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"مدارک این پلتفرم هنوز از تامین‌کننده نرسیده و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 30)T00:00:00\"}"; nomsg "enge1 B: a waiver is requested only for a draft handover (single use)" "معافیت فقط برای پیش‌نویس تحویل درخواست می‌شود"
+as "$E_ENG" GET "$EN/debts?CaseId=$EBC&PageSize=0"; check "enge1 B: the debt list of the case has exactly the 2 open debts, none overdue" '.success and .data.totalItems == 2 and ([.data.data[]|select(.status == 0 and .overdue == false)]|length) == 2'
+call POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"return\",\"note\":\"کوتاه\"}"; nomsg "enge1 B: the PMO return needs a real reason" "دلیل برگشت"
+call POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"return\",\"note\":\"مدارک الزامی هنوز کامل نیست و باید پیش از اجرا برسد\"}"; check "enge1 B: the PMO returns the handover with a reason; the 2 debts of the round are void" '.success and .data.status == 2 and ([.data.debts[]|select(.status == 2)]|length) == 2'
+as "$E_ENG" GET "$EN/debts?CaseId=$EBC&Status=0&PageSize=0"; check "enge1 B: no open debt is left after the return" '.success and .data.totalItems == 0'
+upload_as "$E_ENG" enge1-bdw; EBD1=$UPLOADED; upload_as "$E_ENG" enge1-bds; EBD2=$UPLOADED
+as "$E_ENG" POST $EN/platforms/supply "{\"lineId\":$LBDW,\"documentId\":\"$EBD1\"}"; check "enge1 B: the drawing of platform two arrives" '.success and .data.missingCount == 1'
+as "$E_ENG" POST $EN/handovers/action "{\"action\":\"draft\",\"caseId\":$EBC}"; check "enge1 B: the agent or the engineer drafts round 2 after the return: only the datasheet is missing now" '.success and .data.status == 0 and .data.round == 2 and .data.missingRequiredCount == 1'
+EBH2=$(val .data.id)
+as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH2,\"reason\":\"برگه اطلاعات تا پایان ماه از تامین‌کننده می‌رسد و پروژه نباید متوقف شود\",\"debtDueDate\":\"$(dd 20)T00:00:00\"}"; check "enge1 B: round 2 has its own waiver for the one missing document" '.success and .data.status == 0 and (.data.missingLines|length) == 1'
+EBW2=$(val .data.id); EBW2RV=$(val .data.rowVersion)
+as "$CEO_TOKEN" POST $EN/waivers/decide "{\"id\":$EBW2,\"decision\":\"approve\",\"rowVersion\":\"$EBW2RV\"}"; check "enge1 B: the CEO approves the second waiver" '.success and .data.status == 1'
+as "$E_MG" POST $EN/handovers/action "{\"id\":$EBH2,\"action\":\"submit\"}"; check "enge1 B: round 2 is submitted with one open debt (the datasheet)" '.success and .data.status == 1 and (.data.debts|length) == 1 and .data.debts[0].status == 0 and .data.debts[0].title == "برگه اطلاعات"'
+as "$E_ENG" POST $EN/debts/settle; check "enge1 B: nothing is settled while the datasheet does not exist" '.success and .data == 0'
+as "$E_ENG" POST $EN/platforms/supply "{\"lineId\":$LBDS,\"documentId\":\"$EBD2\"}"; check "enge1 B: the datasheet arrives" '.success and .data.missingCount == 0'
+as "$E_ENG" POST $EN/debts/settle; check "enge1 B: the engineering agent settles the debt from the document that arrived" '.success and .data == 1'
+as "$E_ENG" GET "$EN/debts?CaseId=$EBC&Status=1&PageSize=0"; check "enge1 B: the settled debt names the document that settled it" ".success and .data.totalItems == 1 and .data.data[0].settledDocumentId == \"$EBD2\""
+as "$E_MG" GET $EN/handovers/$EBH2; check "enge1 B: the handover of round 2 carries the settled debt and stays incomplete as it was submitted" '.success and .data.complete == false and .data.debts[0].status == 1'
+
+# --- scenario C: a new design (no platform): the conceptual tender needs its concept note and a document; the clarification goes through commercial only
+as "$SL_TOKEN" POST $SL/inquiries "{\"customerId\":$SLCA,\"title\":\"طراحی جدید کنترل مهندسی ج\",\"productType\":4,\"quantity\":1,\"requiredDeliveryDate\":\"$(dd 120)T00:00:00\",\"proposalDueDate\":\"$(dd 15)T00:00:00\"}"; check "enge1 C: inquiry registered" '.success and .data.status == 1'
+ECI=$(val .data.id)
+as "$E_ENG" POST $EN/cases/action "{\"action\":\"open\",\"inquiryId\":$ECI}"; check "enge1 C: the case is opened" '.success and .data.status == 1'
+ECC=$(val .data.id)
+as "$E_ENG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"propose\",\"classification\":2,\"basis\":\"هیچ پلتفرم موجودی با این مشخصات مطابقت ندارد\"}"; check "enge1 C: a new design is proposed" '.success and .data.status == 2 and .data.proposedClassification == 2'
+as "$E_MG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"confirm\"}"; check "enge1 C: the manager confirms" '.success and .data.status == 3'
+as "$CEO_TOKEN" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"approve\"}"; check "enge1 C: the CEO approves: new design, the tender package is being prepared" '.success and .data.status == 4 and .data.classification == 2'
+slbid "$ECI" "ENGE1-C" 120
+as "$E_ENG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"draft-tender\"}"; check "enge1 C: the package is made empty (a new design has no platform documents)" '.success and (.data.tenderPackageId|type) == "number" and .data.tenderDocumentCount == 0'
+as "$E_MG2" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"release-tender\"}"; nomsg "enge1 C: a new design cannot be released without a conceptual document" "دست‌کم یک سند مفهومی در بسته لازم است"
+as "$E_ENG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"save-concept\",\"conceptNote\":\"یک توربین یک‌مرحله‌ای؛ فشار و دمای بخار ورودی از کارفرما فرض شده است\"}"; check "enge1 C: the concept note (what is defined and what is assumed) is saved" '.success and (.data.conceptNote|contains("یک‌مرحله‌ای"))'
+as "$E_ENG" POST $EN/clarifications "{\"caseId\":$ECC,\"question\":\"فشار و دمای بخار ورودی چقدر است؟\"}"; check "enge1 C: the engineer writes a question for the client: a draft numbered ECQ" '.success and .data.status == 0 and (.data.number|test("^ECQ-[0-9]{4}-[0-9]{4}$")) and .data.caseId > 0'
+EQ=$(val .data.id)
+as "$E_ENG" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"submit\"}"; check "enge1 C: the question goes to commercial" '.success and .data.status == 1'
+as "$E_ENG" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"send\",\"clientLetterRef\":\"N-1405/77\"}"; nomsg "enge1 C: engineering cannot send the question to the client (commercial only)" "بازرگانی"
+as "$COM_TOKEN" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"send\"}"; nomsg "enge1 C: commercial must give the number of the letter to the client" "شمارهٔ نامه"
+as "$COM_TOKEN" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"send\",\"clientLetterRef\":\"N-1405/77\"}"; check "enge1 C: commercial sends it with the letter number" '.success and .data.status == 2 and .data.clientLetterRef == "N-1405/77"'
+as "$E_ENG" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"answer\",\"answer\":\"ده بار\"}"; nomsg "enge1 C: engineering cannot record the answer of the client (commercial only)" "بازرگانی"
+as "$COM_TOKEN" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"answer\",\"answer\":\"ده بار و پانصد و چهل درجه\"}"; check "enge1 C: commercial records the answer" '.success and .data.status == 3 and (.data.answer|contains("ده بار"))'
+as "$E_ENG" POST $EN/clarifications/action "{\"id\":$EQ,\"action\":\"reask\",\"question\":\"فشار خروجی مورد نیاز چقدر است؟\"}"; check "enge1 C: engineering asks a follow-up question: a new question linked to the answered one, back with commercial" ".success and .data.status == 1 and .data.followsId == $EQ"
+as "$E_ENG" GET "$EN/clarifications/$EQ"; check "enge1 C: the answered question is closed by the follow-up" '.success and .data.status == 4'
+as "$E_MG" GET "$EN/cases/$ECC"; check "enge1 C: the case counts its open clarification" '.success and .data.openClarifications == 1'
+
+# --- the overview, the catalogue of the agent steps, and the cut-over day put ahead again for what follows
+as "$CEO_TOKEN" GET $EN/overview; check "enge1: the overview of the CEO: the control started; 2 platform cases and 1 new design; released 1, handed over 1, tender package in preparation 1; 1 handover waits for the PMO; no open debt and no waiver; 1 open clarification; every distribution confirmed" '.success and .data.controlStarted == true and ([.data.casesByClassification[]|select(.key == 1)][0].count) == 2 and ([.data.casesByClassification[]|select(.key == 2)][0].count) == 1 and ([.data.casesByStatus[]|select(.key == 10)][0].count) == 1 and ([.data.casesByStatus[]|select(.key == 8)][0].count) == 1 and ([.data.casesByStatus[]|select(.key == 4)][0].count) == 1 and ([.data.handoversWaiting[]|select(.key == 1)][0].count) == 1 and .data.openDebts == 0 and .data.overdueDebts == 0 and .data.waiversAwaitingCeo == 0 and .data.openClarifications == 1 and .data.distributionsUnacknowledged == 0'
+as "$CEO_TOKEN" GET finance/ceo-dashboard; check "enge1: the CEO dashboard tiles: no open or overdue document debt; the incomplete platforms are the active ones minus platform one (the only complete dossier)" '.success and .data.enOpenDebts == 0 and .data.enOverdueDebts == 0 and (.data.enPlatformsTotal|type) == "number" and .data.enPlatformsIncomplete == (.data.enPlatformsTotal - 1)'
+as "$ADMIN_TOKEN" GET $AG/steps; check "enge1: the catalogue has exactly 195 steps; 31 of them are the engineering control steps of the engineering agent (14 at station 1, 1 at station 3, 16 at station 5), 11 of them the agent's own" '.success and (.data|length) == 195 and ([.data[]|select(.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\."))]|length) == 31 and ([.data[]|select((.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\.")) and .agentCode == "AG-ENG")]|length) == 31 and ([.data[]|select((.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\.")) and .station == 1)]|length) == 14 and ([.data[]|select((.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\.")) and .station == 3)]|length) == 1 and ([.data[]|select((.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\.")) and .station == 5)]|length) == 16 and ([.data[]|select((.code|test("^ENG\\.(REF|PLATFORM|CASE|TENDER|CLAR|CHARTER|HANDOVER|WAIVER|DEBT|DIST)\\.")) and .kind == 1)]|length) == 11'
+as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=ENG.WAIVER.DECIDE&OpenOnly=true&PageNumber=1&PageSize=0"; check "enge1: the CEO waiver step has no open task: every waiver of the block was decided" '.success and .data.totalItems == 0'
+safety_set Quality Engineering.ControlStartDate 14990101
+check "enge1 cut-over: the day of the engineering control is put ahead again for everything after this block (moving it later is a weakening that a second person approves)" '.success and .data.status == "Approved" and .data.weakening == true and .data.oldValue == "0" and .data.newValue == "14990101"'
 TOKEN=$ADMIN_TOKEN
 
 # ------------------------------------------------------------------------------------------ access fixes found by the UI crawl

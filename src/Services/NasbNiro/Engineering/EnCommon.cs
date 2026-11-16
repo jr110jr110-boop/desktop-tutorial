@@ -69,6 +69,9 @@ namespace Services.NasbNiro.Engineering
 
     public static class EnSettingKeys
     {
+        /// <summary>The Shamsi number yyyyMMdd of the day the engineering control starts; 0 = the one cut-over instant of Package G (<see cref="CutOver"/>). Moving it later makes more work legacy: a weakening that needs a second person (like Design.ControlStartDate).</summary>
+        public const string ControlStartDate = "Engineering.ControlStartDate";
+
         /// <summary>The farthest due date (days ahead) of the document debts of an emergency waiver.</summary>
         public const string WaiverMaxDebtDays = "Engineering.Waiver.MaxDebtDays";
 
@@ -76,6 +79,7 @@ namespace Services.NasbNiro.Engineering
 
         public static IEnumerable<QualitySetting> Defaults()
         {
+            yield return new QualitySetting { Key = ControlStartDate, Value = 0, Title = "روز آغاز کنترل مهندسی (تاریخ شمسی به‌صورت yyyyMMdd؛ ۰ = لحظهٔ آغاز کنترل ثبت‌شده در نخستین اجرای برنامه، همان گذار بسته G): استعلام و قراردادهای پیش از آن «قدیمی» شمرده می‌شوند", Source = Source };
             yield return new QualitySetting { Key = WaiverMaxDebtDays, Value = 90, Title = "حداکثر مهلت (روز) بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی", Source = Source };
         }
 
@@ -84,6 +88,7 @@ namespace Services.NasbNiro.Engineering
             min = 0; max = 0;
             switch (key)
             {
+                case ControlStartDate: max = 99991231; return true;
                 case WaiverMaxDebtDays: min = 1; max = 365; return true;
                 default: return false;
             }
@@ -220,8 +225,18 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The instant the control started: the one cut-over of Package G (<see cref="CutOver"/>), or null when it has not started.</summary>
         public static async Task<DateTimeOffset?> StartAsync(IUnitOfWork uow, CancellationToken ct)
         {
-            DateTimeOffset start = await CutOver.StartAsync(uow, ct);
+            Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(uow, ct);
+            DateTime? day = DesignGate.ShamsiDay(settings[EnSettingKeys.ControlStartDate]);
+            if (day.HasValue) return new DateTimeOffset(DateTime.SpecifyKind(day.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(day.Value.Date));   // a day set for the engineering control only
+            DateTimeOffset start = await CutOver.StartAsync(uow, settings, ct);   // else the one cut-over of Package G
             return start <= DateTimeOffset.MinValue ? (DateTimeOffset?)null : start;
+        }
+
+        /// <summary>The control is in force now: a start exists and it is not in the future. Before that (a day set ahead for the old data) the agent steps that are not tied to a record find nothing to do.</summary>
+        public static async Task<bool> ActiveAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            DateTimeOffset? start = await StartAsync(uow, ct);
+            return start.HasValue && start.Value <= DateTimeOffset.Now;
         }
 
         /// <summary>Legacy: created before the cut-over, or the control has not started.</summary>

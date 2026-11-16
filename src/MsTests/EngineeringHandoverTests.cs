@@ -253,6 +253,19 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task The_Engineering_Day_Moved_Later_Makes_Everything_Before_It_Legacy_Like_The_Package_G_Cut_Over()
+        {
+            AppHost host = Started("ho6");
+            int contract = Contract(host);
+            Assert.IsFalse(await host.As(Eng1, async p => await EnControl.ContractIsLegacyAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), contract, Ct)), "after the cut-over instant of Package G the contract is controlled");
+            host.Write(u => { AppHost.Add(u, new Entities.Model.NasbNiro.Quality.QualitySetting { Key = EnSettingKeys.ControlStartDate, Value = 14990101, Title = "t", Source = "t" }); u.SaveChanges(); }, Seeder);
+            Assert.IsTrue(await host.As(Eng1, async p => await EnControl.ContractIsLegacyAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), contract, Ct)), "the day set for the engineering control moved later: the contract is legacy");
+            Assert.IsFalse(await host.As(Eng1, async p => await EnControl.ActiveAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct)), "a start in the future: the agent steps that are not tied to a record find nothing yet");
+            Assert.IsNotNull(Services.NasbNiro.Integrity.SafetyProfile.Find(Entities.Model.NasbNiro.Integrity.SafetyStore.Quality, EnSettingKeys.ControlStartDate));
+            Assert.IsTrue(Services.NasbNiro.Integrity.SafetyProfile.IsWeaker(Services.NasbNiro.Integrity.SafetyProfile.Find(Entities.Model.NasbNiro.Integrity.SafetyStore.Quality, EnSettingKeys.ControlStartDate), "14990101"));
+        }
+
+        [TestMethod]
         public void The_Engineering_E1_Catalogue_Has_Thirty_One_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
@@ -262,7 +275,7 @@ namespace MsTests
             Assert.AreEqual(14, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
             Assert.AreEqual(16, steps.Count(s => s.Station == 5));
-            Assert.AreEqual(11, steps.Count(s => s.Kind == Services.NasbNiro.Agents.AgentStepKind.Agent));
+            Assert.AreEqual(11, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
             Assert.AreEqual(31, steps.Select(s => s.Code).Distinct().Count());
         }
 

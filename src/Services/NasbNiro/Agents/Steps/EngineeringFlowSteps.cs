@@ -80,6 +80,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             bool any = await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview || l.Status == EnRefStatus.Approved), ct);
             if (any) return new List<AgentWorkItem>();
             var t = await uow.Set<PcMdrTemplate>().AsNoTracking().Where(x => !x.Deleted && x.IsActive && x.Lines.Any()).OrderBy(x => x.Id).Select(x => new { x.Id, x.Code, x.Title }).FirstOrDefaultAsync(ct);
@@ -115,6 +116,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Draft).OrderBy(l => l.Id).Take(ProcStepCommon.Cap).Select(l => new { l.Id, l.Code, l.Revision, Lines = l.Lines.Count }).ToListAsync(ct);
             return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست مدارک مرجع {r.Code} (بازنگری {r.Revision}، {r.Lines} ردیف) پیش‌نویس است و برای تایید ارسال نشده است.")).ToList();
         }
@@ -132,6 +134,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.UnderReview).OrderBy(l => l.Id).Take(ProcStepCommon.Cap).Select(l => new { l.Id, l.Code, l.Revision }).ToListAsync(ct);
             return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست مدارک مرجع {r.Code} (بازنگری {r.Revision}) منتظر تایید است.", EnRoles.RefApprovers)).ToList();
         }
@@ -157,6 +160,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             int? current = await EnCurrentList.IdAsync(uow, ct);
             if (!current.HasValue) return new List<AgentWorkItem>();
             int list = current.Value;
@@ -186,6 +190,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             int? current = await EnCurrentList.IdAsync(uow, ct);
             if (!current.HasValue) return new List<AgentWorkItem>();
             int list = current.Value;
@@ -207,6 +212,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDossierStatus.Completing)
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() }).ToListAsync(ct);
             return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code, null, null, $"مدارک پلتفرم {r.Code} کامل اعلام شده و منتظر تایید مدیر مهندسی است.", EnRoles.RefApprovers)).ToList();
