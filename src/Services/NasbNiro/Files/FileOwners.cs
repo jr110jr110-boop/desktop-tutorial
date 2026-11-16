@@ -61,6 +61,9 @@ namespace Services.NasbNiro.Files
             ["SlProposal"] = Sales.SalesRoles.Readers, ["SlProposal.CommercialDocumentId"] = Sales.SalesRoles.CommercialReaders,
             ["SlInquiry"] = Sales.SalesRoles.Readers,
             ["SvServiceOrder"] = AfterSales.SvRoles.OrderReaders,
+
+            // engineering (ENG-E1)
+            ["EnPlatformDocument"] = Engineering.EnRoles.Readers, ["EnHandoverLine"] = Engineering.EnRoles.Readers, ["EnDocumentDebt"] = Engineering.EnRoles.Readers, ["EnClarification"] = Engineering.EnRoles.Readers,
         };
 
         /// <summary>The read roles for a link, or false when the record type is not in the map (the caller then fails closed).</summary>

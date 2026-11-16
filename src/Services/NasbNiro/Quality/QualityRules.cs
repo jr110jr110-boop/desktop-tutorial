@@ -154,6 +154,7 @@ namespace Services.NasbNiro.Quality
             if (global::Services.NasbNiro.ProductBank.DesignSettingKeys.TryGetBounds(key, out min, out max)) return true;   // Package A1
             if (global::Services.NasbNiro.AuditSeat.AusSettingKeys.TryGetBounds(key, out min, out max)) return true;   // Package 9
             if (global::Services.NasbNiro.GoLive.GlSettingKeys.TryGetBounds(key, out min, out max)) return true;   // Package G
+            if (global::Services.NasbNiro.Engineering.EnSettingKeys.TryGetBounds(key, out min, out max)) return true;   // ENG-E1
             if (key != null && Table.TryGetValue(key, out KeyValuePair<int, int> range)) { min = range.Key; max = range.Value; return true; }
             min = 0; max = 0;
             return false;

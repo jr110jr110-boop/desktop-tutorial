@@ -227,6 +227,7 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.GoLive.IPoCitationService, Services.NasbNiro.GoLive.PoCitationService>();
             services.AddScoped<Services.NasbNiro.GoLive.IGlPrintService, Services.NasbNiro.GoLive.GlPrintService>();
             services.AddHostedService<Services.NasbNiro.GoLive.GoLiveHostedService>();
+            services.AddHostedService<Services.NasbNiro.Engineering.EnHostedService>();   // ENG-E1: records the engineering cut-over instant once
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
             services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();

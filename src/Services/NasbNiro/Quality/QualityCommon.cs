@@ -218,6 +218,7 @@ namespace Services.NasbNiro.Quality
             foreach (QualitySetting dd in global::Services.NasbNiro.ProductBank.DesignSettingKeys.Defaults()) yield return dd;   // Package A1
             foreach (QualitySetting ad in global::Services.NasbNiro.AuditSeat.AusSettingKeys.Defaults()) yield return ad;   // Package 9
             foreach (QualitySetting gd in global::Services.NasbNiro.GoLive.GlSettingKeys.Defaults()) yield return gd;   // Package G
+            foreach (QualitySetting ed in global::Services.NasbNiro.Engineering.EnSettingKeys.Defaults()) yield return ed;   // ENG-E1
         }
 
         /// <summary>

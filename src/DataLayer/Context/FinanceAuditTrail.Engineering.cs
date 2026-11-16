@@ -1,0 +1,29 @@
+using E = Entities.Model.NasbNiro.Engineering;
+
+namespace DataLayer.Context
+{
+    /// <summary>
+    /// ENG-E1 (engineering module, external workflow): the reference list, the platform dossier and its lines, the case and its history, the clarifications, the handover with its lines, the emergency waiver, the document debts and the distribution
+    /// join the tamper-evident chain (Package D mechanism). A direct edit of a confirmation, an approval, a classification, a waiver decision or a debt status in the database is then a row of the chain that nobody wrote.
+    /// In its own file so that it merges cleanly with the other packages that add entries to <c>FinanceAuditTrail.cs</c>.
+    /// </summary>
+    internal static partial class FinanceAuditTrail
+    {
+        private static void AddEngineering()
+        {
+            AuditPd(typeof(E.EnActivation), new[] { "StartAt", "RecordedByUserId", "Note", "Slot", "Deleted" }, "آغاز کنترل مهندسی");
+            AuditPd(typeof(E.EnReferenceList), new[] { "Code", "Title", "StandardSource", "Revision", "Status", "PreparedByUserId", "EditorUserIds", "SubmittedAt", "ApprovedByUserId", "ApprovedAt", "ContentHash", "Note", "VoidReason", "Deleted" }, "فهرست مدارک مرجع مهندسی");
+            AuditPd(typeof(E.EnReferenceLine), new[] { "ListId", "Seq", "DocumentType", "Discipline", "Title", "Required", "TenderStage", "ClientSubmittal", "StandardClause", "Note" }, "ردیف فهرست مدارک مرجع");
+            AuditPd(typeof(E.EnPlatformDossier), new[] { "ProductId", "ReferenceListId", "ReferenceRevision", "Status", "AssessedAt", "LastEditedByUserId", "EditorUserIds", "ConfirmedByUserId", "ConfirmedAt", "ConfirmedHash", "Note", "Deleted" }, "پرونده مدارک پلتفرم");
+            AuditPd(typeof(E.EnPlatformDocument), new[] { "DossierId", "ReferenceLineId", "Seq", "DocumentType", "Discipline", "Title", "Required", "TenderStage", "State", "DocumentId", "ControlledDocumentId", "Revision", "NotApplicableReason", "SystemProven", "SuppliedByUserId", "SuppliedAt" }, "مدرک پرونده پلتفرم");
+            AuditPd(typeof(E.EnCase), new[] { "Number", "Title", "InquiryId", "ContractId", "Status", "Classification", "ProductId", "PlatformWithChanges", "ChangeNote", "ProposedClassification", "ProposedProductId", "ProposedWithChanges", "ProposedChangeNote", "ProposalBasis", "ProposedByUserId", "ProposedAt", "EditorUserIds", "EngConfirmedByUserId", "EngConfirmedAt", "CeoApprovedByUserId", "CeoApprovedAt", "ClassificationHash", "ReturnReason", "TenderPackageId", "TenderReleasedByUserId", "TenderReleasedAt", "TenderHash", "ConceptNote", "CharterReviewOutcome", "CharterReviewedByUserId", "CharterReviewedAt", "CharterHash", "CharterReviewNote", "ClosedReason", "Deleted" }, "پرونده مهندسی");
+            AuditPd(typeof(E.EnCaseEvent), new[] { "CaseId", "Kind", "At", "UserId", "Note" }, "رویداد پرونده مهندسی");
+            AuditPd(typeof(E.EnClarification), new[] { "Number", "CaseId", "FollowsId", "Question", "QuestionAttachmentIds", "AskedByUserId", "AskedAt", "Status", "SentToClientByUserId", "SentToClientAt", "ClientLetterRef", "Answer", "AnswerAttachmentIds", "AnswerRecordedByUserId", "AnswerRecordedAt", "ClosedByUserId", "ClosedAt", "VoidReason", "Deleted" }, "ابهام‌زدایی از طریق بازرگانی");
+            AuditPd(typeof(E.EnHandover), new[] { "Number", "CaseId", "ContractId", "Round", "Status", "PreparedByUserId", "EditorUserIds", "Complete", "MissingRequiredCount", "WaiverId", "SubmittedByUserId", "SubmittedAt", "AcceptedByUserId", "AcceptedAt", "ReturnedByUserId", "ReturnedAt", "ReturnReason", "ReleasedByUserId", "ReleasedAt", "ContentHash", "Note", "VoidReason", "Deleted" }, "تحویل مدارک مهندسی به PMO");
+            AuditPd(typeof(E.EnHandoverLine), new[] { "HandoverId", "Seq", "DocumentType", "Discipline", "Title", "Required", "State", "DocumentId", "Revision", "PlatformDocumentId", "DeliverableId", "Note" }, "ردیف تحویل مدارک مهندسی");
+            AuditPd(typeof(E.EnWaiver), new[] { "Number", "HandoverId", "CaseId", "Reason", "MissingSnapshot", "DebtDueDate", "Status", "RequestedByUserId", "RequestedAt", "ExpiresAt", "DecidedByUserId", "DecidedAt", "DecisionNote", "UsedAt", "Deleted" }, "معافیت اضطراری قفل تحویل مدارک");
+            AuditPd(typeof(E.EnDocumentDebt), new[] { "WaiverId", "HandoverLineId", "CaseId", "ContractId", "ProductId", "DocumentType", "Title", "DueDate", "Status", "SettledAt", "SettledByUserId", "SettledDocumentId", "Deleted" }, "بدهی مدرک مهندسی");
+            AuditPd(typeof(E.EnDistribution), new[] { "HandoverId", "CaseId", "ContractId", "Unit", "Roles", "NotifiedAt", "AcknowledgedByUserId", "AcknowledgedAt", "Deleted" }, "ابلاغ مدارک به واحد");
+        }
+    }
+}

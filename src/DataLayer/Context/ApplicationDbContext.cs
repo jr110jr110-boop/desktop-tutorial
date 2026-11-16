@@ -12,6 +12,7 @@ using DataLayer.Configurations.EF.NasbNiro;
 using DataLayer.Configurations.EF.NasbNiro.Agents;
 using DataLayer.Configurations.EF.NasbNiro.Attachments;
 using DataLayer.Configurations.EF.NasbNiro.EngChange;
+using DataLayer.Configurations.EF.NasbNiro.Engineering;
 using DataLayer.Configurations.EF.NasbNiro.AuditSeat;
 using DataLayer.Configurations.EF.NasbNiro.Integrity;
 using DataLayer.Configurations.EF.NasbNiro.Inventory;
@@ -505,6 +506,9 @@ namespace DataLayer.Context
 
             // Package A2: engineering change requests and orders, impact snapshot, dispositions, tasks
             builder.AddEngChangeConfigurations();
+
+            // ENG-E1: the engineering module (reference list, platform dossiers, cases, clarifications, handovers, waivers, debts, distribution)
+            builder.AddEngineeringConfigurations();
 
             // Package 9: the AI internal auditor (audit programme, runs, findings, reports, process audits)
             builder.AddAuditSeatConfigurations();

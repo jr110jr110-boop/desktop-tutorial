@@ -434,6 +434,7 @@ namespace DataLayer.Context
             AddSepidarTransfer();     // Sepidar transfer per document: kinds, queue items, attempts (FinanceAuditTrail.Sepidar.cs)
             AddResources();           // project control priority 4: resource pool, standard rates, resource plan (FinanceAuditTrail.Resources.cs)
             AddGoLive();              // package G: legacy register, adoptions, PO drawing citation; engineering masters in the record-drift scope (FinanceAuditTrail.GoLive.cs)
+            AddEngineering();         // ENG-E1: reference list, platform dossiers, cases, clarifications, handovers, waivers, debts, distribution (FinanceAuditTrail.Engineering.cs)
             var more = new Dictionary<Type, string[]>
             {
                 { typeof(Entities.Model.NasbNiro.Procurement.SupplierProfile), new[] { "Grade", "Score", "Blocked", "BlockReason", "Warnings" } },
