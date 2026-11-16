@@ -42,11 +42,14 @@ namespace Services.NasbNiro.Engineering
         public static string LineHash(IEnumerable<EnHandoverLine> lines) =>
             EnHash.Of(string.Join(";", lines.OrderBy(l => l.Seq).Select(l => string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Title), l.Required ? "1" : "0", EnText.Num((int)l.State), l.DocumentId?.ToString("N") ?? "-", EnHash.Norm(l.Revision)))));
 
+        /// <summary>The Code of the Approved list the handover lines come from: spare parts and service may use the one chosen at the confirm; else the standard of the project.</summary>
+        public static string ListCode(EnCase c) => c.Kind != EnCaseKind.Turbine && !string.IsNullOrWhiteSpace(c.HandoverListCode) ? c.HandoverListCode : c.ReferenceCode;
+
         public static async Task<List<EnSourceLine>> SourcesAsync(IUnitOfWork uow, EnCase c, CancellationToken ct)
         {
             List<EnSourceLine> result = await SourceListAsync(uow, c, ct);
             // the product's own BOM and manufacturing route are proven by the system when the reference list has no line of that type; they carry a link to the bank page, not a file
-            if (c.ProductId.HasValue)
+            if (c.ProductId.HasValue && c.Kind == EnCaseKind.Turbine)
             {
                 int pid = c.ProductId.Value;
                 int seq = result.Count == 0 ? 1000 : result.Max(x => x.Seq) + 1;
@@ -76,7 +79,7 @@ namespace Services.NasbNiro.Engineering
                     result.Add(new EnSourceLine { Seq = x.Seq, Type = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, State = x.State, DocumentId = x.DocumentId, Revision = x.Revision, PlatformDocumentId = x.Id });
                 return result;
             }
-            EnReferenceList list = await EnReferenceRules.CurrentAsync(uow, false, ct, c.ReferenceCode);
+            EnReferenceList list = await EnReferenceRules.CurrentAsync(uow, false, ct, ListCode(c));
             if (list == null || !c.ContractId.HasValue) return result;
             List<PcEngineeringDeliverable> mdr = await uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => x.ContractId == c.ContractId.Value && !x.Deleted).OrderBy(x => x.Id).ToListAsync(ct);
             foreach (EnReferenceLine l in list.Lines.OrderBy(l => l.Seq))
@@ -519,13 +522,13 @@ namespace Services.NasbNiro.Engineering
             EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == dto.CaseId.Value && !x.Deleted, ct);
             if (c == null) return EnText.NotFound<EnHandoverDto>(EnText.NotFoundCase);
             if (!c.ContractId.HasValue || (c.Status != EnCaseStatus.Awarded && c.Status != EnCaseStatus.InEngineering)) return EnText.Bad<EnHandoverDto>("تحویل مدارک فقط برای پروندهٔ برنده‌شده و در مهندسی ساخته می‌شود.");
-            if (c.Classification == EnClassification.None) return EnText.Bad<EnHandoverDto>("نوع پرونده هنوز تصویب نشده است.");
+            if (c.Kind == EnCaseKind.Turbine && c.Classification == EnClassification.None) return EnText.Bad<EnHandoverDto>("نوع پرونده هنوز تصویب نشده است.");
             if (await _uow.Set<EnHandover>().AnyAsync(x => x.CaseId == c.Id && !x.Deleted && (x.Status == EnHandoverStatus.Draft || x.Status == EnHandoverStatus.Submitted || x.Status == EnHandoverStatus.Accepted || x.Status == EnHandoverStatus.Released), ct))
                 return EnText.Bad<EnHandoverDto>("برای این پرونده تحویل باز یا ابلاغ‌شده وجود دارد.");
             Entities.Model.NasbNiro.ProjectControl.PcProjectCharter charter = await EnCaseRules.CharterAsync(_uow, c.ContractId.Value, ct);
             if (charter != null && !(c.CharterReviewOutcome == EnCharterOutcome.Confirmed && c.CharterHash == EnCaseRules.CharterHash(charter))) return EnText.Bad<EnHandoverDto>("منشور پروژه هنوز توسط مهندسی تایید نشده است.");
             if (string.IsNullOrWhiteSpace(c.ReferenceCode)) return EnText.Bad<EnHandoverDto>("استاندارد پروژه از دیتاشیت کارفرما ثبت نشده است؛ تحویل مدارک بدون آن ساخته نمی‌شود.");
-            if (c.Classification == EnClassification.New && await EnReferenceRules.CurrentAsync(_uow, false, ct, c.ReferenceCode) == null) return EnText.Bad<EnHandoverDto>("فهرست مدارک مرجع تاییدشده‌ای برای این پرونده (" + (c.ReferenceCode ?? "بدون استاندارد مرجع") + ") وجود ندارد.");
+            if ((c.Classification == EnClassification.New || c.Kind != EnCaseKind.Turbine) && await EnReferenceRules.CurrentAsync(_uow, false, ct, EnHandoverRules.ListCode(c)) == null) return EnText.Bad<EnHandoverDto>("فهرست مدارک مرجع تاییدشده‌ای برای این پرونده (" + (EnHandoverRules.ListCode(c) ?? "بدون استاندارد مرجع") + ") وجود ندارد.");
             int round = (await _uow.Set<EnHandover>().Where(x => x.CaseId == c.Id).Select(x => (int?)x.Round).MaxAsync(ct) ?? 0) + 1;
             EnHandover h = new EnHandover { CaseId = c.Id, ContractId = c.ContractId.Value, Round = round, Status = EnHandoverStatus.Draft, PreparedByUserId = Me, EditorUserIds = w.Seat ? null : EnEditors.With(null, Me), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };
             h.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Handover, "EHO", now.DateTime, ct);

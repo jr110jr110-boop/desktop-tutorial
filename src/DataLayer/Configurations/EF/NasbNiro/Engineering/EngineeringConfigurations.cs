@@ -74,6 +74,9 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.CustomerRequirementNote).HasMaxLength(2000);
                 b.Property(x => x.ApprovedGapHash).HasMaxLength(64);
+                b.Property(x => x.Kind).HasDefaultValue(EnCaseKind.Turbine);
+                b.Property(x => x.OpinionText).HasMaxLength(2000);
+                b.Property(x => x.HandoverListCode).HasMaxLength(60);
                 b.Property(x => x.ChangeNote).HasMaxLength(1000);
                 b.Property(x => x.ReferenceCode).HasMaxLength(60);
                 b.Property(x => x.StandardEvidence).HasMaxLength(500);

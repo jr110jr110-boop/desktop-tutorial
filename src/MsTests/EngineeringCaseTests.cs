@@ -35,7 +35,9 @@ namespace MsTests
             StringAssert.StartsWith(c.Number, "ENG-");
             Assert.AreEqual((int)EnCaseStatus.Classifying, c.Status);
             Refused(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry), "وجود دارد");
-            Refused(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, SlInquiryStatus.Bidding, SlProductType.SpareParts)), "یدکی");
+            EnCaseDto spare = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, SlInquiryStatus.Bidding, SlProductType.SpareParts)));   // spare parts and service are controlled too
+            Assert.AreEqual((int)EnCaseKind.SpareParts, spare.Kind);
+            Assert.AreEqual((int)EnCaseKind.Turbine, c.Kind);
             Refused(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, SlInquiryStatus.Lost)), "باز");
             Refused(await CaseAct(host, Eng1, null, "open", d => { d.InquiryId = inquiry; d.ContractId = 5; }), "یکی از");
             // an old inquiry (before the control started) is legacy: no case

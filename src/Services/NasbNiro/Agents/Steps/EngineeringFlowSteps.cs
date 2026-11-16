@@ -36,6 +36,7 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnCaseProposeStep>();
             services.AddScoped<IAgentStep, EnCaseClassifyInputStep>();
             services.AddScoped<IAgentStep, EnCaseConfirmStep>();
+            services.AddScoped<IAgentStep, EnOpinionInputStep>();
             services.AddScoped<IAgentStep, EnCaseApproveStep>();
             services.AddScoped<IAgentStep, EnTenderDraftStep>();
             services.AddScoped<IAgentStep, EnTenderInputStep>();

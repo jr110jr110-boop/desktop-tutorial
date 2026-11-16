@@ -151,6 +151,8 @@ namespace Services.NasbNiro.Engineering
 
         public static string Classification(EnClassification c) => c switch { EnClassification.Platform => "پلتفرم (توربین ساخته‌شده)", EnClassification.New => "طراحی جدید", _ => "تعیین‌نشده" };
 
+        public static string Kind(EnCaseKind k) => k switch { EnCaseKind.SpareParts => "قطعات یدکی", EnCaseKind.Service => "خدمات پس از فروش", _ => "توربین" };
+
         public static string Case(EnCaseStatus s) => s switch
         {
             EnCaseStatus.Classifying => "در حال تعیین نوع", EnCaseStatus.AwaitingEngConfirm => "منتظر تایید مدیر مهندسی", EnCaseStatus.AwaitingCeoApproval => "منتظر تصویب مدیرعامل",

@@ -28,6 +28,18 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     public class EnCaseDto
     {
         public int Id { get; set; }
+
+        /// <summary>1 turbine, 2 spare parts, 3 after-sales service.</summary>
+        public int Kind { get; set; }
+        public string KindText { get; set; }
+
+        /// <summary>Spare parts and service: the technical opinion, who wrote it and the list code the handover is built from.</summary>
+        public string OpinionText { get; set; }
+        public string OpinionByName { get; set; }
+        public string OpinionAtText { get; set; }
+        public string HandoverListCode { get; set; }
+        public bool CanSaveOpinion { get; set; }
+        public string SaveOpinionBlockedReason { get; set; }
         public string ReferenceCode { get; set; }
         public string Number { get; set; }
         public string Title { get; set; }
@@ -142,6 +154,12 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Basis { get; set; }
         public string Note { get; set; }
         public string ConceptNote { get; set; }
+
+        /// <summary>For save-opinion (spare parts and service): the technical opinion, at least 30 characters.</summary>
+        public string OpinionText { get; set; }
+
+        /// <summary>For confirm of a spare-parts or service case (optional): the Code of the Approved reference list the handover is built from.</summary>
+        public string HandoverListCode { get; set; }
 
         /// <summary>For set-standard: the standard of the project from the client data sheet (any code is accepted; trimmed, upper-cased, at most 40 characters).</summary>
         public string ReferenceCode { get; set; }

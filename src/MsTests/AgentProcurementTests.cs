@@ -191,11 +191,11 @@ namespace MsTests
             using IServiceScope scope = e.Host.Provider.CreateScope();
             List<IAgentStep> steps = scope.ServiceProvider.GetServices<IAgentStep>().ToList();
             var procurement = steps.Where(s => s.Station == 6 && s.Code != null && !s.Code.StartsWith("TEST.")).ToList();
-            Assert.AreEqual(203, steps.Count, "the registrations of the application");
-            Assert.AreEqual(203, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
+            Assert.AreEqual(204, steps.Count, "the registrations of the application");
+            Assert.AreEqual(204, steps.Select(s => s.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count(), "no duplicate code");
             Assert.AreEqual(34, procurement.Count, "the station 6 steps");
             IAgentStepCatalog catalog = scope.ServiceProvider.GetRequiredService<IAgentStepCatalog>();
-            Assert.AreEqual(203, catalog.All.Count);
+            Assert.AreEqual(204, catalog.All.Count);
             foreach (IAgentStep s in steps)
             {
                 AiSeatDefinition seat = AiSeatCatalog.Find(s.AgentCode);

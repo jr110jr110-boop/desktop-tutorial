@@ -34,7 +34,7 @@ namespace Services.NasbNiro.Agents.Steps
         }
     }
 
-    /// <summary>ENG.CASE.OPEN (Agent): a controlled inquiry (an open one that is not spare parts or service) or a controlled live contract with a work order and no engineering case.</summary>
+    /// <summary>ENG.CASE.OPEN (Agent): a controlled inquiry (an open one; spare parts and service inquiries get a case of their own kind) or a controlled live contract with a work order and no engineering case.</summary>
     internal sealed class EnCaseOpenStep : EnCaseStep
     {
         public override string Code => "ENG.CASE.OPEN";
@@ -48,7 +48,7 @@ namespace Services.NasbNiro.Agents.Steps
             List<AgentWorkItem> items = new List<AgentWorkItem>();
             if (!start.HasValue) return items;
             DateTimeOffset from = start.Value;
-            var inquiries = await uow.Set<SlInquiry>().AsNoTracking().Where(i => !i.Deleted && i.CreateDate >= from && i.ProductType != SlProductType.SpareParts && i.ProductType != SlProductType.Service
+            var inquiries = await uow.Set<SlInquiry>().AsNoTracking().Where(i => !i.Deleted && i.CreateDate >= from
                     && (i.Status == SlInquiryStatus.Received || i.Status == SlInquiryStatus.UnderReview || i.Status == SlInquiryStatus.Bidding) && !uow.Set<EnCase>().Any(c => c.InquiryId == i.Id && !c.Deleted))
                 .OrderBy(i => i.Id).Take(ProcStepCommon.Cap).Select(i => new { i.Id, i.Number }).ToListAsync(ct);
             items.AddRange(inquiries.Select(i => Item("SlInquiry", i.Id, i.Number, null, null, $"برای استعلام {i.Number} پروندهٔ مهندسی باز نشده است.")));
@@ -124,12 +124,22 @@ namespace Services.NasbNiro.Agents.Steps
                 }
             }
             int checkedProducts = await uow.Set<PbProduct>().AsNoTracking().CountAsync(p => !p.Deleted && p.IsActive, ct);
-            var matches = equipments.Count == 0 ? new List<(int Id, string Code)>() : (await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && p.EquipmentId.HasValue && equipments.Contains(p.EquipmentId.Value)).OrderBy(p => p.Id).Select(p => new { p.Id, p.Code }).Take(20).ToListAsync(ct)).Select(p => (p.Id, p.Code)).ToList();
+            // only a product that has at least one dossier is a platform: the product of a new design is not one until the CEO approved its registration
+            var matches = equipments.Count == 0 ? new List<(int Id, string Code)>() : (await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && p.EquipmentId.HasValue && equipments.Contains(p.EquipmentId.Value) && uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted)).OrderBy(p => p.Id).Select(p => new { p.Id, p.Code }).Take(20).ToListAsync(ct)).Select(p => (p.Id, p.Code)).ToList();
             string number = c.Number;
+            if (c.Kind != EnCaseKind.Turbine)
+            {
+                // spare parts and service: no classification; the related platform is proposed when it can be derived, the technical opinion is written by an engineer
+                int? related = matches.Count == 1 ? matches[0].Id : (int?)null;
+                string basisText = matches.Count == 1 ? $"{source} با پلتفرم {matches[0].Code} (دارای پرونده مدارک) برابر است؛ پلتفرم مرتبط پیشنهاد شد."
+                    : matches.Count == 0 ? $"از {EnText2.Num(checkedProducts)} محصول فعال بانک محصول، هیچ پلتفرمِ دارای پرونده مدارک با {source} برابر نیست؛ پلتفرم مرتبط مشخص نشد."
+                    : $"چند پلتفرم با {source} برابر است ({string.Join("، ", matches.Select(m => m.Code))}); مهندس پلتفرم مرتبط را انتخاب کند.";
+                return await CallAsync(services, new EnCaseActionDto { Action = "propose", Id = c.Id, ProductId = related, Basis = basisText }, $"ایجنت مهندسی برای {number} " + (related.HasValue ? $"پلتفرم مرتبط {matches[0].Code} را پیشنهاد کرد." : "پلتفرم مرتبطی تعیین نکرد."), number, ct);
+            }
             if (matches.Count == 1)
                 return await CallAsync(services, new EnCaseActionDto { Action = "propose", Id = c.Id, Classification = (int)EnClassification.Platform, ProductId = matches[0].Id, Basis = $"{source} با محصول {matches[0].Code} در بانک محصول برابر است (از {EnText2.Num(checkedProducts)} محصول فعال تنها همین یکی)." }, $"ایجنت مهندسی برای {number} «پلتفرم {matches[0].Code}» را پیشنهاد کرد.", number, ct);
             if (matches.Count == 0)
-                return await CallAsync(services, new EnCaseActionDto { Action = "propose", Id = c.Id, Classification = (int)EnClassification.New, Basis = $"هیچ‌یک از {EnText2.Num(checkedProducts)} محصول فعال بانک محصول با {source} ({EnText2.Num(equipments.Count)} تجهیز) برابر نیست." }, $"ایجنت مهندسی برای {number} «طراحی جدید» را پیشنهاد کرد.", number, ct);
+                return await CallAsync(services, new EnCaseActionDto { Action = "propose", Id = c.Id, Classification = (int)EnClassification.New, Basis = $"هیچ‌یک از {EnText2.Num(checkedProducts)} محصول فعال بانک محصول که پرونده مدارک (پلتفرم) دارد با {source} ({EnText2.Num(equipments.Count)} تجهیز) برابر نیست." }, $"ایجنت مهندسی برای {number} «طراحی جدید» را پیشنهاد کرد.", number, ct);
             return await CallAsync(services, new EnCaseActionDto { Action = "propose", Id = c.Id, Classification = 0, Basis = $"چند محصول بانک با {source} برابر است ({string.Join("، ", matches.Select(m => m.Code))}); مهندس باید محصول را انتخاب کند یا طراحی جدید بداند." }, $"ایجنت مهندسی برای {number} چند محصول مطابق یافت و تصمیم را به مهندس سپرد.", number, ct);
         }
 
@@ -169,6 +179,24 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = CaseLink(item.TargetId), Title = "تایید نوع پروندهٔ مهندسی " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.OPINION.INPUT (Input): a spare-parts or service case has no classification; an engineer writes the technical opinion (min 30 characters) that the manager then confirms.</summary>
+    internal sealed class EnOpinionInputStep : EnCaseStep
+    {
+        public override string Code => "ENG.OPINION.INPUT";
+        public override string Title => "ثبت رای فنی مهندسی برای قطعات یدکی و خدمات پس از فروش";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+        public override string FallbackRoles => EnRoles.Writers;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Kind != EnCaseKind.Turbine && c.Status == EnCaseStatus.Classifying && c.OpinionText == null)
+                .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
+            return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"رای فنی مهندسی برای پروندهٔ {r.Number} (قطعات یدکی یا خدمات) هنوز ثبت نشده است.", EnRoles.Writers)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = CaseLink(item.TargetId), Title = "ثبت رای فنی پروندهٔ " + item.TargetNumber };
     }
 
     /// <summary>ENG.CASE.APPROVE (HumanGate): the CEO approves the classification (not the confirmer, not the proposer or an editor).</summary>
@@ -256,10 +284,10 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderIssued && c.TenderPackageId != null).OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId, c.TenderPackageId, c.TenderHash }).ToListAsync(ct);
+            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderIssued && c.TenderPackageId != null).OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId, c.TenderPackageId, c.TenderHash, c.Kind, c.OpinionText }).ToListAsync(ct);
             List<AgentWorkItem> items = new List<AgentWorkItem>();
             foreach (var r in rows)
-                if (r.TenderHash != await EnCaseRules.TenderHashAsync(uow, r.TenderPackageId.Value, ct))
+                if (r.TenderHash != await EnCaseRules.TenderHashAsync(uow, r.TenderPackageId.Value, r.Kind, r.OpinionText, ct))
                     items.Add(Item("EnCase", r.Id, r.Number, r.ContractId, null, $"مدارک بستهٔ فنی پروندهٔ {r.Number} پس از ابلاغ تغییر کرده است."));
             return items;
         }
@@ -281,7 +309,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.TenderPackageId != null && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)
-                    && (c.Classification == EnClassification.Platform || (c.ConceptNote != null && uow.Set<PcTenderDocument>().Any(t => t.PackageId == c.TenderPackageId && !t.Deleted))))
+                    && (c.Classification == EnClassification.Platform || (c.Kind != EnCaseKind.Turbine && c.OpinionText != null) || (c.ConceptNote != null && uow.Set<PcTenderDocument>().Any(t => t.PackageId == c.TenderPackageId && !t.Deleted))))
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
             return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"بستهٔ فنی پروندهٔ {r.Number} آمادهٔ ابلاغ به بازرگانی است.", EnRoles.Manager)).ToList();
         }

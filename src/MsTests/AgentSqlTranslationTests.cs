@@ -254,5 +254,23 @@ namespace MsTests
                 Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
             }
         }
+        /// <summary>ENG-E1 part 3: the discoveries of the steps added in S5, S6, S9 and S10 (and the changed ones) translate to SQL Server; the connection swallows every command, so a query the server could not express throws here.</summary>
+        [TestMethod]
+        public void The_Discoveries_Of_The_Engineering_E1_Part3_Steps_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var problems = new List<string>();
+                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN" })
+                {
+                    IAgentStep step = scope.ServiceProvider.GetServices<IAgentStep>().Single(x => x.Code == code);
+                    try { step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult(); }
+                    catch (Exception ex) { string text = ex.ToString(); if (text.Contains("could not be translated") || text.Contains("cannot be translated") || text.Contains("LINQ expression")) problems.Add(code + ": " + ex.Message); }   // the swallowing reader has no columns: only a translation failure counts
+                }
+                Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
+            }
+        }
     }
 }

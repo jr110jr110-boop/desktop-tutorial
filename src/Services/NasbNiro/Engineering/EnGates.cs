@@ -30,12 +30,15 @@ namespace Services.NasbNiro.Engineering
         public static string ClassHash(EnCase c) =>
             EnHash.Of(string.Join("|", EnText.Num((int)c.ProposedClassification), c.ProposedProductId?.ToString() ?? "-", c.ProposedWithChanges ? "1" : "0", EnHash.Norm(c.ProposedChangeNote), c.InquiryId?.ToString() ?? "-", c.ContractId?.ToString() ?? "-", EnHash.Norm(c.ReferenceCode), EnHash.Norm(c.StandardEvidence)));
 
-        /// <summary>The documents of the tender package as they are now (id, file, revision, title): any addition, void or change gives another hash.</summary>
-        public static async Task<string> TenderHashAsync(IUnitOfWork uow, int packageId, CancellationToken ct)
+        /// <summary>The documents of the tender package as they are now (id, file, revision, title): any addition, void or change gives another hash. A spare-parts or service case also binds the confirmed technical opinion into the hash.</summary>
+        public static async Task<string> TenderHashAsync(IUnitOfWork uow, int packageId, EnCaseKind kind, string opinion, CancellationToken ct)
         {
             var docs = await uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == packageId && !d.Deleted).OrderBy(d => d.Id).Select(d => new { d.Id, d.DocumentId, d.Revision, d.Title }).ToListAsync(ct);
-            return EnHash.Of(string.Join(";", docs.Select(d => EnText.Num(d.Id) + "|" + (d.DocumentId?.ToString("N") ?? "-") + "|" + EnHash.Norm(d.Revision) + "|" + EnHash.Norm(d.Title))));
+            string text = string.Join(";", docs.Select(d => EnText.Num(d.Id) + "|" + (d.DocumentId?.ToString("N") ?? "-") + "|" + EnHash.Norm(d.Revision) + "|" + EnHash.Norm(d.Title)));
+            return EnHash.Of(kind == EnCaseKind.Turbine ? text : text + "#OPINION#" + EnHash.Norm(opinion));
         }
+
+        public static Task<string> TenderHashAsync(IUnitOfWork uow, EnCase c, CancellationToken ct) => TenderHashAsync(uow, c.TenderPackageId.Value, c.Kind, c.OpinionText, ct);
 
         public static async Task<PcProjectCharter> CharterAsync(IUnitOfWork uow, int contractId, CancellationToken ct) =>
             await uow.Set<PcProjectCharter>().AsNoTracking().Where(c => c.ContractId == contractId && !c.Deleted).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
@@ -57,14 +60,14 @@ namespace Services.NasbNiro.Engineering
         public static async Task<EnGateResult> ForInquiryAsync(IUnitOfWork uow, int inquiryId, CancellationToken ct)
         {
             var inquiry = await uow.Set<SlInquiry>().AsNoTracking().Where(i => i.Id == inquiryId && !i.Deleted).Select(i => new { i.Id, i.CreateDate, i.ProductType, i.Status }).FirstOrDefaultAsync(ct);
-            if (inquiry == null || inquiry.ProductType == SlProductType.SpareParts || inquiry.ProductType == SlProductType.Service) return new EnGateResult { Passed = true };
+            if (inquiry == null) return new EnGateResult { Passed = true };   // spare parts and service inquiries are controlled too (their case carries the technical opinion)
             DateTimeOffset? start = await EnControl.StartAsync(uow, ct);
             if (EnControl.IsLegacy(inquiry.CreateDate, start)) return new EnGateResult { Legacy = true, LegacyNote = EnControl.LegacyNote(start), Passed = true };
             EnCase c = await uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.InquiryId == inquiryId && !x.Deleted, ct);
             if (c == null) return new EnGateResult { Controlled = true, Reason = "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است (پرونده مهندسی هنوز باز نشده است)." };
             EnGateResult r = new EnGateResult { Controlled = true, Case = c };
             if (!EnCaseRules.TenderPassed(c.Status) || !c.TenderReleasedAt.HasValue) { r.Reason = "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است (پرونده مهندسی " + Name(c) + ")."; return r; }
-            if (c.TenderPackageId.HasValue && c.TenderHash != await EnCaseRules.TenderHashAsync(uow, c.TenderPackageId.Value, ct))
+            if (c.TenderPackageId.HasValue && c.TenderHash != await EnCaseRules.TenderHashAsync(uow, c, ct))
             { r.Reason = "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است: مدارک بسته پس از ابلاغ تغییر کرده و مهندسی باید دوباره ابلاغ کند (پرونده مهندسی " + Name(c) + ")."; return r; }
             r.Passed = true;
             return r;

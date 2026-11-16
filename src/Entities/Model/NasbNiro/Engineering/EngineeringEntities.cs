@@ -16,6 +16,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnClassification { None = 0, Platform = 1, New = 2 }
 
+    /// <summary>What the case is about: a turbine (the classification gate applies) or spare parts / after-sales service (a technical opinion replaces the classification; no CEO classification gate).</summary>
+    public enum EnCaseKind { Turbine = 1, SpareParts = 2, Service = 3 }
+
     public enum EnCaseStatus
     {
         Classifying = 1, AwaitingEngConfirm = 2, AwaitingCeoApproval = 3, TenderPreparation = 4, TenderIssued = 5, Awarded = 6, InEngineering = 7, HandedOver = 8, Accepted = 9, Released = 10, ClosedLost = 11, Cancelled = 12,
@@ -161,9 +164,18 @@ namespace Entities.Model.NasbNiro.Engineering
     {
         public string Number { get; set; }
         public string Title { get; set; }
+        public EnCaseKind Kind { get; set; } = EnCaseKind.Turbine;
         public int? InquiryId { get; set; }
         public int? ContractId { get; set; }
         public string CustomerRequirementNote { get; set; }
+
+        /// <summary>Spare parts and service: the technical opinion of engineering (min 30 characters); the manager confirms it and the tender release hash includes it.</summary>
+        public string OpinionText { get; set; }
+        public int? OpinionByUserId { get; set; }
+        public DateTimeOffset? OpinionAt { get; set; }
+
+        /// <summary>Spare parts and service: the Code of the Approved reference list the handover is built from (chosen by the manager at the confirm); empty = ReferenceCode.</summary>
+        public string HandoverListCode { get; set; }
 
         /// <summary>The content hash of the standard-gap report the CEO approved the case with (empty when there was no gap).</summary>
         public string ApprovedGapHash { get; set; }
