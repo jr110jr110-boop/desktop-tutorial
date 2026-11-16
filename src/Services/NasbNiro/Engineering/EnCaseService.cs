@@ -195,7 +195,7 @@ namespace Services.NasbNiro.Engineering
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
-                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardAttachmentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
+                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
                     CustomerName = inq != null && customers.TryGetValue(inq.CustomerId, out string cn) ? cn : con?.Employer, CustomerRequirementNote = c.CustomerRequirementNote, Status = (int)c.Status, StatusText = EnText.Case(c.Status),
                     Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification), ProductId = c.ProductId, ProductCode = c.ProductId.HasValue && products.TryGetValue(c.ProductId.Value, out string pc) ? pc : null,
                     PlatformWithChanges = c.PlatformWithChanges, ChangeNote = c.ChangeNote,
@@ -405,7 +405,7 @@ namespace Services.NasbNiro.Engineering
                     if (why == null && change) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد");
                     if (why == null && dto.StandardAttachmentId.HasValue) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
-                    c.ReferenceCode = code; c.StandardEvidence = evidence; c.StandardAttachmentId = dto.StandardAttachmentId;
+                    c.ReferenceCode = code; c.StandardEvidence = evidence; c.StandardDocumentId = dto.StandardAttachmentId;
                     if (change && c.Status != EnCaseStatus.Classifying)
                     {
                         // a changed standard after the manager's confirmation or the CEO's approval is a new decision round (the approval bound to the old content)

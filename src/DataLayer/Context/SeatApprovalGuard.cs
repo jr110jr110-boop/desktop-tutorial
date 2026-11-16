@@ -25,6 +25,9 @@ namespace DataLayer.Context
         /// <summary>The user name of the coordinator seat (AiSeatNames.UserName("AG-MASTER"); a test keeps the two equal).</summary>
         public const string MasterUserName = "seat.ag-master";
 
+        /// <summary>The user name of the project-initiation seat (AiSeatNames.UserName("AG-INIT"); a test keeps the two equal). It sends the PMO-side notices to the units without any approving role.</summary>
+        public const string InitUserName = "seat.ag-init";
+
         public const string Message = "تایید، امضا و تصمیم با انسان است؛ ایجنت هوش مصنوعی آن را انجام نمی‌دهد";
 
         public const string MasterMessage = "ایجنت اصلی فقط جدول‌های ایجنت‌ها، هوش مصنوعی و کارتابل را می‌نویسد و رکورد واحدهای دیگر را تغییر نمی‌دهد: ";
@@ -65,9 +68,25 @@ namespace DataLayer.Context
             "Entities.Model.NasbNiro.Engineering.EnCaseEvent",
         };
 
+        /// <summary>
+        /// The only engineering tables the project-initiation seat may write: the two PMO-side actions (draft-distribution, distribute) write the distribution rows and the case event,
+        /// and stamp the modify date of the handover and of the case. Every other engineering table is refused for this seat (its decisions stay with humans).
+        /// </summary>
+        private static readonly HashSet<string> InitAllowedEngineeringTypes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Entities.Model.NasbNiro.Engineering.EnDistribution",
+            "Entities.Model.NasbNiro.Engineering.EnCaseEvent",
+            "Entities.Model.NasbNiro.Engineering.EnHandover",
+            "Entities.Model.NasbNiro.Engineering.EnCase",
+        };
+
+        public const string InitMessage = "ایجنت آغاز پروژه در ماژول مهندسی فقط ردیف‌های توزیع و رویداد پرونده را می‌نویسد: ";
+
         private static readonly ConcurrentDictionary<Type, string[]> ColumnsOfType = new ConcurrentDictionary<Type, string[]>();
 
         public static bool IsSeatName(string userName) => !string.IsNullOrWhiteSpace(userName) && userName.Trim().StartsWith(SeatPrefix, StringComparison.OrdinalIgnoreCase);
+
+        public static bool IsInitName(string userName) => string.Equals(userName?.Trim(), InitUserName, StringComparison.OrdinalIgnoreCase);
 
         public static bool IsMasterName(string userName) => string.Equals(userName?.Trim(), MasterUserName, StringComparison.OrdinalIgnoreCase);
 
@@ -93,13 +112,14 @@ namespace DataLayer.Context
             string name = user?.Identity?.Name;
             if (!IsSeatName(name)) return;   // a human, or a background job without a principal: not touched
 
-            bool master = IsMasterName(name);
+            bool master = IsMasterName(name), init = IsInitName(name);
             int seatId = int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out int id) ? id : 0;
 
             foreach (EntityEntry entry in context.ChangeTracker.Entries().Where(e => e.State == EntityState.Added || e.State == EntityState.Modified || e.State == EntityState.Deleted).ToList())
             {
                 Type type = entry.Entity.GetType();
                 if (master && !Allowed(type)) throw new InvalidOperationException(MasterMessage + type.Name);
+                if (init && type.Namespace == "Entities.Model.NasbNiro.Engineering" && !InitAllowedEngineeringTypes.Contains(type.FullName)) throw new InvalidOperationException(InitMessage + type.Name);
                 if (seatId == 0 || entry.State == EntityState.Deleted) continue;
 
                 string[] columns = ColumnsOfType.GetOrAdd(type, _ => entry.Metadata.GetProperties().Where(IsDecisionColumn).Select(p => p.Name).ToArray());

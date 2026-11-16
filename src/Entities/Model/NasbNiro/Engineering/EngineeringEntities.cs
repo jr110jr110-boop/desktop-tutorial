@@ -203,7 +203,7 @@ namespace Entities.Model.NasbNiro.Engineering
         public string StandardEvidence { get; set; }
 
         /// <summary>Optional attachment (uploaded document) of the client data sheet.</summary>
-        public Guid? StandardAttachmentId { get; set; }
+        public Guid? StandardDocumentId { get; set; }
         public string ChangeNote { get; set; }
 
         public EnClassification ProposedClassification { get; set; }

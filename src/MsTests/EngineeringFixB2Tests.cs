@@ -35,14 +35,14 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task M11_The_Two_Distribution_Steps_Belong_To_The_Project_Initiation_Agent_Whose_Seat_Has_The_Pmo_Role()
+        public async Task M11_The_Two_Distribution_Steps_Belong_To_The_Project_Initiation_Agent_Whose_Seat_Has_No_Approving_Role()
         {
             AppHost host = new AppHost("EnB2Seat_" + Guid.NewGuid().ToString("N"));
             var steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s.Code == "ENG.DIST.DRAFT" || s.Code == "ENG.DIST.NOTIFY").ToList())).GetAwaiter().GetResult();
             Assert.AreEqual(2, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-INIT"));
             Assert.IsTrue(steps.All(s => s.GateInfo(new Services.NasbNiro.Agents.AgentWorkItem { TargetId = 1 }).Roles == EnRoles.Pmo));
-            CollectionAssert.Contains(Services.NasbNiro.Ai.AiSeatCatalog.Find("AG-INIT").Roles, "PMO");
+            CollectionAssert.DoesNotContain(Services.NasbNiro.Ai.AiSeatCatalog.Find("AG-INIT").Roles, "PMO");   // round B3: no agent seat holds an approving role
             CollectionAssert.DoesNotContain(Services.NasbNiro.Ai.AiSeatCatalog.Find("AG-ENG").Roles, "PMO");
         }
 

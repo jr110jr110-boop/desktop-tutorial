@@ -124,6 +124,7 @@ namespace Services.Services
             ["FnOutboxPackage"] = "بسته ارسال به نرم‌افزار مالی",
             ["FnPettyCashSettlementLine"] = "تسویه تنخواه",
             ["FnVoucherAttachment"] = "پیوست سند حسابداری",
+            ["EnCase"] = "پروندهٔ مهندسی (مدرک استاندارد)",
             ["EnClarification"] = "ابهام‌خواهی فنی",
             ["EnDocumentDebt"] = "بدهی مدرک مهندسی",
             ["EnHandoverLine"] = "ردیف تحویل مدارک مهندسی",

@@ -348,6 +348,14 @@ namespace Services.NasbNiro.Engineering
             return DataLayer.Context.SeatApprovalGuard.IsMasterName(name);
         }
 
+        /// <summary>The user is the seat of the project-initiation agent (AG-INIT), identified by its seat user name, never by a display name.</summary>
+        public static async Task<bool> IsInitSeatAsync(IUnitOfWork uow, int userId, CancellationToken ct)
+        {
+            if (userId <= 0) return false;
+            string name = await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.Id == userId).Select(u => u.UserName).FirstOrDefaultAsync(ct);
+            return DataLayer.Context.SeatApprovalGuard.IsInitName(name);
+        }
+
         public static async Task<int[]> SeatIdsAsync(IUnitOfWork uow, CancellationToken ct)
         {
             string prefix = global::Services.NasbNiro.Ai.AiSeatNames.UserPrefix;

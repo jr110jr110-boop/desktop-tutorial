@@ -261,7 +261,7 @@ namespace MsTests
             Assert.IsTrue(s.Complete);
             Assert.AreEqual(0, s.Debts.Count);
             Assert.IsNull(s.WaiverId);
-            ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO"), seatInit = await SeatAsync(host, "AG-INIT", "PLANNING", "PMO");
+            ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO"), seatInit = await SeatAsync(host, "AG-INIT", "PLANNING");
             Refused(await Act(host, seatPmo, "accept", d => d.Id = h.Id));
             Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             Ok(await Act(host, seatInit, "draft-distribution", d => d.Id = h.Id));
@@ -419,7 +419,7 @@ namespace MsTests
         {
             AppHost host = Started("ho4");
             (int contract, int caseId) = await NewDesign(host);
-            ClaimsPrincipal seat = await SeatAsync(host), initSeat = await SeatAsync(host, "AG-INIT", "PLANNING", "PMO");
+            ClaimsPrincipal seat = await SeatAsync(host), initSeat = await SeatAsync(host, "AG-INIT", "PLANNING");
             DateTime today = DateTime.Today;
             ClaimsPrincipal Owner(string code) => code == "ENG.DIST.DRAFT" || code == "ENG.DIST.NOTIFY" ? initSeat : seat;   // the two distribution steps belong to the PMO-side agent
             async Task<List<Services.NasbNiro.Agents.AgentWorkItem>> Discover(string code) => await host.As(Owner(code), async p =>
