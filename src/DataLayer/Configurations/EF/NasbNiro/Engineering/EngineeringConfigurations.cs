@@ -152,7 +152,6 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Number).HasMaxLength(50).IsRequired();
                 b.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
                 b.Property(x => x.DecisionNote).HasMaxLength(1000);
-                b.Property(x => x.DebtDueDate).HasColumnType("date");
                 b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
                 // one live waiver (requested or approved) per handover
                 b.HasIndex(x => x.HandoverId).IsUnique().HasFilter("[Status] IN (0, 1) AND [Deleted] = 0").HasDatabaseName("UX_EnWaivers_OneLive");
@@ -165,8 +164,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.ToTable("EnDocumentDebts");
                 b.Property(x => x.DocumentType).HasMaxLength(100).IsRequired();
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
-                b.Property(x => x.DueDate).HasColumnType("date");
-                b.HasIndex(x => new { x.Status, x.DueDate });
+                b.HasIndex(x => new { x.Status, x.DueAt });
                 b.HasIndex(x => x.CaseId);
                 b.HasIndex(x => new { x.WaiverId, x.HandoverLineId }).IsUnique().HasFilter(NotDeleted);
                 b.HasOne<EnWaiver>().WithMany().HasForeignKey(x => x.WaiverId).OnDelete(DeleteBehavior.Restrict);

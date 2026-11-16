@@ -55,7 +55,7 @@ namespace Services.NasbNiro.Engineering
                 .GroupBy(h => h.Status).Select(g => new { Key = g.Key, Count = g.Count() }).OrderBy(g => g.Key).ToListAsync(ct);
             o.HandoversWaiting = waiting.Select(g => new EnCountDto { Key = (int)g.Key, Text = EnText.Handover(g.Key), Count = g.Count }).ToList();
             o.OpenDebts = await _uow.Set<EnDocumentDebt>().AsNoTracking().CountAsync(d => !d.Deleted && d.Status == EnDebtStatus.Open, ct);
-            o.OverdueDebts = await _uow.Set<EnDocumentDebt>().AsNoTracking().CountAsync(d => !d.Deleted && d.Status == EnDebtStatus.Open && d.DueDate < today, ct);
+            o.OverdueDebts = await _uow.Set<EnDocumentDebt>().AsNoTracking().CountAsync(d => !d.Deleted && d.Status == EnDebtStatus.Open && d.DueAt < DateTimeOffset.Now, ct);
             DateTimeOffset now = DateTimeOffset.Now;
             o.WaiversAwaitingCeo = await _uow.Set<EnWaiver>().AsNoTracking().CountAsync(w => !w.Deleted && w.Status == EnWaiverStatus.Requested, ct);
             DateTimeOffset? oldest = await _uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested).OrderBy(w => w.RequestedAt).Select(w => (DateTimeOffset?)w.RequestedAt).FirstOrDefaultAsync(ct);

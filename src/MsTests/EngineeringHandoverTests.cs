@@ -27,8 +27,8 @@ namespace MsTests
             return host.As(who, p => p.GetRequiredService<IEnHandoverService>().HandoverActionAsync(dto, Ct));
         }
 
-        private static Task<ResponseDto<EnWaiverDto>> Request(AppHost host, ClaimsPrincipal who, int handover, string reason, DateTime due) =>
-            host.As(who, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = handover, Reason = reason, DebtDueDate = due }, Ct));
+        private static Task<ResponseDto<EnWaiverDto>> Request(AppHost host, ClaimsPrincipal who, int handover, string reason, DateTimeOffset due) =>
+            host.As(who, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = handover, Reason = reason, DebtDueAt = due }, Ct));
 
         private static Task<ResponseDto<EnWaiverDto>> Decide(AppHost host, ClaimsPrincipal who, int waiver, string decision, string note = null) =>
             host.As(who, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = waiver, Decision = decision, Note = note }, Ct));
@@ -87,15 +87,16 @@ namespace MsTests
             Refused(await Act(host, Eng1, "submit", d => d.Id = h.Id));
 
             // the waiver request: the manager only, a real reason, a future date within the maximum
-            DateTime due = DateTime.Today.AddDays(30);
-            Refused(await Request(host, Eng1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", due));
-            Refused(await Request(host, Mgr1, h.Id, "کوتاه", due), "30");
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", DateTime.Today), "فردا");
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", DateTime.Today.AddDays(400)), "90");
-            EnWaiverDto w = Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", due));
+            DateTimeOffset due = DateTimeOffset.Now.AddHours(72);   // exactly the ceiling is accepted
+            Refused(await Request(host, Eng1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
+            Refused(await Request(host, Mgr1, h.Id, "کوتاه", due), "50");
+            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(-1)), "آینده");
+            Refused(await Request(host, Mgr1, h.Id, new string((char)0x645, 49), due), "50");   // 49 characters
+            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(73)), "72");
+            EnWaiverDto w = Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
             StringAssert.StartsWith(w.Number, "EWV-");
             Assert.AreEqual(2, w.MissingLines.Count);
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", due), "معافیت باز");
+            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due), "معافیت باز");
             // only the CEO decides, and still the lock holds until then
             Refused(await Decide(host, Mgr2, w.Id, "approve"), "مدیرعامل");
             Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), "قفل");
@@ -116,10 +117,10 @@ namespace MsTests
             Assert.AreEqual((int)EnHandoverStatus.Submitted, s.Status);
             Assert.IsFalse(s.Complete);
             Assert.AreEqual(2, s.Debts.Count);
-            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueDate == due));
+            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt == due));
             Assert.AreEqual((int)EnCaseStatus.HandedOver, Ok(await GetCase(host, Mgr1, caseId)).Status);
             // the waiver is spent: a new handover round needs a new one
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", due));
+            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
 
             // the PMO side: not the commercial, not the submitter; the return needs a reason and voids the debts of the round
             Refused(await Act(host, Comm1, "accept", d => d.Id = h.Id));
@@ -182,7 +183,7 @@ namespace MsTests
             AppHost host = Started("ho9");
             (int contract, int caseId) = await NewDesign(host);
             EnHandoverDto h = Ok(await Act(host, Mgr1, "draft", d => d.CaseId = caseId));
-            Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", DateTime.Today.AddDays(10)));
+            Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(24)));
             host.Write(u => { foreach (EnWaiver w in u.Set<EnWaiver>().ToList()) { w.RequestedAt = DateTimeOffset.Now.AddDays(-30); } u.SaveChanges(); }, Seeder);
             ClaimsPrincipal seat = await SeatAsync(host);
             List<Services.NasbNiro.Agents.AgentWorkItem> gate = await host.As(seat, async p => await p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Single(x => x.Code == "ENG.WAIVER.DECIDE").DiscoverAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), DateTime.Today, Ct));
@@ -325,7 +326,7 @@ namespace MsTests
             Assert.AreEqual(0, (await Discover("ENG.DEBT.SETTLE")).Count);
             Assert.AreEqual(0, (await Discover("ENG.DIST.NOTIFY")).Count);
             int handover = host.Read(u => u.Set<EnHandover>().Single().Id);
-            Ok(await Request(host, Mgr1, handover, "دلیل کافی برای این معافیت اضطراری نوشته شده است", DateTime.Today.AddDays(10)));
+            Ok(await Request(host, Mgr1, handover, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(24)));
             Assert.AreEqual(1, (await Discover("ENG.WAIVER.DECIDE")).Count);
             int waiver = host.Read(u => u.Set<EnWaiver>().Single().Id);
             Ok(await Decide(host, Ceo, waiver, "approve"));

@@ -224,11 +224,11 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- read
 
-        private static EnDebtDto DebtDto(EnDocumentDebt d, Dictionary<int, string> names, Dictionary<int, string> waivers, Dictionary<int, string> cases, DateTime today) => new EnDebtDto
+        private static EnDebtDto DebtDto(EnDocumentDebt d, Dictionary<int, string> names, Dictionary<int, string> waivers, Dictionary<int, string> cases, DateTimeOffset today) => new EnDebtDto
         {
             Id = d.Id, WaiverId = d.WaiverId, WaiverNumber = waivers.TryGetValue(d.WaiverId, out string wn) ? wn : null, HandoverLineId = d.HandoverLineId, CaseId = d.CaseId, CaseNumber = cases.TryGetValue(d.CaseId, out string cn) ? cn : null,
-            ContractId = d.ContractId, ProductId = d.ProductId, DocumentType = d.DocumentType, Title = d.Title, DueDate = d.DueDate, DueDateText = InventoryText.PersianDate(d.DueDate), Status = (int)d.Status, StatusText = d.Status == EnDebtStatus.Open ? "باز" : d.Status == EnDebtStatus.Settled ? "تسویه‌شده" : "باطل",
-            Overdue = d.Status == EnDebtStatus.Open && d.DueDate.Date < today, OverdueDays = d.Status == EnDebtStatus.Open && d.DueDate.Date < today ? (int)(today - d.DueDate.Date).TotalDays : 0,
+            ContractId = d.ContractId, ProductId = d.ProductId, DocumentType = d.DocumentType, Title = d.Title, DueAt = d.DueAt, DueAtText = EnText.Stamp(d.DueAt), Status = (int)d.Status, StatusText = d.Status == EnDebtStatus.Open ? "باز" : d.Status == EnDebtStatus.Settled ? "تسویه‌شده" : "باطل",
+            Overdue = d.Status == EnDebtStatus.Open && d.DueAt < today, OverdueDays = d.Status == EnDebtStatus.Open && d.DueAt < today ? (int)(today - d.DueAt).TotalDays : 0,
             SettledAtText = EnText.Stamp(d.SettledAt), SettledByName = names.Name(d.SettledByUserId), SettledDocumentId = d.SettledDocumentId,
         };
 
@@ -255,7 +255,7 @@ namespace Services.NasbNiro.Engineering
                 result.Add(new EnWaiverDto
                 {
                     Id = w.Id, Number = w.Number, HandoverId = w.HandoverId, HandoverNumber = hn.TryGetValue(w.HandoverId, out string hnum) ? hnum : null, CaseId = w.CaseId, CaseNumber = cn.TryGetValue(w.CaseId, out string cnum) ? cnum : null,
-                    Reason = w.Reason, MissingLines = snap.Lines, DossierUnconfirmed = snap.DossierUnconfirmed, DebtDueDate = w.DebtDueDate, DebtDueDateText = InventoryText.PersianDate(w.DebtDueDate), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
+                    Reason = w.Reason, MissingLines = snap.Lines, DossierUnconfirmed = snap.DossierUnconfirmed, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
                     RequestedByName = names.Name(w.RequestedByUserId), RequestedAtText = EnText.Stamp(w.RequestedAt), WaitingHours = w.Status == EnWaiverStatus.Requested ? (int)Math.Floor((now - w.RequestedAt).TotalHours) : 0,
                     DecidedByName = names.Name(w.DecidedByUserId), DecidedAtText = EnText.Stamp(w.DecidedAt), DecisionNote = w.DecisionNote, Used = w.UsedAt.HasValue, Covers = w.Status == EnWaiverStatus.Approved && coverage == null, CoverageNote = coverage,
                     RowVersion = EnConcurrency.Text(w.RowVersion), CanDecide = decide == null, DecideBlockedReason = decide,
@@ -268,7 +268,7 @@ namespace Services.NasbNiro.Engineering
         {
             Who w = await WhoAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
-            DateTime today = DateTime.Today;
+            DateTimeOffset today = DateTimeOffset.Now;
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmittedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }), ct);
             int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
             List<int> caseIds = rows.Select(r => r.CaseId).Distinct().ToList(), hids = rows.Select(r => r.Id).ToList(), contractIds = rows.Select(r => r.ContractId).Distinct().ToList();
@@ -365,13 +365,13 @@ namespace Services.NasbNiro.Engineering
         {
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<PagedList<EnDebtDto>>(EnText.NotAllowed);
             query ??= new EnDebtQuery();
-            DateTime today = DateTime.Today;
+            DateTimeOffset today = DateTimeOffset.Now;
             IQueryable<EnDocumentDebt> q = _uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted);
             if (query.CaseId.HasValue) q = q.Where(d => d.CaseId == query.CaseId.Value);
             if (query.ContractId.HasValue) q = q.Where(d => d.ContractId == query.ContractId.Value);
             if (query.Status.HasValue) { EnDebtStatus s = (EnDebtStatus)query.Status.Value; q = q.Where(d => d.Status == s); }
-            if (query.OnlyOverdue) q = q.Where(d => d.Status == EnDebtStatus.Open && d.DueDate < today);
-            return ResponseDtoHelper.Ok(await EnPaging.CutAsync(q.OrderBy(d => d.DueDate).ThenBy(d => d.Id), query.PageNumber, query.PageSize, async rows =>
+            if (query.OnlyOverdue) q = q.Where(d => d.Status == EnDebtStatus.Open && d.DueAt < today);
+            return ResponseDtoHelper.Ok(await EnPaging.CutAsync(q.OrderBy(d => d.DueAt).ThenBy(d => d.Id), query.PageNumber, query.PageSize, async rows =>
             {
                 Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.Select(r => r.SettledByUserId), ct);
                 List<int> wids = rows.Select(r => r.WaiverId).Distinct().ToList(), cids = rows.Select(r => r.CaseId).Distinct().ToList();
@@ -412,14 +412,14 @@ namespace Services.NasbNiro.Engineering
             why ??= EnText.ReasonShort(reason, EnRules.WaiverReasonMin, "دلیل معافیت") ?? EnText.Over(reason, 2000, "دلیل معافیت");
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, ct);
-            int maxDays = (int)settings[EnSettingKeys.WaiverMaxDebtDays];
-            DateTime due = dto.DebtDueDate.Date;
-            if (due <= DateTime.Today) return EnText.Bad<EnWaiverDto>("سررسید تسویهٔ بدهی مدارک باید از فردا به بعد باشد.");
-            if (due > DateTime.Today.AddDays(maxDays)) return EnText.Bad<EnWaiverDto>("سررسید تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxDays) + " روز آینده نمی‌شود.");
+            int maxHours = Math.Min(72, (int)settings[EnSettingKeys.WaiverMaxDebtHours]);   // the ceiling of the employer is 72 hours, whatever the setting says
             DateTimeOffset now = DateTimeOffset.Now;
+            DateTimeOffset due = dto.DebtDueAt;
+            if (due <= now) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک (تاریخ و ساعت) باید در آینده باشد.");
+            if (due > now.AddHours(maxHours)) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت آینده نمی‌شود (سقف ۷۲ ساعت).");
             EnWaiver waiver = new EnWaiver
             {
-                HandoverId = h.Id, CaseId = h.CaseId, Reason = reason, DebtDueDate = due, Status = EnWaiverStatus.Requested, RequestedByUserId = Me, RequestedAt = now,
+                HandoverId = h.Id, CaseId = h.CaseId, Reason = reason, DebtDueAt = due, Status = EnWaiverStatus.Requested, RequestedByUserId = Me, RequestedAt = now,
                 MissingSnapshot = JsonSerializer.Serialize(new EnHandoverRules.Snapshot { Lines = ls.Keys, DossierUnconfirmed = ls.DossierUnconfirmed }), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
             };
             waiver.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Waiver, "EWV", now.DateTime, ct);
@@ -446,6 +446,12 @@ namespace Services.NasbNiro.Engineering
             why ??= EnText.Over(note, 1000, "توضیح");
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             waiver.Status = decision == "approve" ? EnWaiverStatus.Approved : EnWaiverStatus.Rejected; waiver.DecidedByUserId = Me; waiver.DecidedAt = now; waiver.DecisionNote = note;
+            if (decision == "approve" && dto.DebtDueAt.HasValue)
+            {
+                if (dto.DebtDueAt.Value >= waiver.DebtDueAt) return EnText.Bad<EnWaiverDto>("مدیرعامل فقط می‌تواند مهلت را کوتاه‌تر کند، نه بیشتر از مهلت درخواست‌شده.");
+                if (dto.DebtDueAt.Value <= now) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک باید در آینده باشد.");
+                waiver.DebtDueAt = dto.DebtDueAt.Value;
+            }
             waiver.ModifyDate = now; waiver.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnWaiverDto>(EnText.Concurrency); }
@@ -545,7 +551,7 @@ namespace Services.NasbNiro.Engineering
                     {
                         h.WaiverId = waiver.Id; waiver.UsedAt = now; waiver.ModifyDate = now; waiver.ModifierUserId = Me;
                         foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = l.Id, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueDate = waiver.DebtDueDate, Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = l.Id, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt, Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     c.Status = EnCaseStatus.HandedOver;
                     EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با معافیت " + waiver.Number : string.Empty));

@@ -158,9 +158,9 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             IQueryable<int> ready = ReadyDebtIds(uow);
-            DateTime day = today.Date;
-            var rows = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open && !ready.Contains(d.Id)).OrderBy(d => d.DueDate).ThenBy(d => d.Id).Take(ProcStepCommon.Cap)
-                .Select(d => new { d.Id, d.Title, d.ContractId, Overdue = d.DueDate < day }).ToListAsync(ct);
+            DateTimeOffset day = DateTimeOffset.Now;
+            var rows = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open && !ready.Contains(d.Id)).OrderBy(d => d.DueAt).ThenBy(d => d.Id).Take(ProcStepCommon.Cap)
+                .Select(d => new { d.Id, d.Title, d.ContractId, Overdue = d.DueAt < day }).ToListAsync(ct);
             return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, r.Overdue ? $"بدهی مدرک «{r.Title}» از سررسید گذشته و هنوز مدرکی نیامده است." : $"مدرک «{r.Title}» بدهی معافیت است و باید تا سررسید تهیه شود.")).ToList();
         }
 

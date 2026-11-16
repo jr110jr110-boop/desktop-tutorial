@@ -73,14 +73,14 @@ namespace Services.NasbNiro.Engineering
         public const string ControlStartDate = "Engineering.ControlStartDate";
 
         /// <summary>The farthest due date (days ahead) of the document debts of an emergency waiver.</summary>
-        public const string WaiverMaxDebtDays = "Engineering.Waiver.MaxDebtDays";
+        public const string WaiverMaxDebtHours = "Engineering.Waiver.MaxDebtHours";
 
         public const string Source = "★ تصمیم مدیرعامل (فرایند مهندسی با سایر واحدها؛ عدم تحمل انحراف)";
 
         public static IEnumerable<QualitySetting> Defaults()
         {
             yield return new QualitySetting { Key = ControlStartDate, Value = 0, Title = "روز آغاز کنترل مهندسی (تاریخ شمسی به‌صورت yyyyMMdd؛ ۰ = لحظهٔ آغاز کنترل ثبت‌شده در نخستین اجرای برنامه، همان گذار بسته G): استعلام و قراردادهای پیش از آن «قدیمی» شمرده می‌شوند", Source = Source };
-            yield return new QualitySetting { Key = WaiverMaxDebtDays, Value = 90, Title = "حداکثر مهلت (روز) بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی", Source = Source };
+            yield return new QualitySetting { Key = WaiverMaxDebtHours, Value = 72, Title = "حداکثر مهلت (ساعت) بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی (سقف ۷۲ ساعت)", Source = Source };
         }
 
         public static bool TryGetBounds(string key, out int min, out int max)
@@ -89,7 +89,7 @@ namespace Services.NasbNiro.Engineering
             switch (key)
             {
                 case ControlStartDate: max = 99991231; return true;
-                case WaiverMaxDebtDays: min = 1; max = 365; return true;
+                case WaiverMaxDebtHours: min = 1; max = 72; return true;
                 default: return false;
             }
         }
@@ -101,7 +101,7 @@ namespace Services.NasbNiro.Engineering
         public const int ReasonMin = 15;
 
         /// <summary>The shortest reason of an emergency waiver request.</summary>
-        public const int WaiverReasonMin = 30;
+        public const int WaiverReasonMin = 50;
 
     }
 

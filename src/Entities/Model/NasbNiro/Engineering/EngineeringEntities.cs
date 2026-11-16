@@ -309,7 +309,7 @@ namespace Entities.Model.NasbNiro.Engineering
         /// <summary>JSON: the missing lines at the request.</summary>
         public string MissingSnapshot { get; set; }
 
-        public DateTime DebtDueDate { get; set; }
+        public DateTimeOffset DebtDueAt { get; set; }
         public EnWaiverStatus Status { get; set; }
         public int RequestedByUserId { get; set; }
         public DateTimeOffset RequestedAt { get; set; }
@@ -337,7 +337,7 @@ namespace Entities.Model.NasbNiro.Engineering
         public int? ProductId { get; set; }
         public string DocumentType { get; set; }
         public string Title { get; set; }
-        public DateTime DueDate { get; set; }
+        public DateTimeOffset DueAt { get; set; }
         public EnDebtStatus Status { get; set; }
         public DateTimeOffset? SettledAt { get; set; }
         public int? SettledByUserId { get; set; }

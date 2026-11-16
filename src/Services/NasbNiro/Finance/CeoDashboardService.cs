@@ -214,7 +214,7 @@ namespace Services.NasbNiro.Finance
                 && _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().Any(p => p.Id == x.ProductId && p.IsActive && !p.Deleted), ct);
             d.EnPlatformsIncomplete = Math.Max(0, d.EnPlatformsTotal - enComplete);
             d.EnOpenDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open, ct);
-            d.EnOverdueDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open && x.DueDate < today, ct);
+            d.EnOverdueDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open && x.DueAt < DateTimeOffset.Now, ct);
             d.EnWaiversAwaitingCeo = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested, ct);
             DateTimeOffset? enOldest = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
             d.EnOldestWaiverWaitingHours = enOldest.HasValue ? Math.Max(0, (int)Math.Floor((DateTimeOffset.Now - enOldest.Value).TotalHours)) : 0;

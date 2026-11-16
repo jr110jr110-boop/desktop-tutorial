@@ -60,8 +60,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int? ProductId { get; set; }
         public string DocumentType { get; set; }
         public string Title { get; set; }
-        public string DueDateText { get; set; }
-        public DateTime DueDate { get; set; }
+        public string DueAtText { get; set; }
+        public DateTimeOffset DueAt { get; set; }
         public int Status { get; set; }
         public string StatusText { get; set; }
         public bool Overdue { get; set; }
@@ -92,8 +92,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Reason { get; set; }
         public List<string> MissingLines { get; set; } = new List<string>();
         public bool DossierUnconfirmed { get; set; }
-        public DateTime DebtDueDate { get; set; }
-        public string DebtDueDateText { get; set; }
+        public DateTimeOffset DebtDueAt { get; set; }
+        public string DebtDueAtText { get; set; }
         public int Status { get; set; }
         public string StatusText { get; set; }
         public string RequestedByName { get; set; }
@@ -123,7 +123,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     {
         public int HandoverId { get; set; }
         public string Reason { get; set; }
-        public DateTime DebtDueDate { get; set; }
+
+        /// <summary>The deadline (date and time) for the missing documents: after now and at most Engineering.Waiver.MaxDebtHours (72) hours ahead.</summary>
+        public DateTimeOffset DebtDueAt { get; set; }
     }
 
     /// <summary>Decision: approve or reject (the CEO only, and not the one who requested it).</summary>
@@ -132,6 +134,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int Id { get; set; }
         public string Decision { get; set; }
         public string Note { get; set; }
+
+        /// <summary>At approval the CEO may only shorten the deadline (earlier than requested), never lengthen it.</summary>
+        public DateTimeOffset? DebtDueAt { get; set; }
         public string RowVersion { get; set; }
     }
 
