@@ -314,10 +314,20 @@ namespace MsTests
             Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
             o = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnOverviewService>().GetOverviewAsync(Ct)));
             Assert.AreEqual(1, o.HandoversWaiting.Single(x => x.Key == (int)EnHandoverStatus.Draft).Count);
-            var dash = Ok(await host.As(Ceo, p => p.GetRequiredService<Services.NasbNiro.Finance.ICeoDashboardService>().GetAsync(Ct)));
-            Assert.AreEqual(1, dash.EnPlatformsIncomplete);
-            Assert.AreEqual(1, dash.EnPlatformsTotal);
-            Assert.AreEqual(0, dash.EnOpenDebts);
+            // The real dashboard goes through the ledger, which runs the finance seed. That seed keeps a process-wide "done" flag (FinanceSeed, F2Seed): once it is set by this host, a later test whose own
+            // database needs the seeded rate table (the attendance tests of the office module) no longer gets it. The flags are put back as they were, so this test leaves the process as it found it.
+            var seedFlags = new[] { typeof(Services.NasbNiro.Finance.FinanceSeed), typeof(Services.NasbNiro.Finance.FinanceSeed).Assembly.GetType("Services.NasbNiro.Finance.F2Seed") }
+                .Where(t => t != null).Select(t => t.GetField("_done", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)).Where(f => f != null).ToList();
+            Assert.IsTrue(seedFlags.Count >= 1, "the finance seed flag was renamed: this test must put it back after the dashboard call");
+            var before = seedFlags.Select(f => f.GetValue(null)).ToList();
+            try
+            {
+                var dash = Ok(await host.As(Ceo, p => p.GetRequiredService<Services.NasbNiro.Finance.ICeoDashboardService>().GetAsync(Ct)));
+                Assert.AreEqual(1, dash.EnPlatformsIncomplete);
+                Assert.AreEqual(1, dash.EnPlatformsTotal);
+                Assert.AreEqual(0, dash.EnOpenDebts);
+            }
+            finally { for (int i = 0; i < seedFlags.Count; i++) seedFlags[i].SetValue(null, before[i]); }
         }
 
         [TestMethod]
