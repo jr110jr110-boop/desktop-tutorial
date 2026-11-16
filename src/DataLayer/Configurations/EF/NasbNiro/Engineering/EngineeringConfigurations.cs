@@ -94,8 +94,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.CharterReviewNote).HasMaxLength(1000);
                 b.Property(x => x.ClosedReason).HasMaxLength(1000);
                 b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
-                b.HasIndex(x => x.InquiryId).IsUnique().HasFilter("[InquiryId] IS NOT NULL AND [Deleted] = 0 AND [Status] NOT IN (11, 12)").HasDatabaseName("UX_EnCases_Inquiry");
-                b.HasIndex(x => x.ContractId).IsUnique().HasFilter("[ContractId] IS NOT NULL AND [Deleted] = 0 AND [Status] NOT IN (11, 12)").HasDatabaseName("UX_EnCases_Contract");
+                b.HasIndex(x => x.InquiryId).IsUnique().HasFilter("[InquiryId] IS NOT NULL AND [Deleted] = 0 AND [Status] < 11").HasDatabaseName("UX_EnCases_Inquiry");
+                b.HasIndex(x => x.ContractId).IsUnique().HasFilter("[ContractId] IS NOT NULL AND [Deleted] = 0 AND [Status] < 11").HasDatabaseName("UX_EnCases_Contract");
                 b.HasIndex(x => x.Status);
                 b.HasOne<SlInquiry>().WithMany().HasForeignKey(x => x.InquiryId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
