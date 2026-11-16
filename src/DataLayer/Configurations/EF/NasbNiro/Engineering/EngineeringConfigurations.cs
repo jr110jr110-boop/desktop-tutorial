@@ -73,6 +73,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Number).HasMaxLength(50).IsRequired();
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.CustomerRequirementNote).HasMaxLength(2000);
+                b.Property(x => x.ApprovedGapHash).HasMaxLength(64);
                 b.Property(x => x.ChangeNote).HasMaxLength(1000);
                 b.Property(x => x.ReferenceCode).HasMaxLength(60);
                 b.Property(x => x.StandardEvidence).HasMaxLength(500);
@@ -144,6 +145,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Discipline).HasMaxLength(100);
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.Revision).HasMaxLength(30);
+                b.Property(x => x.LinkPath).HasMaxLength(300);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.HandoverId);
             });
@@ -199,6 +201,29 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.HasIndex(x => x.Status);
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
                 b.HasOne<PbProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<EnStandardGap>(b =>
+            {
+                b.ToTable("EnStandardGaps");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.BaseCode).HasMaxLength(60);
+                b.Property(x => x.TargetCode).HasMaxLength(60).IsRequired();
+                b.Property(x => x.Summary).HasMaxLength(2000);
+                b.Property(x => x.EngineeringImpactNote).HasMaxLength(2000);
+                b.Property(x => x.ContentHash).HasMaxLength(64);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.CaseId, x.Status });
+                b.HasMany(x => x.Lines).WithOne(x => x.Gap).HasForeignKey(x => x.GapId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
+                b.HasOne<PbProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            });
+            builder.Entity<EnStandardGapLine>(b =>
+            {
+                b.ToTable("EnStandardGapLines");
+                b.Property(x => x.DocumentType).HasMaxLength(100).IsRequired();
+                b.Property(x => x.Discipline).HasMaxLength(100);
+                b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+                b.HasIndex(x => x.GapId);
             });
         }
     }

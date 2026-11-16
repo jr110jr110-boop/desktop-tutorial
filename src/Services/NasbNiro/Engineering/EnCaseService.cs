@@ -86,11 +86,11 @@ namespace Services.NasbNiro.Engineering
             : c.Status == EnCaseStatus.AwaitingCeoApproval ? (w.Ceo ? (w.Seat ? EnText.AiNever : null) : EnText.NotAllowed)
             : "فقط پروندهٔ منتظر تایید برگشت می‌خورد.";
 
-        private static string ApproveReason(EnCase c, Who w) =>
+        private static string ApproveReason(EnCase c, Who w, string gap = null) =>
             !w.Ceo ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingCeoApproval ? "فقط پروندهٔ منتظر تصویب مدیرعامل تصویب می‌شود."
             : EnEditors.Touched(0, c.EditorUserIds, w.Me) || c.ProposedByUserId == w.Me || c.EngConfirmedByUserId == w.Me ? EnText.SameUser
             : string.IsNullOrWhiteSpace(c.ReferenceCode) ? StandardMissingText
-            : c.ClassificationHash != EnCaseRules.ClassHash(c) ? "محتوای پیشنهاد پس از تایید مدیر مهندسی تغییر کرده است؛ پرونده را برگردانید." : null;
+            : c.ClassificationHash != EnCaseRules.ClassHash(c) ? "محتوای پیشنهاد پس از تایید مدیر مهندسی تغییر کرده است؛ پرونده را برگردانید." : gap;
 
         private static string ReclassifyReason(EnCase c, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever
@@ -159,7 +159,7 @@ namespace Services.NasbNiro.Engineering
                     incomplete = !await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
                     missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
                 }
-                string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
+                string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
@@ -185,6 +185,8 @@ namespace Services.NasbNiro.Engineering
                 };
                 if (withEvents && events.TryGetValue(c.Id, out List<EnCaseEvent> list))
                     dto.Events = list.Select(e => new EnCaseEventDto { Kind = e.Kind, At = e.At, AtText = EnText.Stamp(e.At), UserId = e.UserId, UserName = eventUsers.Name(e.UserId), Note = e.Note }).ToList();
+                EnStandardGap gapLive = await EnGaps.LiveAsync(_uow, c.Id, ct);
+                if (gapLive != null) dto.StandardGap = new EnGapSummaryDto { Id = gapLive.Id, Number = gapLive.Number, Status = (int)gapLive.Status, StatusText = EnStandardGapService.StatusText(gapLive.Status), Summary = gapLive.Summary };
                 result.Add(dto);
             }
             return result;
@@ -332,8 +334,9 @@ namespace Services.NasbNiro.Engineering
                     break;
                 case "approve":
                 {
-                    why = ApproveReason(c, w);
+                    why = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct));
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    c.ApprovedGapHash = (await EnGaps.LiveAsync(_uow, c.Id, ct))?.ContentHash;
                     c.Classification = c.ProposedClassification; c.ProductId = c.ProposedProductId; c.PlatformWithChanges = c.ProposedWithChanges; c.ChangeNote = c.ProposedChangeNote;
                     c.CeoApprovedByUserId = Me; c.CeoApprovedAt = now; c.ReturnReason = null;
                     // a platform ordered under a standard gets its own document set (P, S): the lines of the Approved list of S, files reused from the other dossiers of the product

@@ -30,6 +30,7 @@ namespace Services.NasbNiro.Engineering
         public EnLineState State;
         public Guid? DocumentId;
         public int? PlatformDocumentId, DeliverableId;
+        public string LinkPath;
         public string Key => EnReferenceRules.Key(Type) + "|" + EnHash.Norm(Discipline).ToUpperInvariant() + "|" + EnHash.Norm(Title).ToUpperInvariant();
     }
 
@@ -42,6 +43,29 @@ namespace Services.NasbNiro.Engineering
             EnHash.Of(string.Join(";", lines.OrderBy(l => l.Seq).Select(l => string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Title), l.Required ? "1" : "0", EnText.Num((int)l.State), l.DocumentId?.ToString("N") ?? "-", EnHash.Norm(l.Revision)))));
 
         public static async Task<List<EnSourceLine>> SourcesAsync(IUnitOfWork uow, EnCase c, CancellationToken ct)
+        {
+            List<EnSourceLine> result = await SourceListAsync(uow, c, ct);
+            // the product's own BOM and manufacturing route are proven by the system when the reference list has no line of that type; they carry a link to the bank page, not a file
+            if (c.ProductId.HasValue)
+            {
+                int pid = c.ProductId.Value;
+                int seq = result.Count == 0 ? 1000 : result.Max(x => x.Seq) + 1;
+                if (!result.Any(x => EnReferenceRules.Key(x.Type) == EnDocTypes.Bom))
+                {
+                    int? rev = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbBomHeader>().AsNoTracking().Where(b => !b.Deleted && b.ProductId == pid && b.Status == Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released).OrderByDescending(b => b.Revision).Select(b => (int?)b.Revision).FirstOrDefaultAsync(ct);
+                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Bom, Discipline = "تولید", Title = "BOM منتشرشده", Required = true, State = rev.HasValue ? EnLineState.Available : EnLineState.Missing, Revision = rev.HasValue ? rev.Value.ToString(CultureInfo.InvariantCulture) : null, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/bom" });
+                }
+                if (!result.Any(x => EnReferenceRules.Key(x.Type) == EnDocTypes.Opc))
+                {
+                    bool ok = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, ct)
+                        && !await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && (o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Draft || o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.UnderReview), ct);
+                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Opc, Discipline = "تولید", Title = "چارت مسیر ساخت (OPC) تاییدشده", Required = true, State = ok ? EnLineState.Available : EnLineState.Missing, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/routing" });
+                }
+            }
+            return result;
+        }
+
+        private static async Task<List<EnSourceLine>> SourceListAsync(IUnitOfWork uow, EnCase c, CancellationToken ct)
         {
             List<EnSourceLine> result = new List<EnSourceLine>();
             if (c.Classification == EnClassification.Platform && c.ProductId.HasValue)
@@ -68,7 +92,7 @@ namespace Services.NasbNiro.Engineering
 
         public static void Apply(EnHandoverLine line, EnSourceLine s)
         {
-            line.State = s.State; line.DocumentId = s.DocumentId; line.Revision = s.Revision; line.PlatformDocumentId = s.PlatformDocumentId; line.DeliverableId = s.DeliverableId;
+            line.State = s.State; line.DocumentId = s.DocumentId; line.Revision = s.Revision; line.PlatformDocumentId = s.PlatformDocumentId; line.DeliverableId = s.DeliverableId; line.LinkPath = s.LinkPath;
         }
 
         /// <summary>The keys of the required lines that are missing.</summary>
@@ -166,6 +190,12 @@ namespace Services.NasbNiro.Engineering
             public bool DossierUnconfirmed;
             public bool Locked => Missing > 0 || DossierUnconfirmed;
             public List<string> Keys = new List<string>();
+        }
+
+        private async Task<EnGapSummaryDto> GapSummaryAsync(int caseId, CancellationToken ct)
+        {
+            EnStandardGap g = await EnGaps.LiveAsync(_uow, caseId, ct);
+            return g == null ? null : new EnGapSummaryDto { Id = g.Id, Number = g.Number, Status = (int)g.Status, StatusText = EnStandardGapService.StatusText(g.Status), Summary = g.Summary };
         }
 
         private async Task<LockState> LockAsync(EnHandover h, EnCase c, CancellationToken ct)
@@ -299,8 +329,9 @@ namespace Services.NasbNiro.Engineering
                     WaiverId = h.WaiverId, WaiverNumber = h.WaiverId.HasValue && waiverNames.TryGetValue(h.WaiverId.Value, out string wn) ? wn : null,
                     SubmittedByName = names.Name(h.SubmittedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
                     ReturnedByName = names.Name(h.ReturnedByUserId), ReturnedAtText = EnText.Stamp(h.ReturnedAt), ReturnReason = h.ReturnReason, ReleasedByName = names.Name(h.ReleasedByUserId), ReleasedAtText = EnText.Stamp(h.ReleasedAt),
+                    StandardGap = await GapSummaryAsync(c.Id, ct),
                     Note = h.Note, VoidReason = h.VoidReason, TouchedByMe = EnEditors.Has(h.EditorUserIds, Me), RowVersion = EnConcurrency.Text(h.RowVersion), Waiver = waiverDto,
-                    Lines = h.Lines.OrderBy(l => l.Seq).ThenBy(l => l.Id).Select(l => new EnHandoverLineDto { Id = l.Id, Seq = l.Seq, DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = (int)l.State, StateText = EnText.LineState(l.State), DocumentId = l.DocumentId, Revision = l.Revision, PlatformDocumentId = l.PlatformDocumentId, DeliverableId = l.DeliverableId, Note = l.Note }).ToList(),
+                    Lines = h.Lines.OrderBy(l => l.Seq).ThenBy(l => l.Id).Select(l => new EnHandoverLineDto { Id = l.Id, Seq = l.Seq, DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = (int)l.State, StateText = EnText.LineState(l.State), DocumentId = l.DocumentId, Revision = l.Revision, PlatformDocumentId = l.PlatformDocumentId, DeliverableId = l.DeliverableId, LinkPath = l.LinkPath, Note = l.Note }).ToList(),
                     Distribution = dist.Where(d => d.HandoverId == h.Id).Select(d => DistDto(d, h.Number, debtUsers, w)).ToList(),
                     Debts = debts.Where(d => waivers.Any(x => x.Id == d.WaiverId && x.HandoverId == h.Id)).Select(d => DebtDto(d, debtUsers, waiverNames, caseNames, today)).ToList(),
                     CanSubmit = submit == null, SubmitBlockedReason = submit, CanRequestWaiver = request == null, RequestWaiverBlockedReason = request, CanAccept = accept == null, AcceptBlockedReason = accept,

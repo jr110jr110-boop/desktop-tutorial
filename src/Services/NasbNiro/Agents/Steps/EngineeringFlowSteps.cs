@@ -61,6 +61,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnDevCeoStep>();
             services.AddScoped<IAgentStep, EnRiskWatchStep>();
             services.AddScoped<IAgentStep, EnRiskEscalateStep>();
+            services.AddScoped<IAgentStep, EnStandardGapStep>();
+            services.AddScoped<IAgentStep, EnStandardGapConfirmStep>();
             return services;
         }
     }
@@ -358,6 +360,61 @@ namespace Services.NasbNiro.Agents.Steps
         public override string Title => "تصمیم مدیرعامل دربارهٔ انحراف از استاندارد (پس از مدیر مهندسی)";
         protected override EnDeviationStatus Waiting => EnDeviationStatus.ManagerApproved;
         protected override string Roles => EnRoles.Ceo;
+    }
+
+    // ------------------------------------------------------------------------------------------ the standard-gap report
+
+    /// <summary>ENG.STANDARD.GAP (Agent): a platform ordered under another standard gets its gap report at once (idempotent: one live report per case and revision pair; a new Approved revision voids and rebuilds it).</summary>
+    internal sealed class EnStandardGapStep : EnStep
+    {
+        public override string Code => "ENG.STANDARD.GAP";
+        public override string Title => "ایجنت مهندسی: گزارش تفاوت استاندارد سفارش با استاندارد پلتفرم";
+        public override AgentStepKind Kind => AgentStepKind.Agent;
+        public override string FallbackRoles => EnRoles.Manager;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            EnCaseStatus a = EnCaseStatus.AwaitingEngConfirm, b = EnCaseStatus.AwaitingCeoApproval;
+            List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (c.Status == a || c.Status == b) && (c.ProposedClassification == EnClassification.Platform || uow.Set<EnStandardGap>().Any(g => g.CaseId == c.Id && !g.Deleted && g.Status != EnGapStatus.Void))).OrderBy(c => c.Id).Take(200).ToListAsync(ct);
+            List<AgentWorkItem> items = new List<AgentWorkItem>();
+            foreach (EnCase c in cases)
+            {
+                EnGaps.Plan p = await EnGaps.PlanOfAsync(uow, c, ct);
+                EnStandardGap live = await EnGaps.LiveAsync(uow, c.Id, ct);
+                bool work = p.Needed ? live == null || !EnGaps.Same(live, p, c.ReferenceCode) : live != null;
+                if (work) items.Add(Item("EnCase", c.Id, c.Number, null, null, "گزارش تفاوت استاندارد " + c.ReferenceCode + " برای پروندهٔ " + c.Number + " باید ساخته یا به‌روز شود."));
+                if (items.Count >= ProcStepCommon.Cap) break;
+            }
+            return items;
+        }
+
+        public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
+        {
+            IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
+            EnCase c = await uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
+            if (c == null) return AgentStepResult.Waiting("پروندهٔ مهندسی پیدا نشد.");
+            string text = await EnGaps.BuildAsync(uow, c, services.GetService<IEnReferenceService>(), services.GetService<global::Services.NasbNiro.Office.INotificationService>(), services.GetRequiredService<global::Services.NasbNiro.Inventory.IInventoryUserContext>().UserId, ct);
+            return AgentStepResult.Done("EnCase", c.Id, c.Number, text);
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases/" + Id(item.TargetId), Title = "گزارش تفاوت استاندارد " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.STANDARD.GAP.CONFIRM (HumanGate): the head of engineering states the effect on materials and design; the CEO cannot approve the case before.</summary>
+    internal sealed class EnStandardGapConfirmStep : EnStep
+    {
+        public override string Code => "ENG.STANDARD.GAP.CONFIRM";
+        public override string Title => "تایید گزارش تفاوت استاندارد توسط مدیر مهندسی";
+        public override AgentStepKind Kind => AgentStepKind.HumanGate;
+        public override string FallbackRoles => null;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnStandardGap>().AsNoTracking().Where(g => !g.Deleted && g.Status == EnGapStatus.Draft).OrderBy(g => g.Id).Take(ProcStepCommon.Cap).Select(g => new { g.Id, g.Number, g.Summary }).ToListAsync(ct);
+            return rows.Select(r => Item("EnStandardGap", r.Id, r.Number, null, null, EnText2.Cut(r.Summary, 200), EnRoles.Manager)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/standard-gaps/" + Id(item.TargetId), Title = "تایید گزارش تفاوت استاندارد " + item.TargetNumber };
     }
 
     /// <summary>The small text helper of the steps (the service-side helper is internal to the same assembly).</summary>

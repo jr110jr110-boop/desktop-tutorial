@@ -164,6 +164,9 @@ namespace Entities.Model.NasbNiro.Engineering
         public int? InquiryId { get; set; }
         public int? ContractId { get; set; }
         public string CustomerRequirementNote { get; set; }
+
+        /// <summary>The content hash of the standard-gap report the CEO approved the case with (empty when there was no gap).</summary>
+        public string ApprovedGapHash { get; set; }
         public EnCaseStatus Status { get; set; } = EnCaseStatus.Classifying;
         public EnClassification Classification { get; set; }
         public int? ProductId { get; set; }
@@ -306,6 +309,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>The project MDR row (PcEngineeringDeliverable) that matches the line.</summary>
         public int? DeliverableId { get; set; }
+
+        /// <summary>The bank page that proves a system-derived line (BOM, manufacturing route); no file.</summary>
+        public string LinkPath { get; set; }
 
         public string Note { get; set; }
     }

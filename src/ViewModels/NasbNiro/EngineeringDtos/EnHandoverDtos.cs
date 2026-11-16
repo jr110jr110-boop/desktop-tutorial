@@ -27,6 +27,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Revision { get; set; }
         public int? PlatformDocumentId { get; set; }
         public int? DeliverableId { get; set; }
+
+        /// <summary>For a line the system proves from its own state (BOM, manufacturing route): the page of the product bank instead of a file.</summary>
+        public string LinkPath { get; set; }
         public string Note { get; set; }
     }
 
@@ -142,6 +145,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
     public class EnHandoverDto
     {
+        /// <summary>The live standard-gap report of the case (null when there is none).</summary>
+        public EnGapSummaryDto StandardGap { get; set; }
+
         public int Id { get; set; }
         public string Number { get; set; }
         public int CaseId { get; set; }

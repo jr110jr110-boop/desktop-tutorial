@@ -46,4 +46,54 @@ namespace Entities.Model.NasbNiro.Engineering
         [Timestamp]
         public byte[] RowVersion { get; set; }
     }
+
+    public enum EnGapStatus { Draft = 0, Confirmed = 1, Void = 2 }
+
+    public enum EnGapKind { Same = 0, Added = 1, Removed = 2, RequiredChanged = 3 }
+
+    /// <summary>The difference between the document list of the standard a platform is already assessed against and the list of the standard of the order (made by the engineering agent; confirmed by the head of engineering before the CEO approves the case).</summary>
+    public class EnStandardGap : BaseEntity
+    {
+        public string Number { get; set; }
+        public int CaseId { get; set; }
+        public int? ProductId { get; set; }
+
+        /// <summary>The standard of the dossier of the product with the most available lines (empty when there is none).</summary>
+        public string BaseCode { get; set; }
+        public string TargetCode { get; set; }
+        public int BaseRevision { get; set; }
+        public int TargetRevision { get; set; }
+        public EnGapStatus Status { get; set; }
+        public int AddedCount { get; set; }
+        public int RemovedCount { get; set; }
+        public int RequiredChangedCount { get; set; }
+        public int ReusableCount { get; set; }
+        public string Summary { get; set; }
+        public string EngineeringImpactNote { get; set; }
+        public int? ConfirmedByUserId { get; set; }
+        public DateTimeOffset? ConfirmedAt { get; set; }
+        public string ContentHash { get; set; }
+
+        public System.Collections.Generic.ICollection<EnStandardGapLine> Lines { get; set; } = new System.Collections.Generic.List<EnStandardGapLine>();
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+    }
+
+    public class EnStandardGapLine
+    {
+        public int Id { get; set; }
+        public int GapId { get; set; }
+        public EnStandardGap Gap { get; set; }
+        public int Seq { get; set; }
+        public EnGapKind Kind { get; set; }
+        public string DocumentType { get; set; }
+        public string Discipline { get; set; }
+        public string Title { get; set; }
+        public bool BaseRequired { get; set; }
+        public bool TargetRequired { get; set; }
+
+        /// <summary>The available line of the product dossier whose file can be reused for this line.</summary>
+        public int? ReusableFromDossierLineId { get; set; }
+    }
 }

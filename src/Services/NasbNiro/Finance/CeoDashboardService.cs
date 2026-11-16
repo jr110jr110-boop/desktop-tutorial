@@ -223,6 +223,8 @@ namespace Services.NasbNiro.Finance
             Alert(d.EnWaiversAwaitingCeo > 0, "danger", $"{d.EnWaiversAwaitingCeo} درخواست معافیت اضطراری مدارک مهندسی منتظر تصمیم مدیرعامل است (قدیمی‌ترین {d.EnOldestWaiverWaitingHours} ساعت)", "/engineering/waivers");
             d.EnDeviationsAwaiting = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.Requested || x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.ManagerApproved), ct);
             d.EnStandardsDeviationsOpen = d.EnDeviationsAwaiting + d.EnWaiversAwaitingCeo;
+            d.EnStandardGapsOpen = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnGapStatus.Draft, ct);
+            Alert(d.EnStandardGapsOpen > 0, "warning", $"{d.EnStandardGapsOpen} گزارش تفاوت استاندارد منتظر تایید مدیر مهندسی است", "/engineering/standard-gaps");
             Alert(d.EnDeviationsAwaiting > 0, "danger", $"{d.EnDeviationsAwaiting} انحراف از استاندارد منتظر تصمیم مدیر مهندسی یا مدیرعامل است", "/engineering/deviations");
             var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);
             d.EnCasesAtDocumentRisk = enRisk.Count; d.EnAwardedCasesAtDocumentRisk = enRisk.Count(r => r.Awarded); d.EnPlatformsAlarm = d.EnAwardedCasesAtDocumentRisk > 0;

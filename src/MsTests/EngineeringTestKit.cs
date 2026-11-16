@@ -14,6 +14,7 @@ using Entities.Model.NasbNiro.ProductBank;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Services.NasbNiro.Agents;
 using Services.NasbNiro.Ai;
 using Services.NasbNiro.Engineering;
 using ViewModels.NasbNiro.EngineeringDtos;
@@ -177,7 +178,20 @@ namespace MsTests
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = platform ? 1 : 2; d.ProductId = productId; d.Basis = "مبنای آزمون برای تعیین نوع پرونده"; }));
             Ok(await SetStandard(host, Eng1, c.Id, code));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            await ConfirmGapIfAny(host, c.Id);
             return Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+        }
+
+        /// <summary>The standard-gap report of a case under another standard: the agent builds it, the manager confirms it.</summary>
+        public static async Task ConfirmGapIfAny(AppHost host, int caseId)
+        {
+            ClaimsPrincipal seat = await SeatAsync(host);
+            foreach (AgentWorkItem item in (await EngineeringStandardsTests.Discover(host, seat, "ENG.STANDARD.GAP")).Where(i => i.TargetId == caseId))
+                await EngineeringStandardsTests.Run(host, seat, "ENG.STANDARD.GAP", item);
+            int? gap = host.Read(u => u.Set<EnStandardGap>().Where(g => g.CaseId == caseId && g.Status == EnGapStatus.Draft).Select(g => (int?)g.Id).FirstOrDefault());
+            if (!gap.HasValue) return;
+            EnGapDto dto = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnStandardGapService>().GetGapAsync(gap.Value, Ct)));
+            Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnStandardGapService>().ConfirmAsync(new EnGapConfirmDto { Id = gap.Value, EngineeringImpactNote = "اثر بر مواد و طراحی بررسی شد؛ مدارک افزوده مطابق فهرست استاندارد سفارش تهیه می‌شود.", RowVersion = dto.RowVersion }, Ct)));
         }
     }
 }

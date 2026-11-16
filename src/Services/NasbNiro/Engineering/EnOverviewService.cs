@@ -66,6 +66,7 @@ namespace Services.NasbNiro.Engineering
             o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
             o.DeviationsAwaiting = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct);
             o.StandardsDeviationsOpen = o.DeviationsAwaiting + o.WaiversAwaitingCeo;
+            o.StandardGapsOpen = await _uow.Set<EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnGapStatus.Draft, ct);
             return ResponseDtoHelper.Ok(o);
         }
     }

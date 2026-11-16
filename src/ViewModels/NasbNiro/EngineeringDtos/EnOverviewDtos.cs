@@ -47,5 +47,6 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         /// <summary>Deviations from a standard that wait for the head of engineering or the CEO (never expire; a permanent alarm), and those together with the emergency waivers that wait for the CEO.</summary>
         public int DeviationsAwaiting { get; set; }
         public int StandardsDeviationsOpen { get; set; }
+        public int StandardGapsOpen { get; set; }
     }
 }

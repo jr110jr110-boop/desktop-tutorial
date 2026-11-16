@@ -71,6 +71,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int PlatformMissingRequired { get; set; }
         public string PlatformWarning { get; set; }
 
+        /// <summary>The live standard-gap report of the case (null when there is none).</summary>
+        public EnGapSummaryDto StandardGap { get; set; }
+
         public int? TenderPackageId { get; set; }
         public string TenderPackageCode { get; set; }
         public int TenderDocumentCount { get; set; }
