@@ -1,7 +1,9 @@
 import "@/views/inventory/inventory.scss";
 import "@/views/engineering/engineering.scss";
 import { faDigits, faNum } from "@/composables/ceo";
-import { jalali } from "@/composables/inventory";
+import { ref } from "vue";
+import type { EnField } from "@/components/engineering/EnPrompt.vue";
+import { fail, jalali, ok } from "@/composables/inventory";
 
 // ENG-E1: names, role lists and labels of the engineering module. The role lists mirror EnRoles (Services/NasbNiro/Engineering/EnCommon.cs) exactly; the API checks every call again.
 // Access decisions use hasRole() / isRole() only (never currentRole()). Enum values are numbers in the JSON; the DTOs also carry their Persian text, the maps below are for filters.
@@ -158,3 +160,51 @@ export function uploadedId(data: any): string | null {
   const v = data.data ?? data.id ?? data.documentId;
   return typeof v === "string" ? v : v && typeof v === "object" ? uploadedId(v) : null;
 }
+
+/** The dialog that asks for the data of an action. `ask()` opens it; `run` gets the typed values and answers the API result; a refusal stays inside the dialog (the server's text). */
+export function useEnDialog(reload: () => Promise<any> | void) {
+  const dlg = ref<null | { title: string; fields: EnField[]; confirmText?: string; hint?: string; okText: string; run: (v: any) => Promise<any> }>(null);
+  const error = ref("");
+  const busy = ref(false);
+  function ask(d: { title: string; fields: EnField[]; confirmText?: string; hint?: string; okText?: string; run: (v: any) => Promise<any> }) {
+    error.value = "";
+    dlg.value = { okText: "انجام شد.", ...d };
+  }
+  async function confirm(values: any) {
+    if (!dlg.value || busy.value) return;
+    busy.value = true;
+    const [, e] = await dlg.value.run(values);
+    busy.value = false;
+    if (e) {
+      error.value = errText(e);
+      return;
+    }
+    ok(dlg.value.okText);
+    dlg.value = null;
+    await reload();
+  }
+  return { dlg, error, busy, ask, confirm, close: () => (dlg.value = null) };
+}
+
+/** An action without a dialog: runs it, shows the server's refusal as a toast, reloads. */
+export async function runEn(run: () => Promise<any>, okText: string, reload: () => Promise<any> | void): Promise<boolean> {
+  const [, e] = await run();
+  if (e) {
+    fail(e);
+    return false;
+  }
+  ok(okText);
+  await reload();
+  return true;
+}
+
+/** Persian names of the event kinds of a case (the server writes a code; an unknown code is shown as it is). */
+export const eventKinds: Record<string, string> = {
+  opened: "پرونده باز شد", analysed: "تحلیل انجام شد", proposed: "پیشنهاد ثبت شد", changed: "پیشنهاد اصلاح شد", "eng-confirmed": "تایید مدیر مهندسی", "ceo-approved": "تایید مدیرعامل",
+  "returned-by-manager": "برگشت توسط مدیر مهندسی", "returned-by-ceo": "برگشت توسط مدیرعامل", "reclassify-requested": "درخواست تغییر طبقه‌بندی", "concept-saved": "یادداشت طرح مفهومی ذخیره شد",
+  "opinion-saved": "نظر فنی ثبت شد", "standard-set": "استاندارد از دیتاشیت ثبت شد", "standard-changed": "استاندارد تغییر کرد", "standard-gap-built": "گزارش شکاف استاندارد ساخته شد",
+  "standard-gap-confirmed": "گزارش شکاف تایید شد", "tender-package-created": "بسته فنی مناقصه ساخته شد", "tender-released": "بسته فنی منتشر شد", "tender-voided": "بسته فنی باطل شد",
+  awarded: "پرونده برنده شد", closed: "پرونده بسته شد", cancelled: "پرونده لغو شد", "handover-drafted": "پیش‌نویس تحویل ساخته شد", "handover-submitted": "تحویل به PMO ارسال شد",
+  "handover-accepted": "PMO تحویل را پذیرفت", "handover-returned": "PMO تحویل را برگرداند", "handover-released": "تحویل منتشر شد", "handover-void": "تحویل باطل شد",
+  "distribution-drafted": "ابلاغ واحدها آماده شد", "distribution-note-edited": "یادداشت دامنه واحد ویرایش شد", "info-request-void": "پرسش واحد پس گرفته شد", "platform-registered": "پلتفرم ثبت شد",
+};
