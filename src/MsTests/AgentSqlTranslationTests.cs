@@ -145,6 +145,29 @@ namespace MsTests
             }
         }
 
+        /// <summary>ENG-F1: the queries of the ingest scan (signature lookups, the originator lookup), of apply (the comparison with the stored lines and steps, the work centres) and of the originator rule translate to SQL Server.</summary>
+        [TestMethod]
+        public void The_Queries_Of_The_Engineering_Inbox_Apply_And_Scan_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using IServiceScope scope = host.Provider.CreateScope();
+            IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            string[] sql =
+            {
+                uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxPackage>().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.EngInbox.EngInboxStatus.Rejected && x.OriginalPath == "a" && x.SourceSignature == "b").Select(x => x.Id).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxPackage>().Where(x => !x.Deleted && x.SourceSignature == "b").OrderBy(x => x.Id).Select(x => new { x.Id, x.Status, x.OriginalPath }).ToQueryString(),
+                uow.Set<Entities.Identity.User>().Where(u => !u.IsDeleted && u.IsActive && (u.NormalizedUserName == "A" || u.UserName == "a")).OrderBy(u => u.Id).Select(u => (int?)u.Id).ToQueryString(),
+                (from a in uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxAppliedItem>() join p in uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxPackage>() on a.PackageId equals p.Id where !a.Deleted && a.Kind == 1 && a.EntityId == 3 && p.OriginatorUserId == 5 select a.Id).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxBomLine>().Where(l => l.PackageId == 1 && !l.Deleted).OrderBy(l => l.SortOrder).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.ProductBank.PbBomLine>().Where(l => l.BomHeaderId == 1 && !l.Deleted).OrderBy(l => l.SortOrder).Select(l => new { l.SortOrder, l.ItemNumber, l.PartNumber, l.PartName, l.Qty, l.Unit, l.Material, l.MakeOrBuy, l.Description }).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcStep>().Where(x => x.RoutingId == 1 && !x.Deleted).Select(x => new { x.Seq, x.PartNumber, x.PartName, x.StageCode2, x.Kind, x.Title, x.WorkCenterId, x.StandardHours, x.IsQcPoint, x.MakeOrBuy, x.Note }).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.Production.MfWorkCenter>().Where(w => !w.Deleted && new[] { "A" }.Contains(w.Code)).Select(w => new { w.Id, w.Code }).ToQueryString(),
+                uow.Set<Entities.Model.NasbNiro.EngInbox.EngInboxScanState>().Where(x => !x.Deleted).OrderBy(x => x.Id).ToQueryString(),
+            };
+            foreach (string q in sql) Assert.IsTrue(q.Contains("SELECT"), q);
+            Assert.IsTrue(sql[0].Contains("EngInboxPackages") && sql[3].Contains("EngInboxAppliedItems"));
+        }
+
         /// <summary>The Sepidar transfer: the queries behind prepare (a change check per kind), send, the fix gate and the approval gate, and the dashboard alert, translated for every kind without being run.</summary>
         [TestMethod]
         public void The_Queries_Behind_The_Sepidar_Transfer_Translate_To_Sql_Server()

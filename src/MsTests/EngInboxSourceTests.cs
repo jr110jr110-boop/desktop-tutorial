@@ -16,18 +16,34 @@ namespace MsTests
         public List<EngPackageContent> Packages { get; } = new List<EngPackageContent>();
         public List<(string Id, EngSourceOutcome Outcome, string Note)> Marks { get; } = new List<(string, EngSourceOutcome, string)>();
         public bool Configured { get; set; } = true;
+
+        /// <summary>True: every move out of the inbox fails (as a locked folder would).</summary>
+        public bool FailMoves { get; set; }
+
+        /// <summary>When set, the first listing waits for it (a scan that is still running).</summary>
+        public System.Threading.Tasks.TaskCompletionSource<bool> Gate { get; set; }
         public string Name => "Memory";
         public bool IsConfigured => Configured;
         public string Location => "memory://";
         public string NotConfiguredReason => "در دسترس نیست.";
 
-        public Task<IReadOnlyList<EngPackageHandle>> ListReadyAsync(CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<EngPackageHandle>>(Packages.Where(p => !Marks.Any(m => m.Id == p.Handle.Id)).Select(p => p.Handle).ToList());
+        public async Task<IReadOnlyList<EngPackageHandle>> ListReadyAsync(CancellationToken ct)
+        {
+            if (Gate != null) await Gate.Task;
+            return Packages.Where(p => !Marks.Any(m => m.Id == p.Handle.Id && !m.Note.StartsWith("FAILED", StringComparison.Ordinal))).Select(p => p.Handle).ToList();
+        }
+
+        public Task<string> SignatureAsync(EngPackageHandle handle, CancellationToken ct)
+        {
+            EngPackageContent c = Packages.Single(p => p.Handle.Id == handle.Id);
+            return Task.FromResult(EngText.Sha256Hex(c.Workbook).Substring(0, 40) + "/" + c.Files.Count + "/" + c.Files.Values.Sum(f => f.Size));
+        }
 
         public Task<EngPackageContent> ReadAsync(EngPackageHandle handle, CancellationToken ct) => Task.FromResult(Packages.Single(p => p.Handle.Id == handle.Id));
 
         public Task<string> MarkAsync(EngPackageHandle handle, EngSourceOutcome outcome, string note, CancellationToken ct)
         {
+            if (FailMoves) { Marks.Add((handle.Id, outcome, "FAILED " + note)); throw new EngSourceMoveException("پوشهٔ بسته جابه‌جا نشد (آزمون)."); }
             Marks.Add((handle.Id, outcome, note));
             return Task.FromResult("_" + outcome + "/" + handle.Id);
         }
@@ -233,7 +249,10 @@ namespace MsTests
                     EngPackageContent c = await src.ReadAsync(h, Ct);
                     Assert.IsNull(c.Workbook, bad);
                     Assert.AreEqual(1, c.Problems.Count, bad);
-                    Assert.AreEqual("", await src.MarkAsync(h, EngSourceOutcome.Ingested, "x", Ct), bad);
+                    EngSourceMoveException moved = null;
+                    try { await src.MarkAsync(h, EngSourceOutcome.Ingested, "x", Ct); }
+                    catch (EngSourceMoveException ex) { moved = ex; }
+                    Assert.IsNotNull(moved, bad + ": a move that cannot happen is reported, not hidden");
                 }
             }
             finally { Directory.Delete(root, true); }

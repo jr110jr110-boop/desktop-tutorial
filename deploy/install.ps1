@@ -860,6 +860,15 @@ try {
     Grant-FolderAccess $LogsDir $poolIdentity 'M'
     # ENG-F1: the engineering inbox folder beside the application folder (an update of the program never touches it); the application identity reads, writes and moves packages there
     $EngInboxDir = Join-Path $InstallRoot 'Engineering-Inbox'
+    # an inbox folder the administrator already configured (another path) is the one that is created and granted; the default is used only when none is set
+    $engSettingsFile = Join-Path $AppDir 'appsettings.Production.json'
+    if (Test-Path $engSettingsFile) {
+        try {
+            $engExisting = [string](Get-JsonSetting (Get-Content -Raw -Path $engSettingsFile -Encoding UTF8 | ConvertFrom-Json) @('Engineering', 'InboxFolder'))
+            if ($engExisting -and [System.IO.Path]::IsPathRooted($engExisting)) { $EngInboxDir = $engExisting }
+        }
+        catch { }
+    }
     if (-not (Test-Path $EngInboxDir)) { New-Item -ItemType Directory -Path $EngInboxDir -Force | Out-Null }
     Grant-FolderAccess $EngInboxDir $poolIdentity 'M'
 
@@ -1080,7 +1089,7 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     if ($null -eq (Get-JsonSetting $settings @('Remote', 'Enabled'))) { Set-JsonSetting $settings @('Remote', 'Enabled') $false }
     if ($null -eq (Get-JsonSetting $settings @('Dnc', 'FolderRoots'))) { Set-JsonSetting $settings @('Dnc', 'FolderRoots') '' }
     # ENG-F1: the inbox root, written once (a value the administrator set is kept)
-    if ($null -eq (Get-JsonSetting $settings @('Engineering', 'InboxFolder'))) { Set-JsonSetting $settings @('Engineering', 'InboxFolder') (Join-Path $InstallRoot 'Engineering-Inbox') }
+    if ($null -eq (Get-JsonSetting $settings @('Engineering', 'InboxFolder'))) { Set-JsonSetting $settings @('Engineering', 'InboxFolder') $EngInboxDir }
     Remove-JsonSetting $settings @('Dnc', 'AllowLoopback')
     Write-JsonSettings $settings $settingsPath
     Write-Ok 'Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.'

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.EngInbox;
+using Services.NasbNiro.Finance;
 
 namespace MsTests
 {
@@ -473,6 +474,96 @@ namespace MsTests
                     }
                 return ms.ToArray();
             }
+        }
+
+        // ------------------------------------------------------------------------------------------------ fix round: hash boundaries and the formula scan
+
+        private static string OldStyleBomText(EngParsedPackage p) => string.Concat(p.Bom.Select(b =>
+            "BOM|" + b.Level + "|" + b.ParentCode + "|" + b.PartCode + "|" + b.Description + "|" + EngText.Num(b.Qty) + "|" + b.Unit + "|" + (int)b.MakeBuy + "|" + b.Material + "|" + b.DrawingNumber + "|" + b.DrawingRevision + "|" + b.Note + "\n"));
+
+        [TestMethod]
+        public void A_Pipe_Or_A_Line_Break_Inside_A_Text_Cannot_Move_A_Boundary_Of_The_Hash()
+        {
+            EngBomRow Row(int level, string parent, string part, string note) => new EngBomRow { Level = level, ParentCode = parent, PartCode = part, Description = "d", Qty = 1, Unit = "u", MakeBuy = EngMakeBuy.Make, Note = note };
+            var two = new EngParsedPackage();
+            two.Bom.Add(Row(1, null, "A", "n"));
+            two.Bom.Add(Row(2, "A", "B", null));
+            string secondRow = OldStyleBomText(new EngParsedPackage { Bom = { Row(2, "A", "B", null) } }).TrimEnd('\n');
+            var one = new EngParsedPackage();
+            one.Bom.Add(Row(1, null, "A", "n\n" + secondRow));
+            Assert.AreEqual(OldStyleBomText(two), OldStyleBomText(one), "with the old format the two packages wrote the same text (that was the collision)");
+            Assert.AreNotEqual(EngPackageHash.Of(two, null), EngPackageHash.Of(one, null));
+        }
+
+        private static byte[] ManySheets(Action<EngTables> change = null)
+        {
+            EngTables t = EngPackageWriter.SampleTables();
+            change?.Invoke(t);
+            XlsxSheet S(string name, string[] head, IEnumerable<object[]> rows)
+            {
+                var sheet = new XlsxSheet { Name = name };
+                sheet.Header.AddRange(head);
+                sheet.Rows.AddRange(rows);
+                return sheet;
+            }
+            var sheets = new List<XlsxSheet>
+            {
+                S(EngPackageParser.SheetInfo, new[] { "مورد", "مقدار", "توضیح" }, t.Info), S(EngPackageParser.SheetBom, t.BomHead, t.Bom), S(EngPackageParser.SheetOpc, t.OpcHead, t.Opc), S(EngPackageParser.SheetDocs, t.DocHead, t.Docs),
+            };
+            for (int i = 1; i <= 8; i++) sheets.Add(S("X" + i, new[] { "a" }, new[] { new object[] { "v" } }));
+            return SimpleXlsx.Build(sheets);
+        }
+
+        private static byte[] WithFormulaInPart(byte[] workbook, string part)
+        {
+            using var input = new ZipArchive(new MemoryStream(workbook), ZipArchiveMode.Read);
+            var output = new MemoryStream();
+            using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
+                foreach (ZipArchiveEntry e in input.Entries)
+                {
+                    byte[] data;
+                    using (Stream s = e.Open()) using (var ms = new MemoryStream()) { s.CopyTo(ms); data = ms.ToArray(); }
+                    if (e.FullName == part) data = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(data).Replace("</sheetData>", "<row r=\"900\"><c r=\"A900\"><f>1+1</f></c></row></sheetData>"));
+                    ZipArchiveEntry n = zip.CreateEntry(e.FullName);
+                    using (Stream s = n.Open()) s.Write(data, 0, data.Length);
+                }
+            return output.ToArray();
+        }
+
+        [TestMethod]
+        public void The_Formula_Scan_Maps_Parts_To_Sheets_Through_The_Relationships_Reads_Only_The_Five_Known_Sheets_And_Copes_With_Twelve_Sheets()
+        {
+            var files = EngPackageWriter.Sample().Files.ToDictionary(f => f.Key, f => new EngFileInfo { Name = f.Key, Size = f.Value.Length, Sha256 = EngText.Sha256Hex(f.Value) });
+            byte[] clean = ManySheets();
+            Assert.AreEqual(0, EngPackageParser.Parse(clean, "ENG-PACKAGE.xlsx", files).Findings.Count(f => f.IsError && f.Message.Contains("فرمول")), "no formula, no finding");
+            // a formula without a stored value on the BOM sheet (part sheet2.xml) is reported on «BOM», once
+            List<EngFinding> bom = EngPackageParser.Parse(WithFormulaInPart(clean, "xl/worksheets/sheet2.xml"), "ENG-PACKAGE.xlsx", files).Findings.Where(f => f.Message.Contains("فرمول")).ToList();
+            Assert.AreEqual(1, bom.Count);
+            Assert.AreEqual("BOM", bom[0].Sheet);
+            Assert.AreEqual(900, bom[0].Row);
+            // the same on the last of twelve sheets (sheet12.xml sorts before sheet2.xml in a file listing) is not a sheet of the package: never scanned, never reported
+            Assert.AreEqual(0, EngPackageParser.Parse(WithFormulaInPart(clean, "xl/worksheets/sheet12.xml"), "ENG-PACKAGE.xlsx", files).Findings.Count(f => f.Message.Contains("فرمول")));
+            // and one on the Info sheet is reported on its own sheet, not on whichever sheet came first in the zip
+            List<EngFinding> info = EngPackageParser.Parse(WithFormulaInPart(clean, "xl/worksheets/sheet1.xml"), "ENG-PACKAGE.xlsx", files).Findings.Where(f => f.Message.Contains("فرمول")).ToList();
+            Assert.AreEqual(1, info.Count);
+            Assert.AreEqual("مشخصات", info[0].Sheet);
+        }
+
+        [TestMethod]
+        public void A_Text_Longer_Than_Its_Column_Is_A_Finding_With_The_Sheet_And_Row_For_Every_Sheet()
+        {
+            EngTables t = EngPackageWriter.SampleTables();
+            t.Bom[3][3] = new string('d', 301);
+            t.Opc[0][2] = new string('o', 301);
+            t.Docs[0][1] = new string('t', 301);
+            EngParsedPackage p = EngPackageParser.Parse(EngPackageWriter.Build(t), "ENG-PACKAGE.xlsx", EngPackageWriter.FactsOf(EngPackageWriter.Sample()));
+            var errors = p.Findings.Where(f => f.IsError).Select(f => f.Sheet + "|" + f.Row + "|" + f.Message).ToList();
+            CollectionAssert.AreEquivalent(new[]
+            {
+                "BOM|5|«شرح» حداکثر ۳۰۰ نویسه است.",
+                "OPC|2|«شرح عملیات» حداکثر ۳۰۰ نویسه است.",
+                "مدارک|2|«عنوان» بیش از 300 نویسه است (301 نویسه)؛ کوتاه‌تر بنویسید.",
+            }, errors, string.Join(" || ", errors));
         }
     }
 }
