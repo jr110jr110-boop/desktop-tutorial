@@ -150,6 +150,20 @@
       </KsSidebarLink>
 
       <KsSidebarLink
+        v-if="enLinks.some((x) => !x.hidden)"
+        :sidebar-state="sidebarState"
+        :subs="enLinks"
+        has-sub
+        route-name="En"
+        tag="engineering-collapse"
+        title="مهندسی">
+        <CopyIcon
+          :class="sidebarState.isSidebarExpanded && 'ms-3'"
+          :fill="String($route.name || '').startsWith('En') ? Colors.primary : Colors.primaryLight"
+          width="18" />
+      </KsSidebarLink>
+
+      <KsSidebarLink
         :sidebar-state="sidebarState"
         :subs="links.productBank"
         has-sub
@@ -334,6 +348,7 @@ import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
 import { PbRoles } from "@/composables/productBank";
+import { EnRoles } from "@/composables/engineering";
 import { DesignRoles } from "@/composables/designControl";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { AuditRoles } from "@/composables/audit";
@@ -745,6 +760,25 @@ const salesLinks = computed<Links[]>(() => [
   { title: "سفارش‌های فروش", routeName: "SlOrders", disabled: !hasRole(SalesRoles.orderReaders), hidden: !hasRole(SalesRoles.orderReaders) },
   { title: "تنظیمات فروش", routeName: "SlSettings", disabled: !hasRole(SalesRoles.readers), hidden: !hasRole(SalesRoles.readers) },
 ]);
+
+// Engineering (مهندسی): every entry follows the server's reader list (EnRoles.readers); the questions of the units have their own narrower list. The section shows only when an entry is visible.
+const enLinks = computed<Links[]>(() => {
+  const r = hasRole(EnRoles.readers);
+  const i = hasRole(EnRoles.infoReaders);
+  return [
+    { title: "نمای کلی مهندسی", routeName: "EnOverview", disabled: !r, hidden: !r },
+    { title: "پرونده‌های مهندسی", routeName: "EnCases", disabled: !r, hidden: !r },
+    { title: "پرونده مدارک پلتفرم‌ها", routeName: "EnPlatforms", disabled: !r, hidden: !r },
+    { title: "فهرست مدارک مرجع", routeName: "EnReferenceLists", disabled: !r, hidden: !r },
+    { title: "تحویل مدارک به PMO", routeName: "EnHandovers", disabled: !r, hidden: !r },
+    { title: "بدهی مدارک", routeName: "EnDebts", disabled: !r, hidden: !r },
+    { title: "معافیت‌های اضطراری", routeName: "EnWaivers", disabled: !r, hidden: !r },
+    { title: "انحراف از استاندارد", routeName: "EnDeviations", disabled: !r, hidden: !r },
+    { title: "شکاف استاندارد", routeName: "EnGaps", disabled: !r, hidden: !r },
+    { title: "ثبت پلتفرم جدید", routeName: "EnRegistrations", disabled: !r, hidden: !r },
+    { title: "پرسش واحدها از PMO", routeName: "EnInfoRequests", disabled: !i, hidden: !i },
+  ];
+});
 
 // After-sales service: each page is disabled for the roles the API refuses (ServiceRoles in composables/roles.ts); the labour run is for the finance manager and the CEO.
 const serviceLinks = computed<Links[]>(() => [

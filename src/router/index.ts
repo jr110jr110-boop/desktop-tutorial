@@ -9,6 +9,7 @@ import { AuditRoles } from "@/composables/audit";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { DncRoles } from "@/composables/dnc";
+import { EnRoles } from "@/composables/engineering";
 import { AccountRoles, AgentRoles, AiRoles, GoLiveRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
@@ -773,6 +774,24 @@ const routes: Array<RouteRecordRaw> = [
     path: "/:pathMatch(.*)*",
     component: () => import("@/views/NotFound.vue"),
   },
+  // ENG-E1: the engineering module (cases, platform dossiers, reference lists, handovers to the PMO, debts, deviations, standard gaps, registrations, questions of the units).
+  // meta.roles = EnRoles.readers (EnRoles.Readers on the server); the questions of the units have their own narrower list. The extra paths are the links the API writes into steps and inbox items.
+  { path: "/engineering", name: "EnOverview", component: () => import("@/views/engineering/Overview.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/cases", name: "EnCases", component: () => import("@/views/engineering/Cases.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/cases/:id(\\d+)", name: "EnCaseDetail", component: () => import("@/views/engineering/CaseDetail.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/clarifications/:id(\\d+)", name: "EnClarification", component: () => import("@/views/engineering/ClarificationRedirect.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/platforms", name: "EnPlatforms", component: () => import("@/views/engineering/Platforms.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/platforms/:productId(\\d+)", name: "EnPlatformDetail", component: () => import("@/views/engineering/PlatformDetail.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/reference-lists", name: "EnReferenceLists", component: () => import("@/views/engineering/ReferenceLists.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/reference-lists/:id(\\d+)", name: "EnReferenceDetail", component: () => import("@/views/engineering/ReferenceDetail.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/handovers", name: "EnHandovers", component: () => import("@/views/engineering/Handovers.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/handovers/:id(\\d+)", name: "EnHandoverDetail", component: () => import("@/views/engineering/HandoverDetail.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/debts", name: "EnDebts", component: () => import("@/views/engineering/Debts.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/waivers/:id(\\d+)?", name: "EnWaivers", component: () => import("@/views/engineering/Waivers.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/deviations/:id(\\d+)?", name: "EnDeviations", component: () => import("@/views/engineering/Deviations.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/standard-gaps/:id(\\d+)?", name: "EnGaps", component: () => import("@/views/engineering/Gaps.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/platform-registrations/:id(\\d+)?", name: "EnRegistrations", component: () => import("@/views/engineering/Registrations.vue"), meta: { roles: EnRoles.readers } },
+  { path: "/engineering/info-requests/:id(\\d+)?", name: "EnInfoRequests", component: () => import("@/views/engineering/InfoRequests.vue"), meta: { roles: EnRoles.infoReaders } },
 ];
 
 const router = createRouter({

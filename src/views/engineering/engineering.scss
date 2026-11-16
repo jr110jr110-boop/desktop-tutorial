@@ -1,0 +1,71 @@
+/* Look of the engineering pages; the shared classes (inv-page, inv-card, inv-badge, inv-modal ...) come from views/inventory/inventory.scss. */
+.en-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.en-tile {
+  display: block;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.6rem;
+  background: #f4f6f8;
+  border: 1px solid #e3e7eb;
+  color: inherit;
+  text-decoration: none;
+}
+a.en-tile:hover { background: #e9eef3; }
+.en-tile .t { font-size: 0.78rem; color: #6c757d; }
+.en-tile .v { font-size: 1.5rem; font-weight: 600; }
+.en-tile .n { font-size: 0.75rem; color: #6c757d; }
+.en-tile.warn { background: #fff8e1; border-color: #ffe08a; }
+.en-tile.bad { background: #fdecee; border-color: #f1aeb5; }
+.en-tile.ok { background: #e8f5ee; border-color: #a3cfbb; }
+.en-banner {
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.88rem;
+  border: 1px solid transparent;
+}
+.en-banner.amber { background: #fff8e1; border-color: #ffe08a; color: #664d03; }
+.en-banner.red { background: #fdecee; border-color: #f1aeb5; color: #842029; }
+.en-banner.blue { background: #e7f0ff; border-color: #b6d0ff; color: #084298; }
+.en-bar { height: 0.55rem; border-radius: 0.3rem; background: #e3e7eb; overflow: hidden; min-width: 90px; }
+.en-bar > span { display: block; height: 100%; background: #198754; }
+.en-bar.partial > span { background: #e0a100; }
+.en-bar.none > span { background: #dc3545; }
+.en-timeline { position: relative; margin: 0; padding: 0; list-style: none; }
+.en-step {
+  position: relative;
+  padding: 0 1.6rem 1rem 0;
+  border-right: 2px solid #d5dbe1;
+  margin-right: 0.6rem;
+}
+.en-step:last-child { border-right-color: transparent; }
+.en-step::before {
+  content: "";
+  position: absolute;
+  right: -0.45rem;
+  top: 0.35rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #0d6efd;
+}
+.en-step.done::before { background: #198754; border-color: #198754; }
+.en-step.wait::before { border-color: #e0a100; background: #ffe08a; }
+.en-step h3 { font-size: 1rem; font-weight: 700; margin: 0 0 0.4rem; }
+.en-box { border: 1px solid #e3e7eb; border-radius: 0.5rem; padding: 0.6rem 0.8rem; margin-bottom: 0.5rem; background: #fff; }
+.en-why { display: block; font-size: 0.75rem; color: #842029; margin-top: 0.15rem; max-width: 22rem; }
+.en-act { display: inline-block; vertical-align: top; margin: 0 0 0.3rem 0.4rem; }
+.en-kv { display: grid; grid-template-columns: 11rem 1fr; gap: 0.2rem 0.8rem; font-size: 0.85rem; }
+.en-kv dt { color: #6c757d; font-weight: 400; }
+.en-kv dd { margin: 0; }
+.en-pre { white-space: pre-wrap; margin: 0; }
+.en-gapline.Added { background: #e8f5ee; }
+.en-gapline.Removed { background: #fdecee; }
+.en-gapline.RequiredChanged { background: #fff8e1; }
+.en-count { font-size: 0.72rem; color: #6c757d; text-align: left; }
+.en-units label { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.8rem; font-size: 0.85rem; }
