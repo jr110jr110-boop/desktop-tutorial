@@ -64,6 +64,9 @@ namespace Services.NasbNiro
             }
 
             ContractEntity contractToAdd = _mapper.Map<ContractEntity>(addContractDto);
+            // Engineering control: the server-side creation date tells a contract created after the cut-over from a legacy one (older rows keep the empty date); never taken from the client
+            contractToAdd.CreateDate = DateTimeOffset.Now;
+            contractToAdd.ModifyDate = contractToAdd.CreateDate;
 
             EntityEntry<ContractEntity> entityEntry = await _contracts.AddAsync(contractToAdd);
 
@@ -84,6 +87,9 @@ namespace Services.NasbNiro
             }
 
             ContractEntity contractToAdd = _mapper.Map<ContractEntity>(addContractDto);
+            // Engineering control: the server-side creation date tells a contract created after the cut-over from a legacy one (older rows keep the empty date); never taken from the client
+            contractToAdd.CreateDate = DateTimeOffset.Now;
+            contractToAdd.ModifyDate = contractToAdd.CreateDate;
             contractToAdd.ForProvider = true;
             EntityEntry<ContractEntity> entityEntry = await _contracts.AddAsync(contractToAdd);
             
