@@ -97,20 +97,37 @@ namespace Services.NasbNiro.Engineering
             await OfficeGates.SyncAsync(_notify, KeyPrefix + EnText.Num(r.Id), r.Status == EnRegStatus.Proposed, "Engineering", nameof(EnPlatformRegistration), r.Id,
                 "پیشنهاد ثبت طرح جدید به عنوان پلتفرم (" + r.Number + ", استاندارد " + r.ReferenceCode + ") منتظر تصمیم مدیرعامل است.", "/engineering/platform-registrations/" + EnText.Num(r.Id), EnRoles.Ceo, ct, null, OfInboxKind.Task);
 
-        /// <summary>Why the content cannot be registered now (null = it can): the case is a New design that reached engineering, the product is active and has no dossier for this standard, and no other open proposal exists.</summary>
+        /// <summary>Why the case cannot take a registration proposal at all (null = it can): it is a New design that reached engineering, the PMO released its handover, it has a standard and no other proposal of the case waits. The case page flag and the service use this one predicate.</summary>
+        internal static string CaseProblem(EnCase c, bool releasedHandover, bool otherOpenProposal) =>
+            c.Kind != EnCaseKind.Turbine || c.Classification != EnClassification.New ? "فقط پروندهٔ طرح جدید می‌تواند پلتفرم شود."
+            // only after the PMO released the handover of the case: the documents of the design exist and were handed over
+            : !releasedHandover ? "ثبت پلتفرم فقط پس از ابلاغ تحویل مدارک این پرونده (تحویل ابلاغ‌شده توسط PMO) ممکن است."
+            : string.IsNullOrWhiteSpace(c.ReferenceCode) ? "استاندارد پروژهٔ این پرونده هنوز ثبت نشده است."
+            : otherOpenProposal ? "پیشنهاد بازی برای این پرونده منتظر تصمیم مدیرعامل است." : null;
+
+        internal static async Task<string> CaseProblemAsync(IUnitOfWork uow, EnCase c, int? exceptId, CancellationToken ct)
+        {
+            bool released = await uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == c.Id && !h.Deleted && h.Status == EnHandoverStatus.Released, ct);
+            bool open = await uow.Set<EnPlatformRegistration>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed && x.CaseId == c.Id && x.Id != (exceptId ?? 0), ct);
+            return CaseProblem(c, released, open);
+        }
+
+        /// <summary>The flag of the case page: who may propose (the engineering manager, never a seat) and the case-level refusal, from the same pieces the service uses.</summary>
+        internal static string CaseProposalRefusal(EnCase c, bool manager, bool seat, bool releasedHandover, bool openProposal) =>
+            !manager ? EnText.NotAllowed + " (پیشنهاد با مدیر مهندسی است)" : seat ? EnText.AiNever : CaseProblem(c, releasedHandover, openProposal);
+
+        /// <summary>Why the content cannot be registered now (null = it can): the case problem, the product is active and belongs to the case, the standard is the case standard, the product has no dossier for it.</summary>
         private async Task<string> ContentProblemAsync(int caseId, int productId, string code, int? exceptId, CancellationToken ct)
         {
             EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == caseId && !x.Deleted, ct);
             if (c == null) return EnText.NotFoundCase;
-            if (c.Kind != EnCaseKind.Turbine || c.Classification != EnClassification.New) return "فقط پروندهٔ طرح جدید می‌تواند پلتفرم شود.";
-            // only after the PMO released the handover of the case: the documents of the design exist and were handed over
-            if (!await _uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == caseId && !h.Deleted && h.Status == EnHandoverStatus.Released, ct)) return "ثبت پلتفرم فقط پس از ابلاغ تحویل مدارک این پرونده (تحویل ابلاغ‌شده توسط PMO) ممکن است.";
+            string caseProblem = await CaseProblemAsync(_uow, c, exceptId, ct);
+            if (caseProblem != null) return caseProblem;
             PbProduct p = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == productId && !x.Deleted, ct);
             if (p == null || !p.IsActive) return "محصول فعال پیدا نشد.";
             if (!await EnOrigin.BelongsToCaseAsync(_uow, c, productId, ct)) return "این محصول به این پروندهٔ طراحی جدید تعلق ندارد (محصول باید همان محصول دستور کار قرارداد پرونده باشد).";
             if (!string.Equals(c.ReferenceCode, code, StringComparison.Ordinal)) return "استاندارد پلتفرم باید همان استاندارد پروژهٔ این پرونده (" + (c.ReferenceCode ?? "—") + ") باشد.";
             if (await _uow.Set<EnPlatformDossier>().AsNoTracking().AnyAsync(d => d.ProductId == productId && d.ReferenceCode == code && !d.Deleted, ct)) return "برای این محصول و استاندارد پرونده پلتفرم از پیش وجود دارد.";
-            if (await _uow.Set<EnPlatformRegistration>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed && x.ProductId == productId && x.ReferenceCode == code && x.Id != (exceptId ?? 0), ct)) return "پیشنهاد بازی برای این محصول و استاندارد منتظر تصمیم است.";
             return null;
         }
 

@@ -45,6 +45,10 @@ namespace Services.NasbNiro.Engineering
 
         private static bool CaseAllowsQuestions(EnCaseStatus s) => s <= EnCaseStatus.TenderIssued || s == EnCaseStatus.Awarded || s == EnCaseStatus.InEngineering;
 
+        /// <summary>The one predicate of a new question: the button of the case page and the save of a new clarification.</summary>
+        internal static string NewQuestionReason(EnCaseStatus status, bool writer) =>
+            !writer ? EnText.NotAllowed : !CaseAllowsQuestions(status) ? "برای این وضعیت پرونده پرسش ثبت نمی‌شود." : null;
+
         private static string SaveReason(EnClarification x, Who w) =>
             !w.Writer ? EnText.NotAllowed : x != null && x.Status != EnClarStatus.Draft ? "فقط پیش‌نویس ویرایش می‌شود." : null;
 
@@ -141,7 +145,8 @@ namespace Services.NasbNiro.Engineering
             {
                 EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(k => k.Id == dto.CaseId && !k.Deleted, ct);
                 if (c == null) return EnText.NotFound<EnClarificationDto>(EnText.NotFoundCase);
-                if (!CaseAllowsQuestions(c.Status)) return EnText.Bad<EnClarificationDto>("برای این وضعیت پرونده پرسش ثبت نمی‌شود.");
+                problem = NewQuestionReason(c.Status, w.Writer);
+                if (problem != null) return EnText.Bad<EnClarificationDto>(problem);
                 x = new EnClarification { CaseId = c.Id, AskedByUserId = Me, AskedAt = now, Status = EnClarStatus.Draft, CreateDate = now, CreatorUserId = Me };
                 x.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Clarification, "ECQ", now.DateTime, ct);
                 _uow.Set<EnClarification>().Add(x);

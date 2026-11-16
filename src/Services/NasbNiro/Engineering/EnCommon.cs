@@ -87,7 +87,7 @@ namespace Services.NasbNiro.Engineering
         public static IEnumerable<QualitySetting> Defaults()
         {
             yield return new QualitySetting { Key = ControlStartDate, Value = 0, Title = "روز آغاز کنترل مهندسی (تاریخ شمسی به‌صورت yyyyMMdd؛ ۰ = لحظهٔ آغاز کنترل ثبت‌شده در نخستین اجرای برنامه، همان گذار بسته G): استعلام و قراردادهای پیش از آن «قدیمی» شمرده می‌شوند", Source = Source };
-            yield return new QualitySetting { Key = WaiverMaxDebtHours, Value = 72, Title = "حداکثر مهلت (ساعت) بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی (سقف ۷۲ ساعت)", Source = Source };
+            yield return new QualitySetting { Key = WaiverMaxDebtHours, Value = 72, Title = "حداکثر مهلت (ساعت) بدهی مدارک در مجوز اضطرار قفل تحویل مدارک مهندسی (سقف ۷۲ ساعت)", Source = Source };
         }
 
         public static bool TryGetBounds(string key, out int min, out int max)

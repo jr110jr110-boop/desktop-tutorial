@@ -58,7 +58,7 @@ namespace Services.NasbNiro.Engineering
                 foreach (EnWaiver w in await uow.Set<EnWaiver>().Where(w => w.HandoverId == h.Id && !w.Deleted && (w.Status == EnWaiverStatus.Requested || (w.Status == EnWaiverStatus.Approved && w.UsedAt == null))).ToListAsync(ct))
                 {
                     w.Status = EnWaiverStatus.Void; w.ModifyDate = now; w.ModifierUserId = me;
-                    await OfficeGates.SyncAsync(notify, "EN-WAIVER-" + w.Id, false, "Engineering", nameof(EnWaiver), w.Id, "تصمیم دربارهٔ معافیت اضطراری " + w.Number, "/engineering/waivers/" + w.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
+                    await OfficeGates.SyncAsync(notify, "EN-WAIVER-" + w.Id, false, "Engineering", nameof(EnWaiver), w.Id, "تصمیم دربارهٔ مجوز اضطرار " + w.Number, "/engineering/waivers/" + w.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
                 }
                 bool submitted = h.Status == EnHandoverStatus.Submitted;
                 h.Status = EnHandoverStatus.Void; h.VoidReason = EnText.Cut(VoidReason, 1000); h.ModifyDate = now; h.ModifierUserId = me;

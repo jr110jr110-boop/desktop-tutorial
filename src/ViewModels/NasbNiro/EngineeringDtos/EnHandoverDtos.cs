@@ -73,6 +73,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int? HandoverLineId { get; set; }
         public int CaseId { get; set; }
         public string CaseNumber { get; set; }
+
+        /// <summary>The standard of the case the debt belongs to (the dossier of that standard is where the debt settles).</summary>
+        public string ReferenceCode { get; set; }
         public int ContractId { get; set; }
         public int? ProductId { get; set; }
         public string DocumentType { get; set; }
@@ -206,6 +209,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public EnWaiverDto Waiver { get; set; }
         public string RowVersion { get; set; }
 
+        /// <summary>Re-read the documents from the platform dossier (draft only, engineering writers).</summary>
+        public bool CanRefresh { get; set; }
+        public string RefreshBlockedReason { get; set; }
         public bool CanSubmit { get; set; }
         public string SubmitBlockedReason { get; set; }
         public bool CanRequestWaiver { get; set; }

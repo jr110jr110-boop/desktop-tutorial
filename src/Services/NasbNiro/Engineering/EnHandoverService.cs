@@ -128,8 +128,8 @@ namespace Services.NasbNiro.Engineering
         public static string Coverage(Snapshot s, List<string> missingNow, bool dossierUnconfirmedNow)
         {
             List<string> extra = missingNow.Where(k => !s.Lines.Contains(k)).ToList();
-            if (extra.Count > 0) return "معافیت این تحویل را پوشش نمی‌دهد: " + EnText.Num(extra.Count) + " مدرک الزامی تازه کم شده یا پس از درخواست از دست رفته است.";
-            if (dossierUnconfirmedNow && !s.DossierUnconfirmed) return "معافیت این تحویل را پوشش نمی‌دهد: تایید پروندهٔ پلتفرم پس از درخواست باطل شده است.";
+            if (extra.Count > 0) return "مجوز اضطرار این تحویل را پوشش نمی‌دهد: " + EnText.Num(extra.Count) + " مدرک الزامی تازه کم شده یا پس از درخواست از دست رفته است.";
+            if (dossierUnconfirmedNow && !s.DossierUnconfirmed) return "مجوز اضطرار این تحویل را پوشش نمی‌دهد: تایید پروندهٔ پلتفرم پس از درخواست باطل شده است.";
             return null;
         }
 
@@ -138,7 +138,7 @@ namespace Services.NasbNiro.Engineering
             if (missing <= 0 && !dossierUnconfirmed) return null;
             string body = missing > 0 ? EnText.Num(missing) + " مدرک الزامی هنوز موجود نیست" + (dossierUnconfirmed ? " و پروندهٔ پلتفرم هنوز توسط مدیر مهندسی تایید نشده است" : string.Empty)
                 : "پروندهٔ پلتفرم هنوز کامل و تایید نشده است";
-            return "تحویل مدارک به PMO قفل است: " + body + ". فقط معافیت اضطراری تاییدشده توسط مدیرعامل این قفل را باز می‌کند.";
+            return "تحویل مدارک به PMO قفل است: " + body + ". فقط مجوز اضطرار تاییدشده توسط مدیرعامل این قفل را باز می‌کند.";
         }
 
         /// <summary>The same rule <see cref="SourcesAsync"/> uses: the BOM line is available with a Released BOM of the product, the OPC line with an Approved routing and none in Draft or UnderReview.</summary>
@@ -234,6 +234,10 @@ namespace Services.NasbNiro.Engineering
         private async Task<EnWaiver> LiveWaiverAsync(int handoverId, CancellationToken ct) =>
             await _uow.Set<EnWaiver>().FirstOrDefaultAsync(w => w.HandoverId == handoverId && !w.Deleted && (w.Status == EnWaiverStatus.Requested || w.Status == EnWaiverStatus.Approved) && w.UsedAt == null, ct);
 
+        /// <summary>The one predicate of the refresh button and the refresh action.</summary>
+        private static string RefreshReason(EnHandover h, Who w) =>
+            !w.Writer ? EnText.NotAllowed : h.Status != EnHandoverStatus.Draft ? "فقط پیش‌نویس از منابع تازه می‌شود." : null;
+
         private static string SubmitReason(EnHandover h, Who w, LockState ls, EnWaiver waiver, DateTimeOffset now)
         {
             if (!w.Manager) return EnText.NotAllowed;
@@ -248,8 +252,8 @@ namespace Services.NasbNiro.Engineering
         }
 
         private static string WaiverRequestReason(EnHandover h, Who w, LockState ls, EnWaiver live) =>
-            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft ? "معافیت فقط برای پیش‌نویس تحویل درخواست می‌شود." : !ls.Locked ? "قفل تحویل باز است؛ معافیت لازم نیست."
-            : live != null ? "برای این تحویل معافیت باز (درخواست‌شده یا تاییدشده) وجود دارد." : null;
+            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft ? "مجوز اضطرار فقط برای پیش‌نویس تحویل درخواست می‌شود." : !ls.Locked ? "قفل تحویل باز است؛ مجوز اضطرار لازم نیست."
+            : live != null ? "برای این تحویل مجوز اضطرار باز (درخواست‌شده یا تاییدشده) وجود دارد." : null;
 
         private async Task<string> PmoReasonAsync(EnHandover h, Who w, bool needPmoOnly, CancellationToken ct)
         {
@@ -290,14 +294,14 @@ namespace Services.NasbNiro.Engineering
             !w.Pmo ? EnText.NotAllowed + " (یادداشت ابلاغ واحد را PMO ویرایش می‌کند)" : w.Seat ? EnText.AiNever : handover != EnHandoverStatus.Accepted || d.Status != EnDistStatus.Draft ? "یادداشت ابلاغ فقط تا پیش از ابلاغ تحویل (وضعیت پذیرفته‌شده) ویرایش می‌شود." : null;
 
         private static string DecideReason(EnWaiver w, Who who, DateTimeOffset now) =>
-            !who.Ceo ? EnText.NotAllowed + " (تایید معافیت اضطراری فقط با مدیرعامل است)" : who.Seat ? EnText.AiNever : w.Status != EnWaiverStatus.Requested ? "فقط درخواست معافیت در انتظار تصمیم تصمیم‌گیری می‌شود."
+            !who.Ceo ? EnText.NotAllowed + " (تایید مجوز اضطرار فقط با مدیرعامل است)" : who.Seat ? EnText.AiNever : w.Status != EnWaiverStatus.Requested ? "فقط درخواست مجوز اضطرار در انتظار تصمیم تصمیم‌گیری می‌شود."
             : w.RequestedByUserId == who.Me ? EnText.SameUser : null;
 
         // ---------------------------------------------------------------- read
 
-        private static EnDebtDto DebtDto(EnDocumentDebt d, Dictionary<int, string> names, Dictionary<int, string> waivers, Dictionary<int, string> cases, DateTimeOffset today) => new EnDebtDto
+        private static EnDebtDto DebtDto(EnDocumentDebt d, Dictionary<int, string> names, Dictionary<int, string> waivers, Dictionary<int, string> cases, Dictionary<int, string> codes, DateTimeOffset today) => new EnDebtDto
         {
-            Id = d.Id, WaiverId = d.WaiverId, WaiverNumber = waivers.TryGetValue(d.WaiverId, out string wn) ? wn : null, HandoverLineId = d.HandoverLineId, CaseId = d.CaseId, CaseNumber = cases.TryGetValue(d.CaseId, out string cn) ? cn : null,
+            Id = d.Id, WaiverId = d.WaiverId, WaiverNumber = waivers.TryGetValue(d.WaiverId, out string wn) ? wn : null, HandoverLineId = d.HandoverLineId, CaseId = d.CaseId, CaseNumber = cases.TryGetValue(d.CaseId, out string cn) ? cn : null, ReferenceCode = codes.TryGetValue(d.CaseId, out string rc) ? rc : null,
             ContractId = d.ContractId, ProductId = d.ProductId, DocumentType = d.DocumentType, Title = d.Title, DueAt = d.DueAt, DueAtText = EnText.Stamp(d.DueAt), Status = (int)d.Status, StatusText = d.Status == EnDebtStatus.Open ? "باز" : d.Status == EnDebtStatus.Settled ? "تسویه‌شده" : "باطل",
             Overdue = d.Status == EnDebtStatus.Open && d.DueAt < today, OverdueDays = d.Status == EnDebtStatus.Open && d.DueAt < today ? (int)(today - d.DueAt).TotalDays : 0,
             SettledAtText = EnText.Stamp(d.SettledAt), SettledByName = names.Name(d.SettledByUserId), SettledDocumentId = d.SettledDocumentId,
@@ -376,8 +380,8 @@ namespace Services.NasbNiro.Engineering
                     Note = h.Note, VoidReason = h.VoidReason, TouchedByMe = EnEditors.Has(h.EditorUserIds, Me), RowVersion = EnConcurrency.Text(h.RowVersion), Waiver = waiverDto,
                     Lines = h.Lines.OrderBy(l => l.Seq).ThenBy(l => l.Id).Select(l => new EnHandoverLineDto { Id = l.Id, Seq = l.Seq, DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = (int)l.State, StateText = EnText.LineState(l.State), DocumentId = l.DocumentId, Revision = l.Revision, PlatformDocumentId = l.PlatformDocumentId, DeliverableId = l.DeliverableId, LinkPath = l.LinkPath, Note = l.Note, Units = l.Units, ForMyUnit = myUnits.Any(u => EnUnits.Includes(l.Units, u)) }).ToList(),
                     Distribution = dist.Where(d => d.HandoverId == h.Id).Select(d => DistDto(d, h.Number, h.Status, debtUsers, w)).ToList(),
-                    Debts = debts.Where(d => waivers.Any(x => x.Id == d.WaiverId && x.HandoverId == h.Id)).Select(d => DebtDto(d, debtUsers, waiverNames, caseNames, today)).ToList(),
-                    CanSubmit = submit == null, SubmitBlockedReason = submit, CanRequestWaiver = request == null, RequestWaiverBlockedReason = request, CanAccept = accept == null, AcceptBlockedReason = accept,
+                    Debts = debts.Where(d => waivers.Any(x => x.Id == d.WaiverId && x.HandoverId == h.Id)).Select(d => DebtDto(d, debtUsers, waiverNames, caseNames, cases.ToDictionary(k => k.Key, k => k.Value.ReferenceCode), today)).ToList(),
+                    CanRefresh = RefreshReason(h, w) == null, RefreshBlockedReason = RefreshReason(h, w), CanSubmit = submit == null, SubmitBlockedReason = submit, CanRequestWaiver = request == null, RequestWaiverBlockedReason = request, CanAccept = accept == null, AcceptBlockedReason = accept,
                     CanReturn = ret == null, ReturnBlockedReason = ret, CanRelease = release == null, ReleaseBlockedReason = release, CanVoid = voidR == null, VoidBlockedReason = voidR,
                 });
             }
@@ -431,7 +435,7 @@ namespace Services.NasbNiro.Engineering
         {
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnWaiverDto>(EnText.NotAllowed);
             EnWaiver x = await _uow.Set<EnWaiver>().AsNoTracking().FirstOrDefaultAsync(w => w.Id == id && !w.Deleted, ct);
-            if (x == null) return EnText.NotFound<EnWaiverDto>("معافیت پیدا نشد.");
+            if (x == null) return EnText.NotFound<EnWaiverDto>("مجوز اضطرار پیدا نشد.");
             return ResponseDtoHelper.Ok((await WaiverDtosAsync(new List<EnWaiver> { x }, ct))[0]);
         }
 
@@ -450,8 +454,9 @@ namespace Services.NasbNiro.Engineering
                 Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.Select(r => r.SettledByUserId), ct);
                 List<int> wids = rows.Select(r => r.WaiverId).Distinct().ToList(), cids = rows.Select(r => r.CaseId).Distinct().ToList();
                 Dictionary<int, string> waivers = await _uow.Set<EnWaiver>().AsNoTracking().Where(x => wids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Number, ct);
-                Dictionary<int, string> cases = await _uow.Set<EnCase>().AsNoTracking().Where(x => cids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Number, ct);
-                return rows.Select(d => DebtDto(d, names, waivers, cases, today)).ToList();
+                var caseRows = await _uow.Set<EnCase>().AsNoTracking().Where(x => cids.Contains(x.Id)).Select(x => new { x.Id, x.Number, x.ReferenceCode }).ToListAsync(ct);
+                Dictionary<int, string> cases = caseRows.ToDictionary(x => x.Id, x => x.Number), codes = caseRows.ToDictionary(x => x.Id, x => x.ReferenceCode);
+                return rows.Select(d => DebtDto(d, names, waivers, cases, codes, today)).ToList();
             }, ct));
         }
 
@@ -483,7 +488,7 @@ namespace Services.NasbNiro.Engineering
             EnWaiver live = await LiveWaiverAsync(h.Id, ct);
             string why = WaiverRequestReason(h, w, ls, live);
             string reason = EnText.Clean(dto.Reason);
-            why ??= EnText.ReasonShort(reason, EnRules.WaiverReasonMin, "دلیل معافیت") ?? EnText.Over(reason, 2000, "دلیل معافیت");
+            why ??= EnText.ReasonShort(reason, EnRules.WaiverReasonMin, "دلیل مجوز اضطرار") ?? EnText.Over(reason, 2000, "دلیل مجوز اضطرار");
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, ct);
             int maxHours = Math.Min(72, (int)settings[EnSettingKeys.WaiverMaxDebtHours]);   // the ceiling of the employer is 72 hours, whatever the setting says
@@ -499,8 +504,8 @@ namespace Services.NasbNiro.Engineering
             waiver.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Waiver, "EWV", now.DateTime, ct);
             _uow.Set<EnWaiver>().Add(waiver);
             try { await _uow.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return EnText.Bad<EnWaiverDto>("برای این تحویل هم‌زمان معافیت دیگری درخواست شد."); }
-            await OfficeGates.SyncAsync(_notify, "EN-WAIVER-" + waiver.Id, true, "Engineering", nameof(EnWaiver), waiver.Id, "تصمیم دربارهٔ معافیت اضطراری " + waiver.Number, "/engineering/waivers/" + waiver.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
+            catch (DbUpdateException) { return EnText.Bad<EnWaiverDto>("برای این تحویل هم‌زمان مجوز اضطرار دیگری درخواست شد."); }
+            await OfficeGates.SyncAsync(_notify, "EN-WAIVER-" + waiver.Id, true, "Engineering", nameof(EnWaiver), waiver.Id, "تصمیم دربارهٔ مجوز اضطرار " + waiver.Number, "/engineering/waivers/" + waiver.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
             return await GetWaiverAsync(waiver.Id, ct);
         }
 
@@ -511,7 +516,7 @@ namespace Services.NasbNiro.Engineering
             if (decision != "approve" && decision != "reject") return EnText.Bad<EnWaiverDto>("تصمیم نامعتبر است (approve یا reject).");
             Who who = await WhoAsync(ct);
             EnWaiver waiver = await _uow.Set<EnWaiver>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
-            if (waiver == null) return EnText.NotFound<EnWaiverDto>("معافیت پیدا نشد.");
+            if (waiver == null) return EnText.NotFound<EnWaiverDto>("مجوز اضطرار پیدا نشد.");
             if (!EnConcurrency.Apply(_uow, waiver, dto.RowVersion)) return EnText.Bad<EnWaiverDto>(EnText.InvalidData);
             DateTimeOffset now = DateTimeOffset.Now;
             string why = DecideReason(waiver, who, now);
@@ -534,7 +539,7 @@ namespace Services.NasbNiro.Engineering
             waiver.ModifyDate = now; waiver.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnWaiverDto>(EnText.Concurrency); }
-            await OfficeGates.SyncAsync(_notify, "EN-WAIVER-" + waiver.Id, false, "Engineering", nameof(EnWaiver), waiver.Id, "تصمیم دربارهٔ معافیت اضطراری " + waiver.Number, "/engineering/waivers/" + waiver.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
+            await OfficeGates.SyncAsync(_notify, "EN-WAIVER-" + waiver.Id, false, "Engineering", nameof(EnWaiver), waiver.Id, "تصمیم دربارهٔ مجوز اضطرار " + waiver.Number, "/engineering/waivers/" + waiver.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
             return await GetWaiverAsync(waiver.Id, ct);
         }
 
@@ -615,8 +620,8 @@ namespace Services.NasbNiro.Engineering
             switch (action)
             {
                 case "refresh":
-                    if (!w.Writer) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed);
-                    if (h.Status != EnHandoverStatus.Draft) return EnText.Bad<EnHandoverDto>("فقط پیش‌نویس از منابع تازه می‌شود.");
+                    why = RefreshReason(h, w);
+                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     await RefreshLinesAsync(h, c, ct);
                     break;
                 case "submit":
@@ -636,7 +641,7 @@ namespace Services.NasbNiro.Engineering
                             _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     c.Status = EnCaseStatus.HandedOver;
-                    EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با معافیت " + waiver.Number : string.Empty));
+                    EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با مجوز اضطرار " + waiver.Number : string.Empty));
                     break;
                 }
                 case "accept":

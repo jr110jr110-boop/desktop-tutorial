@@ -110,7 +110,7 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnWaiverDecideStep : EnHandoverStep
     {
         public override string Code => "ENG.WAIVER.DECIDE";
-        public override string Title => "تصمیم مدیرعامل دربارهٔ معافیت اضطراری قفل تحویل مدارک";
+        public override string Title => "تصمیم مدیرعامل دربارهٔ مجوز اضطرار قفل تحویل مدارک";
         public override AgentStepKind Kind => AgentStepKind.HumanGate;
         public override string FallbackRoles => null;
 
@@ -119,10 +119,10 @@ namespace Services.NasbNiro.Agents.Steps
             DateTimeOffset now = DateTimeOffset.Now;
             var rows = await uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested)
                 .OrderBy(w => w.Id).Take(ProcStepCommon.Cap).Select(w => new { w.Id, w.Number, ContractId = uow.Set<EnHandover>().Where(h => h.Id == w.HandoverId).Select(h => (int?)h.ContractId).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnWaiver", r.Id, r.Number, r.ContractId, null, $"معافیت اضطراری {r.Number} منتظر تصمیم مدیرعامل است.", EnRoles.Ceo)).ToList();
+            return rows.Select(r => Item("EnWaiver", r.Id, r.Number, r.ContractId, null, $"مجوز اضطرار {r.Number} منتظر تصمیم مدیرعامل است.", EnRoles.Ceo)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = Root + "/waivers/" + Id(item.TargetId), Title = "تصمیم دربارهٔ معافیت اضطراری " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = Root + "/waivers/" + Id(item.TargetId), Title = "تصمیم دربارهٔ مجوز اضطرار " + item.TargetNumber };
     }
 
     /// <summary>ENG.DEBT.SETTLE (Agent): an open document debt whose source document now exists; the agent settles it from the source (zero tolerance: nothing is settled without the document).</summary>
@@ -137,7 +137,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             IQueryable<int> ready = ReadyDebtIds(uow);
             var rows = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => ready.Contains(d.Id)).OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.Title, d.ContractId }).ToListAsync(ct);
-            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, $"مدرک «{r.Title}» که بدهی معافیت بود اکنون موجود است و بدهی قابل تسویه است.")).ToList();
+            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, $"مدرک «{r.Title}» که بدهی مجوز اضطرار بود اکنون موجود است و بدهی قابل تسویه است.")).ToList();
         }
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
@@ -157,7 +157,7 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnDebtSupplyStep : EnHandoverStep
     {
         public override string Code => "ENG.DEBT.SUPPLY";
-        public override string Title => "تهیهٔ مدرک بدهی معافیت (مدارک را مهندسی دارد)";
+        public override string Title => "تهیهٔ مدرک بدهی مجوز اضطرار (مدارک را مهندسی دارد)";
         public override AgentStepKind Kind => AgentStepKind.Input;
         public override string FallbackRoles => EnRoles.Writers;
 
@@ -167,7 +167,7 @@ namespace Services.NasbNiro.Agents.Steps
             DateTimeOffset day = DateTimeOffset.Now;
             var rows = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open && !ready.Contains(d.Id)).OrderBy(d => d.DueAt).ThenBy(d => d.Id).Take(ProcStepCommon.Cap)
                 .Select(d => new { d.Id, d.Title, d.ContractId, Overdue = d.DueAt < day }).ToListAsync(ct);
-            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, r.Overdue ? $"بدهی مدرک «{r.Title}» از سررسید گذشته و هنوز مدرکی نیامده است." : $"مدرک «{r.Title}» بدهی معافیت است و باید تا سررسید تهیه شود.")).ToList();
+            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, r.Overdue ? $"بدهی مدرک «{r.Title}» از سررسید گذشته و هنوز مدرکی نیامده است." : $"مدرک «{r.Title}» بدهی مجوز اضطرار است و باید تا سررسید تهیه شود.")).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/debts", Title = "تهیهٔ مدرک بدهی " + item.TargetNumber };
@@ -184,7 +184,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Submitted).OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId, h.Complete }).ToListAsync(ct);
-            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, r.Complete ? $"تحویل مدارک {r.Number} منتظر پذیرش است." : $"تحویل مدارک {r.Number} با معافیت اضطراری و بدهی مدارک منتظر پذیرش است.", EnRoles.PmoSide)).ToList();
+            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, r.Complete ? $"تحویل مدارک {r.Number} منتظر پذیرش است." : $"تحویل مدارک {r.Number} با مجوز اضطرار و بدهی مدارک منتظر پذیرش است.", EnRoles.PmoSide)).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.PmoSide, Link = HandoverLink(item.TargetId), Title = "پذیرش تحویل مدارک " + item.TargetNumber };

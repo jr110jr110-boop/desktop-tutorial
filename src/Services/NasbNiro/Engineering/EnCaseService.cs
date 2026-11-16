@@ -120,6 +120,11 @@ namespace Services.NasbNiro.Engineering
             : charter == null ? "منشور پروژه هنوز ثبت نشده است." : !charter.ManagerAcceptedAt.HasValue ? "مدیر پروژه هنوز منشور را نپذیرفته است." : charter.ApprovedAt.HasValue ? "منشور قبلاً توسط مدیرعامل تایید شده است."
             : (c.CharterReviewOutcome != EnCharterOutcome.None && c.CharterHash == EnCaseRules.CharterHash(charter)) ? "این محتوای منشور قبلاً بررسی شده است." : null;
 
+        private static string AddTenderDocumentReason(EnCase c, Who w, SlInquiryStatus? inquiryStatus) =>
+            !w.Writer ? EnText.NotAllowed : w.Seat ? EnText.AiNever
+            : c.Status != EnCaseStatus.TenderPreparation ? "مدرک فقط در مرحلهٔ تهیهٔ بسته فنی به بسته افزوده می‌شود؛ پس از ابلاغ بسته، مدرک تازه افزوده نمی‌شود."
+            : inquiryStatus != SlInquiryStatus.Bidding ? "بسته فنی فقط برای استعلامی ساخته می‌شود که مدیرعامل شرکت در آن را تصمیم گرفته است." : null;
+
         private static string CancelReason(EnCase c, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.InquiryId.HasValue ? "پروندهٔ استعلام با نتیجهٔ استعلام بسته می‌شود."
             : c.Status == EnCaseStatus.HandedOver || c.Status == EnCaseStatus.Accepted || c.Status == EnCaseStatus.Released || !EnCaseRules.Open(c.Status) ? "این پرونده دیگر لغو نمی‌شود." : null;
@@ -142,6 +147,9 @@ namespace Services.NasbNiro.Engineering
             int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
             var clar = await _uow.Set<EnClarification>().AsNoTracking().Where(x => !x.Deleted && caseIds.Contains(x.CaseId) && x.Status != EnClarStatus.Closed && x.Status != EnClarStatus.Void).Select(x => x.CaseId).ToListAsync(ct);
             var handovers = await _uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && caseIds.Contains(h.CaseId) && (h.Status == EnHandoverStatus.Draft || h.Status == EnHandoverStatus.Submitted || h.Status == EnHandoverStatus.Returned || h.Status == EnHandoverStatus.Accepted)).OrderBy(h => h.Id).Select(h => new { h.CaseId, h.Id }).ToListAsync(ct);
+            Dictionary<int, EnRiskRow> risks = (await EnRisk.ComputeAsync(_uow, ct, caseIds)).ToDictionary(r => r.CaseId);   // one extra query set for the page, the rule of ENG.RISK.WATCH
+            HashSet<int> releasedHandovers = (await _uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Released && caseIds.Contains(h.CaseId)).Select(h => h.CaseId).ToListAsync(ct)).ToHashSet();
+            HashSet<int> openProposals = (await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed && caseIds.Contains(x.CaseId)).Select(x => x.CaseId).ToListAsync(ct)).ToHashSet();
             Dictionary<int, List<EnCaseEvent>> events = withEvents ? (await _uow.Set<EnCaseEvent>().AsNoTracking().Where(e => caseIds.Contains(e.CaseId)).OrderBy(e => e.Id).ToListAsync(ct)).GroupBy(e => e.CaseId).ToDictionary(g => g.Key, g => g.ToList()) : new Dictionary<int, List<EnCaseEvent>>();
             Dictionary<int, string> eventUsers = withEvents ? await EnUsers.NamesAsync(_uow, events.Values.SelectMany(l => l).Select(e => e.UserId), ct) : new Dictionary<int, string>();
             List<EnCaseDto> result = new List<EnCaseDto>();
@@ -149,12 +157,13 @@ namespace Services.NasbNiro.Engineering
             {
                 var inq = inquiries.FirstOrDefault(i => i.Id == c.InquiryId);
                 var con = contracts.FirstOrDefault(i => i.Id == c.ContractId);
-                int docs = 0; string packageCode = null; bool stale = false; HashSet<int> makers = new HashSet<int>();
+                int docs = 0; string packageCode = null; bool stale = false; HashSet<int> makers = new HashSet<int>(); List<EnTenderDocumentDto> tenderDocs = new List<EnTenderDocumentDto>();
                 if (c.TenderPackageId.HasValue)
                 {
                     packageCode = await _uow.Set<PcTenderPackage>().AsNoTracking().Where(p => p.Id == c.TenderPackageId.Value).Select(p => p.Code).FirstOrDefaultAsync(ct);
-                    var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).Select(d => new { d.CreatorUserId, d.IssuedByUserId }).ToListAsync(ct);
+                    var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).OrderBy(d => d.Id).Select(d => new { d.CreatorUserId, d.IssuedByUserId, d.DocumentId, d.Title, d.Revision, d.IssuedAt }).ToListAsync(ct);
                     docs = pd.Count;
+                    tenderDocs = pd.Select(d => new EnTenderDocumentDto { DocumentId = d.DocumentId, Title = d.Title, Revision = d.Revision, IssuedAtText = EnText.Stamp(d.IssuedAt), AddedByAgent = seats.Contains(d.CreatorUserId) }).ToList();
                     foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
                     stale = c.Status == EnCaseStatus.TenderIssued && c.TenderHash != await EnCaseRules.TenderHashAsync(_uow, c, ct);
                 }
@@ -168,6 +177,9 @@ namespace Services.NasbNiro.Engineering
                 }
                 string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
                 string opinionR = OpinionReason(c, w);
+                string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
+                string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id));
+                risks.TryGetValue(c.Id, out EnRiskRow risk);
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
@@ -190,6 +202,10 @@ namespace Services.NasbNiro.Engineering
                     CanApprove = approve == null, ApproveBlockedReason = approve, CanReturn = ret == null, ReturnBlockedReason = ret, CanReclassify = reclass == null, ReclassifyBlockedReason = reclass,
                     CanSaveConcept = concept == null, SaveConceptBlockedReason = concept, CanReleaseTender = release == null, ReleaseTenderBlockedReason = release, CanCharterReview = charterR == null, CharterReviewBlockedReason = charterR,
                     CanCancel = cancel == null, CancelBlockedReason = cancel,
+                    CanAddTenderDocument = addDoc == null, AddTenderDocumentBlockedReason = addDoc, TenderDocuments = tenderDocs,
+                    DocumentRisk = risk?.Summary(), DocumentRiskAwarded = risk != null && risk.Awarded,
+                    CanProposeRegistration = proposeReg == null, ProposeRegistrationBlockedReason = proposeReg,
+                    CanAskClarification = EnClarificationService.NewQuestionReason(c.Status, w.Writer) == null,
                 };
                 if (withEvents && events.TryGetValue(c.Id, out List<EnCaseEvent> list))
                     dto.Events = list.Select(e => new EnCaseEventDto { Kind = e.Kind, At = e.At, AtText = EnText.Stamp(e.At), UserId = e.UserId, UserName = eventUsers.Name(e.UserId), Note = e.Note }).ToList();
@@ -263,7 +279,7 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- actions
 
-        private static readonly string[] Actions = { "open", "propose", "change", "confirm", "return", "approve", "reclassify", "save-concept", "draft-tender", "revalidate-tender", "release-tender", "award", "close", "cancel", "charter-confirm", "charter-return", "set-standard", "save-opinion" };
+        private static readonly string[] Actions = { "open", "propose", "change", "confirm", "return", "approve", "reclassify", "save-concept", "draft-tender", "add-tender-document", "revalidate-tender", "release-tender", "award", "close", "cancel", "charter-confirm", "charter-return", "set-standard", "save-opinion" };
 
         private async Task<string> ProductProblemAsync(int? productId, EnClassification kind)
         {
@@ -442,6 +458,24 @@ namespace Services.NasbNiro.Engineering
                     ResponseDto<EnCaseDto> r = await DraftTenderAsync(c, w, now, ct);
                     return r;
                 }
+                case "add-tender-document":
+                {
+                    SlInquiryStatus? inquiryStatus = c.InquiryId.HasValue ? await _uow.Set<SlInquiry>().AsNoTracking().Where(i => i.Id == c.InquiryId.Value).Select(i => (SlInquiryStatus?)i.Status).FirstOrDefaultAsync(ct) : null;
+                    why = AddTenderDocumentReason(c, w, inquiryStatus);
+                    string docTitle = EnText.Clean(dto.Title);
+                    if (why == null && !dto.DocumentId.HasValue) why = "فایل مدرک را مشخص کنید؛ ابتدا فایل را بارگذاری کنید.";
+                    if (why == null) why = docTitle == null || docTitle.Length < 3 ? "عنوان مدرک را بنویسید (دست‌کم ۳ نویسه)." : EnText.Over(docTitle, 300, "عنوان مدرک");
+                    if (why == null) why = await EnFiles.CheckOwnAsync(_uow, dto.DocumentId.Value, Me, ct);
+                    if (why == null && c.TenderPackageId.HasValue && await _uow.Set<PcTenderDocument>().AsNoTracking().AnyAsync(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted && d.DocumentId == dto.DocumentId.Value, ct)) why = "این فایل قبلاً در بسته فنی افزوده شده است.";
+                    if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    why = await EnsureTenderPackageAsync(c, ct);   // through the tender service, like the agent's draft
+                    if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    ResponseDto<PcTenderPackageDto> addedDoc = await _edms.SaveTenderDocumentAsync(new PcTenderDocumentSaveDto { PackageId = c.TenderPackageId.Value, Title = docTitle, DocumentType = c.Classification == EnClassification.New ? "CONCEPT" : "TENDER", Revision = "00", DocumentId = dto.DocumentId }, ct);
+                    if (!addedDoc.Success) return EnText.Bad<EnCaseDto>(addedDoc.Message);
+                    c.EditorUserIds = EnEditors.With(c.EditorUserIds, Me);   // he made the package content: he does not release it
+                    EnEvents.Add(_uow, c, "tender-document-added", Me, docTitle);
+                    break;
+                }
                 case "revalidate-tender":
                 {
                     if (!w.Writer) return EnText.Bad<EnCaseDto>(EnText.NotAllowed);
@@ -565,6 +599,19 @@ namespace Services.NasbNiro.Engineering
             return await GetCaseAsync(c.Id, ct);
         }
 
+        /// <summary>Creates the EDMS tender package of the case through the tender service when it does not exist yet (null = the case has a package now, otherwise the Persian refusal).</summary>
+        private async Task<string> EnsureTenderPackageAsync(EnCase c, CancellationToken ct)
+        {
+            if (c.TenderPackageId.HasValue) return null;
+            var inquiry = c.InquiryId.HasValue ? await _uow.Set<SlInquiry>().AsNoTracking().Where(i => i.Id == c.InquiryId.Value).Select(i => new { i.Number, i.Title, i.TenderId }).FirstOrDefaultAsync(ct) : null;
+            if (inquiry == null) return "استعلام این پرونده پیدا نشد.";
+            ResponseDto<PcTenderPackageDto> created = await _edms.SaveTenderPackageAsync(new PcTenderPackageSaveDto { Title = EnText.Cut("بسته فنی " + inquiry.Number + " — " + inquiry.Title, 300), TenderId = inquiry.TenderId, Note = "پروندهٔ مهندسی " + c.Number }, ct);
+            if (!created.Success) return created.Message;
+            c.TenderPackageId = created.Data.Id;
+            EnEvents.Add(_uow, c, "tender-package-created", Me, created.Data.Code);
+            return null;
+        }
+
         /// <summary>The tender package: created from the inquiry, and (platform) the dossier documents of the tender stage added as the files appear. Idempotent: it adds only what is not yet in the package.</summary>
         private async Task<ResponseDto<EnCaseDto>> DraftTenderAsync(EnCase c, Who w, DateTimeOffset now, CancellationToken ct)
         {
@@ -572,13 +619,8 @@ namespace Services.NasbNiro.Engineering
             if (c.Status != EnCaseStatus.TenderPreparation) return EnText.Bad<EnCaseDto>("بسته فنی فقط در مرحلهٔ تهیهٔ بسته فنی ساخته می‌شود.");
             var inquiry = c.InquiryId.HasValue ? await _uow.Set<SlInquiry>().AsNoTracking().Where(i => i.Id == c.InquiryId.Value).Select(i => new { i.Number, i.Title, i.Status, i.TenderId }).FirstOrDefaultAsync(ct) : null;
             if (inquiry == null || inquiry.Status != SlInquiryStatus.Bidding) return EnText.Bad<EnCaseDto>("بسته فنی فقط برای استعلامی ساخته می‌شود که مدیرعامل شرکت در آن را تصمیم گرفته است.");
-            if (!c.TenderPackageId.HasValue)
-            {
-                ResponseDto<PcTenderPackageDto> created = await _edms.SaveTenderPackageAsync(new PcTenderPackageSaveDto { Title = EnText.Cut("بسته فنی " + inquiry.Number + " — " + inquiry.Title, 300), TenderId = inquiry.TenderId, Note = "پروندهٔ مهندسی " + c.Number }, ct);
-                if (!created.Success) return EnText.Bad<EnCaseDto>(created.Message);
-                c.TenderPackageId = created.Data.Id;
-                EnEvents.Add(_uow, c, "tender-package-created", Me, created.Data.Code);
-            }
+            string packageProblem = await EnsureTenderPackageAsync(c, ct);
+            if (packageProblem != null) return EnText.Bad<EnCaseDto>(packageProblem);
             List<string> missing = new List<string>();
             if (c.Classification == EnClassification.Platform && c.ProductId.HasValue)
             {

@@ -7,6 +7,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         /// <summary>0 requested, 1 manager approved, 2 approved, 3 rejected, 4 void.</summary>
         public int? Status { get; set; }
         public int? CaseId { get; set; }
+        public int? ProductId { get; set; }
         public bool OnlyOpen { get; set; }
         public int PageNumber { get; set; } = 1;
         public int PageSize { get; set; } = 25;

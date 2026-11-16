@@ -113,7 +113,7 @@ namespace Services.NasbNiro.Engineering
                 string why = DecideReason(d, manager, ceo, seat, Me, toucher);
                 result.Add(new EnDeviationDto
                 {
-                    Id = d.Id, Number = d.Number, Kind = (int)d.Kind, KindText = d.Kind == EnDeviationKind.NotApplicable ? "غیرقابل‌اجرا اعلام‌کردن بند الزامی" : d.Kind == EnDeviationKind.ReferenceLoosening ? "حذف یا سبک‌کردن بند الزامی در بازنگری فهرست مرجع" : "معافیت اضطراری",
+                    Id = d.Id, Number = d.Number, Kind = (int)d.Kind, KindText = d.Kind == EnDeviationKind.NotApplicable ? "غیرقابل‌اجرا اعلام‌کردن بند الزامی" : d.Kind == EnDeviationKind.ReferenceLoosening ? "حذف یا سبک‌کردن بند الزامی در بازنگری فهرست مرجع" : "مجوز اضطرار",
                     TargetType = d.TargetType, TargetId = d.TargetId, CaseId = d.CaseId, CaseNumber = d.CaseId.HasValue && cases.TryGetValue(d.CaseId.Value, out string cn) ? cn : null, ProductId = d.ProductId, ProductCode = d.ProductId.HasValue && products.TryGetValue(d.ProductId.Value, out string pc) ? pc : null,
                     StandardCode = d.StandardCode, StandardClause = d.StandardClause, Requirement = d.Requirement, Instruction = d.Instruction, RequestedByName = names.Name(d.RequestedByUserId), RequestedAtText = EnText.Stamp(d.RequestedAt),
                     ManagerApprovedByName = names.Name(d.ManagerApprovedByUserId), ManagerApprovedAtText = EnText.Stamp(d.ManagerApprovedAt), CeoApprovedByName = names.Name(d.CeoApprovedByUserId), CeoApprovedAtText = EnText.Stamp(d.CeoApprovedAt),
@@ -131,6 +131,7 @@ namespace Services.NasbNiro.Engineering
             IQueryable<EnDeviation> q = _uow.Set<EnDeviation>().AsNoTracking().Where(d => !d.Deleted);
             if (query.Status.HasValue) { EnDeviationStatus s = (EnDeviationStatus)query.Status.Value; q = q.Where(d => d.Status == s); }
             if (query.CaseId.HasValue) q = q.Where(d => d.CaseId == query.CaseId.Value);
+            if (query.ProductId.HasValue) q = q.Where(d => d.ProductId == query.ProductId.Value);
             if (query.OnlyOpen) q = q.Where(d => d.Status == EnDeviationStatus.Requested || d.Status == EnDeviationStatus.ManagerApproved);
             return ResponseDtoHelper.Ok(await EnPaging.CutAsync(q.OrderByDescending(d => d.Id), query.PageNumber, query.PageSize, rows => DtosAsync(rows, ct), ct));
         }

@@ -11,7 +11,7 @@ namespace Services.NasbNiro.Integrity
         {
             const SafetyStore Q = SafetyStore.Quality;
             yield return new SafetySettingSpec { Store = Q, Key = EnSettingKeys.ControlStartDate, Kind = SafetyKind.NumberAtMost, Strict = "0", Min = 0, Max = 99991231, Title = "روز آغاز کنترل مهندسی جابه‌جا نشود (جابه‌جایی به روز دیرتر، استعلام و قراردادهای بیشتری را «قدیمی» و معاف می‌کند)" };
-            yield return new SafetySettingSpec { Store = Q, Key = EnSettingKeys.WaiverMaxDebtHours, Kind = SafetyKind.NumberAtMost, Strict = "72", Min = 1, Max = 72, Title = "حداکثر مهلت بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی (ساعت، سقف ۷۲)" };
+            yield return new SafetySettingSpec { Store = Q, Key = EnSettingKeys.WaiverMaxDebtHours, Kind = SafetyKind.NumberAtMost, Strict = "72", Min = 1, Max = 72, Title = "حداکثر مهلت بدهی مدارک در مجوز اضطرار قفل تحویل مدارک مهندسی (ساعت، سقف ۷۲)" };
         }
     }
 }

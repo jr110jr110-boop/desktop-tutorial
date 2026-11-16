@@ -47,6 +47,12 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         /// <summary>Deviations from a standard that wait for the head of engineering or the CEO (never expire; a permanent alarm), and those together with the emergency waivers that wait for the CEO.</summary>
         public int DeviationsAwaiting { get; set; }
         public int StandardsDeviationsOpen { get; set; }
+
+        /// <summary>Of the deviations awaiting: those the head of engineering has approved (waiting for the CEO) and those not yet decided by him; hours since the oldest request of the open ones (0 when none), and since the oldest open registration proposal.</summary>
+        public int DeviationsAwaitingCeo { get; set; }
+        public int DeviationsAwaitingManager { get; set; }
+        public int OldestDeviationWaitingHours { get; set; }
+        public int OldestRegistrationWaitingHours { get; set; }
         public int StandardGapsOpen { get; set; }
 
         /// <summary>Questions of the units to the PMO that wait for an answer.</summary>

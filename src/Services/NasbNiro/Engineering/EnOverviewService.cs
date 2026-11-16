@@ -65,9 +65,15 @@ namespace Services.NasbNiro.Engineering
             List<EnRiskRow> risk = await EnRisk.ComputeAsync(_uow, ct);
             o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
             o.DeviationsAwaiting = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct);
+            o.DeviationsAwaitingCeo = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnDeviationStatus.ManagerApproved, ct);
+            o.DeviationsAwaitingManager = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnDeviationStatus.Requested, ct);
+            DateTimeOffset? oldestDeviation = await _uow.Set<EnDeviation>().AsNoTracking().Where(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved)).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
+            o.OldestDeviationWaitingHours = oldestDeviation.HasValue ? Math.Max(0, (int)Math.Floor((now - oldestDeviation.Value).TotalHours)) : 0;
             o.StandardsDeviationsOpen = o.DeviationsAwaiting + o.WaiversAwaitingCeo;
             o.StandardGapsOpen = await _uow.Set<EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnGapStatus.Draft, ct);
             o.InfoRequestsOpen = await _uow.Set<EnInfoRequest>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnInfoStatus.Open, ct);
+            DateTimeOffset? oldestRegistration = await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed).OrderBy(x => x.ProposedAt).Select(x => (DateTimeOffset?)x.ProposedAt).FirstOrDefaultAsync(ct);
+            o.OldestRegistrationWaitingHours = oldestRegistration.HasValue ? Math.Max(0, (int)Math.Floor((now - oldestRegistration.Value).TotalHours)) : 0;
             o.RegistrationsOpen = await _uow.Set<EnPlatformRegistration>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed, ct);
             return ResponseDtoHelper.Ok(o);
         }

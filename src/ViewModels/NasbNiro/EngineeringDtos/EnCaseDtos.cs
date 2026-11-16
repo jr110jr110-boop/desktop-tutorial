@@ -136,9 +136,34 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public bool StandardMissing { get; set; }
         public bool CanSetStandard { get; set; }
         public string SetStandardBlockedReason { get; set; }
+
+        /// <summary>A person adds an uploaded file (a conceptual design document or a tender document) to the tender package of the case.</summary>
+        public bool CanAddTenderDocument { get; set; }
+        public string AddTenderDocumentBlockedReason { get; set; }
+        public List<EnTenderDocumentDto> TenderDocuments { get; set; } = new List<EnTenderDocumentDto>();
+
+        /// <summary>The document risk of the case (the summary text of the early warning; null when the case has no risk) and whether the CEO is already told (the case is awarded or in engineering).</summary>
+        public string DocumentRisk { get; set; }
+        public bool DocumentRiskAwarded { get; set; }
+
+        /// <summary>Propose the registration of this New design as a platform: the same predicate the registration service enforces.</summary>
+        public bool CanProposeRegistration { get; set; }
+        public string ProposeRegistrationBlockedReason { get; set; }
+
+        /// <summary>A new question to the client: false when the case is closed, cancelled or released, or the user is not an engineer.</summary>
+        public bool CanAskClarification { get; set; }
     }
 
-    /// <summary>Action: open, propose, change, confirm, return, approve, reclassify, save-concept, draft-tender, revalidate-tender, release-tender, award, close, cancel, charter-confirm, charter-return.</summary>
+    public class EnTenderDocumentDto
+    {
+        public Guid? DocumentId { get; set; }
+        public string Title { get; set; }
+        public string Revision { get; set; }
+        public string IssuedAtText { get; set; }
+        public bool AddedByAgent { get; set; }
+    }
+
+    /// <summary>Action: open, propose, change, confirm, return, approve, reclassify, save-concept, draft-tender, add-tender-document, revalidate-tender, release-tender, award, close, cancel, charter-confirm, charter-return.</summary>
     public class EnCaseActionDto
     {
         public int? Id { get; set; }
@@ -168,6 +193,10 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string StandardEvidence { get; set; }
         public Guid? StandardAttachmentId { get; set; }
         public string RowVersion { get; set; }
+
+        /// <summary>For add-tender-document: the uploaded file (Documents API) and its title in the package.</summary>
+        public Guid? DocumentId { get; set; }
+        public string Title { get; set; }
     }
 
     /// <summary>The project charter as engineering sees it: every text section EXCEPT the cost estimate, and no amount of the contract (only managers see the project price). The confirmation of engineering binds to the hash of exactly these sections.</summary>

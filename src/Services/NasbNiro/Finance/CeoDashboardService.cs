@@ -220,7 +220,7 @@ namespace Services.NasbNiro.Finance
             d.EnWaiversAwaitingCeo = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested, ct);
             DateTimeOffset? enOldest = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
             d.EnOldestWaiverWaitingHours = enOldest.HasValue ? Math.Max(0, (int)Math.Floor((DateTimeOffset.Now - enOldest.Value).TotalHours)) : 0;
-            Alert(d.EnWaiversAwaitingCeo > 0, "danger", $"{d.EnWaiversAwaitingCeo} درخواست معافیت اضطراری مدارک مهندسی منتظر تصمیم مدیرعامل است (قدیمی‌ترین {d.EnOldestWaiverWaitingHours} ساعت)", "/engineering/waivers");
+            Alert(d.EnWaiversAwaitingCeo > 0, "danger", $"{d.EnWaiversAwaitingCeo} درخواست مجوز اضطرار مدارک مهندسی منتظر تصمیم مدیرعامل است (قدیمی‌ترین {d.EnOldestWaiverWaitingHours} ساعت)", "/engineering/waivers");
             d.EnDeviationsAwaiting = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.Requested || x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.ManagerApproved), ct);
             d.EnStandardsDeviationsOpen = d.EnDeviationsAwaiting + d.EnWaiversAwaitingCeo;
             d.EnStandardGapsOpen = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnGapStatus.Draft, ct);
@@ -231,7 +231,7 @@ namespace Services.NasbNiro.Finance
             var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);
             d.EnCasesAtDocumentRisk = enRisk.Count; d.EnAwardedCasesAtDocumentRisk = enRisk.Count(r => r.Awarded); d.EnPlatformsAlarm = d.EnAwardedCasesAtDocumentRisk > 0;
             Alert(d.EnAwardedCasesAtDocumentRisk > 0, "danger", $"{d.EnAwardedCasesAtDocumentRisk} پروندهٔ برنده‌شده با خطر مدارک مهندسی (مدرک الزامی کم است)", "/engineering/cases");
-            Alert(d.EnOverdueDebts > 0, "danger", $"{d.EnOverdueDebts} بدهی مدارک مهندسی از سررسید گذشته است (مدرک معافیت اضطراری هنوز نیامده)", "/engineering/debts");
+            Alert(d.EnOverdueDebts > 0, "danger", $"{d.EnOverdueDebts} بدهی مدارک مهندسی از سررسید گذشته است (مدرک مجوز اضطرار هنوز نیامده)", "/engineering/debts");
             Alert(d.EnOpenDebts > 0 && d.EnOverdueDebts == 0, "info", $"{d.EnOpenDebts} بدهی مدارک مهندسی باز است", "/engineering/debts");
             Alert(d.EnPlatformsIncomplete > 0, "info", $"{d.EnPlatformsIncomplete} پلتفرم از {d.EnPlatformsTotal} مدارک مهندسی کامل ندارد", "/engineering/platforms");
             // office automation: open decisions of approved minutes past their due date (read directly, so the constructor stays as it is)
