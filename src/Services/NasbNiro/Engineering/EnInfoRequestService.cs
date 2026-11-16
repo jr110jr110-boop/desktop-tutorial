@@ -29,7 +29,7 @@ namespace Services.NasbNiro.Engineering
     {
         public const string KeyPrefix = "EN-INFO-";
         public const string Hint = "پاسخ نباید شامل قیمت، مبلغ یا هزینه باشد؛ مهندسی و واحدها قیمت نمی‌بینند (بررسی خودکار ممکن نیست و مسئولیت با پاسخ‌دهنده است).";
-        private const string Privileged = "PMO,CEO,AUDITOR";
+        private const string PrivilegedReaders = "PMO,CEO,AUDITOR";
 
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -44,7 +44,7 @@ namespace Services.NasbNiro.Engineering
 
         private int Me => _user.UserId;
         private bool OfUnit(EnUnit u) => _user.IsInRole(EnUnits.RolesOf(u));
-        private bool CanSee(EnInfoRequest r) => _user.IsInRole(Privileged) || OfUnit(r.Unit);
+        private bool CanSee(EnInfoRequest r) => _user.IsInRole(PrivilegedReaders) || OfUnit(r.Unit);
 
         internal static string StatusText(EnInfoStatus s) => s == EnInfoStatus.Open ? "منتظر پاسخ PMO" : s == EnInfoStatus.Answered ? "پاسخ‌داده‌شده" : s == EnInfoStatus.Closed ? "بسته‌شده" : "ابطال‌شده";
 
@@ -81,7 +81,7 @@ namespace Services.NasbNiro.Engineering
         public async Task<ResponseDto<PagedList<EnInfoRequestDto>>> GetRequestsAsync(EnInfoQuery query, CancellationToken ct)
         {
             List<EnUnit> mine = EnUnits.All.Where(OfUnit).ToList();
-            bool all = _user.IsInRole(Privileged);
+            bool all = _user.IsInRole(PrivilegedReaders);
             if (!all && mine.Count == 0) return EnText.Bad<PagedList<EnInfoRequestDto>>(EnText.NotAllowed);
             query ??= new EnInfoQuery();
             IQueryable<EnInfoRequest> q = _uow.Set<EnInfoRequest>().AsNoTracking().Where(x => !x.Deleted);
