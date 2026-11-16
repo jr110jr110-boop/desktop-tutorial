@@ -33,6 +33,9 @@ namespace Entities.Model.NasbNiro.EngInbox
         /// <summary>Free text from the workbook (not a user of the system).</summary>
         public string PreparedByText { get; set; }
 
+        /// <summary>The user (login name in the workbook «تهیه‌کننده») who prepared the package: a human, active user. Null only on a rejected package. This person can never check, approve, release or publish what the agent made from the package (maker is not checker).</summary>
+        public int? OriginatorUserId { get; set; }
+
         public int SchemaVersion { get; set; }
 
         /// <summary>SHA-256 of the normalised content and the referenced files (never of the raw workbook).</summary>
@@ -40,6 +43,9 @@ namespace Entities.Model.NasbNiro.EngInbox
 
         /// <summary>The package folder as the source saw it, relative to the inbox root.</summary>
         public string OriginalPath { get; set; }
+
+        /// <summary>The size and last write time of the files of the folder as the source saw them: a rejected package that is seen again unchanged is not stored a second time.</summary>
+        public string SourceSignature { get; set; }
 
         /// <summary>Where the folder was moved to (_Processed or _Rejected), relative to the inbox root.</summary>
         public string StoredPath { get; set; }
@@ -99,6 +105,26 @@ namespace Entities.Model.NasbNiro.EngInbox
 
         [Timestamp]
         public byte[] RowVersion { get; set; }
+    }
+
+    /// <summary>1 = PbBomHeader, 2 = PbOpcRouting, 3 = PbProduct (the product bank records the agent created or edited from a package; no column was added to the product bank tables).</summary>
+    public static class EngInboxAppliedKind
+    {
+        public const byte BomHeader = 1;
+        public const byte Routing = 2;
+        public const byte Product = 3;
+    }
+
+    /// <summary>One row per BOM header, routing or product that applying a package created or edited. The product bank services read it to refuse the originator of the package on every check, approval, release and publication.</summary>
+    public class EngInboxAppliedItem : BaseEntity
+    {
+        public int PackageId { get; set; }
+        public EngInboxPackage Package { get; set; }
+
+        /// <summary>See <see cref="EngInboxAppliedKind"/>.</summary>
+        public byte Kind { get; set; }
+
+        public int EntityId { get; set; }
     }
 
     public class EngInboxBomLine : BaseEntity

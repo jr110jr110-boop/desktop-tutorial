@@ -30,6 +30,9 @@ namespace ViewModels.NasbNiro.EngInboxDtos
         public bool CanScan { get; set; }
         public string ScanDisabledReason { get; set; }
         public bool CanDismiss { get; set; }
+
+        /// <summary>Persian reason when the engineering agent does not apply packages now (the apply step or the AG-ENG seat is switched off); null otherwise. The packages stay as they are.</summary>
+        public string ApplyPausedReason { get; set; }
     }
 
     public class EngInboxStatusCountDto
@@ -79,6 +82,7 @@ namespace ViewModels.NasbNiro.EngInboxDtos
         public int? LinkedWorkOrderId { get; set; }
         public string DismissReason { get; set; }
         public string RowVersion { get; set; }
+        public int? OriginatorUserId { get; set; }
     }
 
     public class EngInboxFindingDto
@@ -153,9 +157,11 @@ namespace ViewModels.NasbNiro.EngInboxDtos
         public string BomCode { get; set; }
         public int? BomRevision { get; set; }
         public string BomStatus { get; set; }
+        public int? BomStatusCode { get; set; }
         public string RoutingPartNumber { get; set; }
         public int? RoutingRevision { get; set; }
         public string RoutingStatus { get; set; }
+        public int? RoutingStatusCode { get; set; }
         public bool CanDismiss { get; set; }
         public List<EngInboxFindingDto> Findings { get; set; } = new List<EngInboxFindingDto>();
         public List<EngInboxBomLineDto> BomLines { get; set; } = new List<EngInboxBomLineDto>();

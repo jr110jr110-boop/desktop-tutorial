@@ -14,8 +14,9 @@ namespace DataLayer.Context
             AuditPd(typeof(EngInboxPackage), new[]
             {
                 "SourceName", "Kind", "PlatformCode", "Standard", "ContractCode", "ProjectCode", "PackageVersion", "Title", "ContentHash", "OriginalPath", "StoredPath", "Status", "StatusNote", "RejectCode", "ErrorCount", "WarningCount",
-                "BomCount", "OpcCount", "DocCount", "MdlCount", "SupersededByPackageId", "ApplyBlockReason", "AppliedAt", "ProductId", "BomHeaderId", "RoutingId", "LinkedContractId", "LinkedWorkOrderId", "DismissedByUserId", "DismissReason",
+                "BomCount", "OpcCount", "DocCount", "MdlCount", "SupersededByPackageId", "ApplyBlockReason", "AppliedAt", "ProductId", "BomHeaderId", "RoutingId", "LinkedContractId", "LinkedWorkOrderId", "DismissedByUserId", "DismissReason", "OriginatorUserId",
             }, "بستهٔ صندوق ورودی مهندسی");
+            AuditPd(typeof(EngInboxAppliedItem), new[] { "PackageId", "Kind", "EntityId" }, "رکورد ساخته‌شده از بستهٔ صندوق ورودی مهندسی");
             AuditPd(typeof(EngInboxDocRef), new[] { "PackageId", "Number", "Title", "Revision", "DocType", "IsRequired", "FileName", "FileSize", "FileSha256" }, "مدرک مرجع بستهٔ صندوق ورودی مهندسی");
         }
     }

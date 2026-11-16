@@ -21,6 +21,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.EngInbox
                 b.Property(x => x.ContentHash).HasMaxLength(64);
                 b.Property(x => x.OriginalPath).HasMaxLength(500);
                 b.Property(x => x.StoredPath).HasMaxLength(500);
+                b.Property(x => x.SourceSignature).HasMaxLength(100);
                 b.Property(x => x.StatusNote).HasMaxLength(500);
                 b.Property(x => x.RejectCode).HasMaxLength(30);
                 b.Property(x => x.ApplyBlockReason).HasMaxLength(1500);
@@ -83,6 +84,13 @@ namespace DataLayer.Configurations.EF.NasbNiro.EngInbox
                 b.Property(x => x.CommitDate).HasColumnType("date");
                 b.HasOne(x => x.Package).WithMany(p => p.MdlLines).HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
                 b.HasIndex(x => x.PackageId);
+            });
+            builder.Entity<EngInboxAppliedItem>(b =>
+            {
+                b.ToTable("EngInboxAppliedItems");
+                b.HasOne(x => x.Package).WithMany().HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => new { x.Kind, x.EntityId, x.PackageId }).IsUnique();
+                b.HasIndex(x => new { x.Kind, x.EntityId });
             });
             builder.Entity<EngInboxScanState>(b =>
             {
