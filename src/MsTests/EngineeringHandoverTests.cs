@@ -289,17 +289,17 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Engineering_E1_Catalogue_Has_Thirty_Five_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
+        public void The_Engineering_E1_Catalogue_Has_Thirty_Seven_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(35, steps.Count);
+            Assert.AreEqual(37, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
             Assert.AreEqual(15, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
-            Assert.AreEqual(19, steps.Count(s => s.Station == 5));
+            Assert.AreEqual(21, steps.Count(s => s.Station == 5));
             Assert.AreEqual(12, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(35, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(37, steps.Select(s => s.Code).Distinct().Count());
         }
 
         [TestMethod]

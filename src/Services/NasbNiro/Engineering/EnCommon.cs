@@ -53,6 +53,7 @@ namespace Services.NasbNiro.Engineering
         public const int Handover = 852;
         public const int Clarification = 853;
         public const int Waiver = 854;
+        public const int Deviation = 855;
 
         /// <summary>For example "ENG-1405-0012": the Shamsi year and a sequence of the year.</summary>
         public static async Task<string> NextAsync(IUnitOfWork uow, int kind, string prefix, DateTime date, CancellationToken ct)

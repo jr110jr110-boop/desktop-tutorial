@@ -144,6 +144,9 @@ namespace Entities.Model.NasbNiro.Engineering
         /// <summary>The system proved the line from its own state (a released BOM, an approved routing); no file is needed.</summary>
         public bool SystemProven { get; set; }
 
+        /// <summary>The approved deviation (head of engineering and CEO) that made a Required line not applicable.</summary>
+        public int? DeviationId { get; set; }
+
         public int? SuppliedByUserId { get; set; }
         public DateTimeOffset? SuppliedAt { get; set; }
 

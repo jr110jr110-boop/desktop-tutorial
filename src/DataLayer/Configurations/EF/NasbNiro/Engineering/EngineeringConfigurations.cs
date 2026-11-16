@@ -182,6 +182,24 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.HasOne<EnHandover>().WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
             });
+
+            builder.Entity<EnDeviation>(b =>
+            {
+                b.ToTable("EnDeviations");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.TargetType).HasMaxLength(60).IsRequired();
+                b.Property(x => x.StandardCode).HasMaxLength(60).IsRequired();
+                b.Property(x => x.StandardClause).HasMaxLength(300);
+                b.Property(x => x.Requirement).HasMaxLength(300).IsRequired();
+                b.Property(x => x.Instruction).HasMaxLength(2000).IsRequired();
+                b.Property(x => x.DecisionNote).HasMaxLength(1000);
+                b.Property(x => x.ContentHash).HasMaxLength(64);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.TargetType, x.TargetId, x.Status });
+                b.HasIndex(x => x.Status);
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
+                b.HasOne<PbProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            });
         }
     }
 }

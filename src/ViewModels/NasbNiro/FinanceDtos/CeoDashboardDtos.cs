@@ -75,6 +75,10 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int EnAwardedCasesAtDocumentRisk { get; set; }
         public bool EnPlatformsAlarm { get; set; }
 
+        /// <summary>Deviations from a standard that wait for a decision, and those with the emergency waivers together («انحراف از استاندارد»).</summary>
+        public int EnDeviationsAwaiting { get; set; }
+        public int EnStandardsDeviationsOpen { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 

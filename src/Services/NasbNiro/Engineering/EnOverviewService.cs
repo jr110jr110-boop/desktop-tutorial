@@ -64,6 +64,8 @@ namespace Services.NasbNiro.Engineering
             o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null, ct);
             List<EnRiskRow> risk = await EnRisk.ComputeAsync(_uow, ct);
             o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
+            o.DeviationsAwaiting = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct);
+            o.StandardsDeviationsOpen = o.DeviationsAwaiting + o.WaiversAwaitingCeo;
             return ResponseDtoHelper.Ok(o);
         }
     }

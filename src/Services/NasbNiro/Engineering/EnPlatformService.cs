@@ -124,11 +124,13 @@ namespace Services.NasbNiro.Engineering
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public EnPlatformService(IUnitOfWork uow, IInventoryUserContext user)
+        public EnPlatformService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
@@ -389,6 +391,29 @@ namespace Services.NasbNiro.Engineering
             if (dto.NotApplicable)
             {
                 string reason = EnText.Clean(dto.NotApplicableReason);
+                if (line.Required)
+                {
+                    // an instruction against a requirement of the standard is not executed: it becomes a deviation that the head of engineering AND the CEO must approve
+                    problem = EnText.ReasonShort(reason, EnDeviations.InstructionMin, "دلیل انحراف از استاندارد") ?? EnText.Over(reason, 2000, "دلیل");
+                    if (problem != null) return EnText.Bad<EnDossierDto>(problem);
+                    if (await _uow.Set<EnDeviation>().AnyAsync(x => !x.Deleted && x.TargetType == EnDeviations.LineType && x.TargetId == line.Id && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct))
+                        return EnText.Bad<EnDossierDto>("برای این بند درخواست انحراف باز وجود دارد؛ منتظر تصمیم مدیر مهندسی و مدیرعامل بمانید.");
+                    DateTimeOffset at = DateTimeOffset.Now;
+                    string clause = line.ReferenceLineId.HasValue ? await _uow.Set<EnReferenceLine>().AsNoTracking().Where(l => l.Id == line.ReferenceLineId.Value).Select(l => l.StandardClause).FirstOrDefaultAsync(ct) : null;
+                    EnDeviation dev = new EnDeviation
+                    {
+                        Kind = EnDeviationKind.NotApplicable, TargetType = EnDeviations.LineType, TargetId = line.Id, ProductId = d.ProductId, StandardCode = d.ReferenceCode, StandardClause = clause, Requirement = EnText.Cut(line.Title, 300), Instruction = reason,
+                        RequestedByUserId = Me, RequestedAt = at, Status = EnDeviationStatus.Requested, ContentHash = EnDeviations.LineHash(line, d.ReferenceCode, reason), CreateDate = at, CreatorUserId = Me, ModifyDate = at, ModifierUserId = Me,
+                    };
+                    dev.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Deviation, "EDV", at.DateTime, ct);
+                    _uow.Set<EnDeviation>().Add(dev);
+                    d.EditorUserIds = EnEditors.With(d.EditorUserIds, Me); d.ModifyDate = at; d.ModifierUserId = Me;
+                    try { await _uow.SaveChangesAsync(ct); }
+                    catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDossierDto>(EnText.Concurrency); }
+                    await EnDeviations.SyncAsync(_notify, dev, ct);
+                    ResponseDto<EnDossierDto> shown = await GetDossierAsync(d.ProductId, d.ReferenceCode, ct);
+                    return shown.Success ? ResponseDtoHelper.Ok(shown.Data, "بند الزامی است؛ غیرقابل‌اجرا شدن آن اعمال نشد و به‌صورت درخواست انحراف " + dev.Number + " برای تصمیم مدیر مهندسی و مدیرعامل ثبت شد.") : shown;
+                }
                 problem = EnText.ReasonShort(reason, EnRules.ReasonMin, "دلیل غیرقابل‌اجرا بودن") ?? EnText.Over(reason, 500, "دلیل");
                 if (problem != null) return EnText.Bad<EnDossierDto>(problem);
                 line.State = EnLineState.NotApplicable; line.NotApplicableReason = reason; line.DocumentId = null; line.ControlledDocumentId = null; line.Revision = null;
@@ -403,6 +428,7 @@ namespace Services.NasbNiro.Engineering
                 }
                 if (dto.ControlledDocumentId.HasValue && !await _uow.Set<ControlledDocument>().AsNoTracking().AnyAsync(c => c.Id == dto.ControlledDocumentId.Value && !c.Deleted, ct))
                     return EnText.Bad<EnDossierDto>("مدرک کنترل‌شده پیدا نشد.");
+                await EnDeviations.VoidOpenAsync(_uow, _notify, EnDeviations.LineType, line.Id, "بند تامین شد و درخواست انحراف دیگر لازم نیست.", Me, ct);
                 line.State = EnLineState.Available; line.NotApplicableReason = null; line.DocumentId = dto.DocumentId; line.ControlledDocumentId = dto.ControlledDocumentId; line.Revision = revision;
             }
             DateTimeOffset now = DateTimeOffset.Now;

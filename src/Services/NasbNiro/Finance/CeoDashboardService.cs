@@ -221,6 +221,9 @@ namespace Services.NasbNiro.Finance
             DateTimeOffset? enOldest = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
             d.EnOldestWaiverWaitingHours = enOldest.HasValue ? Math.Max(0, (int)Math.Floor((DateTimeOffset.Now - enOldest.Value).TotalHours)) : 0;
             Alert(d.EnWaiversAwaitingCeo > 0, "danger", $"{d.EnWaiversAwaitingCeo} درخواست معافیت اضطراری مدارک مهندسی منتظر تصمیم مدیرعامل است (قدیمی‌ترین {d.EnOldestWaiverWaitingHours} ساعت)", "/engineering/waivers");
+            d.EnDeviationsAwaiting = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.Requested || x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.ManagerApproved), ct);
+            d.EnStandardsDeviationsOpen = d.EnDeviationsAwaiting + d.EnWaiversAwaitingCeo;
+            Alert(d.EnDeviationsAwaiting > 0, "danger", $"{d.EnDeviationsAwaiting} انحراف از استاندارد منتظر تصمیم مدیر مهندسی یا مدیرعامل است", "/engineering/deviations");
             var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);
             d.EnCasesAtDocumentRisk = enRisk.Count; d.EnAwardedCasesAtDocumentRisk = enRisk.Count(r => r.Awarded); d.EnPlatformsAlarm = d.EnAwardedCasesAtDocumentRisk > 0;
             Alert(d.EnAwardedCasesAtDocumentRisk > 0, "danger", $"{d.EnAwardedCasesAtDocumentRisk} پروندهٔ برنده‌شده با خطر مدارک مهندسی (مدرک الزامی کم است)", "/engineering/cases");

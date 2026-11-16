@@ -57,6 +57,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnHandoverReleaseStep>();
             services.AddScoped<IAgentStep, EnDistNotifyStep>();
             services.AddScoped<IAgentStep, EnDistAckStep>();
+            services.AddScoped<IAgentStep, EnDevManagerStep>();
+            services.AddScoped<IAgentStep, EnDevCeoStep>();
             services.AddScoped<IAgentStep, EnRiskWatchStep>();
             services.AddScoped<IAgentStep, EnRiskEscalateStep>();
             return services;
@@ -318,6 +320,44 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases", Title = "هشدار مدارک " + item.TargetNumber };
+    }
+
+    // ------------------------------------------------------------------------------------------ standards deviations
+
+    internal abstract class EnDeviationStep : EnStep
+    {
+        protected abstract EnDeviationStatus Waiting { get; }
+        protected abstract string Roles { get; }
+        public override string FallbackRoles => null;
+        public override AgentStepKind Kind => AgentStepKind.HumanGate;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            EnDeviationStatus status = Waiting;
+            var rows = await uow.Set<EnDeviation>().AsNoTracking().Where(d => !d.Deleted && d.Status == status).OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.Number, d.StandardCode, d.Requirement }).ToListAsync(ct);
+            string roles = Roles;
+            return rows.Select(r => Item("EnDeviation", r.Id, r.Number, null, null, $"انحراف از استاندارد {r.StandardCode} ({r.Number}): «{EnText2.Cut(r.Requirement, 120)}» منتظر تصمیم است.", roles)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = Roles, Link = Root + "/deviations/" + Id(item.TargetId), Title = "تصمیم دربارهٔ انحراف از استاندارد " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.DEV.MANAGER (HumanGate): the head of engineering decides first on an instruction that contradicts a requirement of a standard.</summary>
+    internal sealed class EnDevManagerStep : EnDeviationStep
+    {
+        public override string Code => "ENG.DEV.MANAGER";
+        public override string Title => "تصمیم مدیر مهندسی دربارهٔ انحراف از استاندارد";
+        protected override EnDeviationStatus Waiting => EnDeviationStatus.Requested;
+        protected override string Roles => EnRoles.Manager;
+    }
+
+    /// <summary>ENG.DEV.CEO (HumanGate): the CEO decides after the head of engineering (a different person); only then is the instruction executed.</summary>
+    internal sealed class EnDevCeoStep : EnDeviationStep
+    {
+        public override string Code => "ENG.DEV.CEO";
+        public override string Title => "تصمیم مدیرعامل دربارهٔ انحراف از استاندارد (پس از مدیر مهندسی)";
+        protected override EnDeviationStatus Waiting => EnDeviationStatus.ManagerApproved;
+        protected override string Roles => EnRoles.Ceo;
     }
 
     /// <summary>The small text helper of the steps (the service-side helper is internal to the same assembly).</summary>

@@ -50,11 +50,13 @@ namespace Services.NasbNiro.Engineering
     {
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
+        private readonly global::Services.NasbNiro.Office.INotificationService _notify;
 
-        public EnReferenceService(IUnitOfWork uow, IInventoryUserContext user)
+        public EnReferenceService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
+            _notify = notify;
         }
 
         private int Me => _user.UserId;
@@ -81,6 +83,8 @@ namespace Services.NasbNiro.Engineering
         private static string VoidReasonOf(EnReferenceList l, bool approver) =>
             !approver ? EnText.NotAllowed : l.Status != EnRefStatus.Draft && l.Status != EnRefStatus.UnderReview ? "فقط فهرست پیش‌نویس یا در انتظار تایید ابطال می‌شود." : null;
 
+        private const string LooseningText = "این بازنگری بند الزامی را حذف یا سبک کرده است؛ تایید آن با مدیر مهندسی و سپس مدیرعامل (دو نفر متفاوت) از مسیر انحراف از استاندارد است.";
+
         // ---------------------------------------------------------------- read
 
         private async Task<List<EnReferenceListDto>> DtosAsync(List<EnReferenceList> rows, bool withLines, CancellationToken ct)
@@ -90,9 +94,11 @@ namespace Services.NasbNiro.Engineering
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.ApprovedByUserId }), ct);
             List<string> codes = rows.Select(r => r.Code).Distinct().ToList();
             List<string> openCodes = await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && codes.Contains(l.Code) && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview)).Select(l => l.Code).Distinct().ToListAsync(ct);
+            List<int> ids = rows.Select(r => r.Id).ToList();
+            List<int> viaDeviation = await _uow.Set<EnDeviation>().AsNoTracking().Where(x => !x.Deleted && x.TargetType == EnDeviations.ListType && ids.Contains(x.TargetId) && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved)).Select(x => x.TargetId).ToListAsync(ct);
             return rows.Select(l =>
             {
-                string edit = EditReason(l, writer), submit = SubmitReason(l, writer, seat), approve = ApproveReason(l, approver, seat, Me), ret = ReturnReasonOf(l, approver), revise = ReviseReason(l, writer, openCodes.Contains(l.Code)), voidR = VoidReasonOf(l, approver);
+                string edit = EditReason(l, writer), submit = SubmitReason(l, writer, seat), approve = viaDeviation.Contains(l.Id) ? LooseningText : ApproveReason(l, approver, seat, Me), ret = ReturnReasonOf(l, approver), revise = ReviseReason(l, writer, openCodes.Contains(l.Code)), voidR = VoidReasonOf(l, approver);
                 return new EnReferenceListDto
                 {
                     Id = l.Id, Code = l.Code, Title = l.Title, StandardSource = l.StandardSource, Revision = l.Revision, Status = (int)l.Status, StatusText = EnText.RefStatus(l.Status), IsCurrent = l.Status == EnRefStatus.Approved,   // one approved list per Code
@@ -227,9 +233,31 @@ namespace Services.NasbNiro.Engineering
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                     row.Status = EnRefStatus.UnderReview; row.SubmittedAt = now; row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);   // the submitter is a maker too
                     row.Status = EnRefStatus.UnderReview; row.SubmittedAt = now; row.ContentHash = EnReferenceRules.Hash(row.Code, row.Revision, row.Lines);
+                    {
+                        // a revision that removes a line or un-marks Required compared with the previous APPROVED revision of the code needs the head of engineering AND the CEO
+                        EnReferenceList previous = await EnReferenceRules.CurrentAsync(_uow, false, ct, row.Code);
+                        List<string> loosened = previous == null || previous.Id == row.Id ? new List<string>() : EnDeviations.Loosened(previous, row);
+                        if (loosened.Count > 0)
+                        {
+                            EnDeviation dev = new EnDeviation
+                            {
+                                Kind = EnDeviationKind.ReferenceLoosening, TargetType = EnDeviations.ListType, TargetId = row.Id, StandardCode = row.Code, Requirement = EnText.Cut(string.Join("، ", loosened), 300),
+                                Instruction = EnText.Cut("بازنگری " + EnText.Num(row.Revision) + " فهرست مرجع " + row.Code + " نسبت به بازنگری تاییدشدهٔ " + EnText.Num(previous.Revision) + " این بندها را سبک می‌کند: " + string.Join("، ", loosened) + (EnText.Clean(row.Note) == null ? string.Empty : ". " + row.Note), 2000),
+                                RequestedByUserId = Me, RequestedAt = now, Status = EnDeviationStatus.Requested, ContentHash = EnDeviations.ListHash(row), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                            };
+                            dev.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Deviation, "EDV", now.DateTime, ct);
+                            _uow.Set<EnDeviation>().Add(dev);
+                            row.ModifyDate = now; row.ModifierUserId = Me;
+                            try { await _uow.SaveChangesAsync(ct); }
+                            catch (DbUpdateConcurrencyException) { return EnText.Bad<EnReferenceListDto>(EnText.Concurrency); }
+                            await EnDeviations.SyncAsync(_notify, dev, ct);
+                            return await GetListAsync(row.Id, ct);
+                        }
+                    }
                     break;
                 case "approve":
                     why = ApproveReason(row, approver, seat, Me);
+                    if (why == null && await _uow.Set<EnDeviation>().AnyAsync(x => !x.Deleted && x.TargetType == EnDeviations.ListType && x.TargetId == row.Id && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct)) why = LooseningText;
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                     // one approved list per code: the earlier revision is superseded first (a filtered unique index keeps it single)
                     List<EnReferenceList> older = await _uow.Set<EnReferenceList>().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == row.Code && l.Id != row.Id).ToListAsync(ct);
@@ -246,12 +274,14 @@ namespace Services.NasbNiro.Engineering
                     if (why == null) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                     row.Status = EnRefStatus.Draft; row.ContentHash = null; row.SubmittedAt = null; row.Note = EnText.Cut("برگشت: " + note, 1000);
+                    await EnDeviations.VoidOpenAsync(_uow, _notify, EnDeviations.ListType, row.Id, "فهرست برگشت خورد؛ درخواست انحراف باطل شد.", Me, ct);
                     break;
                 case "void":
                     why = VoidReasonOf(row, approver);
                     if (why == null) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل ابطال");
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                     row.Status = EnRefStatus.Void; row.VoidReason = EnText.Cut(note, 1000);
+                    await EnDeviations.VoidOpenAsync(_uow, _notify, EnDeviations.ListType, row.Id, "فهرست باطل شد؛ درخواست انحراف باطل شد.", Me, ct);
                     break;
                 default:   // revise
                     bool open = await _uow.Set<EnReferenceList>().AnyAsync(l => !l.Deleted && l.Code == row.Code && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview), ct);

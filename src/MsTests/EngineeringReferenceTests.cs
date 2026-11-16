@@ -104,7 +104,7 @@ namespace MsTests
             Refused(await Supply(host, Eng1, d.Lines[0].Id, foreign), "خود شما");
             Refused(await Supply(host, Eng1, d.Lines[0].Id, File(host, 2111, ".exe")));
             Refused(await Supply(host, Eng1, d.Lines[0].Id, null));
-            Refused(await Supply(host, Eng1, d.Lines[0].Id, null, true, "کوتاه"), "15");
+            Refused(await Supply(host, Eng1, d.Lines[0].Id, null, true, "کوتاه"), "30");
             foreach (EnDossierLineDto l in d.Lines.Where(x => x.Required))
                 d = Ok(await Supply(host, Eng1, l.Id, File(host, 2111)));
             Assert.AreEqual(0, d.MissingCount);
