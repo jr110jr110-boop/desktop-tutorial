@@ -39,5 +39,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int WaiversAwaitingCeo { get; set; }
         public int OldestWaiverWaitingHours { get; set; }
         public int DistributionsUnacknowledged { get; set; }
+
+        /// <summary>Early warning: controlled cases whose documents are at risk, and those of them that are Awarded or later (the CEO is told).</summary>
+        public int CasesAtDocumentRisk { get; set; }
+        public int AwardedCasesAtDocumentRisk { get; set; }
     }
 }

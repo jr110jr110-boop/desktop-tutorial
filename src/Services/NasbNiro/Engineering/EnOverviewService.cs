@@ -62,6 +62,8 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset? oldest = await _uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested).OrderBy(w => w.RequestedAt).Select(w => (DateTimeOffset?)w.RequestedAt).FirstOrDefaultAsync(ct);
             o.OldestWaiverWaitingHours = oldest.HasValue ? Math.Max(0, (int)Math.Floor((now - oldest.Value).TotalHours)) : 0;   // a request never expires: it is an alarm until the CEO decides
             o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null, ct);
+            List<EnRiskRow> risk = await EnRisk.ComputeAsync(_uow, ct);
+            o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
             return ResponseDtoHelper.Ok(o);
         }
     }

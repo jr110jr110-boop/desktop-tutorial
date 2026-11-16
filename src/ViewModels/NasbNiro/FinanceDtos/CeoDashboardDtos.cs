@@ -70,6 +70,11 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int EnWaiversAwaitingCeo { get; set; }
         public int EnOldestWaiverWaitingHours { get; set; }
 
+        /// <summary>Early warning: cases whose engineering documents are at risk, and those already Awarded (the tile «پلتفرم‌های ناقص» is in alarm when the second is above zero).</summary>
+        public int EnCasesAtDocumentRisk { get; set; }
+        public int EnAwardedCasesAtDocumentRisk { get; set; }
+        public bool EnPlatformsAlarm { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 

@@ -57,6 +57,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnHandoverReleaseStep>();
             services.AddScoped<IAgentStep, EnDistNotifyStep>();
             services.AddScoped<IAgentStep, EnDistAckStep>();
+            services.AddScoped<IAgentStep, EnRiskWatchStep>();
+            services.AddScoped<IAgentStep, EnRiskEscalateStep>();
             return services;
         }
     }
@@ -246,6 +248,76 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.RefApprovers, Link = Root + "/platforms", Title = "تایید مدارک پلتفرم " + item.TargetNumber };
+    }
+
+    // ------------------------------------------------------------------------------------------ the early warning (an emergency should never happen)
+
+    /// <summary>ENG.RISK.WATCH (Input, owned by the engineering agent): one open task per controlled, not-closed case with a document risk. It closes only when the risk is gone, never by an acknowledgement.</summary>
+    internal sealed class EnRiskWatchStep : EnStep
+    {
+        public override string Code => "ENG.RISK.WATCH";
+        public override string Title => "هشدار زودهنگام: خطر مدارک پرونده مهندسی (باید دیده و پیگیری شود)";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+        public override string FallbackRoles => EnRoles.Manager;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            List<EnRiskRow> rows = await EnRisk.ComputeAsync(uow, ct);
+            return rows.Take(ProcStepCommon.Cap).Select(r => Item("EnCase", r.CaseId, r.Number, r.ContractId, null, r.Summary(), EnRoles.Manager)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases/" + Id(item.TargetId), Title = "خطر مدارک پروندهٔ " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.RISK.ESCALATE (Agent): keeps the inbox of the CEO equal to the truth: an open item for every case at document risk from Awarded on and for every overdue document debt, until the risk is gone or the debt is settled. A person cannot silence it by reading it.</summary>
+    internal sealed class EnRiskEscalateStep : EnStep
+    {
+        public override string Code => "ENG.RISK.ESCALATE";
+        public override string Title => "ایجنت مهندسی: اعلام دائمی خطر مدارک و بدهی سررسیدشده به مدیرعامل";
+        public override AgentStepKind Kind => AgentStepKind.Agent;
+        public override string FallbackRoles => EnRoles.Manager;
+
+        private static AgentWorkItem ItemOf(string key, bool open, Func<string, string, int, string, AgentWorkItem> make)
+        {
+            bool risk = key.StartsWith(EnRisk.RiskKeyPrefix, StringComparison.Ordinal);
+            int id = int.Parse(key.Substring((risk ? EnRisk.RiskKeyPrefix : EnRisk.DebtKeyPrefix).Length), CultureInfo.InvariantCulture);
+            return make(risk ? "EnCase" : "EnDocumentDebt", key, id, open ? "هشدار مدارک برای مدیرعامل در کارتابل باز می‌شود." : "خطر یا بدهی برطرف شده؛ هشدار کارتابل مدیرعامل بسته می‌شود.");
+        }
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            HashSet<string> desired = await EnRisk.DesiredKeysAsync(uow, ct);
+            List<string> open = await EnRisk.OpenKeysAsync(uow, ct);
+            List<AgentWorkItem> items = new List<AgentWorkItem>();
+            foreach (string k in desired.Except(open).OrderBy(x => x, StringComparer.Ordinal)) items.Add(ItemOf(k, true, (t, n, id, s) => Item(t, id, n, null, null, s)));
+            foreach (string k in open.Except(desired).OrderBy(x => x, StringComparer.Ordinal)) items.Add(ItemOf(k, false, (t, n, id, s) => Item(t, id, n, null, null, s)));
+            return items.Take(ProcStepCommon.Cap).ToList();
+        }
+
+        public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
+        {
+            IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
+            string key = item.TargetNumber;
+            bool risk = key.StartsWith(EnRisk.RiskKeyPrefix, StringComparison.Ordinal);
+            bool waiting = (await EnRisk.DesiredKeysAsync(uow, ct)).Contains(key);
+            string title; string link;
+            if (risk)
+            {
+                EnRiskRow row = (await EnRisk.ComputeAsync(uow, ct)).FirstOrDefault(r => r.CaseId == item.TargetId);
+                title = row != null ? "خطر مدارک: " + row.Summary() : "خطر مدارک پرونده مهندسی " + Id(item.TargetId);
+                link = Root + "/cases/" + Id(item.TargetId);
+            }
+            else
+            {
+                string debt = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => d.Id == item.TargetId).Select(d => d.Title).FirstOrDefaultAsync(ct);
+                title = "بدهی مدرک «" + debt + "» از سررسید گذشته و تسویه نشده است";
+                link = Root + "/debts";
+            }
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(services.GetService<global::Services.NasbNiro.Office.INotificationService>(), key, waiting, "Engineering", risk ? nameof(EnCase) : nameof(EnDocumentDebt), item.TargetId, title, link, EnRoles.Ceo, ct, null, global::Entities.Model.NasbNiro.Office.OfInboxKind.Task, global::Entities.Model.NasbNiro.Office.OfUrgency.Urgent);
+            return AgentStepResult.Done(risk ? "EnCase" : "EnDocumentDebt", item.TargetId, key, waiting ? "ایجنت مهندسی هشدار دائمی را در کارتابل مدیرعامل باز کرد." : "ایجنت مهندسی هشدار را بست؛ خطر برطرف شده است.");
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases", Title = "هشدار مدارک " + item.TargetNumber };
     }
 
     /// <summary>The small text helper of the steps (the service-side helper is internal to the same assembly).</summary>

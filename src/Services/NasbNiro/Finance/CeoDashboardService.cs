@@ -221,6 +221,9 @@ namespace Services.NasbNiro.Finance
             DateTimeOffset? enOldest = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnWaiver>().AsNoTracking().Where(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnWaiverStatus.Requested).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
             d.EnOldestWaiverWaitingHours = enOldest.HasValue ? Math.Max(0, (int)Math.Floor((DateTimeOffset.Now - enOldest.Value).TotalHours)) : 0;
             Alert(d.EnWaiversAwaitingCeo > 0, "danger", $"{d.EnWaiversAwaitingCeo} درخواست معافیت اضطراری مدارک مهندسی منتظر تصمیم مدیرعامل است (قدیمی‌ترین {d.EnOldestWaiverWaitingHours} ساعت)", "/engineering/waivers");
+            var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);
+            d.EnCasesAtDocumentRisk = enRisk.Count; d.EnAwardedCasesAtDocumentRisk = enRisk.Count(r => r.Awarded); d.EnPlatformsAlarm = d.EnAwardedCasesAtDocumentRisk > 0;
+            Alert(d.EnAwardedCasesAtDocumentRisk > 0, "danger", $"{d.EnAwardedCasesAtDocumentRisk} پروندهٔ برنده‌شده با خطر مدارک مهندسی (مدرک الزامی کم است)", "/engineering/cases");
             Alert(d.EnOverdueDebts > 0, "danger", $"{d.EnOverdueDebts} بدهی مدارک مهندسی از سررسید گذشته است (مدرک معافیت اضطراری هنوز نیامده)", "/engineering/debts");
             Alert(d.EnOpenDebts > 0 && d.EnOverdueDebts == 0, "info", $"{d.EnOpenDebts} بدهی مدارک مهندسی باز است", "/engineering/debts");
             Alert(d.EnPlatformsIncomplete > 0, "info", $"{d.EnPlatformsIncomplete} پلتفرم از {d.EnPlatformsTotal} مدارک مهندسی کامل ندارد", "/engineering/platforms");
