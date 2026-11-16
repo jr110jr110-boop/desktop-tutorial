@@ -190,7 +190,8 @@ namespace MsTests
             // accept and release: the releaser did not submit or prepare; only the PMO releases
             Ok(await Act(host, Pmo1, "accept", d => d.Id = r2.Id));
             Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ ممکن نیست");   // the distribution rows are not built yet
-            Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = r2.Id));
+            Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = r2.Id), "PMO");   // the notices to the units never go from engineering
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = r2.Id));
             Refused(await Act(host, Eng1, "release", d => d.Id = r2.Id));
             Refused(await Act(host, Mgr1, "release", d => d.Id = r2.Id));
             EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = r2.Id));
@@ -209,9 +210,10 @@ namespace MsTests
 
             // the distribution: six units, each confirms with its own roles, once
             Refused(await Act(host, Nobody, "distribute", d => d.Id = r2.Id));
-            EnHandoverDto dist = Ok(await Act(host, Eng1, "distribute", d => d.Id = r2.Id));
+            Refused(await Act(host, Eng1, "distribute", d => d.Id = r2.Id), "PMO");
+            EnHandoverDto dist = Ok(await Act(host, Pmo1, "distribute", d => d.Id = r2.Id));
             Assert.AreEqual(6, dist.Distribution.Count);
-            Refused(await Act(host, Eng1, "distribute", d => d.Id = r2.Id), "قبلاً");
+            Refused(await Act(host, Pmo1, "distribute", d => d.Id = r2.Id), "قبلاً");
             int qa = dist.Distribution.Single(x => x.Unit == (int)EnUnit.Qa).Id, production = dist.Distribution.Single(x => x.Unit == (int)EnUnit.Production).Id;
             Refused(await Act(host, Qa1, "acknowledge", d => d.DistributionId = production));
             Ok(await Act(host, Qa1, "acknowledge", d => d.DistributionId = qa));
@@ -259,13 +261,13 @@ namespace MsTests
             Assert.IsTrue(s.Complete);
             Assert.AreEqual(0, s.Debts.Count);
             Assert.IsNull(s.WaiverId);
-            ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO");
+            ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO"), seatInit = await SeatAsync(host, "AG-INIT", "PLANNING", "PMO");
             Refused(await Act(host, seatPmo, "accept", d => d.Id = h.Id));
             Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
-            Ok(await Act(host, seat, "draft-distribution", d => d.Id = h.Id));
+            Ok(await Act(host, seatInit, "draft-distribution", d => d.Id = h.Id));
             Refused(await Act(host, seatPmo, "release", d => d.Id = h.Id));
             Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
-            EnHandoverDto dist = Ok(await Act(host, seat, "distribute", d => d.Id = h.Id));
+            EnHandoverDto dist = Ok(await Act(host, seatInit, "distribute", d => d.Id = h.Id));
             ClaimsPrincipal seatQa = await SeatAsync(host, "AG-ENG", "QA");
             Refused(await Act(host, seatQa, "acknowledge", d => d.DistributionId = dist.Distribution.First().Id));
         }
@@ -337,7 +339,7 @@ namespace MsTests
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
             Assert.AreEqual(43, steps.Count);
-            Assert.IsTrue(steps.All(s => s.AgentCode == (s.Code == "ENG.STANDARD.GAP" ? "AG-MASTER" : "AG-ENG") && s.Code.StartsWith("ENG.") && s.Code.Length <= 60), "the main agent owns the standard-gap report, the engineering agent every other step");
+            Assert.IsTrue(steps.All(s => s.AgentCode == (s.Code == "ENG.STANDARD.GAP" ? "AG-MASTER" : s.Code == "ENG.DIST.DRAFT" || s.Code == "ENG.DIST.NOTIFY" ? "AG-INIT" : "AG-ENG") && s.Code.StartsWith("ENG.") && s.Code.Length <= 60), "the main agent owns the standard-gap report, the project-initiation agent (PMO side) the two distribution steps, the engineering agent every other step");
             Assert.AreEqual(16, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
             Assert.AreEqual(26, steps.Count(s => s.Station == 5));
@@ -377,9 +379,10 @@ namespace MsTests
             Assert.IsTrue(asPmo.Lines.All(l => !l.ForMyUnit), "the PMO has no unit of its own");
             // no rows yet: no release
             Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), "ابلاغ ممکن نیست");
+            Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id), "PMO");
             Refused(await Act(host, Qa1, "draft-distribution", d => d.Id = h.Id));
-            EnHandoverDto rows = Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id));
-            Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id), "قبلاً");
+            EnHandoverDto rows = Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            Refused(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id), "قبلاً");
             Assert.AreEqual(6, rows.Distribution.Count);
             Assert.IsTrue(rows.Distribution.All(d => d.Status == (int)EnDistStatus.Draft && !string.IsNullOrWhiteSpace(d.ScopeNote)));
             EnDistributionDto prod = rows.Distribution.Single(d => d.Unit == (int)EnUnit.Production), qa = rows.Distribution.Single(d => d.Unit == (int)EnUnit.Qa);
@@ -405,8 +408,9 @@ namespace MsTests
             Refused(await Act(host, Pmo1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "پس از ابلاغ"; }));
             // the notification is sent by the agent step; before it a unit cannot confirm the receipt
             Refused(await Act(host, Qa1, "acknowledge", d => d.DistributionId = qa.Id), "هنوز ارسال نشده");
-            Ok(await Act(host, Eng1, "distribute", d => d.Id = h.Id));
-            Refused(await Act(host, Eng1, "distribute", d => d.Id = h.Id), "قبلاً");
+            Refused(await Act(host, Eng1, "distribute", d => d.Id = h.Id), "PMO");
+            Ok(await Act(host, Pmo1, "distribute", d => d.Id = h.Id));
+            Refused(await Act(host, Pmo1, "distribute", d => d.Id = h.Id), "قبلاً");
             Ok(await Act(host, Qa1, "acknowledge", d => d.DistributionId = qa.Id));
         }
 
@@ -415,14 +419,15 @@ namespace MsTests
         {
             AppHost host = Started("ho4");
             (int contract, int caseId) = await NewDesign(host);
-            ClaimsPrincipal seat = await SeatAsync(host);
+            ClaimsPrincipal seat = await SeatAsync(host), initSeat = await SeatAsync(host, "AG-INIT", "PLANNING", "PMO");
             DateTime today = DateTime.Today;
-            async Task<List<Services.NasbNiro.Agents.AgentWorkItem>> Discover(string code) => await host.As(seat, async p =>
+            ClaimsPrincipal Owner(string code) => code == "ENG.DIST.DRAFT" || code == "ENG.DIST.NOTIFY" ? initSeat : seat;   // the two distribution steps belong to the PMO-side agent
+            async Task<List<Services.NasbNiro.Agents.AgentWorkItem>> Discover(string code) => await host.As(Owner(code), async p =>
             {
                 Services.NasbNiro.Agents.IAgentStep step = p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Single(x => x.Code == code);
                 return await step.DiscoverAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), today, Ct);
             });
-            async Task<Services.NasbNiro.Agents.AgentStepResult> Run(string code, Services.NasbNiro.Agents.AgentWorkItem item) => await host.As(seat, async p =>
+            async Task<Services.NasbNiro.Agents.AgentStepResult> Run(string code, Services.NasbNiro.Agents.AgentWorkItem item) => await host.As(Owner(code), async p =>
             {
                 Services.NasbNiro.Agents.IAgentStep step = p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Single(x => x.Code == code);
                 return await step.RunAsync(item, p, Ct);
@@ -511,7 +516,7 @@ namespace MsTests
             Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
 
             // release
-            Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
             Edit(host, caseId, c => c.ClassificationHash = "1111");
             Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), fragment);
             Assert.IsFalse(Ok(await Get(host, Pmo2, h.Id)).CanRelease);

@@ -115,7 +115,7 @@ namespace Services.NasbNiro.Engineering
         private async Task<string> AttachmentProblemAsync(List<Guid> ids, CancellationToken ct)
         {
             if (ids == null || ids.Count == 0) return null;
-            if (ids.Count > 20) return "حداکثر ۲۰ پیوست مجاز است.";
+            if (ids.Count > 12) return "حداکثر ۱۲ پیوست مجاز است.";
             foreach (Guid id in ids)
             {
                 string problem = await EnFiles.CheckOwnAsync(_uow, id, Me, ct);

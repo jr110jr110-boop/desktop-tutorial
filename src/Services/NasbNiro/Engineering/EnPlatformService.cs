@@ -433,6 +433,8 @@ namespace Services.NasbNiro.Engineering
                 line.State = EnLineState.Available; line.NotApplicableReason = null; line.DocumentId = dto.DocumentId; line.ControlledDocumentId = dto.ControlledDocumentId; line.Revision = revision;
             }
             DateTimeOffset now = DateTimeOffset.Now;
+            string editorsFull = EnEditors.Full(d.EditorUserIds, Me);
+            if (editorsFull != null) return EnText.Bad<EnDossierDto>(editorsFull);
             line.SuppliedByUserId = Me; line.SuppliedAt = now;
             d.EditorUserIds = EnEditors.With(d.EditorUserIds, Me); d.LastEditedByUserId = Me; d.ModifyDate = now; d.ModifierUserId = Me;
             Recompute(d, false);

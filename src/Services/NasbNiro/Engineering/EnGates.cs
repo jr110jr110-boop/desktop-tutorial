@@ -28,7 +28,7 @@ namespace Services.NasbNiro.Engineering
         public static bool Open(EnCaseStatus s) => s != EnCaseStatus.ClosedLost && s != EnCaseStatus.Cancelled;
 
         public static string ClassHash(EnCase c) =>
-            EnHash.Of(string.Join("|", EnText.Num((int)c.ProposedClassification), c.ProposedProductId?.ToString() ?? "-", c.ProposedWithChanges ? "1" : "0", EnHash.Norm(c.ProposedChangeNote), c.InquiryId?.ToString() ?? "-", c.ContractId?.ToString() ?? "-", EnHash.Norm(c.ReferenceCode), EnHash.Norm(c.StandardEvidence)));
+            EnHash.Of(string.Join("|", EnText.Num((int)c.ProposedClassification), c.ProposedProductId?.ToString() ?? "-", c.ProposedWithChanges ? "1" : "0", EnHash.Norm(c.ProposedChangeNote), c.InquiryId?.ToString() ?? "-", c.ContractId?.ToString() ?? "-", EnHash.Norm(c.ReferenceCode), EnHash.Norm(c.StandardEvidence), EnHash.Norm(c.HandoverListCode)));
 
         /// <summary>The documents of the tender package as they are now (id, file, revision, title): any addition, void or change gives another hash. A spare-parts or service case also binds the confirmed technical opinion into the hash.</summary>
         public static async Task<string> TenderHashAsync(IUnitOfWork uow, int packageId, EnCaseKind kind, string opinion, CancellationToken ct)
@@ -66,7 +66,7 @@ namespace Services.NasbNiro.Engineering
             if (inquiry == null) return new EnGateResult { Passed = true };   // spare parts and service inquiries are controlled too (their case carries the technical opinion)
             DateTimeOffset? start = await EnControl.StartAsync(uow, ct);
             if (EnControl.IsLegacy(inquiry.CreateDate, start)) return new EnGateResult { Legacy = true, LegacyNote = EnControl.LegacyNote(start), Passed = true };
-            EnCase c = await uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.InquiryId == inquiryId && !x.Deleted, ct);
+            EnCase c = await uow.Set<EnCase>().AsNoTracking().OrderByDescending(x => x.Id).FirstOrDefaultAsync(x => x.InquiryId == inquiryId && !x.Deleted, ct);
             if (c == null) return new EnGateResult { Controlled = true, Reason = "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است (پرونده مهندسی هنوز باز نشده است)." };
             EnGateResult r = new EnGateResult { Controlled = true, Case = c };
             if (!EnCaseRules.TenderPassed(c.Status) || !c.TenderReleasedAt.HasValue) { r.Reason = "بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است (پرونده مهندسی " + Name(c) + ")."; return r; }
@@ -82,7 +82,7 @@ namespace Services.NasbNiro.Engineering
             if (!created.HasValue) return new EnGateResult { Passed = true };
             DateTimeOffset? start = await EnControl.StartAsync(uow, ct);
             if (EnControl.IsLegacy(created.Value, start)) return new EnGateResult { Legacy = true, LegacyNote = EnControl.LegacyNote(start), Passed = true };
-            EnCase c = await uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.ContractId == contractId && !x.Deleted, ct);
+            EnCase c = await uow.Set<EnCase>().AsNoTracking().OrderByDescending(x => x.Id).FirstOrDefaultAsync(x => x.ContractId == contractId && !x.Deleted, ct);
             return new EnGateResult { Controlled = true, Case = c };
         }
 

@@ -13,6 +13,7 @@ using Entities.Model.NasbNiro.Engineering;
 using Entities.Model.NasbNiro.GoLive;
 using Entities.Model.NasbNiro.Quality;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Services.NasbNiro.Attachments;
 using Services.NasbNiro.GoLive;
 using Services.NasbNiro.Inventory;
@@ -231,6 +232,27 @@ namespace Services.NasbNiro.Engineering
         public static string Norm(string s) => (s ?? string.Empty).Trim().Replace('|', '/').Replace('\n', ' ').Replace('\r', ' ');
     }
 
+    /// <summary>
+    /// Runs several saves as one unit in a database transaction inside the execution strategy (the provider retries transient failures). The work may run again from the start after the change tracker was cleared, so it must
+    /// load what it changes itself; a result that is not a success rolls the transaction back. The in-memory database of the tests has no transactions, so the work simply runs.
+    /// </summary>
+    internal static class EnTransaction
+    {
+        public static async Task<T> InAsync<T>(IUnitOfWork uow, Func<Task<T>> work, Func<T, bool> succeeded, CancellationToken ct)
+        {
+            if (!(uow is DbContext db) || !db.Database.IsRelational()) return await work();
+            int attempt = 0;
+            return await db.Database.CreateExecutionStrategy().ExecuteAsync<T>(async token =>
+            {
+                if (attempt++ > 0) db.ChangeTracker.Clear();
+                await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(token);
+                T result = await work();
+                if (succeeded(result)) await transaction.CommitAsync(token); else await transaction.RollbackAsync(token);
+                return result;
+            }, ct);
+        }
+    }
+
     internal static class EnConcurrency
     {
         public static bool Apply<T>(IUnitOfWork uow, T entity, string version) where T : class
@@ -252,6 +274,11 @@ namespace Services.NasbNiro.Engineering
 
     internal static class EnEditors
     {
+        public const int Max = 400;
+
+        /// <summary>The Persian refusal when adding this person would not fit the column (null = fits).</summary>
+        public static string Full(string ids, int user) => With(ids, user).Length > Max ? "شمار ویرایشگران این رکورد به سقف رسیده است؛ برای ادامه با مدیر مهندسی هماهنگ کنید." : null;
+
         public static string With(string ids, int user) => ids != null && ids.Contains("," + user.ToString(CultureInfo.InvariantCulture) + ",") ? ids : (ids ?? ",") + user.ToString(CultureInfo.InvariantCulture) + ",";
 
         public static bool Has(string ids, int user) => user > 0 && ids != null && ids.Contains("," + user.ToString(CultureInfo.InvariantCulture) + ",");
@@ -305,10 +332,18 @@ namespace Services.NasbNiro.Engineering
     {
         public static Task<bool> IsSeatAsync(IUnitOfWork uow, int userId, CancellationToken ct) => GlText.IsAiSeatUserAsync(uow, userId, ct);
 
+        /// <summary>The user is the seat of the main (master) agent.</summary>
+        public static async Task<bool> IsMasterSeatAsync(IUnitOfWork uow, int userId, CancellationToken ct)
+        {
+            if (userId <= 0) return false;
+            string name = await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.Id == userId).Select(u => u.UserName).FirstOrDefaultAsync(ct);
+            return DataLayer.Context.SeatApprovalGuard.IsMasterName(name);
+        }
+
         public static async Task<int[]> SeatIdsAsync(IUnitOfWork uow, CancellationToken ct)
         {
             string prefix = global::Services.NasbNiro.Ai.AiSeatNames.UserPrefix;
-            return (await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.UserName.StartsWith(prefix)).Select(u => u.Id).Take(200).ToListAsync(ct)).ToArray();
+            return (await uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => u.UserName.StartsWith(prefix)).OrderBy(u => u.Id).Select(u => u.Id).Take(200).ToListAsync(ct)).ToArray();
         }
     }
 

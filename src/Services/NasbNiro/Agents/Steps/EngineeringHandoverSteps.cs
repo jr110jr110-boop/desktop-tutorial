@@ -211,9 +211,10 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnDistDraftStep : EnHandoverStep
     {
         public override string Code => "ENG.DIST.DRAFT";
-        public override string Title => "ایجنت مهندسی: تهیهٔ یادداشت ابلاغ هر واحد برای تحویل پذیرفته‌شده";
+        public override string Title => "ایجنت آغاز پروژه (سمت PMO): تهیهٔ یادداشت ابلاغ هر واحد برای تحویل پذیرفته‌شده";
         public override AgentStepKind Kind => AgentStepKind.Agent;
-        public override string FallbackRoles => EnRoles.Writers;
+        public override string AgentCode => AgentCodes.Init;   // the notices to the units go engineering -> PMO -> units: the PMO-side agent seat sends them, never the engineering agent
+        public override string FallbackRoles => EnRoles.Pmo;
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
@@ -223,18 +224,19 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct) =>
-            CallAsync(services, new EnHandoverActionDto { Action = "draft-distribution", Id = item.TargetId }, "ایجنت مهندسی برای تحویل {n} یادداشت ابلاغ هر واحد را ساخت؛ PMO می‌تواند آن‌ها را پیش از ابلاغ ویرایش کند.", ct);
+            CallAsync(services, new EnHandoverActionDto { Action = "draft-distribution", Id = item.TargetId }, "ایجنت سمت PMO برای تحویل {n} یادداشت ابلاغ هر واحد را ساخت؛ PMO می‌تواند آن‌ها را پیش از ابلاغ ویرایش کند.", ct);
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "یادداشت ابلاغ واحدها برای " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = HandoverLink(item.TargetId), Title = "یادداشت ابلاغ واحدها برای " + item.TargetNumber };
     }
 
     /// <summary>ENG.DIST.NOTIFY (Agent): a released handover whose units were not notified yet; the agent sends each unit its own notice text.</summary>
     internal sealed class EnDistNotifyStep : EnHandoverStep
     {
         public override string Code => "ENG.DIST.NOTIFY";
-        public override string Title => "ایجنت مهندسی: اطلاع‌رسانی مدارک ابلاغ‌شده به واحدها";
+        public override string Title => "ایجنت آغاز پروژه (سمت PMO): اطلاع‌رسانی مدارک ابلاغ‌شده به واحدها";
         public override AgentStepKind Kind => AgentStepKind.Agent;
-        public override string FallbackRoles => EnRoles.Writers;
+        public override string AgentCode => AgentCodes.Init;   // the notices to the units go engineering -> PMO -> units: the PMO-side agent seat sends them, never the engineering agent
+        public override string FallbackRoles => EnRoles.Pmo;
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
@@ -244,9 +246,9 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct) =>
-            CallAsync(services, new EnHandoverActionDto { Action = "distribute", Id = item.TargetId }, "ایجنت مهندسی ابلاغ مدارک {n} را با یادداشت مخصوص هر واحد به واحدهای تضمین کیفیت، کنترل کیفیت، تولید، تدارکات، انبار و برنامه‌ریزی اطلاع داد.", ct);
+            CallAsync(services, new EnHandoverActionDto { Action = "distribute", Id = item.TargetId }, "ایجنت سمت PMO ابلاغ مدارک {n} را با یادداشت مخصوص هر واحد به واحدهای تضمین کیفیت، کنترل کیفیت، تولید، تدارکات، انبار و برنامه‌ریزی اطلاع داد.", ct);
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "اطلاع‌رسانی مدارک " + item.TargetNumber + " به واحدها" };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = HandoverLink(item.TargetId), Title = "اطلاع‌رسانی مدارک " + item.TargetNumber + " به واحدها" };
     }
 
     /// <summary>ENG.INFO.ANSWER (Input, PMO): a unit that needs more than its notice asked the PMO; the PMO answers (never with a price). The question waits without expiring.</summary>

@@ -106,6 +106,14 @@ namespace Services.NasbNiro.Engineering
             !w.Writer ? EnText.NotAllowed : c.Status == EnCaseStatus.Classifying || c.Status == EnCaseStatus.AwaitingEngConfirm || c.Status == EnCaseStatus.AwaitingCeoApproval || c.Status == EnCaseStatus.TenderPreparation ? null
             : "یادداشت طراحی مفهومی فقط تا پیش از ابلاغ بسته فنی ثبت می‌شود.";
 
+        /// <summary>The agent adds dossier files to the tender package as the seat, so the person who supplied such a file (EnPlatformDocument.SuppliedByUserId) is a maker of the package too and cannot release it.</summary>
+        private async Task AddDossierSuppliersAsync(HashSet<int> makers, EnCase c, List<Guid> packageDocuments, int[] seats, CancellationToken ct)
+        {
+            if (!c.ProductId.HasValue || packageDocuments.Count == 0) return;
+            List<int?> suppliers = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.DocumentId.HasValue && packageDocuments.Contains(d.DocumentId.Value)).Select(d => d.SuppliedByUserId).ToListAsync(ct);
+            foreach (int? u in suppliers) if (u.HasValue && !seats.Contains(u.Value)) makers.Add(u.Value);
+        }
+
         private static string ReleaseReason(EnCase c, Who w, int docs, HashSet<int> docMakers) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.TenderPreparation ? "فقط پرونده در مرحلهٔ تهیهٔ بسته فنی ابلاغ می‌شود."
             : !c.TenderPackageId.HasValue ? "بستهٔ فنی هنوز ساخته نشده است."
@@ -118,15 +126,18 @@ namespace Services.NasbNiro.Engineering
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : !c.ContractId.HasValue ? "این پرونده قرارداد ندارد."
             : c.Status != EnCaseStatus.Awarded && c.Status != EnCaseStatus.InEngineering ? "بررسی منشور پس از برنده‌شدن و پیش از تحویل مدارک ممکن است."
             : charter == null ? "منشور پروژه هنوز ثبت نشده است." : !charter.ManagerAcceptedAt.HasValue ? "مدیر پروژه هنوز منشور را نپذیرفته است." : charter.ApprovedAt.HasValue ? "منشور قبلاً توسط مدیرعامل تایید شده است."
-            : (c.CharterReviewOutcome != EnCharterOutcome.None && c.CharterHash == EnCaseRules.CharterHash(charter)) ? "این محتوای منشور قبلاً بررسی شده است." : null;
+            : (c.CharterReviewOutcome != EnCharterOutcome.None && c.CharterHash == EnCaseRules.CharterHash(charter)) ? "این محتوای منشور قبلاً بررسی شده است."
+            : charter.CreatorUserId == w.Me || charter.ModifierUserId == w.Me ? EnText.SameUser + " کسی که منشور را ساخته یا ویرایش کرده آن را بررسی نمی‌کند." : null;
 
         private static string AddTenderDocumentReason(EnCase c, Who w, SlInquiryStatus? inquiryStatus) =>
             !w.Writer ? EnText.NotAllowed : w.Seat ? EnText.AiNever
             : c.Status != EnCaseStatus.TenderPreparation ? "مدرک فقط در مرحلهٔ تهیهٔ بسته فنی به بسته افزوده می‌شود؛ پس از ابلاغ بسته، مدرک تازه افزوده نمی‌شود."
             : inquiryStatus != SlInquiryStatus.Bidding ? "بسته فنی فقط برای استعلامی ساخته می‌شود که مدیرعامل شرکت در آن را تصمیم گرفته است." : null;
 
-        private static string CancelReason(EnCase c, Who w) =>
-            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.InquiryId.HasValue ? "پروندهٔ استعلام با نتیجهٔ استعلام بسته می‌شود."
+        /// <summary>Cancelling a case that has a contract is refused while the contract is live (current or stopped): the contract would stay locked at instantiate and production with no case to release it. A case without a contract (inquiry stage) may be cancelled by the manager with a reason; a new case may be opened afterwards.</summary>
+        private static string CancelReason(EnCase c, Who w, ContractStatus? contractStatus) =>
+            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever
+            : c.ContractId.HasValue && (contractStatus == ContractStatus.Current || contractStatus == ContractStatus.Stopped) ? "پروندهٔ مهندسی قراردادی که جاری است لغو نمی‌شود؛ تا پایان یا لغو قرارداد، پرونده باید به تحویل مدارک برسد."
             : c.Status == EnCaseStatus.HandedOver || c.Status == EnCaseStatus.Accepted || c.Status == EnCaseStatus.Released || !EnCaseRules.Open(c.Status) ? "این پرونده دیگر لغو نمی‌شود." : null;
 
         // ---------------------------------------------------------------- read
@@ -138,7 +149,7 @@ namespace Services.NasbNiro.Engineering
             List<int> contractIds = rows.Where(r => r.ContractId.HasValue).Select(r => r.ContractId.Value).ToList();
             List<int> caseIds = rows.Select(r => r.Id).ToList();
             var inquiries = await _uow.Set<SlInquiry>().AsNoTracking().Where(i => inquiryIds.Contains(i.Id)).Select(i => new { i.Id, i.Number, i.Status, i.CustomerId }).ToListAsync(ct);
-            var contracts = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).Select(c => new { c.Id, c.Code, c.Employer }).ToListAsync(ct);
+            var contracts = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).Select(c => new { c.Id, c.Code, c.Employer, c.Status }).ToListAsync(ct);
             List<int> customerIds = inquiries.Select(i => i.CustomerId).Distinct().ToList();
             Dictionary<int, string> customers = await _uow.Set<FnCustomer>().AsNoTracking().Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
             List<int> productIds = rows.SelectMany(r => new[] { r.ProductId, r.ProposedProductId }).Where(x => x.HasValue).Select(x => x.Value).Distinct().ToList();
@@ -165,6 +176,7 @@ namespace Services.NasbNiro.Engineering
                     docs = pd.Count;
                     tenderDocs = pd.Select(d => new EnTenderDocumentDto { DocumentId = d.DocumentId, Title = d.Title, Revision = d.Revision, IssuedAtText = EnText.Stamp(d.IssuedAt), AddedByAgent = seats.Contains(d.CreatorUserId) }).ToList();
                     foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
+                    await AddDossierSuppliersAsync(makers, c, pd.Where(d => d.DocumentId.HasValue).Select(d => d.DocumentId.Value).ToList(), seats, ct);
                     stale = c.Status == EnCaseStatus.TenderIssued && c.TenderHash != await EnCaseRules.TenderHashAsync(_uow, c, ct);
                 }
                 PcProjectCharter charter = c.ContractId.HasValue ? await EnCaseRules.CharterAsync(_uow, c.ContractId.Value, ct) : null;
@@ -180,7 +192,7 @@ namespace Services.NasbNiro.Engineering
                 string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
                 string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id));
                 risks.TryGetValue(c.Id, out EnRiskRow risk);
-                string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w), setStd = StandardReason(c, w);
+                string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
                     Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardAttachmentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
@@ -303,7 +315,8 @@ namespace Services.NasbNiro.Engineering
             if (c == null) return EnText.NotFound<EnCaseDto>(EnText.NotFoundCase);
             if (!EnConcurrency.Apply(_uow, c, dto.RowVersion)) return EnText.Bad<EnCaseDto>(EnText.InvalidData);
             string note = EnText.Clean(dto.Note);
-            string why;
+            string why = w.Seat ? null : EnEditors.Full(c.EditorUserIds, Me);
+            if (why != null) return EnText.Bad<EnCaseDto>(why);
             switch (action)
             {
                 case "propose":
@@ -388,7 +401,7 @@ namespace Services.NasbNiro.Engineering
                     why = StandardReason(c, w);
                     string code = EnDossierBuilder.NormCode(dto.ReferenceCode), evidence = EnText.Clean(dto.StandardEvidence);
                     if (why == null) why = code == null ? "استاندارد پروژه را از دیتاشیت کارفرما بنویسید." : EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(evidence, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(evidence, 500, "مبنای استاندارد");
-                    bool change = c.ReferenceCode != null && c.ReferenceCode != code;
+                    bool change = c.ReferenceCode != null && (c.ReferenceCode != code || EnHash.Norm(c.StandardEvidence) != EnHash.Norm(evidence));   // an evidence change alone is a change too: the class hash binds it
                     if (why == null && change) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد");
                     if (why == null && dto.StandardAttachmentId.HasValue) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
@@ -492,8 +505,9 @@ namespace Services.NasbNiro.Engineering
                     if (c.TenderPackageId.HasValue)
                     {
                         int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
-                        var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).Select(d => new { d.CreatorUserId, d.IssuedByUserId }).ToListAsync(ct);
+                        var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).Select(d => new { d.CreatorUserId, d.IssuedByUserId, d.DocumentId }).ToListAsync(ct);
                         foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
+                        await AddDossierSuppliersAsync(makers, c, pd.Where(d => d.DocumentId.HasValue).Select(d => d.DocumentId.Value).ToList(), seats, ct);
                     }
                     why = ReleaseReason(c, w, docs, makers);
                     if (why == null && c.Kind == EnCaseKind.Turbine) why = await EnDecision.RefusalAsync(_uow, c, ct);   // an approval whose standard-gap report went stale does not release a tender package
@@ -527,7 +541,7 @@ namespace Services.NasbNiro.Engineering
                     break;
                 }
                 case "cancel":
-                    why = CancelReason(c, w) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل لغو");
+                    why = CancelReason(c, w, c.ContractId.HasValue ? await _uow.Set<ContractEntity>().AsNoTracking().Where(k => k.Id == c.ContractId.Value).Select(k => (ContractStatus?)k.Status).FirstOrDefaultAsync(ct) : null) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل لغو");
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.Status = EnCaseStatus.Cancelled; c.ClosedReason = EnText.Cut(note, 1000);
                     EnEvents.Add(_uow, c, "cancelled", Me, note);
@@ -577,7 +591,7 @@ namespace Services.NasbNiro.Engineering
                 if (i == null) return EnText.NotFound<EnCaseDto>("استعلام پیدا نشد.");
                 if (i.Status != SlInquiryStatus.Received && i.Status != SlInquiryStatus.UnderReview && i.Status != SlInquiryStatus.Bidding) return EnText.Bad<EnCaseDto>("پروندهٔ مهندسی فقط برای استعلام باز (دریافت‌شده، در بررسی یا در حال پیشنهاد) باز می‌شود.");
                 if (EnControl.IsLegacy(i.CreateDate, start)) return EnText.Bad<EnCaseDto>(EnControl.LegacyNote(start));
-                if (await _uow.Set<EnCase>().AnyAsync(x => x.InquiryId == i.Id && !x.Deleted, ct)) return EnText.Bad<EnCaseDto>("برای این استعلام پروندهٔ مهندسی وجود دارد.");
+                if (await _uow.Set<EnCase>().AnyAsync(x => x.InquiryId == i.Id && !x.Deleted && x.Status != EnCaseStatus.Cancelled && x.Status != EnCaseStatus.ClosedLost, ct)) return EnText.Bad<EnCaseDto>("برای این استعلام پروندهٔ مهندسی وجود دارد.");
                 c.Kind = i.ProductType == SlProductType.SpareParts ? EnCaseKind.SpareParts : i.ProductType == SlProductType.Service ? EnCaseKind.Service : EnCaseKind.Turbine;
                 c.InquiryId = i.Id; c.Title = EnText.Cut(i.Title, 300); c.CustomerRequirementNote = EnText.Cut(i.Note, 2000);
             }
@@ -587,7 +601,7 @@ namespace Services.NasbNiro.Engineering
                 if (k == null) return EnText.NotFound<EnCaseDto>("قرارداد پیدا نشد.");
                 if (EnControl.IsLegacy(k.CreateDate, start)) return EnText.Bad<EnCaseDto>(EnControl.LegacyNote(start));
                 if (!await _uow.Set<WorkOrder>().AsNoTracking().AnyAsync(x => x.ContractId == k.Id && !x.Deleted, ct)) return EnText.Bad<EnCaseDto>("قرارداد هنوز دستور کار ندارد.");
-                if (await _uow.Set<EnCase>().AnyAsync(x => x.ContractId == k.Id && !x.Deleted, ct)) return EnText.Bad<EnCaseDto>("برای این قرارداد پروندهٔ مهندسی وجود دارد.");
+                if (await _uow.Set<EnCase>().AnyAsync(x => x.ContractId == k.Id && !x.Deleted && x.Status != EnCaseStatus.Cancelled && x.Status != EnCaseStatus.ClosedLost, ct)) return EnText.Bad<EnCaseDto>("برای این قرارداد پروندهٔ مهندسی وجود دارد.");
                 c.ContractId = k.Id; c.Title = EnText.Cut(k.Title, 300);
             }
             c.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Case, "ENG", now.DateTime, ct);

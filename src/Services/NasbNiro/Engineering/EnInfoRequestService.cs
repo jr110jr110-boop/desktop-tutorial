@@ -169,7 +169,7 @@ namespace Services.NasbNiro.Engineering
                 if (why != null) return EnText.Bad<EnInfoRequestDto>(why);
                 r.Status = EnInfoStatus.Void;
                 EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == r.CaseId, ct);
-                if (c != null) EnEvents.Add(_uow, c, "info-request-void", Me, r.Number + ": " + text);
+                if (c != null) EnEvents.Add(_uow, c, "info-request-void", Me, r.Number);   // the reason stays on the request, not in the case events (all readers see the events)
             }
             r.ModifyDate = now; r.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }

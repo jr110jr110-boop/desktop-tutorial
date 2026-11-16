@@ -265,11 +265,21 @@ namespace Services.NasbNiro.Engineering
         }
 
         private async Task<string> AcceptReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
-            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmitConfirmedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
+            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmitConfirmedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
 
         /// <summary>The decision of the case (both signatures, the stored hashes) is re-checked inside the same call; one refusal message.</summary>
         private async Task<string> DecisionAsync(EnHandover h, CancellationToken ct) =>
             await EnDecision.RefusalAsync(_uow, await _uow.Set<EnCase>().AsNoTracking().FirstAsync(x => x.Id == h.CaseId, ct), ct);
+
+        /// <summary>The platform dossier was complete and confirmed when the handover was submitted; if it was returned since, the stale snapshot is neither accepted nor released (unless a CEO waiver covered the dossier).</summary>
+        private async Task<string> DossierStillConfirmedAsync(EnHandover h, CancellationToken ct)
+        {
+            if (h.WaiverId.HasValue) return null;
+            EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstAsync(x => x.Id == h.CaseId, ct);
+            if (c.Classification != EnClassification.Platform) return null;
+            bool complete = c.ProductId.HasValue && await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
+            return complete ? null : "پروندهٔ مدارک پلتفرم دیگر کامل و تأییدشده نیست (پس از ارسال تحویل برگشت خورده است)؛ تحویل ارسال‌شده کهنه است. تحویل را برگردانید تا پس از تأیید دوبارهٔ پرونده، دور تازه‌ای ارسال شود.";
+        }
 
         private async Task<string> ReturnReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده برگشت می‌خورد." : null);
@@ -285,7 +295,7 @@ namespace Services.NasbNiro.Engineering
 
         private async Task<string> ReleaseBaseReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
-                : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
+                : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
 
         private static string VoidReasonOf(EnHandover h, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft && h.Status != EnHandoverStatus.Returned ? "فقط پیش‌نویس یا تحویل برگشت‌خورده ابطال می‌شود." : null;
@@ -301,7 +311,7 @@ namespace Services.NasbNiro.Engineering
 
         private static EnDebtDto DebtDto(EnDocumentDebt d, Dictionary<int, string> names, Dictionary<int, string> waivers, Dictionary<int, string> cases, Dictionary<int, string> codes, DateTimeOffset today) => new EnDebtDto
         {
-            Id = d.Id, WaiverId = d.WaiverId, WaiverNumber = waivers.TryGetValue(d.WaiverId, out string wn) ? wn : null, HandoverLineId = d.HandoverLineId, CaseId = d.CaseId, CaseNumber = cases.TryGetValue(d.CaseId, out string cn) ? cn : null, ReferenceCode = codes.TryGetValue(d.CaseId, out string rc) ? rc : null,
+            Id = d.Id, WaiverId = d.WaiverId, WaiverNumber = waivers.TryGetValue(d.WaiverId, out string wn) ? wn : null, HandoverLineId = d.HandoverLineId, CaseId = d.CaseId, CaseNumber = cases.TryGetValue(d.CaseId, out string cn) ? cn : null, ReferenceCode = codes.TryGetValue(d.CaseId, out string rc) ? rc : null, VoidReason = d.VoidReason,
             ContractId = d.ContractId, ProductId = d.ProductId, DocumentType = d.DocumentType, Title = d.Title, DueAt = d.DueAt, DueAtText = EnText.Stamp(d.DueAt), Status = (int)d.Status, StatusText = d.Status == EnDebtStatus.Open ? "باز" : d.Status == EnDebtStatus.Settled ? "تسویه‌شده" : "باطل",
             Overdue = d.Status == EnDebtStatus.Open && d.DueAt < today, OverdueDays = d.Status == EnDebtStatus.Open && d.DueAt < today ? (int)(today - d.DueAt).TotalDays : 0,
             SettledAtText = EnText.Stamp(d.SettledAt), SettledByName = names.Name(d.SettledByUserId), SettledDocumentId = d.SettledDocumentId,
@@ -523,6 +533,8 @@ namespace Services.NasbNiro.Engineering
             string note = EnText.Clean(dto.Note);
             if (why == null && decision == "reject") why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل رد");
             why ??= EnText.Over(note, 1000, "توضیح");
+            if (why == null && await _uow.Set<EnHandover>().AsNoTracking().Where(x => x.Id == waiver.HandoverId).Select(x => x.Status).FirstAsync(ct) != EnHandoverStatus.Draft)
+                why = "تحویل مربوط دیگر پیش‌نویس نیست (ابطال یا ارسال شده است)؛ برای آن مجوز اضطرار تصمیم‌گیری نمی‌شود.";
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             waiver.Status = decision == "approve" ? EnWaiverStatus.Approved : EnWaiverStatus.Rejected; waiver.DecidedByUserId = Me; waiver.DecidedAt = now; waiver.DecisionNote = note;
             if (decision == "approve")
@@ -636,7 +648,7 @@ namespace Services.NasbNiro.Engineering
                     {
                         h.WaiverId = waiver.Id; waiver.UsedAt = now; waiver.ModifyDate = now; waiver.ModifierUserId = Me;
                         foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = l.Id, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                         if (ls.DossierUnconfirmed)   // the waiver also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
                             _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
@@ -653,7 +665,7 @@ namespace Services.NasbNiro.Engineering
                 case "return":
                     why = await ReturnReasonAsync(h, w, ct) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
-                    await VoidDebtsAsync(h, now, ct);
+                    await VoidDebtsAsync(h, c, now, "تحویل توسط PMO برگشت خورد: " + note, ct);
                     h.Status = EnHandoverStatus.Returned; h.ReturnedByUserId = Me; h.ReturnedAt = now; h.ReturnReason = EnText.Cut(note, 1000); c.Status = EnCaseStatus.InEngineering;
                     EnEvents.Add(_uow, c, "handover-returned", Me, note);
                     break;
@@ -667,13 +679,13 @@ namespace Services.NasbNiro.Engineering
                 case "void":
                     why = VoidReasonOf(h, w) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل ابطال");
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
-                    await VoidDebtsAsync(h, now, ct);
+                    await VoidDebtsAsync(h, c, now, "تحویل باطل شد: " + note, ct);
                     h.Status = EnHandoverStatus.Void; h.VoidReason = EnText.Cut(note, 1000);
                     EnEvents.Add(_uow, c, "handover-void", Me, note);
                     break;
                 case "draft-distribution":
                 {
-                    if (!w.Writer) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed);
+                    if (!w.Pmo) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed + " (یادداشت ابلاغ واحدها را PMO یا ایجنت سمت PMO می‌سازد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)");
                     if (h.Status != EnHandoverStatus.Accepted) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع فقط برای تحویل پذیرفته‌شده ساخته می‌شود.");
                     if (await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct)) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع این تحویل قبلاً ساخته شده است.");
                     string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
@@ -697,21 +709,12 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "distribute":
                 {
-                    if (!w.Writer) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed);
+                    if (!w.Pmo) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed + " (اطلاع‌رسانی به واحدها را PMO یا ایجنت سمت PMO انجام می‌دهد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)");
                     if (h.Status != EnHandoverStatus.Released) return EnText.Bad<EnHandoverDto>("فقط تحویل ابلاغ‌شده توزیع می‌شود.");
                     List<EnDistribution> rows = await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
                     if (rows.Any(d => d.NoticeSentAt.HasValue)) return EnText.Bad<EnHandoverDto>("توزیع این تحویل قبلاً انجام شده است.");
-                    if (rows.Count == 0)
-                    {
-                        // a handover released before the per-unit notices existed: the rows are made now, already notified
-                        string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
-                        foreach ((EnUnit unit, string roles) in Units)
-                        {
-                            string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count);
-                            _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Notified, ScopeNote = text, DocumentCount = count, NotifiedAt = now, NoticeSentAt = now, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                        }
-                    }
-                    else foreach (EnDistribution d in rows) { d.NoticeSentAt = now; d.ModifyDate = now; d.ModifierUserId = Me; }
+                    if (rows.Count == 0) return EnText.Bad<EnHandoverDto>("یادداشت ابلاغ واحدها برای این تحویل ساخته نشده است؛ بدون متن تأییدشدهٔ PMO به واحدها اطلاع داده نمی‌شود.");
+                    foreach (EnDistribution d in rows) { d.NoticeSentAt = now; d.ModifyDate = now; d.ModifierUserId = Me; }
                     break;
                 }
                 default:   // acknowledge
@@ -724,17 +727,19 @@ namespace Services.NasbNiro.Engineering
             h.ModifyDate = now; h.ModifierUserId = Me; c.ModifyDate = now; c.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnHandoverDto>(EnText.Concurrency); }
+            catch (DbUpdateException) { return EnText.Bad<EnHandoverDto>("ذخیره انجام نشد؛ داده‌های تحویل با وضعیت فعلی هم‌خوان نیست. صفحه را تازه کنید و دوباره تلاش کنید."); }
             await SyncAsync(h, ct);
             return await GetHandoverAsync(h.Id, ct);
         }
 
         /// <summary>A returned or voided handover no longer owes its waived documents: the next round has its own waiver and debts.</summary>
-        private async Task VoidDebtsAsync(EnHandover h, DateTimeOffset now, CancellationToken ct)
+        private async Task VoidDebtsAsync(EnHandover h, EnCase c, DateTimeOffset now, string reason, CancellationToken ct)
         {
             if (!h.WaiverId.HasValue) return;
             int waiverId = h.WaiverId.Value;
             List<EnDocumentDebt> open = await _uow.Set<EnDocumentDebt>().Where(d => d.WaiverId == waiverId && !d.Deleted && d.Status == EnDebtStatus.Open).ToListAsync(ct);
-            foreach (EnDocumentDebt d in open) { d.Status = EnDebtStatus.Void; d.ModifyDate = now; d.ModifierUserId = Me; }
+            foreach (EnDocumentDebt d in open) { d.Status = EnDebtStatus.Void; d.VoidReason = EnText.Cut(reason, 500); d.ModifyDate = now; d.ModifierUserId = Me; }
+            if (open.Count > 0) EnEvents.Add(_uow, c, "debts-voided", Me, EnText.Num(open.Count) + " بدهی مدرک باطل شد (" + h.Number + "): " + EnText.Cut(reason, 300));
         }
 
         private async Task SyncAsync(EnHandover h, CancellationToken ct)

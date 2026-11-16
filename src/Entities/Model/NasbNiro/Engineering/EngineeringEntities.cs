@@ -93,6 +93,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>The units that need this document (comma-separated names of <see cref="EnUnit"/>); empty = all units.</summary>
         public string Units { get; set; }
+
+        /// <summary>Removed while the list was already a controlled record (it had been submitted once): the row is kept for the audit trail and hidden from every read (query filter). A never-submitted draft deletes its removed rows physically.</summary>
+        public bool Voided { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ the platform dossier
@@ -379,6 +382,8 @@ namespace Entities.Model.NasbNiro.Engineering
         public int WaiverId { get; set; }
         /// <summary>The handover line the debt is about; null for the debt of the unconfirmed platform dossier (<see cref="EnDebtTypes.DossierConfirm"/>).</summary>
         public int? HandoverLineId { get; set; }
+        /// <summary>Navigation of the same foreign key (no schema change): a debt created in the same save as a new line points to the line without reading its Id before the save.</summary>
+        public EnHandoverLine HandoverLine { get; set; }
         public int CaseId { get; set; }
         public int ContractId { get; set; }
         public int? ProductId { get; set; }
@@ -389,6 +394,8 @@ namespace Entities.Model.NasbNiro.Engineering
         public DateTimeOffset? SettledAt { get; set; }
         public int? SettledByUserId { get; set; }
         public Guid? SettledDocumentId { get; set; }
+        /// <summary>Why the debt was voided (the handover was returned or voided: the next round has its own waiver and debts).</summary>
+        public string VoidReason { get; set; }
     }
 
     public static class EnDebtTypes

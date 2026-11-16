@@ -232,7 +232,7 @@ namespace Services.NasbNiro.Agents.Steps
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
             var supplement = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.TenderPackageId != null && c.Classification == EnClassification.Platform && c.ProductId != null
                     && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)
-                    && uow.Set<EnPlatformDocument>().Any(d => d.Dossier.ProductId == c.ProductId && !d.Dossier.Deleted && d.TenderStage && d.State == EnLineState.Available && d.DocumentId != null
+                    && uow.Set<EnPlatformDocument>().Any(d => d.Dossier.ProductId == c.ProductId && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.TenderStage && d.State == EnLineState.Available && d.DocumentId != null
                         && !uow.Set<PcTenderDocument>().Any(t => t.PackageId == c.TenderPackageId && !t.Deleted && t.DocumentId == d.DocumentId)))
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
             return noPackage.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"بستهٔ فنی مناقصهٔ پروندهٔ {r.Number} هنوز ساخته نشده است."))
@@ -261,7 +261,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             var platform = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.Classification == EnClassification.Platform && c.ProductId != null
                     && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)
-                    && uow.Set<EnPlatformDocument>().Any(d => d.Dossier.ProductId == c.ProductId && !d.Dossier.Deleted && d.TenderStage && d.State == EnLineState.Missing))
+                    && uow.Set<EnPlatformDocument>().Any(d => d.Dossier.ProductId == c.ProductId && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.TenderStage && d.State == EnLineState.Missing))
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
             var fresh = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.Classification == EnClassification.New
                     && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)

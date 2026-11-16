@@ -160,6 +160,8 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<PagedList<EnGapDto>>> GetGapsAsync(EnGapQuery query, CancellationToken ct);
         Task<ResponseDto<EnGapDto>> GetGapAsync(int id, CancellationToken ct);
         Task<ResponseDto<EnGapDto>> ConfirmAsync(EnGapConfirmDto dto, CancellationToken ct);
+        /// <summary>Builds (or refreshes) the standard-gap report of a case. Allowed for the engineering roles and for the main agent seat; the engineering agent seat (a writer) may call it too, no seat ever confirms. Returns the Persian result text.</summary>
+        Task<ResponseDto<string>> BuildAsync(int caseId, CancellationToken ct);
     }
 
     /// <summary>The standard-gap reports: read, and the confirmation of the head of engineering (the effect on materials and design).</summary>
@@ -207,6 +209,14 @@ namespace Services.NasbNiro.Engineering
 
         internal static string StatusText(EnGapStatus s) => s == EnGapStatus.Draft ? "منتظر تایید مدیر مهندسی" : s == EnGapStatus.Confirmed ? "تاییدشده" : "باطل";
         internal static string KindText(EnGapKind k) => k == EnGapKind.Added ? "افزوده با استاندارد سفارش" : k == EnGapKind.Removed ? "حذف‌شده در استاندارد سفارش" : k == EnGapKind.RequiredChanged ? "الزام تغییر کرده" : "یکسان";
+
+        public async Task<ResponseDto<string>> BuildAsync(int caseId, CancellationToken ct)
+        {
+            if (!_user.IsInRole(EnRoles.Writers) && !await EnActors.IsMasterSeatAsync(_uow, Me, ct)) return EnText.Bad<string>(EnText.NotAllowed);
+            EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == caseId && !x.Deleted, ct);
+            if (c == null) return EnText.NotFound<string>(EnText.NotFoundCase);
+            return ResponseDtoHelper.Ok(await EnGaps.BuildAsync(_uow, c, _notify, Me, ct));
+        }
 
         public async Task<ResponseDto<PagedList<EnGapDto>>> GetGapsAsync(EnGapQuery query, CancellationToken ct)
         {

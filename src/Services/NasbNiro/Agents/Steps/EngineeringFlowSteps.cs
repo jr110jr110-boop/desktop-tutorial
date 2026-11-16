@@ -352,11 +352,12 @@ namespace Services.NasbNiro.Agents.Steps
             IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
             string key = item.TargetNumber;
             bool risk = key.StartsWith(EnRisk.RiskKeyPrefix, StringComparison.Ordinal);
-            bool waiting = (await EnRisk.DesiredKeysAsync(uow, ct)).Contains(key);
+            // the risk of this one case only (no run over all cases per task): the same rule as the full computation
+            EnRiskRow row = risk ? (await EnRisk.ComputeAsync(uow, ct, new[] { item.TargetId })).FirstOrDefault() : null;
+            bool waiting = risk ? row != null && row.Awarded : (await EnRisk.OverdueDebtsAsync(uow, ct)).Any(d => d.Id == item.TargetId);
             string title; string link;
             if (risk)
             {
-                EnRiskRow row = (await EnRisk.ComputeAsync(uow, ct)).FirstOrDefault(r => r.CaseId == item.TargetId);
                 title = row != null ? "خطر مدارک: " + row.Summary() : "خطر مدارک پرونده مهندسی " + Id(item.TargetId);
                 link = Root + "/cases/" + Id(item.TargetId);
             }
@@ -442,11 +443,9 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
         {
-            IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
-            EnCase c = await uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
-            if (c == null) return AgentStepResult.Waiting("پروندهٔ مهندسی پیدا نشد.");
-            string text = await EnGaps.BuildAsync(uow, c, services.GetService<global::Services.NasbNiro.Office.INotificationService>(), services.GetRequiredService<global::Services.NasbNiro.Inventory.IInventoryUserContext>().UserId, ct);
-            return AgentStepResult.Done("EnCase", c.Id, c.Number, text);
+            ResponseDto<string> built = await services.GetRequiredService<IEnStandardGapService>().BuildAsync(item.TargetId, ct);
+            if (!built.Success) return ProcStepCommon.Refusal(built);
+            return AgentStepResult.Done("EnCase", item.TargetId, item.TargetNumber, built.Data);
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases/" + Id(item.TargetId), Title = "گزارش تفاوت استاندارد " + item.TargetNumber };

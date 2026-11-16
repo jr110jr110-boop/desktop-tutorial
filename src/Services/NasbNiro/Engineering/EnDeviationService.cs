@@ -180,7 +180,7 @@ namespace Services.NasbNiro.Engineering
             if (decision == "reject")
             {
                 d.Status = EnDeviationStatus.Rejected; d.RejectedByUserId = Me; d.RejectedAt = now; d.DecisionNote = note;   // the line stays Missing; a rejected revision goes back to draft
-                if (list != null) { list.Status = EnRefStatus.Draft; list.ContentHash = null; list.SubmittedAt = null; list.Note = EnText.Cut("انحراف رد شد: " + note, 1000); list.ModifyDate = now; list.ModifierUserId = Me; }
+                if (list != null) { list.Status = EnRefStatus.Draft; list.ContentHash = null; list.Note = EnText.Cut("انحراف رد شد: " + note, 1000); list.ModifyDate = now; list.ModifierUserId = Me; }
             }
             else if (d.Status == EnDeviationStatus.Requested)
             {
@@ -198,10 +198,31 @@ namespace Services.NasbNiro.Engineering
                 }
                 else if (list != null)
                 {
-                    List<EnReferenceList> older = await _uow.Set<EnReferenceList>().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == list.Code && l.Id != list.Id).ToListAsync(ct);
-                    foreach (EnReferenceList o in older) { o.Status = EnRefStatus.Superseded; o.ModifyDate = now; o.ModifierUserId = Me; }
-                    if (older.Count > 0) { try { await _uow.SaveChangesAsync(ct); } catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDeviationDto>(EnText.Concurrency); } }
-                    list.Status = EnRefStatus.Approved; list.ApprovedAt = now; list.ApprovedByUserId = Me; list.ModifyDate = now; list.ModifierUserId = Me;
+                    // the earlier revision is superseded and the new one approved in one transaction (a failure never leaves the code without an Approved list)
+                    int deviationId = d.Id, listId = list.Id; string version = dto.RowVersion; EnDeviation decided = null;
+                    ResponseDto<EnDeviationDto> done = await EnTransaction.InAsync(_uow, async () =>
+                    {
+                        decided = await _uow.Set<EnDeviation>().FirstAsync(x => x.Id == deviationId, ct);
+                        EnReferenceList target = await _uow.Set<EnReferenceList>().FirstAsync(x => x.Id == listId, ct);
+                        if (!EnConcurrency.Apply(_uow, decided, version)) return EnText.Bad<EnDeviationDto>(EnText.InvalidData);
+                        decided.Status = EnDeviationStatus.Approved; decided.CeoApprovedByUserId = Me; decided.CeoApprovedAt = now; decided.DecisionNote = note; decided.ModifyDate = now; decided.ModifierUserId = Me;
+                        List<EnReferenceList> older = await _uow.Set<EnReferenceList>().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == target.Code && l.Id != target.Id).ToListAsync(ct);
+                        try
+                        {
+                            if (older.Count > 0)
+                            {
+                                foreach (EnReferenceList o in older) { o.Status = EnRefStatus.Superseded; o.ModifyDate = now; o.ModifierUserId = Me; }
+                                await _uow.SaveChangesAsync(ct);
+                            }
+                            target.Status = EnRefStatus.Approved; target.ApprovedAt = now; target.ApprovedByUserId = Me; target.ModifyDate = now; target.ModifierUserId = Me;
+                            await _uow.SaveChangesAsync(ct);
+                        }
+                        catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDeviationDto>(EnText.Concurrency); }
+                        return ResponseDtoHelper.Ok<EnDeviationDto>(null);
+                    }, r => r.Success, ct);
+                    if (!done.Success) return done;
+                    await EnDeviations.SyncAsync(_notify, decided, ct);
+                    return await GetDeviationAsync(deviationId, ct);
                 }
             }
             d.ModifyDate = now; d.ModifierUserId = Me;

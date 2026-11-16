@@ -40,6 +40,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Units).HasMaxLength(120);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.ListId);
+                b.HasQueryFilter(x => !x.Voided);   // a removed line of a submitted list is kept for the audit trail and never read
             });
 
             builder.Entity<EnPlatformDossier>(b =>
@@ -93,8 +94,8 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.CharterReviewNote).HasMaxLength(1000);
                 b.Property(x => x.ClosedReason).HasMaxLength(1000);
                 b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
-                b.HasIndex(x => x.InquiryId).IsUnique().HasFilter("[InquiryId] IS NOT NULL AND [Deleted] = 0").HasDatabaseName("UX_EnCases_Inquiry");
-                b.HasIndex(x => x.ContractId).IsUnique().HasFilter("[ContractId] IS NOT NULL AND [Deleted] = 0").HasDatabaseName("UX_EnCases_Contract");
+                b.HasIndex(x => x.InquiryId).IsUnique().HasFilter("[InquiryId] IS NOT NULL AND [Deleted] = 0 AND [Status] NOT IN (11, 12)").HasDatabaseName("UX_EnCases_Inquiry");
+                b.HasIndex(x => x.ContractId).IsUnique().HasFilter("[ContractId] IS NOT NULL AND [Deleted] = 0 AND [Status] NOT IN (11, 12)").HasDatabaseName("UX_EnCases_Contract");
                 b.HasIndex(x => x.Status);
                 b.HasOne<SlInquiry>().WithMany().HasForeignKey(x => x.InquiryId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<ContractEntity>().WithMany().HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Restrict);
@@ -174,11 +175,12 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.ToTable("EnDocumentDebts");
                 b.Property(x => x.DocumentType).HasMaxLength(100).IsRequired();
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+                b.Property(x => x.VoidReason).HasMaxLength(500);
                 b.HasIndex(x => new { x.Status, x.DueAt });
                 b.HasIndex(x => x.CaseId);
                 b.HasIndex(x => new { x.WaiverId, x.HandoverLineId }).IsUnique().HasFilter(NotDeleted);
                 b.HasOne<EnWaiver>().WithMany().HasForeignKey(x => x.WaiverId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<EnHandoverLine>().WithMany().HasForeignKey(x => x.HandoverLineId).OnDelete(DeleteBehavior.NoAction);
+                b.HasOne(x => x.HandoverLine).WithMany().HasForeignKey(x => x.HandoverLineId).OnDelete(DeleteBehavior.NoAction);
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
             });
 

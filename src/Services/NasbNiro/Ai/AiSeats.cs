@@ -100,7 +100,7 @@ namespace Services.NasbNiro.Ai
             new AiSeatDefinition { Code = Agents.AgentCodes.Master, Title = "ایجنت اصلی (هماهنگ‌کننده فرایندها)", Roles = new string[0], Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Sales, Title = "ایجنت فروش و پیشنهاد", Roles = new[] { "SALES" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Contract, Title = "ایجنت قرارداد و بازنگری قرارداد", Roles = new[] { "COMMERCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
-            new AiSeatDefinition { Code = Agents.AgentCodes.Init, Title = "ایجنت آغاز پروژه", Roles = new[] { "PLANNING" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
+            new AiSeatDefinition { Code = Agents.AgentCodes.Init, Title = "ایجنت آغاز پروژه", Roles = new[] { "PLANNING", "PMO" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Plan, Title = "ایجنت برنامه‌ریزی و کنترل پروژه", Roles = new[] { "PLANNING" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Eng, Title = "ایجنت مهندسی", Roles = new[] { "ENGINEER" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },
             new AiSeatDefinition { Code = Agents.AgentCodes.Proc, Title = "ایجنت تدارکات و خرید", Roles = new[] { "COMMERCIAL" }, Schedule = "poll 2", OutputKind = "AgentTasks", UsesModel = false },

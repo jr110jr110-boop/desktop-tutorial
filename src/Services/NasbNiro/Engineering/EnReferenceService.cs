@@ -167,12 +167,30 @@ namespace Services.NasbNiro.Engineering
             return null;
         }
 
-        private static void ApplyLines(EnReferenceList l, List<EnReferenceLineDto> lines)
+        /// <summary>
+        /// Updates the lines in place (by Id, else by type and title) and appends the new ones. A removed line is deleted physically only while the list was never submitted (a draft that is not a controlled record yet);
+        /// once submitted it is kept and flagged Voided, so the audit trail keeps it. The list must be loaded with its voided lines (IgnoreQueryFilters) so the numbering stays unique.
+        /// </summary>
+        private static void ApplyLines(IUnitOfWork uow, EnReferenceList l, List<EnReferenceLineDto> lines)
         {
-            l.Lines.Clear();
+            bool neverSubmitted = l.Status == EnRefStatus.Draft && !l.SubmittedAt.HasValue;
+            List<EnReferenceLine> pool = l.Lines.Where(x => !x.Voided).ToList();
+            HashSet<EnReferenceLine> kept = new HashSet<EnReferenceLine>();
             int seq = 0;
             foreach (EnReferenceLineDto x in lines)
-                l.Lines.Add(new EnReferenceLine { Seq = ++seq, DocumentType = x.DocumentType.Trim(), Discipline = EnText.Clean(x.Discipline), Title = x.Title.Trim(), Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = EnText.Clean(x.StandardClause), Note = EnText.Clean(x.Note), Units = EnUnits.Normalize(x.Units, out _) });
+            {
+                string key = EnDossierBuilder.TypeTitle(x.DocumentType.Trim(), x.Title.Trim());
+                EnReferenceLine line = (x.Id > 0 ? pool.FirstOrDefault(p => p.Id == x.Id && !kept.Contains(p)) : null) ?? pool.FirstOrDefault(p => !kept.Contains(p) && EnDossierBuilder.TypeTitle(p.DocumentType, p.Title) == key);
+                if (line == null) { line = new EnReferenceLine(); l.Lines.Add(line); }
+                kept.Add(line);
+                line.Seq = ++seq; line.DocumentType = x.DocumentType.Trim(); line.Discipline = EnText.Clean(x.Discipline); line.Title = x.Title.Trim(); line.Required = x.Required; line.TenderStage = x.TenderStage; line.ClientSubmittal = x.ClientSubmittal;
+                line.StandardClause = EnText.Clean(x.StandardClause); line.Note = EnText.Clean(x.Note); line.Units = EnUnits.Normalize(x.Units, out _);
+            }
+            foreach (EnReferenceLine gone in pool.Where(p => !kept.Contains(p)))
+            {
+                if (neverSubmitted) { l.Lines.Remove(gone); uow.Set<EnReferenceLine>().Remove(gone); }
+                else gone.Voided = true;
+            }
         }
 
         public async Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct)
@@ -185,14 +203,14 @@ namespace Services.NasbNiro.Engineering
             EnReferenceList row;
             if (dto.Id.HasValue)
             {
-                row = await _uow.Set<EnReferenceList>().Include(l => l.Lines).FirstOrDefaultAsync(l => l.Id == dto.Id.Value && !l.Deleted, ct);
+                row = await _uow.Set<EnReferenceList>().IgnoreQueryFilters().Include(l => l.Lines).FirstOrDefaultAsync(l => l.Id == dto.Id.Value && !l.Deleted, ct);
                 if (row == null) return EnText.NotFound<EnReferenceListDto>(EnText.NotFoundList);
                 string why = EditReason(row, true);
                 if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                 if (!EnConcurrency.Apply(_uow, row, dto.RowVersion)) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
+                why = EnEditors.Full(row.EditorUserIds, Me);
+                if (why != null) return EnText.Bad<EnReferenceListDto>(why);
                 if (!string.Equals(row.Code, dto.Code.Trim(), StringComparison.Ordinal)) return EnText.Bad<EnReferenceListDto>("کد فهرست پس از ساخت تغییر نمی‌کند.");
-                foreach (EnReferenceLine old in row.Lines.ToList()) _uow.Set<EnReferenceLine>().Remove(old);
-                row.Lines.Clear();
             }
             else
             {
@@ -204,7 +222,7 @@ namespace Services.NasbNiro.Engineering
                 _uow.Set<EnReferenceList>().Add(row);
             }
             row.Title = dto.Title.Trim(); row.StandardSource = EnText.Clean(dto.StandardSource); row.Note = EnText.Clean(dto.Note);
-            ApplyLines(row, dto.Lines);
+            ApplyLines(_uow, row, dto.Lines);
             row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
             row.ModifyDate = now; row.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
@@ -227,7 +245,8 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset now = DateTimeOffset.Now;
             string note = EnText.Clean(dto.Note);
             int resultId = row.Id;
-            string why;
+            string why = EnText.Over(note, 1000, "توضیح") ?? ((action == "submit" || action == "revise") && !seat ? EnEditors.Full(row.EditorUserIds, Me) : null);
+            if (why != null) return EnText.Bad<EnReferenceListDto>(why);
             switch (action)
             {
                 case "submit":
@@ -261,21 +280,35 @@ namespace Services.NasbNiro.Engineering
                     why = ApproveReason(row, approver, seat, Me);
                     if (why == null && await _uow.Set<EnDeviation>().AnyAsync(x => !x.Deleted && x.TargetType == EnDeviations.ListType && x.TargetId == row.Id && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct)) why = LooseningText;
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
-                    // one approved list per code: the earlier revision is superseded first (a filtered unique index keeps it single)
-                    List<EnReferenceList> older = await _uow.Set<EnReferenceList>().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == row.Code && l.Id != row.Id).ToListAsync(ct);
-                    if (older.Count > 0)
+                    // one approved list per code: the earlier revision is superseded first (a filtered unique index keeps it single); both saves are one transaction, so a failure never leaves the code without an Approved list
+                {
+                    int approveId = row.Id; string approveVersion = dto.RowVersion;
+                    ResponseDto<EnReferenceListDto> approved = await EnTransaction.InAsync(_uow, async () =>
                     {
-                        foreach (EnReferenceList o in older) { o.Status = EnRefStatus.Superseded; o.ModifyDate = now; o.ModifierUserId = Me; }
-                        try { await _uow.SaveChangesAsync(ct); }
+                        EnReferenceList target = await _uow.Set<EnReferenceList>().FirstAsync(l => l.Id == approveId, ct);
+                        if (!EnConcurrency.Apply(_uow, target, approveVersion)) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
+                        List<EnReferenceList> older = await _uow.Set<EnReferenceList>().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == target.Code && l.Id != target.Id).ToListAsync(ct);
+                        try
+                        {
+                            if (older.Count > 0)
+                            {
+                                foreach (EnReferenceList o in older) { o.Status = EnRefStatus.Superseded; o.ModifyDate = now; o.ModifierUserId = Me; }
+                                await _uow.SaveChangesAsync(ct);
+                            }
+                            target.Status = EnRefStatus.Approved; target.ApprovedAt = now; target.ApprovedByUserId = Me; target.ModifyDate = now; target.ModifierUserId = Me;
+                            await _uow.SaveChangesAsync(ct);
+                        }
                         catch (DbUpdateConcurrencyException) { return EnText.Bad<EnReferenceListDto>(EnText.Concurrency); }
-                    }
-                    row.Status = EnRefStatus.Approved; row.ApprovedAt = now; row.ApprovedByUserId = Me;
-                    break;
+                        return ResponseDtoHelper.Ok<EnReferenceListDto>(null);
+                    }, r => r.Success, ct);
+                    if (!approved.Success) return approved;
+                    return await GetListAsync(approveId, ct);
+                }
                 case "return":
                     why = ReturnReasonOf(row, approver);
                     if (why == null) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
                     if (why != null) return EnText.Bad<EnReferenceListDto>(why);
-                    row.Status = EnRefStatus.Draft; row.ContentHash = null; row.SubmittedAt = null; row.Note = EnText.Cut("برگشت: " + note, 1000);
+                    row.Status = EnRefStatus.Draft; row.ContentHash = null; row.Note = EnText.Cut("برگشت: " + note, 1000);
                     await EnDeviations.VoidOpenAsync(_uow, _notify, EnDeviations.ListType, row.Id, "فهرست برگشت خورد؛ درخواست انحراف باطل شد.", Me, ct);
                     break;
                 case "void":

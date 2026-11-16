@@ -76,6 +76,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
         /// <summary>The standard of the case the debt belongs to (the dossier of that standard is where the debt settles).</summary>
         public string ReferenceCode { get; set; }
+        /// <summary>Why a voided debt was voided (null for the others).</summary>
+        public string VoidReason { get; set; }
         public int ContractId { get; set; }
         public int? ProductId { get; set; }
         public string DocumentType { get; set; }
