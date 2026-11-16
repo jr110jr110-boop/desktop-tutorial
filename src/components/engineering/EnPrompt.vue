@@ -6,7 +6,7 @@ import { ref } from "vue";
 export interface EnField {
   key: string;
   label: string;
-  type?: "text" | "textarea" | "datetime" | "multi" | "select" | "number";
+  type?: "text" | "textarea" | "datetime" | "multi" | "select" | "number" | "file";
   required?: boolean;
   min?: number;
   max?: number;
@@ -24,7 +24,7 @@ function go() {
   local.value = "";
   for (const f of props.fields) {
     const v = values.value[f.key];
-    if (f.required && (v === null || v === undefined || String(v).trim() === "" || (Array.isArray(v) && !v.length))) {
+    if (f.required && (v === null || v === undefined || (typeof v === "string" && v.trim() === "") || (Array.isArray(v) && !v.length))) {
       local.value = `«${f.label}» را وارد کنید.`;
       return;
     }
@@ -41,6 +41,7 @@ function go() {
       <div v-for="f in fields" :key="f.key" class="mb-2">
         <label class="form-label small mb-0">{{ f.label }}<span v-if="f.required"> *</span></label>
         <textarea v-if="f.type === 'textarea'" v-model="values[f.key]" :maxlength="f.max" class="form-control form-control-sm" rows="3"></textarea>
+        <input v-else-if="f.type === 'file'" class="form-control form-control-sm" type="file" @change="values[f.key] = ($event.target as HTMLInputElement).files?.[0] || null" />
         <input v-else-if="f.type === 'datetime'" v-model="values[f.key]" class="form-control form-control-sm" type="datetime-local" />
         <div v-else-if="f.type === 'multi'" class="en-units">
           <label v-for="o in f.options" :key="o.value"><input v-model="values[f.key]" :value="o.value" type="checkbox" /> {{ o.text }}</label>

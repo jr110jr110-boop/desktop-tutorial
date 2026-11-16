@@ -2,6 +2,9 @@ import "@/views/inventory/inventory.scss";
 import "@/views/engineering/engineering.scss";
 import { faDigits, faNum } from "@/composables/ceo";
 import { ref } from "vue";
+import { saveBlob } from "@/api/ApiClient";
+import { addDocument } from "@/api/Document";
+import { getDocument } from "@/api/DocumentAPIs";
 import type { EnField } from "@/components/engineering/EnPrompt.vue";
 import { fail, jalali, ok } from "@/composables/inventory";
 
@@ -17,6 +20,8 @@ export const EnRoles = {
   /** The engineers and the manager. */
   writers: list("ENGINEERING,ENGINEER"),
   ceo: list("CEO"),
+  /** Approves a reference list (never whoever edited it). */
+  refApprovers: list("ENGINEERING,CEO"),
   standardSetters: list("SALES,COMMERCIAL,ENGINEERING,ENGINEER"),
   commercial: list("SALES,COMMERCIAL"),
   pmo: list("PMO"),
@@ -208,3 +213,22 @@ export const eventKinds: Record<string, string> = {
   "handover-accepted": "PMO تحویل را پذیرفت", "handover-returned": "PMO تحویل را برگرداند", "handover-released": "تحویل منتشر شد", "handover-void": "تحویل باطل شد",
   "distribution-drafted": "ابلاغ واحدها آماده شد", "distribution-note-edited": "یادداشت دامنه واحد ویرایش شد", "info-request-void": "پرسش واحد پس گرفته شد", "platform-registered": "پلتفرم ثبت شد",
 };
+
+/** Uploads a file through the documents API and answers its id (or the error). */
+export async function uploadDoc(file: File): Promise<[string | null, Error | null]> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await addDocument(form, "engineering", encodeURIComponent(file.name), "engineering");
+  const [data, error] = res || [null, new Error("بارگذاری فایل ممکن نشد.")];
+  if (error) return [null, error as Error];
+  const id = uploadedId(data);
+  return id ? [id, null] : [null, new Error("شناسه فایل بارگذاری‌شده خوانده نشد.")];
+}
+
+/** Downloads a stored file with the authorised request (blob). */
+export async function downloadDoc(id: string, name = "document") {
+  const res = await getDocument(id);
+  const [blob, error] = res || [null, new Error("دریافت فایل ممکن نشد.")];
+  if (error || !blob) return fail(error || "دریافت فایل ممکن نشد.");
+  saveBlob(blob as Blob, name);
+}
