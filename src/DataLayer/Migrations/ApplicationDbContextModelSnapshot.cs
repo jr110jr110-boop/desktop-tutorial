@@ -6973,6 +6973,1569 @@ namespace DataLayer.Migrations
                     b.ToTable("EcTasks", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnCase", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ApprovedGapHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("CeoApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CeoApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ChangeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CharterHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CharterReviewNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("CharterReviewOutcome")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CharterReviewedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CharterReviewedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Classification")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClassificationHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ClosedReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ConceptNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int?>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerRequirementNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTimeOffset?>("EngConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("EngConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("HandoverListCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int?>("InquiryId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("OpinionAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("OpinionByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OpinionText")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("PlatformWithChanges")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProposalBasis")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("ProposedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ProposedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProposedChangeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ProposedClassification")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProposedProductId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ProposedWithChanges")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ReferenceCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("ReturnReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("StandardDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("StandardEvidence")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TenderHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("TenderPackageId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("TenderReleasedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("TenderReleasedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnCases_Contract")
+                        .HasFilter("[ContractId] IS NOT NULL AND [Deleted] = 0 AND [Status] < 11");
+
+                    b.HasIndex("InquiryId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnCases_Inquiry")
+                        .HasFilter("[InquiryId] IS NOT NULL AND [Deleted] = 0 AND [Status] < 11");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenderPackageId");
+
+                    b.ToTable("EnCases", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnCaseEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.ToTable("EnCaseEvents", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnClarification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Answer")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("AnswerAttachmentIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTimeOffset?>("AnswerRecordedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("AnswerRecordedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("AskedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("AskedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClientLetterRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("FollowsId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("QuestionAttachmentIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset?>("SentToClientAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SentToClientByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FollowsId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("CaseId", "Status");
+
+                    b.ToTable("EnClarifications", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDeviation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CeoApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CeoApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Instruction")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ManagerApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ManagerApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Requirement")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("StandardClause")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("StandardCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TargetType", "TargetId", "Status");
+
+                    b.ToTable("EnDeviations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDistribution", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("AcknowledgedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("DocumentCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("HandoverId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("NoticeSentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("NotifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReceiptConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Roles")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ScopeNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Unit")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("HandoverId", "Unit")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnDistributions", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDocumentDebt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("DueAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("HandoverLineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SettledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SettledByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SettledDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("WaiverId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("HandoverLineId");
+
+                    b.HasIndex("Status", "DueAt");
+
+                    b.HasIndex("WaiverId", "HandoverLineId")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnDocumentDebts", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnHandover", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("AcceptedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Complete")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("MissingRequiredCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("PreparedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReleasedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReturnReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("ReturnedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ReturnedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Round")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SubmitConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("WaiverId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContractId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("WaiverId");
+
+                    b.HasIndex("CaseId", "Round")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnHandovers", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnHandoverLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("DeliverableId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Discipline")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("HandoverId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("LinkPath")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("PlatformDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Revision")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Units")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HandoverId");
+
+                    b.ToTable("EnHandoverLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnInfoRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Answer")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("AnsweredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("AnsweredByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("AskedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("AskedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Unit")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("CaseId", "Status");
+
+                    b.ToTable("EnInfoRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ControlledDocumentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DeviationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Discipline")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("DossierId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NotApplicableReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("ReferenceLineId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Revision")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SuppliedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("SuppliedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("SystemProven")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("TenderStage")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Units")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DossierId");
+
+                    b.HasIndex("ReferenceLineId");
+
+                    b.ToTable("EnPlatformDocuments", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("AssessedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ConfirmedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int?>("LastEditedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReferenceCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int?>("ReferenceListId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReferenceRevision")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("StandardBasis")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReferenceListId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("ProductId", "ReferenceCode")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnPlatformDossiers", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformRegistration", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("DossierId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ProposedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("ProposedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Rationale")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ReferenceCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("StandardBasis")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("ProductId", "ReferenceCode", "Status");
+
+                    b.ToTable("EnPlatformRegistrations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ClientSubmittal")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Discipline")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ListId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StandardClause")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("TenderStage")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Units")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<bool>("Voided")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ListId");
+
+                    b.ToTable("EnReferenceLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceList", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EditorUserIds")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("PreparedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("StandardSource")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnReferenceLists_OneApproved")
+                        .HasFilter("[Status] = 2 AND [Deleted] = 0");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("Code", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnReferenceLists", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnStandardGap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AddedCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("BaseCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("BaseRevision")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("EngineeringImpactNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RemovedCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RequiredChangedCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReusableCount")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("TargetCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("TargetRevision")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("CaseId", "Status");
+
+                    b.ToTable("EnStandardGaps", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnStandardGapLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("BaseRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Discipline")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("GapId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ReusableFromDossierLineId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("TargetRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GapId");
+
+                    b.ToTable("EnStandardGapLines", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnWaiver", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DebtDueAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("DebtHours")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("HandoverId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MissingSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("HandoverId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnWaivers_OneLive")
+                        .HasFilter("[Status] IN (0, 1) AND [Deleted] = 0");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnWaivers", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Equipments.Equipment", b =>
                 {
                     b.Property<int>("Id")
@@ -42056,6 +43619,237 @@ namespace DataLayer.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnCase", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.Sales.SlInquiry", null)
+                        .WithMany()
+                        .HasForeignKey("InquiryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProductBank.PbProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProjectControl.PcTenderPackage", null)
+                        .WithMany()
+                        .HasForeignKey("TenderPackageId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnCaseEvent", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnClarification", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnClarification", null)
+                        .WithMany()
+                        .HasForeignKey("FollowsId")
+                        .OnDelete(DeleteBehavior.NoAction);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDeviation", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Entities.Model.NasbNiro.ProductBank.PbProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDistribution", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnHandover", null)
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnDocumentDebt", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnHandoverLine", "HandoverLine")
+                        .WithMany()
+                        .HasForeignKey("HandoverLineId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnWaiver", null)
+                        .WithMany()
+                        .HasForeignKey("WaiverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("HandoverLine");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnHandover", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Contracts.ContractEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnWaiver", null)
+                        .WithMany()
+                        .HasForeignKey("WaiverId")
+                        .OnDelete(DeleteBehavior.NoAction);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnHandoverLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnHandover", "Handover")
+                        .WithMany("Lines")
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Handover");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnInfoRequest", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnHandover", null)
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.NoAction);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDocument", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", "Dossier")
+                        .WithMany("Documents")
+                        .HasForeignKey("DossierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnReferenceLine", null)
+                        .WithMany()
+                        .HasForeignKey("ReferenceLineId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("Dossier");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.ProductBank.PbProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnReferenceList", null)
+                        .WithMany()
+                        .HasForeignKey("ReferenceListId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformRegistration", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnReferenceList", "List")
+                        .WithMany("Lines")
+                        .HasForeignKey("ListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("List");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnStandardGap", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.ProductBank.PbProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnStandardGapLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnStandardGap", "Gap")
+                        .WithMany("Lines")
+                        .HasForeignKey("GapId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Gap");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnWaiver", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnHandover", null)
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Equipments.EquipmentAssembly", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Equipments.Equipment", "Equipment")
@@ -48490,6 +50284,26 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.EngChange.EcRequest", b =>
                 {
                     b.Navigation("Targets");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnHandover", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", b =>
+                {
+                    b.Navigation("Documents");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceList", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnStandardGap", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Equipments.Equipment", b =>
