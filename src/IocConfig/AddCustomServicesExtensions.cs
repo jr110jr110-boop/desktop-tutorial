@@ -228,6 +228,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.GoLive.IGlPrintService, Services.NasbNiro.GoLive.GlPrintService>();
             services.AddHostedService<Services.NasbNiro.GoLive.GoLiveHostedService>();
             services.AddHostedService<Services.NasbNiro.Engineering.EnHostedService>();   // ENG-E1: records the engineering cut-over instant once
+            services.AddScoped<Services.NasbNiro.Engineering.IEnReferenceService, Services.NasbNiro.Engineering.EnReferenceService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnPlatformService, Services.NasbNiro.Engineering.EnPlatformService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
             services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();
@@ -342,6 +344,7 @@ namespace IocConfig
             Services.NasbNiro.Agents.Steps.FinanceSteps.AddFinanceSteps(services);
             Services.NasbNiro.Agents.Steps.SepidarOutboxSteps.AddSepidarOutboxSteps(services);
             Services.NasbNiro.Agents.Steps.EngineeringSteps.AddEngineeringSteps(services);
+            Services.NasbNiro.Agents.Steps.EngineeringFlowSteps.AddEngineeringFlowSteps(services);   // ENG-E1
             Services.NasbNiro.Agents.Steps.SalesSteps.AddSalesSteps(services);
             Services.NasbNiro.Agents.Steps.ServiceSteps.AddServiceSteps(services);
             Services.NasbNiro.Agents.AgentStationProbes.AddAgentStationProbes(services);
