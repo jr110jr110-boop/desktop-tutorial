@@ -3,7 +3,7 @@
 // with the ones the PMO accepted on purpose counted apart, linked to the over-allocations of the resources page. The counts are those of the CEO dashboard service (pcOverloadedResources, pcOverloadsAccepted).
 // It follows the style of the headline cells; when the counts cannot be read the tile says so and still links to the page.
 import { computed, onMounted, ref } from "vue";
-import { getCeoDashboard } from "@/api/FinanceAPIs";
+import { loadCeoDashboardShared } from "@/composables/ceoDashboard";
 import CeoIcon from "@/components/ceo/CeoIcon.vue";
 import { faNum } from "@/composables/ceo";
 import { overloadsPath } from "@/composables/resources";
@@ -13,7 +13,7 @@ const accepted = ref<number | null>(null);
 const failed = ref(false);
 
 async function load() {
-  const [data, error] = await getCeoDashboard();
+  const [data, error] = await loadCeoDashboardShared();
   if (error || !data) { failed.value = true; return; }
   open.value = Number(data.pcOverloadedResources ?? 0);
   accepted.value = Number(data.pcOverloadsAccepted ?? 0);

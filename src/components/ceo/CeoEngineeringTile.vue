@@ -2,7 +2,7 @@
 // The engineering tiles of the CEO page (ENG-E1), wired like the over-allocated-resources tile: the counts are those of the CEO dashboard service (every en* field), each tile links to its
 // list. A tile is in its alarm state when the server says so (enPlatformsAlarm) or when something waits for the CEO or is overdue; a request that waits for the CEO never expires.
 import { computed, onMounted, ref } from "vue";
-import { getCeoDashboard } from "@/api/FinanceAPIs";
+import { loadCeoDashboardShared } from "@/composables/ceoDashboard";
 import CeoIcon from "@/components/ceo/CeoIcon.vue";
 import { faNum } from "@/composables/ceo";
 import { enPaths, waitText } from "@/composables/engineering";
@@ -10,7 +10,7 @@ import { enPaths, waitText } from "@/composables/engineering";
 const d = ref<any>(null);
 const failed = ref(false);
 async function load() {
-  const [data, error] = await getCeoDashboard();
+  const [data, error] = await loadCeoDashboardShared();
   if (error || !data) {
     failed.value = true;
     return;
@@ -18,7 +18,7 @@ async function load() {
   d.value = data;
 }
 onMounted(load);
-const n = (v: any) => (d.value ? faNum(Number(v ?? 0), 0) : failed.value ? "—" : "…");
+const n = (v: any) => (d.value ? (v === null || v === undefined ? "—" : faNum(Number(v), 0)) : failed.value ? "—" : "…");
 const tiles = computed(() => {
   const x = d.value || {};
   const w = Number(x.enWaiversAwaitingCeo ?? 0);
@@ -27,13 +27,13 @@ const tiles = computed(() => {
       note: Number(x.enAwardedCasesAtDocumentRisk) > 0 ? `${n(x.enAwardedCasesAtDocumentRisk)} پرونده برنده‌شده در معرض خطر مدارک است` : "مدارک این پلتفرم‌ها کامل و تایید نشده است" },
     { key: "debts", title: "بدهی مدارک مهندسی", value: n(x.enOpenDebts), unit: "باز", to: enPaths.debts, alarm: Number(x.enOverdueDebts) > 0, warn: Number(x.enOpenDebts) > 0,
       note: Number(x.enOverdueDebts) > 0 ? `${n(x.enOverdueDebts)} بدهی از موعد گذشته است` : "بدهی‌ای از موعد نگذشته" },
-    { key: "waivers", title: "معافیت اضطراری منتظر شما", value: n(x.enWaiversAwaitingCeo), unit: "درخواست", to: enPaths.waivers, alarm: w > 0, warn: false,
+    { key: "waivers", title: "مجوز اضطرار منتظر شما", value: n(x.enWaiversAwaitingCeo), unit: "درخواست", to: enPaths.waivers, alarm: w > 0, warn: false,
       note: w > 0 ? `قدیمی‌ترین ${waitText(x.enOldestWaiverWaitingHours)} منتظر است؛ منقضی نمی‌شود` : "درخواستی منتظر نیست" },
     { key: "risk", title: "پرونده در معرض خطر مدارک", value: n(x.enCasesAtDocumentRisk), unit: "پرونده", to: enPaths.cases, alarm: Number(x.enAwardedCasesAtDocumentRisk) > 0, warn: Number(x.enCasesAtDocumentRisk) > 0,
       note: `${n(x.enAwardedCasesAtDocumentRisk)} مورد برنده‌شده است` },
-    { key: "deviations", title: "انحراف از استاندارد", value: n(x.enDeviationsAwaiting), unit: "منتظر تصمیم", to: enPaths.deviations, alarm: false, warn: Number(x.enDeviationsAwaiting) > 0,
-      note: `${n(x.enStandardsDeviationsOpen)} انحراف و معافیت باز` },
-    { key: "gaps", title: "شکاف استاندارد باز", value: n(x.enStandardGapsOpen), unit: "گزارش", to: enPaths.gaps, alarm: false, warn: Number(x.enStandardGapsOpen) > 0, note: "منتظر تایید مدیر مهندسی" },
+    { key: "deviations", title: "انحراف از استاندارد", value: n(x.enDeviationsAwaiting), unit: "منتظر تصمیم", to: enPaths.deviations, alarm: Number(x.enDeviationsAwaiting) > 0, warn: Number(x.enDeviationsAwaiting) > 0,
+      note: `${n(x.enStandardsDeviationsOpen)} انحراف و مجوز باز` },
+    { key: "gaps", title: "تفاوت استاندارد باز", value: n(x.enStandardGapsOpen), unit: "گزارش", to: enPaths.gaps, alarm: false, warn: Number(x.enStandardGapsOpen) > 0, note: "منتظر تایید مدیر مهندسی" },
     { key: "regs", title: "ثبت پلتفرم جدید", value: n(x.enPlatformRegistrationsAwaiting), unit: "منتظر شما", to: enPaths.registrations, alarm: Number(x.enPlatformRegistrationsAwaiting) > 0, warn: false, note: "طراحی‌های جدیدی که برای ثبت به‌عنوان پلتفرم پیشنهاد شده" },
   ];
 });

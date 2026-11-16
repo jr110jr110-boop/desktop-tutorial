@@ -24,6 +24,7 @@ import CeoKpiCluster from "@/components/ceo/CeoKpiCluster.vue";
 import CeoPulse from "@/components/ceo/CeoPulse.vue";
 import CeoResourceTile from "@/components/ceo/CeoResourceTile.vue";
 import CeoEngineeringTile from "@/components/ceo/CeoEngineeringTile.vue";
+import CeoEngineeringAlarm from "@/components/ceo/CeoEngineeringAlarm.vue";
 import CeoSectionPanel from "@/components/ceo/CeoSection.vue";
 import OpsWidget from "@/components/opsData/OpsWidget.vue";
 import AuditWidget from "@/components/audit/AuditWidget.vue";
@@ -555,6 +556,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <div :class="{ refreshing: loading }" class="ceo-data">
         <CeoPulse :class="{ compact: size === 'm' || size === 's' }" :lamp-test="lampTest" :pulse="overview.pulse" class="ceo-pulse" @go="goToSection" />
+        <CeoEngineeringAlarm />
         <div id="ceo-headline" class="kpi-head">
           <h2 class="kpi-head-title">شاخص‌های اصلی</h2>
           <button

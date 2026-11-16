@@ -30,7 +30,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 // ---------------------------------------------------------------- fixtures (DTO shapes)
 const ok = (data) => JSON.stringify({ success: true, message: "", data, httpStatusCode: 200 });
 const refuse = (message) => JSON.stringify({ success: false, message, data: null, httpStatusCode: 200 });
-const page = (rows) => ({ data: rows, totalItems: rows.length, pageNumber: 1, pageSize: 25 });
+const page = (rows) => ({ data: rows, totalItems: rows.length, currentPage: 1, itemsPerPage: 25, totalPages: 1 });
 const NO = "شما مجوز این کار را ندارید.";
 const flags = (names, on = false, why = NO) => Object.fromEntries(names.flatMap((n) => [["can" + n, on], [n[0].toLowerCase() + n.slice(1) + "BlockedReason", on ? null : why]]));
 
@@ -71,7 +71,7 @@ const waiver = { id: 4, number: "WVR-1405-0004", handoverId: 21, handoverNumber:
   missingLines: ["CALC — محاسبه ارتعاش پیچشی", "RPT — گزارش تست عملکرد"], dossierUnconfirmed: false, debtDueAt: "2026-11-18T10:00:00+03:30", debtDueAtText: "1405/08/28", status: 0, statusText: "درخواست‌شده", requestedByName: "مدیر مهندسی", requestedAtText: "1405/08/25 08:30", waitingHours: 53,
   used: false, covers: true, coverageNote: null, rowVersion: "WWWW", ...flags(["Decide"]) };
 const handover = { id: 21, number: "HND-1405-0021", caseId: 12, caseNumber: "ENG-1405-0012", contractId: 3, contractCode: "CN-1405-003", classification: 1, classificationText: "پلتفرم (توربین ساخته‌شده)", round: 1, status: 0, statusText: "پیش‌نویس", preparedByName: "ایجنت مهندسی", preparedByAgent: true,
-  complete: false, missingRequiredCount: 2, requiredCount: 6, platformDossierConfirmed: true, lockMessage: "قفل ب: ۲ مدرک الزامی (محاسبه ارتعاش پیچشی، گزارش تست عملکرد) هنوز موجود نیست؛ تحویل به PMO ممکن نیست.", waiverId: null, rowVersion: "HHHH",
+  complete: false, missingRequiredCount: 2, requiredCount: 6, platformDossierConfirmed: true, lockMessage: "تحویل مدارک به PMO قفل است: ۲ مدرک الزامی هنوز موجود نیست. فقط مجوز اضطرار تاییدشده توسط مدیرعامل این قفل را باز می‌کند.", waiverId: null, rowVersion: "HHHH",
   ...flags(["Submit", "RequestWaiver", "Accept", "Return", "Release", "Void"]), submitBlockedReason: "۲ مدرک الزامی هنوز موجود نیست.", waiver: null, debts: [],
   lines: [{ id: 1, seq: 1, documentType: "DWG", discipline: "مکانیک", title: "نقشه مونتاژ کلی", required: true, state: 1, stateText: "موجود", documentId: "11111111-1111-1111-1111-111111111111", revision: "B", units: "", forMyUnit: false },
     { id: 2, seq: 2, documentType: "CALC", discipline: "مکانیک", title: "محاسبه ارتعاش پیچشی", required: true, state: 0, stateText: "موجود نیست", units: "Production", forMyUnit: false },
@@ -129,7 +129,7 @@ const shots = [
   { name: "03-cases-list", path: "/engineering/cases", role: "ENGINEERING" },
   { name: "04-cases-empty", path: "/engineering/cases", role: "PMO", over: { "engineering/cases": page([]) } },
   { name: "05-case-awaiting-manager", path: "/engineering/cases/12", role: "ENGINEERING", over: { "engineering/cases/12": { ...caseBase, canConfirm: true, confirmBlockedReason: null, canReturn: true, returnBlockedReason: null, canSetStandard: true, setStandardBlockedReason: null } } },
-  { name: "06-case-awaiting-ceo", path: "/engineering/cases/12", role: "CEO", over: { "engineering/cases/12": { ...caseBase, status: 3, statusText: "منتظر تایید مدیرعامل", engConfirmedByName: "مدیر مهندسی", engConfirmedAtText: "1405/08/22", canApprove: true, approveBlockedReason: null, canReturn: true, returnBlockedReason: null, confirmBlockedReason: "تایید مدیر مهندسی انجام شده است." } } },
+  { name: "06-case-awaiting-ceo", path: "/engineering/cases/12", role: "CEO", over: { "engineering/cases/12": { ...caseBase, documentRisk: "۲ مدرک الزامی تحویل کم است و ۴ روز به موعد مانده است.", documentRiskAwarded: true, status: 3, statusText: "منتظر تایید مدیرعامل", engConfirmedByName: "مدیر مهندسی", engConfirmedAtText: "1405/08/22", canApprove: true, approveBlockedReason: null, canReturn: true, returnBlockedReason: null, confirmBlockedReason: "تایید مدیر مهندسی انجام شده است." } } },
   { name: "07-case-disabled-with-reason", path: "/engineering/cases/12", role: "ENGINEERING", over: { "engineering/cases/12": { ...caseBase, confirmBlockedReason: "این کار باید توسط شخص دیگری انجام شود (تفکیک وظایف: سازنده یا ویرایشگر تأییدکننده نیست)." } } },
   { name: "08-case-spare-parts", path: "/engineering/cases/13", role: "ENGINEERING", over: { "engineering/cases/13": { ...caseBase, id: 13, kind: 2, kindText: "قطعه یدکی", status: 1, statusText: "در حال تعیین نوع", opinionText: null, standardGap: null, platformIncomplete: false, canSaveOpinion: true, saveOpinionBlockedReason: null } } },
   { name: "09-platforms-list", path: "/engineering/platforms", role: "ENGINEERING" },
@@ -140,7 +140,7 @@ const shots = [
   { name: "14-handover-waiver-waiting-ceo", path: "/engineering/handovers/21", role: "CEO", over: { "engineering/handovers/21": { ...handover, status: 0, waiverId: 4, waiver, lockMessage: handover.lockMessage } } },
   { name: "15-handover-released-distribution", path: "/engineering/handovers/21", role: "QC", over: { "engineering/handovers/21": handoverReleased, "engineering/info-requests": page([info]) } },
   { name: "16-waiver-dialog-refused", path: "/engineering/handovers/21", role: "ENGINEERING", over: { "engineering/handovers/21": { ...handover, canRequestWaiver: true, requestWaiverBlockedReason: null }, "engineering/waivers/request": () => refuse("مهلت بدهی مدارک از ۷۲ ساعت بیشتر نیست.") },
-    act: async (p) => { await p.click("text=درخواست معافیت اضطراری"); await p.fill("textarea", "تحویل فردا است و مدارک رسیدن ندارد"); await p.fill("input[type=datetime-local]", "2026-12-30T10:00"); await p.click(".inv-modal >> text=تایید"); await p.waitForTimeout(500); } },
+    act: async (p) => { await p.click("text=درخواست مجوز اضطرار"); await p.fill("textarea", "تحویل فردا است و مدارک رسیدن ندارد"); await p.fill(".inv-modal .fn-date-wrap input", "۱۴۰۵/۱۰/۰۹"); await p.selectOption(".inv-modal select[aria-label=ساعت]", "10"); await p.click(".inv-modal >> text=تایید"); await p.waitForTimeout(500); } },
   { name: "17-debts", path: "/engineering/debts", role: "PMO" },
   { name: "18-waivers", path: "/engineering/waivers", role: "CEO", over: { "engineering/waivers": page([{ ...waiver, canDecide: true, decideBlockedReason: null }]) } },
   { name: "19-deviations", path: "/engineering/deviations", role: "CEO", over: { "engineering/deviations": page([{ ...deviation, canDecide: true, decideBlockedReason: null }]) } },
@@ -148,6 +148,16 @@ const shots = [
   { name: "21-registrations", path: "/engineering/platform-registrations", role: "CEO", over: { "engineering/platform-registrations": page([{ ...registration, canDecide: true, decideBlockedReason: null }]) } },
   { name: "22-info-requests-pmo", path: "/engineering/info-requests", role: "PMO", over: { "engineering/info-requests": page([{ ...info, canAnswer: true, answerBlockedReason: null }]) } },
   { name: "23-ceo-home-engineering-tiles", path: "/ceo", role: "CEO", fullPage: false },
+  { name: "25-ceo-home-alarm-band", path: "/ceo", role: "CEO", fullPage: false },
+  { name: "26-waiver-deadline-dialog-shamsi", path: "/engineering/handovers/21", role: "ENGINEERING", over: { "engineering/handovers/21": { ...handover, canRequestWaiver: true, requestWaiverBlockedReason: null } },
+    act: async (p) => { await p.click("text=درخواست مجوز اضطرار"); await p.fill("textarea", "تحویل فردا است و مدارک رسیدن ندارد"); await p.fill(".inv-modal .fn-date-wrap input", "۱۴۰۵/۰۸/۳۰"); await p.selectOption(".inv-modal select[aria-label=ساعت]", "14"); await p.waitForTimeout(200); } },
+  { name: "27-spare-parts-confirm-dialog", path: "/engineering/cases/13", role: "ENGINEERING", over: { "engineering/cases/13": { ...caseBase, id: 13, kind: 2, kindText: "قطعه یدکی", status: 1, statusText: "در حال تعیین نوع", opinionText: "نظر فنی کامل برای قطعه یدکی پمپ با شرح مواد و استاندارد", standardGap: null, platformIncomplete: false, canConfirm: true, confirmBlockedReason: null } },
+    act: async (p) => { await p.click("button:has-text('تایید مدیر مهندسی')"); await p.waitForTimeout(400); } },
+  { name: "28-reference-list-unit-unticked", path: "/engineering/reference-lists/2", role: "ENGINEERING", over: { "engineering/reference/lists/2": { ...refList, canEdit: true, editBlockedReason: null, canSubmit: true, submitBlockedReason: null } },
+    act: async (p) => { await p.locator("[data-test=en-ref-grid] tbody tr").first().locator(".en-units label:has-text('تولید') input").uncheck(); await p.waitForTimeout(200); } },
+  { name: "29-waiver-ceo-shorten-dialog", path: "/engineering/waivers", role: "CEO", over: { "engineering/waivers": page([{ ...waiver, canDecide: true, decideBlockedReason: null }]) },
+    act: async (p) => { await p.click("button:has-text('تایید مجوز اضطرار')"); await p.waitForTimeout(300); } },
+  { name: "30-waiver-by-id-not-on-first-page", path: "/engineering/waivers/44", role: "CEO", over: { "engineering/waivers/44": { ...waiver, id: 44, number: "WVR-1405-0044", canDecide: true, decideBlockedReason: null } } },
   { name: "24-forbidden-info-requests-for-sales", path: "/engineering/info-requests", role: "SALES" },
 ];
 const wanted = process.argv.slice(2);
