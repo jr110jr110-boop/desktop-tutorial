@@ -477,6 +477,7 @@ namespace Services.NasbNiro.ProductBank
             if (!InRole(StepRoles(dto.Step))) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             string who = SignerError(h, User.UserId, await DistinctReviewersAsync(ct));
             if (who != null) return ResponseDtoHelper.BadRequest<PbBomDto>(who);
+            if (await IsEngOriginatorAsync(1, h.Id, ct)) return ResponseDtoHelper.BadRequest<PbBomDto>(global::Services.NasbNiro.EngInbox.EngInboxText.OriginatorCannotCheck);   // ENG-F1
             if (HashOf(h.Lines) != h.ContentHash) return ResponseDtoHelper.BadRequest<PbBomDto>("محتوای BOM بعد از ارسال تغییر کرده است؛ برگردانده شود و دوباره فرستاده شود.");
             DateTimeOffset now = DateTimeOffset.Now;
             switch (dto.Step)
@@ -500,6 +501,7 @@ namespace Services.NasbNiro.ProductBank
             if (h.Status != PbBomStatus.Approved) return ResponseDtoHelper.BadRequest<PbBomDto>("فقط نسخه تایید‌شده منتشر می‌شود.");
             if (!InRole(PbRoles.ReleaseRoles)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (h.PreparedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.SameUser);
+            if (await IsEngOriginatorAsync(1, h.Id, ct)) return ResponseDtoHelper.BadRequest<PbBomDto>(global::Services.NasbNiro.EngInbox.EngInboxText.OriginatorCannotCheck);   // ENG-F1
             if (HashOf(h.Lines) != h.ContentHash) return ResponseDtoHelper.BadRequest<PbBomDto>("محتوای BOM بعد از ارسال تغییر کرده است.");
             // Packages A2 + A1 (one gate, one message): an approved ECO that names a new revision of a released BOM, then a closed and accepted design verification; both problems are reported together
             string releaseProblem = JoinProblems(await EngChange.EcGate.BomReleaseProblemAsync(Uow, h, ct), await DesignGate.CheckReleaseAsync(Uow, h, null, null, ct));

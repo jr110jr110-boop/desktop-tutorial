@@ -269,6 +269,7 @@ namespace Services.NasbNiro.ProductBank
             if (r.Status != PbRoutingStatus.UnderReview || r.CheckedAt.HasValue) return ResponseDtoHelper.BadRequest<PbOpcDto>("این چارت منتظر کنترل نیست.");
             if (!InRole(PbRoles.CheckRoles)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.NotAllowed);
             if (r.PreparedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.SameUser);
+            if (await IsEngOriginatorAsync(2, r.Id, ct)) return ResponseDtoHelper.BadRequest<PbOpcDto>(global::Services.NasbNiro.EngInbox.EngInboxText.OriginatorCannotCheck);   // ENG-F1
             if (HashOf(r.Steps) != r.ContentHash) return ResponseDtoHelper.BadRequest<PbOpcDto>("مراحل بعد از ارسال تغییر کرده است.");
             r.CheckedByUserId = User.UserId; r.CheckedAt = DateTimeOffset.Now;
             Stamp(r, false);
@@ -285,6 +286,7 @@ namespace Services.NasbNiro.ProductBank
             if (r.Status != PbRoutingStatus.UnderReview || !r.CheckedAt.HasValue) return ResponseDtoHelper.BadRequest<PbOpcDto>("این چارت هنوز کنترل نشده یا در حال بررسی نیست.");
             if (!InRole(PbRoles.ApproveRoles)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.NotAllowed);
             if (r.PreparedByUserId == User.UserId || r.CheckedByUserId == User.UserId) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.SameUser);
+            if (await IsEngOriginatorAsync(2, r.Id, ct)) return ResponseDtoHelper.BadRequest<PbOpcDto>(global::Services.NasbNiro.EngInbox.EngInboxText.OriginatorCannotCheck);   // ENG-F1
             if (HashOf(r.Steps) != r.ContentHash) return ResponseDtoHelper.BadRequest<PbOpcDto>("مراحل بعد از ارسال تغییر کرده است.");
             string ecProblem = await EngChange.EcGate.OpcApproveProblemAsync(Uow, r, ct);   // Package A2: a new revision of an approved OPC chart needs an approved ECO that names it
             if (ecProblem != null) return ResponseDtoHelper.BadRequest<PbOpcDto>(ecProblem);
@@ -397,6 +399,7 @@ namespace Services.NasbNiro.ProductBank
             PbOpcRouting r = dto == null ? null : await LoadAsync(dto.Id, true, ct);
             if (r == null) return ResponseDtoHelper.NotFound<PbPublishResultDto>(PbMessages.NotFound);
             if (r.Status != PbRoutingStatus.Approved) return ResponseDtoHelper.BadRequest<PbPublishResultDto>("فقط چارت تاییدشده به مسیر ساخت (MES) منتقل می‌شود.");
+            if (await IsEngOriginatorAsync(2, r.Id, ct)) return ResponseDtoHelper.BadRequest<PbPublishResultDto>(global::Services.NasbNiro.EngInbox.EngInboxText.OriginatorCannotCheck);   // ENG-F1
             var result = new PbPublishResultDto { RoutingId = r.Id };
             List<PbOpcStep> live = Live(r);
 

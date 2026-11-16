@@ -120,6 +120,20 @@ namespace Services.NasbNiro.ProductBank
             return (item, null);
         }
 
+        /// <summary>
+        /// ENG-F1 (maker is not checker): true when the signed-in user is the originator (the preparer named in the workbook) of an engineering inbox package that the agent applied to this BOM header (kind 1) or routing (kind 2).
+        /// Every check, approval, release and publication refuses such a user.
+        /// </summary>
+        protected async Task<bool> IsEngOriginatorAsync(byte kind, int entityId, CancellationToken ct)
+        {
+            int userId = User.UserId;
+            if (userId <= 0) return false;
+            return await (from a in Uow.Set<global::Entities.Model.NasbNiro.EngInbox.EngInboxAppliedItem>().AsNoTracking()
+                          join p in Uow.Set<global::Entities.Model.NasbNiro.EngInbox.EngInboxPackage>().AsNoTracking() on a.PackageId equals p.Id
+                          where !a.Deleted && a.Kind == kind && a.EntityId == entityId && p.OriginatorUserId == userId
+                          select a.Id).AnyAsync(ct);
+        }
+
         /// <summary>Saves; false with the Persian message when another request changed the same document at the same time.</summary>
         protected async Task<string> TrySaveAsync(CancellationToken ct)
         {

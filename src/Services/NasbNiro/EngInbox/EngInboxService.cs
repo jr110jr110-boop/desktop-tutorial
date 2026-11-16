@@ -39,6 +39,11 @@ namespace Services.NasbNiro.EngInbox
         public const string Concurrent = "این بسته هم‌زمان تغییر کرد؛ صفحه را تازه کنید و دوباره تلاش کنید.";
         public const string DismissStatus = "فقط بستهٔ ردشده، متوقف‌شده یا منتظر ایجنت کنار گذاشته می‌شود.";
         public const string Duplicate = "تکراری";
+        public const string OriginatorCannotCheck = "تهیه‌کنندهٔ بستهٔ مهندسی نمی‌تواند همان مدرک را بررسی یا تأیید کند.";
+        public const string OriginatorUnknown = "تهیه‌کننده باید نام کاربری یک کاربر فعال باشد.";
+        public const string ScanBusy = "بررسی دیگری در حال اجراست.";
+        public const string RowVersionRequired = "نسخهٔ ردیف (RowVersion) بسته لازم است؛ صفحه را تازه کنید و دوباره تلاش کنید.";
+        public const int TechAfter = 3;
         public const string VersionConflict = "نسخه تکراری با محتوای متفاوت؛ شماره نسخه را بالا ببرید.";
         public const string OlderVersion = "نسخهٔ بالاتری از همین بسته قبلاً دریافت شده است؛ نسخهٔ قدیمی‌تر پذیرفته نمی‌شود.";
 
@@ -58,6 +63,12 @@ namespace Services.NasbNiro.EngInbox
     public class EngInboxService : IEngInboxService
     {
         public const int MaxPerRun = 10;
+
+        /// <summary>One scan at a time in the whole process (the agent step, the hosted loop and the button share it).</summary>
+        private static readonly SemaphoreSlim ScanGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>How often saving the same package failed (key: the folder and its signature); after <see cref="EngInboxText.TechAfter"/> failures the package is moved to _Rejected with a technical note.</summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> Failures = new System.Collections.Concurrent.ConcurrentDictionary<string, int>(StringComparer.Ordinal);
 
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -89,6 +100,13 @@ namespace Services.NasbNiro.EngInbox
         public async Task<ResponseDto<EngInboxScanResultDto>> ScanAsync(CancellationToken ct)
         {
             if (!CanOperate && !AgentMaker.Allows(EngInboxCodes.Ingest)) return ResponseDtoHelper.BadRequest<EngInboxScanResultDto>(EngInboxText.NotAllowed);
+            if (!await ScanGate.WaitAsync(0, ct)) return ResponseDtoHelper.Ok(new EngInboxScanResultDto { Note = EngInboxText.ScanBusy });
+            try { return await ScanCoreAsync(ct); }
+            finally { ScanGate.Release(); }
+        }
+
+        private async Task<ResponseDto<EngInboxScanResultDto>> ScanCoreAsync(CancellationToken ct)
+        {
             var result = new EngInboxScanResultDto();
             try
             {
@@ -117,6 +135,8 @@ namespace Services.NasbNiro.EngInbox
                     {
                         AgentDb.Clear(_uow);
                         result.Errors++;
+                        try { if (await GiveUpAsync(h, ct)) result.Rejected++; }
+                        catch (Exception ex2) when (ex2 is DbUpdateException || ex2 is InvalidOperationException || ex2 is System.IO.IOException) { AgentDb.Clear(_uow); }
                     }
                 }
                 if (handles.Count > MaxPerRun) result.Note = "بسته‌های بعدی در اسکن بعدی خوانده می‌شوند.";
@@ -132,6 +152,53 @@ namespace Services.NasbNiro.EngInbox
             return ResponseDtoHelper.Ok(result);
         }
 
+        /// <summary>A package whose saving failed again and again: after the third time it is stored as Rejected (code TECH) and moved to _Rejected, so one broken folder never jams the inbox.</summary>
+        private async Task<bool> GiveUpAsync(EngPackageHandle h, CancellationToken ct)
+        {
+            string sig = await SafeSignatureAsync(h, ct);
+            string key = h.Id + "|" + sig;
+            int n = Failures.AddOrUpdate(key, 1, (_, old) => old + 1);
+            if (n < EngInboxText.TechAfter) return false;
+            Failures.TryRemove(key, out _);
+            string note = "این بسته " + EngInboxText.TechAfter.ToString(CultureInfo.InvariantCulture) + " بار ذخیره نشد (خطای فنی)؛ به پوشهٔ ردشده رفت. پوشه را بررسی و در صورت نیاز دوباره در صندوق ورودی بگذارید.";
+            bool exists = await _uow.Set<EngInboxPackage>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EngInboxStatus.Rejected && x.OriginalPath == h.RelativePath && x.SourceSignature == sig, ct);
+            if (!exists)
+            {
+                var pkg = new EngInboxPackage
+                {
+                    SourceName = _source.Name, Kind = h.LayoutKind == EngPackageKind.Project ? EngInboxKind.Project : EngInboxKind.Platform, PackageVersion = 0, Status = EngInboxStatus.Rejected, RejectCode = "TECH",
+                    OriginalPath = Fit(h.RelativePath, 500), SourceSignature = Fit(sig, 100), FindingsJson = FindingsToJson(new[] { new EngFinding { Severity = EngFindingSeverity.Error, Message = note } }), ErrorCount = 1,
+                    IngestedAt = DateTimeOffset.Now, StatusAt = DateTimeOffset.Now, StatusNote = Fit("رد شد: خطای فنی", 500),
+                };
+                Stamp(pkg, true);
+                _uow.Set<EngInboxPackage>().Add(pkg);
+                await _uow.SaveChangesAsync(ct);
+                string stored = await TryMoveAsync(h, EngSourceOutcome.Rejected, note, pkg, ct);
+                if (!string.IsNullOrEmpty(stored)) { pkg.StoredPath = Fit(stored, 500); Stamp(pkg, false); await _uow.SaveChangesAsync(ct); }
+            }
+            else await TryMoveAsync(h, EngSourceOutcome.Rejected, note, null, ct);
+            return true;
+        }
+
+        private async Task<string> SafeSignatureAsync(EngPackageHandle h, CancellationToken ct)
+        {
+            try { return await _source.SignatureAsync(h, ct) ?? ""; }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException) { return ""; }
+        }
+
+        /// <summary>Moves the package out of the inbox; a failed move is reported in the status note of the package (when there is one) and the package is NOT treated as moved (empty result).</summary>
+        private async Task<string> TryMoveAsync(EngPackageHandle h, EngSourceOutcome outcome, string note, EngInboxPackage pkg, CancellationToken ct)
+        {
+            try { return await _source.MarkAsync(h, outcome, note, ct) ?? ""; }
+            catch (EngSourceMoveException ex)
+            {
+                if (pkg != null) pkg.StatusNote = Fit((pkg.StatusNote ?? "") + " — " + ex.Message, 500);
+                return "";
+            }
+        }
+
+        public static string Fit(string text, int max) => text == null ? null : (text.Length <= max ? text : text.Substring(0, max));
+
         private async Task TouchStateAsync(EngInboxScanResultDto r, CancellationToken ct)
         {
             EngInboxScanState s = await _uow.Set<EngInboxScanState>().Where(x => !x.Deleted).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -146,6 +213,26 @@ namespace Services.NasbNiro.EngInbox
 
         private async Task<EngSourceOutcome> IngestOneAsync(EngPackageHandle h, CancellationToken ct)
         {
+            // a package the inbox already knows (same files, same sizes, same times) is recognised without reading or hashing its files (B3)
+            string sig = await SafeSignatureAsync(h, ct);
+            if (sig.Length > 0)
+            {
+                var known = await _uow.Set<EngInboxPackage>().AsNoTracking().Where(x => !x.Deleted && x.SourceSignature == sig).OrderBy(x => x.Id).Select(x => new { x.Id, x.Status, x.OriginalPath }).ToListAsync(ct);
+                var live = known.FirstOrDefault(x => Live.Contains(x.Status));
+                if (live != null)
+                {
+                    await TryMoveAsync(h, EngSourceOutcome.Duplicate, EngInboxText.Duplicate + ": همین بسته قبلاً دریافت شده است (بستهٔ شمارهٔ " + live.Id.ToString(CultureInfo.InvariantCulture) + ").", null, ct);
+                    return EngSourceOutcome.Duplicate;
+                }
+                // a rejected package seen again unchanged (its folder could not be moved): no second row, only the move is tried again (B2)
+                var again = known.FirstOrDefault(x => x.Status == EngInboxStatus.Rejected && x.OriginalPath == h.RelativePath);
+                if (again != null)
+                {
+                    await TryMoveAsync(h, EngSourceOutcome.Rejected, "این بسته قبلاً رد شده است (بستهٔ شمارهٔ " + again.Id.ToString(CultureInfo.InvariantCulture) + "؛ دلایل در صفحهٔ صندوق ورودی مهندسی).", null, ct);
+                    return EngSourceOutcome.Rejected;
+                }
+            }
+
             EngPackageContent content = await _source.ReadAsync(h, ct);
             EngParsedPackage p;
             if (content.Problems.Count > 0 || content.Workbook == null)
@@ -165,13 +252,26 @@ namespace Services.NasbNiro.EngInbox
             int version = p.Info.PackageVersion;
             string rejectCode = null;
 
+            // the preparer is a real, active user of the system (maker is not checker: he can never check or approve what the agent makes from his package)
+            int? originatorId = null;
+            if (!p.HasErrors)
+            {
+                string login = EngText.Norm(p.Info.PreparedBy);
+                if (login.Length > 0)
+                {
+                    string upper = login.ToUpperInvariant();
+                    originatorId = await _uow.Set<Entities.Identity.User>().AsNoTracking().Where(u => !u.IsDeleted && u.IsActive && (u.NormalizedUserName == upper || u.UserName == login)).OrderBy(u => u.Id).Select(u => (int?)u.Id).FirstOrDefaultAsync(ct);
+                }
+                if (originatorId == null) p.Error("مشخصات", 0, EngInboxText.OriginatorUnknown);
+            }
+
             if (!p.HasErrors)
             {
                 IQueryable<EngInboxPackage> sameKey = _uow.Set<EngInboxPackage>().Where(x => !x.Deleted && x.Kind == kind && x.PlatformCode == platform && x.Standard == standard && x.ContractCode == contract && x.ProjectCode == project && Live.Contains(x.Status));
                 EngInboxPackage same = await sameKey.Where(x => x.PackageVersion == version).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
                 if (same != null && same.ContentHash == p.ContentHash)
                 {
-                    await _source.MarkAsync(h, EngSourceOutcome.Duplicate, EngInboxText.Duplicate + ": همین بسته قبلاً دریافت شده است (بستهٔ شمارهٔ " + same.Id.ToString(CultureInfo.InvariantCulture) + ").", ct);
+                    await TryMoveAsync(h, EngSourceOutcome.Duplicate, EngInboxText.Duplicate + ": همین بسته قبلاً دریافت شده است (بستهٔ شمارهٔ " + same.Id.ToString(CultureInfo.InvariantCulture) + ").", null, ct);
                     return EngSourceOutcome.Duplicate;
                 }
                 if (same != null) { rejectCode = "VersionConflict"; p.Error(null, 0, EngInboxText.VersionConflict); }
@@ -183,10 +283,23 @@ namespace Services.NasbNiro.EngInbox
             }
 
             bool rejected = p.HasErrors;
+            if (rejected)
+            {
+                // the same rejected folder, unchanged, is stored once (B2)
+                bool stored0 = sig.Length > 0 && await _uow.Set<EngInboxPackage>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EngInboxStatus.Rejected && x.OriginalPath == h.RelativePath && x.SourceSignature == sig, ct);
+                if (stored0)
+                {
+                    await TryMoveAsync(h, EngSourceOutcome.Rejected, "این بسته قبلاً رد شده است.", null, ct);
+                    return EngSourceOutcome.Rejected;
+                }
+            }
+            // a rejected package is stored with every text cut to its column (the findings carry the real values and lengths)
             var pkg = new EngInboxPackage
             {
-                SourceName = _source.Name, Kind = kind, PlatformCode = platform, Standard = standard, ContractCode = contract, ProjectCode = project, PackageVersion = rejected && version < 1 ? 0 : version,
-                Title = p.Info.Title, PreparedByText = p.Info.PreparedBy, SchemaVersion = p.Info.SchemaVersion, ContentHash = p.ContentHash, OriginalPath = h.RelativePath,
+                SourceName = _source.Name, Kind = kind, PlatformCode = Fit(platform, EngPackageParser.Max.PlatformCode), Standard = Fit(standard, EngPackageParser.Max.Standard), ContractCode = Fit(contract, EngPackageParser.Max.ContractCode),
+                ProjectCode = Fit(project, EngPackageParser.Max.ProjectCode), PackageVersion = rejected && version < 1 ? 0 : version,
+                Title = Fit(p.Info.Title, EngPackageParser.Max.Title), PreparedByText = Fit(p.Info.PreparedBy, EngPackageParser.Max.PreparedBy), OriginatorUserId = rejected ? null : originatorId, SchemaVersion = p.Info.SchemaVersion,
+                ContentHash = p.ContentHash, OriginalPath = Fit(h.RelativePath, 500), SourceSignature = Fit(sig, 100),
                 Status = rejected ? EngInboxStatus.Rejected : EngInboxStatus.Ingested, RejectCode = rejectCode, FindingsJson = FindingsToJson(p.Findings), ErrorCount = p.ErrorCount, WarningCount = p.WarningCount,
                 BomCount = p.Bom.Count, OpcCount = p.Opc.Count, DocCount = p.Docs.Count, MdlCount = p.Mdl.Count, IngestedAt = DateTimeOffset.Now, StatusAt = DateTimeOffset.Now,
                 StatusNote = rejected ? "رد شد: " + p.ErrorCount.ToString(CultureInfo.InvariantCulture) + " خطا" : "دریافت شد؛ منتظر ایجنت مهندسی",
@@ -195,11 +308,12 @@ namespace Services.NasbNiro.EngInbox
             if (!rejected) AddLines(pkg, p);
             _uow.Set<EngInboxPackage>().Add(pkg);
             await _uow.SaveChangesAsync(ct);
+            Failures.TryRemove(h.Id + "|" + sig, out _);
 
             if (!rejected)
             {
                 // a higher version replaces the lower ones of the same key that are still on their way
-                var lower = await _uow.Set<EngInboxPackage>().Where(x => !x.Deleted && x.Id != pkg.Id && x.Kind == kind && x.PlatformCode == platform && x.Standard == standard && x.ContractCode == contract && x.ProjectCode == project
+                var lower = await _uow.Set<EngInboxPackage>().Where(x => !x.Deleted && x.Id != pkg.Id && x.Kind == kind && x.PlatformCode == pkg.PlatformCode && x.Standard == pkg.Standard && x.ContractCode == pkg.ContractCode && x.ProjectCode == pkg.ProjectCode
                     && x.PackageVersion < version && (x.Status == EngInboxStatus.Ingested || x.Status == EngInboxStatus.ApplyBlocked || x.Status == EngInboxStatus.Applied)).ToListAsync(ct);
                 foreach (EngInboxPackage old in lower)
                 {
@@ -211,13 +325,10 @@ namespace Services.NasbNiro.EngInbox
             }
 
             string note = rejected ? RejectionText(pkg, p.Findings) : "بستهٔ شمارهٔ " + pkg.Id.ToString(CultureInfo.InvariantCulture) + " دریافت شد: " + EngInboxText.Name(pkg) + ".";
-            string stored = await _source.MarkAsync(h, rejected ? EngSourceOutcome.Rejected : EngSourceOutcome.Ingested, note, ct);
-            if (!string.IsNullOrEmpty(stored))
-            {
-                pkg.StoredPath = stored;
-                Stamp(pkg, false);
-                await _uow.SaveChangesAsync(ct);
-            }
+            string stored = await TryMoveAsync(h, rejected ? EngSourceOutcome.Rejected : EngSourceOutcome.Ingested, note, pkg, ct);
+            if (!string.IsNullOrEmpty(stored)) pkg.StoredPath = Fit(stored, 500);
+            Stamp(pkg, false);
+            await _uow.SaveChangesAsync(ct);
             return rejected ? EngSourceOutcome.Rejected : EngSourceOutcome.Ingested;
         }
 
@@ -298,7 +409,7 @@ namespace Services.NasbNiro.EngInbox
             d.Id = p.Id; d.SourceName = p.SourceName; d.Kind = p.Kind; d.PlatformCode = p.PlatformCode; d.Standard = p.Standard; d.ContractCode = p.ContractCode; d.ProjectCode = p.ProjectCode; d.PackageVersion = p.PackageVersion;
             d.Title = p.Title; d.PreparedByText = p.PreparedByText; d.Status = p.Status; d.StatusNote = p.StatusNote; d.RejectCode = p.RejectCode; d.ErrorCount = p.ErrorCount; d.WarningCount = p.WarningCount;
             d.BomCount = p.BomCount; d.OpcCount = p.OpcCount; d.DocCount = p.DocCount; d.MdlCount = p.MdlCount; d.IngestedAt = p.IngestedAt; d.StatusAt = p.StatusAt; d.ApplyBlockReason = p.ApplyBlockReason;
-            d.ProductId = p.ProductId; d.BomHeaderId = p.BomHeaderId; d.RoutingId = p.RoutingId; d.LinkedContractId = p.LinkedContractId; d.LinkedWorkOrderId = p.LinkedWorkOrderId; d.DismissReason = p.DismissReason;
+            d.OriginatorUserId = p.OriginatorUserId; d.ProductId = p.ProductId; d.BomHeaderId = p.BomHeaderId; d.RoutingId = p.RoutingId; d.LinkedContractId = p.LinkedContractId; d.LinkedWorkOrderId = p.LinkedWorkOrderId; d.DismissReason = p.DismissReason;
             d.RowVersion = p.RowVersion == null ? null : Convert.ToBase64String(p.RowVersion);
             return d;
         }
@@ -316,6 +427,7 @@ namespace Services.NasbNiro.EngInbox
             };
             foreach (EngInboxStatus st in Enum.GetValues(typeof(EngInboxStatus)).Cast<EngInboxStatus>().OrderBy(x => (int)x))
                 dto.Counts.Add(new EngInboxStatusCountDto { Status = st, Count = counts.Where(c => c.Status == st).Select(c => c.Count).FirstOrDefault() });
+            if (await global::Services.NasbNiro.Agents.Steps.EngInboxApplyStep.IsPausedAsync(_uow, ct)) dto.ApplyPausedReason = "ایجنت مهندسی (یا گام ساخت BOM و OPC) خاموش است؛ بسته‌ها همان‌طور که هستند می‌مانند و با روشن شدن ایجنت پیش می‌روند.";
             dto.CanScan = CanOperate && dto.IsConfigured;
             dto.ScanDisabledReason = !CanOperate ? "اسکن با واحد مهندسی است." : !dto.IsConfigured ? dto.NotConfiguredReason : null;
             return ResponseDtoHelper.Ok(dto);
@@ -359,12 +471,12 @@ namespace Services.NasbNiro.EngInbox
             if (p.BomHeaderId.HasValue)
             {
                 var b = await _uow.Set<PbBomHeader>().AsNoTracking().Where(x => x.Id == p.BomHeaderId.Value).Select(x => new { x.Code, x.Revision, x.Status }).FirstOrDefaultAsync(ct);
-                if (b != null) { d.BomCode = b.Code; d.BomRevision = b.Revision; d.BomStatus = b.Status.ToString(); }
+                if (b != null) { d.BomCode = b.Code; d.BomRevision = b.Revision; d.BomStatus = b.Status.ToString(); d.BomStatusCode = (int)b.Status; }
             }
             if (p.RoutingId.HasValue)
             {
                 var r = await _uow.Set<PbOpcRouting>().AsNoTracking().Where(x => x.Id == p.RoutingId.Value).Select(x => new { x.PartNumber, x.Revision, x.Status }).FirstOrDefaultAsync(ct);
-                if (r != null) { d.RoutingPartNumber = r.PartNumber; d.RoutingRevision = r.Revision; d.RoutingStatus = r.Status.ToString(); }
+                if (r != null) { d.RoutingPartNumber = r.PartNumber; d.RoutingRevision = r.Revision; d.RoutingStatus = r.Status.ToString(); d.RoutingStatusCode = (int)r.Status; }
             }
             return ResponseDtoHelper.Ok(d);
         }
@@ -379,14 +491,12 @@ namespace Services.NasbNiro.EngInbox
             string reason = string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim();
             if (reason == null || reason.Length < 15) return ResponseDtoHelper.BadRequest<EngInboxPackageDto>(EngInboxText.ReasonTooShort);
             if (reason.Length > 1000) reason = reason.Substring(0, 1000);
+            if (string.IsNullOrWhiteSpace(dto.RowVersion)) return ResponseDtoHelper.BadRequest<EngInboxPackageDto>(EngInboxText.RowVersionRequired);
             EngInboxPackage p = await _uow.Set<EngInboxPackage>().FirstOrDefaultAsync(x => x.Id == dto.Id && !x.Deleted, ct);
             if (p == null) return ResponseDtoHelper.NotFound<EngInboxPackageDto>(EngInboxText.NotFound);
             if (p.Status != EngInboxStatus.Rejected && p.Status != EngInboxStatus.ApplyBlocked && p.Status != EngInboxStatus.Ingested) return ResponseDtoHelper.BadRequest<EngInboxPackageDto>(EngInboxText.DismissStatus);
-            if (!string.IsNullOrEmpty(dto.RowVersion))
-            {
-                try { _uow.Entry(p).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
-                catch (FormatException) { return ResponseDtoHelper.BadRequest<EngInboxPackageDto>(AgentText.InvalidData); }
-            }
+            try { _uow.Entry(p).Property(x => x.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion); }
+            catch (FormatException) { return ResponseDtoHelper.BadRequest<EngInboxPackageDto>(AgentText.InvalidData); }
             p.Status = EngInboxStatus.Dismissed; p.DismissedByUserId = _user.UserId; p.DismissReason = reason; p.StatusAt = DateTimeOffset.Now;
             p.StatusNote = "کنار گذاشته شد: " + AgentText.Cut(reason, 200);
             Stamp(p, false);

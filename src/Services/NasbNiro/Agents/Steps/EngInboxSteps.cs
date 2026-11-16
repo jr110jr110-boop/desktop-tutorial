@@ -97,8 +97,19 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentStepKind Kind => AgentStepKind.Agent;
         public override string FallbackRoles => EngInboxRoles.Operators;
 
+        /// <summary>True when the apply step or the engineering agent seat is switched off.</summary>
+        public static async Task<bool> IsPausedAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            bool stepOff = await uow.Set<AgentStepSetting>().AsNoTracking().AnyAsync(x => !x.Deleted && x.StepCode == EngInboxCodes.Apply && !x.Enabled, ct);
+            if (stepOff) return true;
+            HashSet<string> seatsOff = await AgentSettings.DisabledSeatsAsync(uow, ct);
+            return seatsOff.Contains(AgentCodes.Eng);
+        }
+
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            // a switched-off step or seat is NOT handed to a person (no human can build a BOM from a package): the packages wait as they are and the page says why (B7)
+            if (await IsPausedAsync(uow, ct)) return new List<AgentWorkItem>();
             DateTimeOffset due = DateTimeOffset.Now - RetryAfter;
             var rows = await uow.Set<EngInboxPackage>().AsNoTracking()
                 .Where(p => !p.Deleted && (p.Status == EngInboxStatus.Ingested || (p.Status == EngInboxStatus.ApplyBlocked && (p.LastApplyAt == null || p.LastApplyAt < due))))
