@@ -210,8 +210,10 @@ namespace Services.NasbNiro.Finance
             Alert(d.PcOverloadedResources > 0, "warning", $"{d.PcOverloadedResources} منبع بیش‌تخصیص‌یافته (بار طرح‌های تاییدشده بیش از ظرفیت) باز است", "/project-control/resources?tab=overloads");
             // engineering control (ENG-E1): incomplete platforms and the open / overdue document debts (read directly, so the constructor stays as it is)
             d.EnPlatformsTotal = await _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().AsNoTracking().CountAsync(p => !p.Deleted && p.IsActive, ct);
-            int enComplete = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDossierStatus.Complete
-                && _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().Any(p => p.Id == x.ProductId && p.IsActive && !p.Deleted), ct);
+            // a product is complete only when it has a dossier and every dossier of it (one per standard) is Complete
+            int enComplete = await _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().AsNoTracking().CountAsync(p => !p.Deleted && p.IsActive
+                && _uow.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().Any(x => x.ProductId == p.Id && !x.Deleted)
+                && !_uow.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().Any(x => x.ProductId == p.Id && !x.Deleted && x.Status != Entities.Model.NasbNiro.Engineering.EnDossierStatus.Complete), ct);
             d.EnPlatformsIncomplete = Math.Max(0, d.EnPlatformsTotal - enComplete);
             d.EnOpenDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open, ct);
             d.EnOverdueDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open && x.DueAt < DateTimeOffset.Now, ct);

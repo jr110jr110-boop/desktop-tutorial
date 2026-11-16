@@ -45,10 +45,11 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
             {
                 b.ToTable("EnPlatformDossiers");
                 b.Property(x => x.EditorUserIds).HasMaxLength(400);
-                b.Property(x => x.ReferenceCode).HasMaxLength(60);
+                b.Property(x => x.ReferenceCode).HasMaxLength(60).IsRequired();
+                b.Property(x => x.StandardBasis).HasMaxLength(500);
                 b.Property(x => x.ConfirmedHash).HasMaxLength(64);
                 b.Property(x => x.Note).HasMaxLength(1000);
-                b.HasIndex(x => x.ProductId).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.ProductId, x.ReferenceCode }).IsUnique().HasFilter(NotDeleted);
                 b.HasIndex(x => x.Status);
                 b.HasOne<PbProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<EnReferenceList>().WithMany().HasForeignKey(x => x.ReferenceListId).OnDelete(DeleteBehavior.Restrict);
@@ -74,6 +75,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.CustomerRequirementNote).HasMaxLength(2000);
                 b.Property(x => x.ChangeNote).HasMaxLength(1000);
                 b.Property(x => x.ReferenceCode).HasMaxLength(60);
+                b.Property(x => x.StandardEvidence).HasMaxLength(500);
                 b.Property(x => x.ProposedChangeNote).HasMaxLength(1000);
                 b.Property(x => x.ProposalBasis).HasMaxLength(2000);
                 b.Property(x => x.EditorUserIds).HasMaxLength(400);

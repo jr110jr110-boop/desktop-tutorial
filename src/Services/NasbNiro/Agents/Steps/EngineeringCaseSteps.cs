@@ -66,6 +66,24 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/cases", Title = "باز کردن پروندهٔ مهندسی " + item.TargetNumber };
     }
 
+    /// <summary>ENG.CASE.STANDARD (Input): the standard of a project is set by the client in its data sheet; nobody in the company chooses it and the agent never assumes it. The task stays open while the case has none.</summary>
+    internal sealed class EnCaseStandardStep : EnCaseStep
+    {
+        public override string Code => "ENG.CASE.STANDARD";
+        public override string Title => "ثبت استاندارد پروژه از دیتاشیت کارفرما";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+        public override string FallbackRoles => EnRoles.StandardSetters;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (c.ReferenceCode == null || c.ReferenceCode == "") && c.Status != EnCaseStatus.ClosedLost && c.Status != EnCaseStatus.Cancelled && c.Status != EnCaseStatus.Released)
+                .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
+            return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"استاندارد پروژهٔ {r.Number} را از دیتاشیت کارفرما ثبت کنید.", EnRoles.StandardSetters)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.StandardSetters, Link = CaseLink(item.TargetId), Title = "ثبت استاندارد پروژه " + item.TargetNumber };
+    }
+
     /// <summary>ENG.CASE.PROPOSE (Agent): proposes platform (one product of the bank matches the equipment) or new design (none matches) with the evidence; several matches are left to an engineer. No model: a rule.</summary>
     internal sealed class EnCaseProposeStep : EnCaseStep
     {

@@ -31,7 +31,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> SummaryAsync(CancellationToken ct) => Ok(await _service.GetSummaryAsync(ct));
 
         [HttpGet("{productId:int}")]
-        public async Task<IActionResult> DossierAsync(int productId, CancellationToken ct) => Ok(await _service.GetDossierAsync(productId, ct));
+        public async Task<IActionResult> DossierAsync(int productId, [FromQuery] string code, CancellationToken ct) => Ok(await _service.GetDossierAsync(productId, code, ct));
 
         [HttpPost("action")]
         public async Task<IActionResult> ActionAsync([FromBody] EnDossierActionDto dto, CancellationToken ct) => Ok(await _service.DossierActionAsync(dto, ct));

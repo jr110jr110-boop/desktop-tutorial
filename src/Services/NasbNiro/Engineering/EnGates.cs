@@ -28,7 +28,7 @@ namespace Services.NasbNiro.Engineering
         public static bool Open(EnCaseStatus s) => s != EnCaseStatus.ClosedLost && s != EnCaseStatus.Cancelled;
 
         public static string ClassHash(EnCase c) =>
-            EnHash.Of(string.Join("|", EnText.Num((int)c.ProposedClassification), c.ProposedProductId?.ToString() ?? "-", c.ProposedWithChanges ? "1" : "0", EnHash.Norm(c.ProposedChangeNote), c.InquiryId?.ToString() ?? "-", c.ContractId?.ToString() ?? "-"));
+            EnHash.Of(string.Join("|", EnText.Num((int)c.ProposedClassification), c.ProposedProductId?.ToString() ?? "-", c.ProposedWithChanges ? "1" : "0", EnHash.Norm(c.ProposedChangeNote), c.InquiryId?.ToString() ?? "-", c.ContractId?.ToString() ?? "-", EnHash.Norm(c.ReferenceCode), EnHash.Norm(c.StandardEvidence)));
 
         /// <summary>The documents of the tender package as they are now (id, file, revision, title): any addition, void or change gives another hash.</summary>
         public static async Task<string> TenderHashAsync(IUnitOfWork uow, int packageId, CancellationToken ct)

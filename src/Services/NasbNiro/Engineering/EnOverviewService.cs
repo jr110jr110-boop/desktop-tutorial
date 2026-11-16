@@ -47,7 +47,8 @@ namespace Services.NasbNiro.Engineering
             var missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(x => x.Required && x.State == EnLineState.Missing && !x.Dossier.Deleted && _uow.Set<PbProduct>().Any(p => p.Id == x.Dossier.ProductId && p.IsActive && !p.Deleted))
                 .GroupBy(x => x.Dossier.Status).Select(g => new { Key = g.Key, Count = g.Count() }).ToListAsync(ct);
             o.PlatformsByDossierStatus = dossiers.Select(g => new EnPlatformCountDto { Status = (int)g.Key, StatusText = EnText.Dossier(g.Key), Count = g.Count, MissingRequired = missing.Where(m => m.Key == g.Key).Sum(m => m.Count) }).ToList();
-            int complete = dossiers.Where(g => g.Key == EnDossierStatus.Complete).Sum(g => g.Count);
+            int complete = await _uow.Set<PbProduct>().AsNoTracking().CountAsync(p => !p.Deleted && p.IsActive && _uow.Set<EnPlatformDossier>().Any(x => x.ProductId == p.Id && !x.Deleted)
+                && !_uow.Set<EnPlatformDossier>().Any(x => x.ProductId == p.Id && !x.Deleted && x.Status != EnDossierStatus.Complete), ct);   // a product is complete when every dossier of it (one per standard) is Complete
             o.PlatformsIncomplete = Math.Max(0, o.PlatformsTotal - complete);
 
             o.OpenClarifications = await _uow.Set<EnClarification>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == EnClarStatus.Draft || x.Status == EnClarStatus.WithCommercial || x.Status == EnClarStatus.SentToClient), ct);

@@ -46,7 +46,7 @@ namespace Services.NasbNiro.Engineering
             List<EnSourceLine> result = new List<EnSourceLine>();
             if (c.Classification == EnClassification.Platform && c.ProductId.HasValue)
             {
-                EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == c.ProductId.Value && !x.Deleted, ct);
+                EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == c.ProductId.Value && x.ReferenceCode == c.ReferenceCode && !x.Deleted, ct);
                 if (d == null) return result;
                 foreach (EnPlatformDocument x in d.Documents.OrderBy(x => x.Seq).ThenBy(x => x.Id))
                     result.Add(new EnSourceLine { Seq = x.Seq, Type = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, State = x.State, DocumentId = x.DocumentId, Revision = x.Revision, PlatformDocumentId = x.Id });
@@ -172,7 +172,7 @@ namespace Services.NasbNiro.Engineering
         {
             LockState s = new LockState { Keys = EnHandoverRules.MissingKeys(h.Lines) };
             s.Missing = h.Lines.Count(l => l.Required && l.State == EnLineState.Missing);
-            s.DossierUnconfirmed = c.Classification == EnClassification.Platform && !(c.ProductId.HasValue && await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, ct));
+            s.DossierUnconfirmed = c.Classification == EnClassification.Platform && !(c.ProductId.HasValue && await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct));
             return s;
         }
 
@@ -493,6 +493,7 @@ namespace Services.NasbNiro.Engineering
                 return EnText.Bad<EnHandoverDto>("برای این پرونده تحویل باز یا ابلاغ‌شده وجود دارد.");
             Entities.Model.NasbNiro.ProjectControl.PcProjectCharter charter = await EnCaseRules.CharterAsync(_uow, c.ContractId.Value, ct);
             if (charter != null && !(c.CharterReviewOutcome == EnCharterOutcome.Confirmed && c.CharterHash == EnCaseRules.CharterHash(charter))) return EnText.Bad<EnHandoverDto>("منشور پروژه هنوز توسط مهندسی تایید نشده است.");
+            if (string.IsNullOrWhiteSpace(c.ReferenceCode)) return EnText.Bad<EnHandoverDto>("استاندارد پروژه از دیتاشیت کارفرما ثبت نشده است؛ تحویل مدارک بدون آن ساخته نمی‌شود.");
             if (c.Classification == EnClassification.New && await EnReferenceRules.CurrentAsync(_uow, false, ct, c.ReferenceCode) == null) return EnText.Bad<EnHandoverDto>("فهرست مدارک مرجع تاییدشده‌ای برای این پرونده (" + (c.ReferenceCode ?? "بدون استاندارد مرجع") + ") وجود ندارد.");
             int round = (await _uow.Set<EnHandover>().Where(x => x.CaseId == c.Id).Select(x => (int?)x.Round).MaxAsync(ct) ?? 0) + 1;
             EnHandover h = new EnHandover { CaseId = c.Id, ContractId = c.ContractId.Value, Round = round, Status = EnHandoverStatus.Draft, PreparedByUserId = Me, EditorUserIds = w.Seat ? null : EnEditors.With(null, Me), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };

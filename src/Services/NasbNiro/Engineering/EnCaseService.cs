@@ -51,12 +51,12 @@ namespace Services.NasbNiro.Engineering
         private sealed class Who
         {
             public int Me;
-            public bool Writer, Manager, Ceo, Seat;
+            public bool Writer, Manager, Ceo, Seat, Std;
         }
 
         private async Task<Who> WhoAsync(CancellationToken ct) => new Who
         {
-            Me = Me, Writer = _user.IsInRole(EnRoles.Writers), Manager = _user.IsInRole(EnRoles.Manager), Ceo = _user.IsInRole(EnRoles.Ceo), Seat = await EnActors.IsSeatAsync(_uow, Me, ct),
+            Me = Me, Writer = _user.IsInRole(EnRoles.Writers), Manager = _user.IsInRole(EnRoles.Manager), Ceo = _user.IsInRole(EnRoles.Ceo), Seat = await EnActors.IsSeatAsync(_uow, Me, ct), Std = _user.IsInRole(EnRoles.StandardSetters),
         };
 
         // ---------------------------------------------------------------- the rules (one predicate for the button and the service)
@@ -69,9 +69,16 @@ namespace Services.NasbNiro.Engineering
         private static string ChangeReason(EnCase c, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingEngConfirm ? "فقط پروندهٔ منتظر تایید مدیر مهندسی تغییر می‌کند." : null;
 
+        private const string StandardMissingText = "استاندارد پروژه هنوز از دیتاشیت کارفرما ثبت نشده است؛ ابتدا استاندارد و مبنای آن (شمارهٔ دیتاشیت و بند) ثبت شود.";
+
+        private static string StandardReason(EnCase c, Who w) =>
+            !w.Std ? EnText.NotAllowed : w.Seat ? EnText.AiNever : !EnCaseRules.Open(c.Status) ? "پروندهٔ بسته یا لغوشده استاندارد نمی‌گیرد."
+            : c.Status >= EnCaseStatus.HandedOver ? "پس از تحویل مدارک به PMO استاندارد تغییر نمی‌کند؛ ابتدا تحویل برگردانده یا باطل شود." : null;
+
         private static string ConfirmReason(EnCase c, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingEngConfirm ? "فقط پروندهٔ منتظر تایید مدیر مهندسی تایید می‌شود."
             : !c.ProposedAt.HasValue ? "پیشنهاد نوع پرونده هنوز ثبت نشده است."
+            : string.IsNullOrWhiteSpace(c.ReferenceCode) ? StandardMissingText
             : EnEditors.Touched(0, c.EditorUserIds, w.Me) || c.ProposedByUserId == w.Me ? EnText.SameUser + " مدیری که پیشنهاد را ساخته یا تغییر داده تایید نمی‌کند." : null;
 
         private static string ReturnReasonOf(EnCase c, Who w) =>
@@ -82,6 +89,7 @@ namespace Services.NasbNiro.Engineering
         private static string ApproveReason(EnCase c, Who w) =>
             !w.Ceo ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingCeoApproval ? "فقط پروندهٔ منتظر تصویب مدیرعامل تصویب می‌شود."
             : EnEditors.Touched(0, c.EditorUserIds, w.Me) || c.ProposedByUserId == w.Me || c.EngConfirmedByUserId == w.Me ? EnText.SameUser
+            : string.IsNullOrWhiteSpace(c.ReferenceCode) ? StandardMissingText
             : c.ClassificationHash != EnCaseRules.ClassHash(c) ? "محتوای پیشنهاد پس از تایید مدیر مهندسی تغییر کرده است؛ پرونده را برگردانید." : null;
 
         private static string ReclassifyReason(EnCase c, Who w) =>
@@ -148,14 +156,14 @@ namespace Services.NasbNiro.Engineering
                 int missing = 0; bool incomplete = false;
                 if (platform)
                 {
-                    incomplete = !await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, ct);
-                    missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
+                    incomplete = !await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
+                    missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
                 }
                 string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
-                string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w);
+                string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
-                    Id = c.Id, ReferenceCode = c.ReferenceCode, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
+                    Id = c.Id, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardAttachmentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
                     CustomerName = inq != null && customers.TryGetValue(inq.CustomerId, out string cn) ? cn : con?.Employer, CustomerRequirementNote = c.CustomerRequirementNote, Status = (int)c.Status, StatusText = EnText.Case(c.Status),
                     Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification), ProductId = c.ProductId, ProductCode = c.ProductId.HasValue && products.TryGetValue(c.ProductId.Value, out string pc) ? pc : null,
                     PlatformWithChanges = c.PlatformWithChanges, ChangeNote = c.ChangeNote,
@@ -221,7 +229,7 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- actions
 
-        private static readonly string[] Actions = { "open", "propose", "change", "confirm", "return", "approve", "reclassify", "save-concept", "draft-tender", "revalidate-tender", "release-tender", "award", "close", "cancel", "charter-confirm", "charter-return" };
+        private static readonly string[] Actions = { "open", "propose", "change", "confirm", "return", "approve", "reclassify", "save-concept", "draft-tender", "revalidate-tender", "release-tender", "award", "close", "cancel", "charter-confirm", "charter-return", "set-standard" };
 
         private async Task<string> ProductProblemAsync(int? productId, EnClassification kind)
         {
@@ -283,19 +291,30 @@ namespace Services.NasbNiro.Engineering
                 case "confirm":
                     why = ConfirmReason(c, w);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
-                    if (c.ProposedClassification == EnClassification.New)
-                    {
-                        // the standard basis of a new design is a human choice when more than one Code is approved (API 611 and API 612); no rule decides between them
-                        List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
-                        string pick = EnText.Clean(dto.ReferenceCode);
-                        if (codes.Count > 1 && string.IsNullOrEmpty(pick)) return EnText.Bad<EnCaseDto>("برای طرح جدید باید استاندارد مرجع (فهرست مدارک) انتخاب شود؛ کدهای تاییدشده: " + string.Join("، ", codes) + ".");
-                        if (!string.IsNullOrEmpty(pick) && !codes.Contains(pick)) return EnText.Bad<EnCaseDto>("برای استاندارد مرجع انتخاب‌شده فهرست تاییدشده‌ای وجود ندارد.");
-                        c.ReferenceCode = codes.Count == 1 ? codes[0] : (string.IsNullOrEmpty(pick) ? null : pick);
-                    }
-                    else c.ReferenceCode = null;
                     c.ClassificationHash = EnCaseRules.ClassHash(c); c.EngConfirmedByUserId = Me; c.EngConfirmedAt = now; c.Status = EnCaseStatus.AwaitingCeoApproval;
                     EnEvents.Add(_uow, c, "eng-confirmed", Me, null);
                     break;
+                case "set-standard":
+                {
+                    why = StandardReason(c, w);
+                    string code = EnDossierBuilder.NormCode(dto.ReferenceCode), evidence = EnText.Clean(dto.StandardEvidence);
+                    if (why == null) why = code == null ? "استاندارد پروژه را از دیتاشیت کارفرما بنویسید." : EnText.Over(code, 40, "کد استاندارد") ?? EnText.ReasonShort(evidence, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(evidence, 500, "مبنای استاندارد");
+                    bool change = c.ReferenceCode != null && c.ReferenceCode != code;
+                    if (why == null && change) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد");
+                    if (why == null && dto.StandardAttachmentId.HasValue) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
+                    if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    c.ReferenceCode = code; c.StandardEvidence = evidence; c.StandardAttachmentId = dto.StandardAttachmentId;
+                    if (change && c.Status != EnCaseStatus.Classifying)
+                    {
+                        // a changed standard after the manager's confirmation or the CEO's approval is a new decision round (the approval bound to the old content)
+                        bool decided = c.Status != EnCaseStatus.AwaitingEngConfirm;
+                        c.Status = EnCaseStatus.AwaitingEngConfirm; c.EngConfirmedByUserId = null; c.EngConfirmedAt = null; c.CeoApprovedByUserId = null; c.CeoApprovedAt = null; c.ClassificationHash = null;
+                        c.TenderReleasedByUserId = null; c.TenderReleasedAt = null; c.TenderHash = null; c.ReturnReason = EnText.Cut("استاندارد پروژه تغییر کرد: " + note, 1000);
+                        if (decided) { c.ProposedClassification = c.Classification == EnClassification.None ? c.ProposedClassification : c.Classification; if (c.Classification != EnClassification.None) { c.ProposedProductId = c.ProductId; c.ProposedWithChanges = c.PlatformWithChanges; c.ProposedChangeNote = c.ChangeNote; } }
+                    }
+                    EnEvents.Add(_uow, c, change ? "standard-changed" : "standard-set", Me, code + " — " + evidence + (change ? " — " + note : string.Empty));
+                    break;
+                }
                 case "return":
                     why = ReturnReasonOf(c, w) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
@@ -317,6 +336,8 @@ namespace Services.NasbNiro.Engineering
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.Classification = c.ProposedClassification; c.ProductId = c.ProposedProductId; c.PlatformWithChanges = c.ProposedWithChanges; c.ChangeNote = c.ProposedChangeNote;
                     c.CeoApprovedByUserId = Me; c.CeoApprovedAt = now; c.ReturnReason = null;
+                    // a platform ordered under a standard gets its own document set (P, S): the lines of the Approved list of S, files reused from the other dossiers of the product
+                    if (c.Classification == EnClassification.Platform && c.ProductId.HasValue) await EnDossierBuilder.EnsureAsync(_uow, c.ProductId.Value, c.ReferenceCode, c.StandardEvidence, Me, now, ct);
                     bool inquiryOpen = c.InquiryId.HasValue && await _uow.Set<SlInquiry>().AsNoTracking().AnyAsync(i => i.Id == c.InquiryId.Value && i.Status != SlInquiryStatus.Won, ct);
                     c.Status = inquiryOpen ? EnCaseStatus.TenderPreparation : EnCaseStatus.Awarded;
                     EnEvents.Add(_uow, c, "ceo-approved", Me, EnText.Classification(c.Classification));
@@ -483,7 +504,7 @@ namespace Services.NasbNiro.Engineering
             List<string> missing = new List<string>();
             if (c.Classification == EnClassification.Platform && c.ProductId.HasValue)
             {
-                List<EnPlatformDocument> lines = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(d => d.Dossier.ProductId == c.ProductId.Value && !d.Dossier.Deleted && d.TenderStage).OrderBy(d => d.Seq).ToListAsync(ct);
+                List<EnPlatformDocument> lines = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.TenderStage).OrderBy(d => d.Seq).ToListAsync(ct);
                 List<Guid?> present = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).Select(d => d.DocumentId).ToListAsync(ct);
                 foreach (EnPlatformDocument l in lines)
                 {

@@ -108,8 +108,16 @@ namespace MsTests
             return id;
         }
 
-        public static Task<ResponseDto<EnDossierDto>> Dossier(AppHost host, ClaimsPrincipal who, int productId, string action, string note = null, int? lineId = null) =>
-            host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = action, Note = note, LineId = lineId }, Ct));
+        /// <summary>The standard code the tests use for a project unless a test says otherwise (it is the Code of <see cref="ApprovedList"/>).</summary>
+        public const string Std = "VDDR-TEST";
+
+        /// <summary>A dossier action. Before an "assess" of a product that has no dossier of the standard, the engineers record the standard of the original data sheet (a human fact), as the real flow needs.</summary>
+        public static async Task<ResponseDto<EnDossierDto>> Dossier(AppHost host, ClaimsPrincipal who, int productId, string action, string note = null, int? lineId = null, string code = Std)
+        {
+            if (action == "assess" && !host.Read(u => u.Set<EnPlatformDossier>().Any(d => d.ProductId == productId && d.ReferenceCode == code && !d.Deleted)))
+                Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)));
+            return await host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = action, Note = note, LineId = lineId, ReferenceCode = code }, Ct));
+        }
 
         public static Task<ResponseDto<EnDossierDto>> Supply(AppHost host, ClaimsPrincipal who, int lineId, Guid? file, bool na = false, string reason = null) =>
             host.As(who, p => p.GetRequiredService<IEnPlatformService>().SupplyLineAsync(new EnSupplyLineDto { LineId = lineId, DocumentId = file, NotApplicable = na, NotApplicableReason = reason, Revision = "A" }, Ct));
@@ -159,11 +167,15 @@ namespace MsTests
 
         public static Task<ResponseDto<EnCaseDto>> GetCase(AppHost host, ClaimsPrincipal who, int id) => host.As(who, p => p.GetRequiredService<IEnCaseService>().GetCaseAsync(id, Ct));
 
+        public static Task<ResponseDto<EnCaseDto>> SetStandard(AppHost host, ClaimsPrincipal who, int caseId, string code, string evidence = "دیتاشیت کارفرما، بند ۲٫۱", string note = null) =>
+            CaseAct(host, who, caseId, "set-standard", d => { d.ReferenceCode = code; d.StandardEvidence = evidence; d.Note = note; });
+
         /// <summary>An inquiry case that the engineer proposed, the manager confirmed and the CEO approved (status TenderPreparation for a bidding inquiry).</summary>
-        public static async Task<EnCaseDto> ApprovedCase(AppHost host, int inquiry, bool platform, int? productId = null)
+        public static async Task<EnCaseDto> ApprovedCase(AppHost host, int inquiry, bool platform, int? productId = null, string code = Std)
         {
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = platform ? 1 : 2; d.ProductId = productId; d.Basis = "مبنای آزمون برای تعیین نوع پرونده"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, code));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             return Ok(await CaseAct(host, Ceo, c.Id, "approve"));
         }

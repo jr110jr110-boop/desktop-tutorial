@@ -57,6 +57,7 @@ namespace MsTests
             Refused(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "کوتاه"; }), "مبنای");
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "مبنای آزمون برای پلتفرم"; }));
             Assert.AreEqual((int)EnCaseStatus.AwaitingEngConfirm, c.Status);
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-TEST"));
             Refused(await CaseAct(host, Eng1, c.Id, "confirm"));                                  // an engineer is not a manager
             var seatMgr = await SeatAsync(host, "AG-ENG", "ENGINEERING");
             Refused(await CaseAct(host, seatMgr, c.Id, "confirm"), "انسان");
@@ -90,6 +91,7 @@ namespace MsTests
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-TEST"));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             Assert.AreEqual((int)EnCaseStatus.Awarded, c.Status);
@@ -208,6 +210,7 @@ namespace MsTests
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست" ; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-TEST"));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             Refused(await CaseAct(host, Mgr1, c.Id, "charter-confirm"), "منشور پروژه هنوز ثبت نشده");

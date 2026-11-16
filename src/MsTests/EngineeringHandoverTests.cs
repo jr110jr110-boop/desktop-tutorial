@@ -57,6 +57,7 @@ namespace MsTests
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-H"));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             return (contract, c.Id);
@@ -236,6 +237,7 @@ namespace MsTests
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-P"));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = c.Id));
@@ -287,17 +289,17 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Engineering_E1_Catalogue_Has_Thirty_Two_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
+        public void The_Engineering_E1_Catalogue_Has_Thirty_Three_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(32, steps.Count);
+            Assert.AreEqual(33, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
-            Assert.AreEqual(14, steps.Count(s => s.Station == 1));
+            Assert.AreEqual(15, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
             Assert.AreEqual(17, steps.Count(s => s.Station == 5));
             Assert.AreEqual(11, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(32, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(33, steps.Select(s => s.Code).Distinct().Count());
         }
 
         [TestMethod]

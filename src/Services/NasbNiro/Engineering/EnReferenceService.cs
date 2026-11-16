@@ -25,13 +25,7 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The current list: the approved list with the latest approval.</summary>
         public static async Task<EnReferenceList> CurrentAsync(IUnitOfWork uow, bool track, CancellationToken ct, string code = null)
         {
-            if (string.IsNullOrWhiteSpace(code))
-            {
-                // no Code given: only an unambiguous basis answers (exactly one approved Code); with several Codes a human must choose
-                List<string> codes = await ApprovedCodesAsync(uow, ct);
-                if (codes.Count != 1) return null;
-                code = codes[0];
-            }
+            if (string.IsNullOrWhiteSpace(code)) return null;   // the standard is set by the client, never assumed (not even when only one list is approved)
             IQueryable<EnReferenceList> q = uow.Set<EnReferenceList>();
             if (!track) q = q.AsNoTracking();
             return await q.Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code).OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).FirstOrDefaultAsync(ct);
@@ -135,6 +129,12 @@ namespace Services.NasbNiro.Engineering
         public async Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(string code, CancellationToken ct)
         {
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                // a screen helper only (viewing): the one approved list when there is exactly one; the services never assume it
+                List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
+                if (codes.Count == 1) code = codes[0];
+            }
             EnReferenceList l = await EnReferenceRules.CurrentAsync(_uow, false, ct, code);
             if (l == null) return EnText.NotFound<EnReferenceListDto>("فهرست مدارک مرجع تاییدشده‌ای وجود ندارد؛ ابتدا فهرست را تهیه و تایید کنید.");
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnReferenceList> { l }, true, ct))[0]);

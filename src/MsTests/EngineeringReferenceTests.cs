@@ -177,7 +177,7 @@ namespace MsTests
             Ok(await host.As(Eng2, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(edit, Ct)));
             Ok(await RefAction(host, Eng2, draft.Id, "submit"));
             Ok(await RefAction(host, Mgr1, draft.Id, "approve"));
-            d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().GetDossierAsync(product, Ct)));
+            d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().GetDossierAsync(product, Std, Ct)));
             Assert.IsTrue(d.Stale);
             d = Ok(await Dossier(host, Eng1, product, "assess"));
             Assert.IsFalse(d.Stale);
@@ -189,7 +189,7 @@ namespace MsTests
 
     internal static class EnPlatformRules2
     {
-        public static Task<bool> IsComplete(IServiceProvider p, int productId) =>
-            Services.NasbNiro.Engineering.EnPlatformRules.IsCompleteAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), productId, System.Threading.CancellationToken.None);
+        public static Task<bool> IsComplete(IServiceProvider p, int productId, string code = "VDDR-TEST") =>
+            Services.NasbNiro.Engineering.EnPlatformRules.IsCompleteAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), productId, code, System.Threading.CancellationToken.None);
     }
 }

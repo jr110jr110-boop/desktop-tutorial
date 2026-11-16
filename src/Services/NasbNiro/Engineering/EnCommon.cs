@@ -33,6 +33,9 @@ namespace Services.NasbNiro.Engineering
         public const string Writers = "ENGINEERING,ENGINEER";
 
         public const string Ceo = "CEO";
+
+        /// <summary>Who records the standard of a project from the client data sheet: sales, commercial and engineering (nobody chooses it; it is the client's).</summary>
+        public const string StandardSetters = "SALES,COMMERCIAL,ENGINEERING,ENGINEER";
         public const string Commercial = "SALES,COMMERCIAL";
         public const string Pmo = "PMO";
         public const string PmoSide = "PMO,PROJECTMANAGER";

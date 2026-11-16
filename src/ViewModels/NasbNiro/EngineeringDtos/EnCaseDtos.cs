@@ -114,6 +114,13 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string CharterReviewBlockedReason { get; set; }
         public bool CanCancel { get; set; }
         public string CancelBlockedReason { get; set; }
+
+        /// <summary>The standard of the project, set by the client in its data sheet: ReferenceCode (the Code of the reference list), the evidence (data sheet number and clause) and an optional attachment.</summary>
+        public string StandardEvidence { get; set; }
+        public Guid? StandardAttachmentId { get; set; }
+        public bool StandardMissing { get; set; }
+        public bool CanSetStandard { get; set; }
+        public string SetStandardBlockedReason { get; set; }
     }
 
     /// <summary>Action: open, propose, change, confirm, return, approve, reclassify, save-concept, draft-tender, revalidate-tender, release-tender, award, close, cancel, charter-confirm, charter-return.</summary>
@@ -133,8 +140,12 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Note { get; set; }
         public string ConceptNote { get; set; }
 
-        /// <summary>At the confirm of a New design: the Code of the reference list (the standard basis); required when more than one Code is approved.</summary>
+        /// <summary>For set-standard: the standard of the project from the client data sheet (any code is accepted; trimmed, upper-cased, at most 40 characters).</summary>
         public string ReferenceCode { get; set; }
+
+        /// <summary>For set-standard: the data sheet number and clause the standard is known from (at least 5 characters), and an optional uploaded attachment of the data sheet.</summary>
+        public string StandardEvidence { get; set; }
+        public Guid? StandardAttachmentId { get; set; }
         public string RowVersion { get; set; }
     }
 

@@ -96,6 +96,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>The Code of the reference list (the standard basis, e.g. API 611 or API 612) this platform is assessed against; chosen by the engineering manager when more than one Code is approved.</summary>
         public string ReferenceCode { get; set; }
+
+        /// <summary>Where the standard of this dossier is known from (the data sheet of the project the platform was built for, or the client data sheet of the case that created it).</summary>
+        public string StandardBasis { get; set; }
         public int ReferenceRevision { get; set; }
         public EnDossierStatus Status { get; set; }
         public DateTimeOffset? AssessedAt { get; set; }
@@ -165,6 +168,12 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>The Code of the reference list a New-design handover is built from; set by the manager at the classification confirm.</summary>
         public string ReferenceCode { get; set; }
+
+        /// <summary>Where the standard of the project is known from: the data sheet number and clause of the client (the client sets the standard; nobody in the company chooses it).</summary>
+        public string StandardEvidence { get; set; }
+
+        /// <summary>Optional attachment (uploaded document) of the client data sheet.</summary>
+        public Guid? StandardAttachmentId { get; set; }
         public string ChangeNote { get; set; }
 
         public EnClassification ProposedClassification { get; set; }

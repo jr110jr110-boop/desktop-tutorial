@@ -18,6 +18,13 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string ProductCode { get; set; }
         public string ProductTitle { get; set; }
         public int? DossierId { get; set; }
+
+        /// <summary>The standard of the dossier (a platform has one dossier per standard); empty on the virtual row of a product that has no dossier yet.</summary>
+        public string ReferenceCode { get; set; }
+        public string StandardBasis { get; set; }
+
+        /// <summary>The product has no dossier: the engineers must record the standard of the data sheet it was built for (step ENG.PLATFORM.STANDARD).</summary>
+        public bool NativeStandardMissing { get; set; }
         public int Status { get; set; }
         public string StatusText { get; set; }
         public int RequiredCount { get; set; }
@@ -54,9 +61,13 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     {
         public int Id { get; set; }
         public string ReferenceCode { get; set; }
-        public bool CanAssign { get; set; }
-        public string AssignBlockedReason { get; set; }
-        public List<string> ApprovedCodes { get; set; }
+        public string StandardBasis { get; set; }
+
+        /// <summary>The other dossiers of the same product (one per standard).</summary>
+        public List<EnDossierRefDto> OtherDossiers { get; set; } = new List<EnDossierRefDto>();
+        public bool NativeStandardMissing { get; set; }
+        public bool CanRecordStandard { get; set; }
+        public string RecordStandardBlockedReason { get; set; }
         public int ProductId { get; set; }
         public string ProductCode { get; set; }
         public string ProductTitle { get; set; }
@@ -90,6 +101,14 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string ReturnBlockedReason { get; set; }
     }
 
+    public class EnDossierRefDto
+    {
+        public int Id { get; set; }
+        public string ReferenceCode { get; set; }
+        public int Status { get; set; }
+        public string StatusText { get; set; }
+    }
+
     /// <summary>Supplies one line of a dossier: a file, a controlled document, or "not applicable" with a reason.</summary>
     public class EnSupplyLineDto
     {
@@ -102,13 +121,16 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string RowVersion { get; set; }
     }
 
-    /// <summary>Action: assess (create or refresh from the current reference list), complete (the engineer says it is complete), confirm (the manager), return (the manager; optional LineId is set to missing).</summary>
+    /// <summary>Action: native-standard (record the standard of the original data sheet; creates the dossier), assess (build or refresh from the approved list of its standard), complete (the engineer says it is complete), confirm (the manager), return (the manager; optional LineId is set to missing).</summary>
     public class EnDossierActionDto
     {
         public int ProductId { get; set; }
 
-        /// <summary>For the action assign: the Code of the reference list (the standard basis) this platform is assessed against.</summary>
+        /// <summary>The standard (Code) of the dossier: a platform has one dossier per standard. For native-standard it is the standard of the data sheet the platform was built for; omitted only when the product has exactly one dossier.</summary>
         public string ReferenceCode { get; set; }
+
+        /// <summary>For native-standard: where the standard is known from (data sheet number and clause), at least 5 characters.</summary>
+        public string StandardBasis { get; set; }
         public string Action { get; set; }
         public int? LineId { get; set; }
         public string Note { get; set; }

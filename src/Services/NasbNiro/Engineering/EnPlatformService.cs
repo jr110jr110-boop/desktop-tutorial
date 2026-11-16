@@ -26,10 +26,11 @@ namespace Services.NasbNiro.Engineering
                 string.Join("|", EnText.Num(d.Seq), EnHash.Norm(d.DocumentType), EnHash.Norm(d.Discipline), EnHash.Norm(d.Title), d.Required ? "1" : "0", d.TenderStage ? "1" : "0", EnText.Num((int)d.State),
                     d.DocumentId?.ToString("N") ?? "-", d.ControlledDocumentId?.ToString() ?? "-", EnHash.Norm(d.Revision), EnHash.Norm(d.NotApplicableReason), d.SystemProven ? "1" : "0"))));
 
-        /// <summary>Whether the platform is complete and confirmed right now: confirmed, the hash still matches, and the dossier is against the current reference list.</summary>
-        public static async Task<bool> IsCompleteAsync(IUnitOfWork uow, int productId, CancellationToken ct)
+        /// <summary>Whether the dossier (product, standard) is complete and confirmed right now: confirmed, the hash still matches, and the dossier is against the current approved list of its standard.</summary>
+        public static async Task<bool> IsCompleteAsync(IUnitOfWork uow, int productId, string code, CancellationToken ct)
         {
-            EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && !x.Deleted, ct);
+            if (string.IsNullOrWhiteSpace(code)) return false;
+            EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && x.ReferenceCode == code && !x.Deleted, ct);
             if (d == null || d.Status != EnDossierStatus.Complete || d.ConfirmedHash == null) return false;
             if (d.ConfirmedHash != Hash(d.ProductId, d.ReferenceRevision, d.Documents)) return false;
             EnReferenceList current = await EnReferenceRules.CurrentAsync(uow, false, ct, d.ReferenceCode);
@@ -37,10 +38,82 @@ namespace Services.NasbNiro.Engineering
         }
     }
 
+    /// <summary>Building a dossier from the approved list of its standard: shared by the dossier service and the case (a platform case creates the dossier of its client standard).</summary>
+    internal static class EnDossierBuilder
+    {
+        public static string LineKey(string type, string discipline, string title) => EnReferenceRules.Key(type) + "|" + EnHash.Norm(discipline).ToUpperInvariant() + "|" + EnHash.Norm(title).ToUpperInvariant();
+
+        /// <summary>Document type + title, trimmed and case-insensitive: the match that lets a file be reused across the dossiers of one product.</summary>
+        public static string TypeTitle(string type, string title) => EnReferenceRules.Key(type) + "|" + EnHash.Norm(title).ToUpperInvariant();
+
+        public static string NormCode(string code)
+        {
+            string c = EnText.Clean(code);
+            return c == null ? null : c.ToUpperInvariant();
+        }
+
+        public static async Task ProveAsync(IUnitOfWork uow, EnPlatformDossier d, CancellationToken ct)
+        {
+            bool bomReleased = await uow.Set<PbBomHeader>().AsNoTracking().AnyAsync(b => !b.Deleted && b.ProductId == d.ProductId && b.Status == PbBomStatus.Released, ct);
+            bool opcApproved = await uow.Set<PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == d.ProductId && o.Status == PbRoutingStatus.Approved, ct);
+            foreach (EnPlatformDocument x in d.Documents)
+            {
+                string key = EnReferenceRules.Key(x.DocumentType);
+                bool proven = (key == EnDocTypes.Bom && bomReleased) || (key == EnDocTypes.Opc && opcApproved);
+                if (proven && x.State != EnLineState.NotApplicable && !(x.State == EnLineState.Available && !x.SystemProven))
+                { x.State = EnLineState.Available; x.SystemProven = true; x.DocumentId = null; x.ControlledDocumentId = null; }
+                else if (!proven && x.SystemProven)
+                { x.State = EnLineState.Missing; x.SystemProven = false; }
+            }
+        }
+
+        public static void Merge(EnPlatformDossier d, EnReferenceList current)
+        {
+            List<EnPlatformDocument> existing = d.Documents.ToList();
+            HashSet<EnPlatformDocument> matched = new HashSet<EnPlatformDocument>();
+            foreach (EnReferenceLine line in current.Lines.OrderBy(l => l.Seq))
+            {
+                string key = LineKey(line.DocumentType, line.Discipline, line.Title);
+                EnPlatformDocument doc = existing.FirstOrDefault(x => !matched.Contains(x) && (x.ReferenceLineId == line.Id || LineKey(x.DocumentType, x.Discipline, x.Title) == key));
+                if (doc == null)
+                {
+                    doc = new EnPlatformDocument { Dossier = d, State = EnLineState.Missing };
+                    d.Documents.Add(doc);
+                }
+                matched.Add(doc);
+                doc.ReferenceLineId = line.Id; doc.Seq = line.Seq; doc.DocumentType = line.DocumentType; doc.Discipline = line.Discipline; doc.Title = line.Title; doc.Required = line.Required; doc.TenderStage = line.TenderStage;
+            }
+            // a line the new list dropped keeps its file and its state but stops being required
+            foreach (EnPlatformDocument x in existing.Where(x => !matched.Contains(x))) { x.Required = false; x.TenderStage = false; x.ReferenceLineId = null; }
+        }
+
+        /// <summary>The dossier (product, standard); created (not saved) when it does not exist: the lines from the Approved list of the standard (none while the standard has no Approved list), and every line that matches a line of another dossier of the product takes its file, revision and state, so nothing is asked twice.</summary>
+        public static async Task<EnPlatformDossier> EnsureAsync(IUnitOfWork uow, int productId, string code, string basis, int userId, DateTimeOffset now, CancellationToken ct)
+        {
+            EnPlatformDossier d = await uow.Set<EnPlatformDossier>().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && x.ReferenceCode == code && !x.Deleted, ct);
+            if (d != null) return d;
+            d = new EnPlatformDossier { ProductId = productId, ReferenceCode = code, StandardBasis = EnText.Cut(basis, 500), Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = userId, ModifyDate = now, ModifierUserId = userId };
+            uow.Set<EnPlatformDossier>().Add(d);
+            EnReferenceList list = await EnReferenceRules.CurrentAsync(uow, false, ct, code);
+            if (list == null) return d;
+            Merge(d, list);
+            d.ReferenceListId = list.Id; d.ReferenceRevision = list.Revision; d.AssessedAt = now; d.Status = EnDossierStatus.Incomplete;
+            await ProveAsync(uow, d, ct);
+            List<EnPlatformDocument> others = await uow.Set<EnPlatformDocument>().AsNoTracking().Where(x => x.Dossier.ProductId == productId && !x.Dossier.Deleted && x.State == EnLineState.Available && !x.SystemProven).OrderBy(x => x.Id).ToListAsync(ct);
+            foreach (EnPlatformDocument x in d.Documents.Where(x => x.State == EnLineState.Missing))
+            {
+                EnPlatformDocument src = others.FirstOrDefault(o => TypeTitle(o.DocumentType, o.Title) == TypeTitle(x.DocumentType, x.Title));
+                if (src == null) continue;
+                x.State = EnLineState.Available; x.DocumentId = src.DocumentId; x.ControlledDocumentId = src.ControlledDocumentId; x.Revision = src.Revision; x.SuppliedByUserId = src.SuppliedByUserId; x.SuppliedAt = src.SuppliedAt;
+            }
+            return d;
+        }
+    }
+
     public interface IEnPlatformService
     {
         Task<ResponseDto<PagedList<EnPlatformListDto>>> GetPlatformsAsync(EnPlatformQuery query, CancellationToken ct);
-        Task<ResponseDto<EnDossierDto>> GetDossierAsync(int productId, CancellationToken ct);
+        Task<ResponseDto<EnDossierDto>> GetDossierAsync(int productId, string code, CancellationToken ct);
         Task<ResponseDto<EnPlatformSummaryDto>> GetSummaryAsync(CancellationToken ct);
         Task<ResponseDto<EnDossierDto>> DossierActionAsync(EnDossierActionDto dto, CancellationToken ct);
         Task<ResponseDto<EnDossierDto>> SupplyLineAsync(EnSupplyLineDto dto, CancellationToken ct);
@@ -61,9 +134,6 @@ namespace Services.NasbNiro.Engineering
         private int Me => _user.UserId;
 
         // ---------------------------------------------------------------- the rules
-
-        private static string AssignReason(bool manager, bool seat, int codes) =>
-            !manager ? "فقط مدیر مهندسی استاندارد مرجع پلتفرم را تعیین می‌کند." : seat ? EnText.AiNever : codes == 0 ? "فهرست مدارک مرجع تاییدشده‌ای وجود ندارد." : null;
 
         private static bool IsStale(EnPlatformDossier d, Dictionary<string, int> currentIds) =>
             d.Status != EnDossierStatus.NotAssessed && (d.ReferenceCode == null || !currentIds.TryGetValue(d.ReferenceCode, out int id) || d.ReferenceListId != id);
@@ -111,7 +181,7 @@ namespace Services.NasbNiro.Engineering
             if (query.Status.HasValue)
             {
                 EnDossierStatus s = (EnDossierStatus)query.Status.Value;
-                if (s == EnDossierStatus.NotAssessed) q = q.Where(p => !_uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status != EnDossierStatus.NotAssessed));
+                if (s == EnDossierStatus.NotAssessed) q = q.Where(p => !_uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted) || _uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status == s));
                 else q = q.Where(p => _uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status == s));
             }
             Dictionary<string, int> currentIds = await CurrentIdsAsync(ct);
@@ -119,44 +189,55 @@ namespace Services.NasbNiro.Engineering
             {
                 List<int> ids = rows.Select(r => r.Id).ToList();
                 List<EnPlatformDossier> dossiers = await _uow.Set<EnPlatformDossier>().AsNoTracking().Include(d => d.Documents).Where(d => !d.Deleted && ids.Contains(d.ProductId)).ToListAsync(ct);
-                return rows.Select(p =>
+                List<EnPlatformListDto> result = new List<EnPlatformListDto>();
+                foreach (PbProduct p in rows)
                 {
-                    EnPlatformDossier d = dossiers.FirstOrDefault(x => x.ProductId == p.Id);
-                    EnPlatformListDto dto = new EnPlatformListDto { ProductId = p.Id, ProductCode = p.Code, ProductTitle = p.Title, Status = d == null ? 0 : (int)d.Status, StatusText = EnText.Dossier(d?.Status ?? EnDossierStatus.NotAssessed), DossierId = d?.Id };
-                    if (d != null)
+                    List<EnPlatformDossier> mine = dossiers.Where(x => x.ProductId == p.Id).OrderBy(x => x.ReferenceCode, StringComparer.Ordinal).ToList();
+                    if (mine.Count == 0)
                     {
+                        // the product has no dossier: a virtual row NotAssessed (the engineers record the standard of its original data sheet)
+                        result.Add(new EnPlatformListDto { ProductId = p.Id, ProductCode = p.Code, ProductTitle = p.Title, Status = 0, StatusText = EnText.Dossier(EnDossierStatus.NotAssessed), NativeStandardMissing = true });
+                        continue;
+                    }
+                    foreach (EnPlatformDossier d in mine)
+                    {
+                        if (query.Status.HasValue && (int)d.Status != query.Status.Value) continue;
+                        EnPlatformListDto dto = new EnPlatformListDto { ProductId = p.Id, ProductCode = p.Code, ProductTitle = p.Title, Status = (int)d.Status, StatusText = EnText.Dossier(d.Status), DossierId = d.Id, ReferenceCode = d.ReferenceCode, StandardBasis = d.StandardBasis };
                         Counts(d, out int r, out int a, out int m, out int t);
                         dto.RequiredCount = r; dto.AvailableCount = a; dto.MissingCount = m; dto.TenderStageMissingCount = t; dto.ReferenceRevision = d.ReferenceRevision;
                         dto.Stale = IsStale(d, currentIds); dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt);
+                        result.Add(dto);
                     }
-                    return dto;
-                }).ToList();
+                }
+                return result;
             }, ct));
         }
 
-        private async Task<EnDossierDto> DossierDtoAsync(PbProduct product, EnPlatformDossier d, EnReferenceList current, CancellationToken ct)
+        private string RecordStandardReason(bool writer, bool seat, PbProduct product) =>
+            !writer ? EnText.NotAllowed : seat ? EnText.AiNever : !product.IsActive ? "فقط محصول فعال ارزیابی می‌شود." : null;
+
+        private async Task<EnDossierDto> DossierDtoAsync(PbProduct product, EnPlatformDossier d, List<EnPlatformDossier> all, EnReferenceList current, CancellationToken ct)
         {
             bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
-            EnDossierDto dto = new EnDossierDto { ProductId = product.Id, ProductCode = product.Code, ProductTitle = product.Title, Status = 0, StatusText = EnText.Dossier(EnDossierStatus.NotAssessed) };
-            List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
-            dto.ApprovedCodes = codes; dto.ReferenceCode = d?.ReferenceCode;
-            string assess = AssessReason(writer, current != null);
-            if (assess != null && current == null && codes.Count > 1 && (d == null || d.ReferenceCode == null)) assess = "چند استاندارد مرجع تاییدشده وجود دارد؛ مدیر مهندسی باید استاندارد این پلتفرم را تعیین کند.";
-            dto.CanAssess = assess == null; dto.AssessBlockedReason = assess;
-            string assign = AssignReason(_user.IsInRole(EnRoles.Manager), seat, codes.Count);
-            dto.CanAssign = assign == null; dto.AssignBlockedReason = assign;
+            EnDossierDto dto = new EnDossierDto { ProductId = product.Id, ProductCode = product.Code, ProductTitle = product.Title, Status = 0, StatusText = EnText.Dossier(EnDossierStatus.NotAssessed), NativeStandardMissing = all.Count == 0 };
+            dto.OtherDossiers = all.Where(x => d == null || x.Id != d.Id).OrderBy(x => x.ReferenceCode, StringComparer.Ordinal).Select(x => new EnDossierRefDto { Id = x.Id, ReferenceCode = x.ReferenceCode, Status = (int)x.Status, StatusText = EnText.Dossier(x.Status) }).ToList();
+            string record = RecordStandardReason(writer, seat, product);
+            dto.CanRecordStandard = record == null; dto.RecordStandardBlockedReason = record;
             if (d == null)
             {
-                dto.SupplyBlockedReason = "ابتدا ارزیابی انجام شود."; dto.CompleteBlockedReason = dto.SupplyBlockedReason; dto.ConfirmBlockedReason = dto.SupplyBlockedReason; dto.ReturnBlockedReason = dto.SupplyBlockedReason;
+                string none = all.Count == 0 ? "استاندارد دیتاشیت اصلی این پلتفرم هنوز ثبت نشده است." : "برای این استاندارد پرونده‌ای نیست.";
+                dto.AssessBlockedReason = none; dto.SupplyBlockedReason = none; dto.CompleteBlockedReason = none; dto.ConfirmBlockedReason = none; dto.ReturnBlockedReason = none;
                 return dto;
             }
+            string assess = AssessReason(writer, current != null);
+            dto.CanAssess = assess == null; dto.AssessBlockedReason = assess;
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, d.Documents.Select(x => x.SuppliedByUserId).Concat(new int?[] { d.ConfirmedByUserId }), ct);
             Counts(d, out int r, out int a, out int m, out int t);
             string complete = CompleteReason(d, writer, seat), confirm = ConfirmReason(d, approver, seat, Me), ret = ReturnReasonOf(d, approver), supply = SupplyReason(d, writer);
             dto.Id = d.Id; dto.ReferenceListId = d.ReferenceListId; dto.ReferenceRevision = d.ReferenceRevision; dto.Status = (int)d.Status; dto.StatusText = EnText.Dossier(d.Status);
             dto.ReferenceTitle = d.ReferenceListId.HasValue ? await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => l.Id == d.ReferenceListId.Value).Select(l => l.Title).FirstOrDefaultAsync(ct) : null;
-            dto.Stale = current != null && d.ReferenceListId != current.Id; dto.ReferenceCode = d.ReferenceCode;
+            dto.Stale = current != null && d.ReferenceListId != current.Id; dto.ReferenceCode = d.ReferenceCode; dto.StandardBasis = d.StandardBasis;
             dto.RequiredCount = r; dto.AvailableCount = a; dto.MissingCount = m; dto.TenderStageMissingCount = t;
             dto.AssessedAtText = EnText.Stamp(d.AssessedAt); dto.ConfirmedByName = names.Name(d.ConfirmedByUserId); dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt); dto.Note = d.Note;
             dto.TouchedByMe = EnEditors.Has(d.EditorUserIds, Me); dto.RowVersion = EnConcurrency.Text(d.RowVersion);
@@ -171,13 +252,15 @@ namespace Services.NasbNiro.Engineering
             return dto;
         }
 
-        public async Task<ResponseDto<EnDossierDto>> GetDossierAsync(int productId, CancellationToken ct)
+        public async Task<ResponseDto<EnDossierDto>> GetDossierAsync(int productId, string code, CancellationToken ct)
         {
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnDossierDto>(EnText.NotAllowed);
             PbProduct product = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId && !p.Deleted, ct);
             if (product == null) return EnText.NotFound<EnDossierDto>("محصول پیدا نشد.");
-            EnPlatformDossier d = await _uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && !x.Deleted, ct);
-            return ResponseDtoHelper.Ok(await DossierDtoAsync(product, d, await EnReferenceRules.CurrentAsync(_uow, false, ct, d?.ReferenceCode), ct));
+            List<EnPlatformDossier> all = await _uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).Where(x => x.ProductId == productId && !x.Deleted).ToListAsync(ct);
+            string norm = EnDossierBuilder.NormCode(code);
+            EnPlatformDossier d = norm != null ? all.FirstOrDefault(x => x.ReferenceCode == norm) : all.OrderBy(x => x.ReferenceCode, StringComparer.Ordinal).FirstOrDefault();
+            return ResponseDtoHelper.Ok(await DossierDtoAsync(product, d, all, d == null ? null : await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode), ct));
         }
 
         public async Task<ResponseDto<EnPlatformSummaryDto>> GetSummaryAsync(CancellationToken ct)
@@ -186,53 +269,16 @@ namespace Services.NasbNiro.Engineering
             List<int> products = await _uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive).Select(p => p.Id).ToListAsync(ct);
             List<EnPlatformDossier> dossiers = await _uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && products.Contains(d.ProductId)).ToListAsync(ct);
             Dictionary<string, int> currentIds = await CurrentIdsAsync(ct);
-            EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);   // the sole basis when there is exactly one
-            EnPlatformSummaryDto s = new EnPlatformSummaryDto { Products = products.Count, HasApprovedReference = currentIds.Count > 0, ReferenceRevision = current?.Revision ?? 0 };
+            EnPlatformSummaryDto s = new EnPlatformSummaryDto { Products = products.Count, HasApprovedReference = currentIds.Count > 0, ReferenceRevision = 0 };
             s.Incomplete = dossiers.Count(d => d.Status == EnDossierStatus.Incomplete);
             s.Completing = dossiers.Count(d => d.Status == EnDossierStatus.Completing);
             s.Complete = dossiers.Count(d => d.Status == EnDossierStatus.Complete);
-            s.NotAssessed = products.Count - s.Incomplete - s.Completing - s.Complete;
+            s.NotAssessed = products.Count(id => dossiers.All(d => d.ProductId != id)) + dossiers.Count(d => d.Status == EnDossierStatus.NotAssessed);
             s.Stale = dossiers.Count(d => IsStale(d, currentIds));
             return ResponseDtoHelper.Ok(s);
         }
 
         // ---------------------------------------------------------------- assess
-
-        private async Task ProveAsync(EnPlatformDossier d, CancellationToken ct)
-        {
-            bool bomReleased = await _uow.Set<PbBomHeader>().AsNoTracking().AnyAsync(b => !b.Deleted && b.ProductId == d.ProductId && b.Status == PbBomStatus.Released, ct);
-            bool opcApproved = await _uow.Set<PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == d.ProductId && o.Status == PbRoutingStatus.Approved, ct);
-            foreach (EnPlatformDocument x in d.Documents)
-            {
-                string key = EnReferenceRules.Key(x.DocumentType);
-                bool proven = (key == EnDocTypes.Bom && bomReleased) || (key == EnDocTypes.Opc && opcApproved);
-                if (proven && x.State != EnLineState.NotApplicable && !(x.State == EnLineState.Available && !x.SystemProven))
-                { x.State = EnLineState.Available; x.SystemProven = true; x.DocumentId = null; x.ControlledDocumentId = null; }
-                else if (!proven && x.SystemProven)
-                { x.State = EnLineState.Missing; x.SystemProven = false; }
-            }
-        }
-
-        private static string Merge(EnPlatformDossier d, EnReferenceList current)
-        {
-            List<EnPlatformDocument> existing = d.Documents.ToList();
-            HashSet<EnPlatformDocument> matched = new HashSet<EnPlatformDocument>();
-            foreach (EnReferenceLine line in current.Lines.OrderBy(l => l.Seq))
-            {
-                string key = EnReferenceRules.Key(line.DocumentType) + "|" + EnHash.Norm(line.Discipline).ToUpperInvariant() + "|" + EnHash.Norm(line.Title).ToUpperInvariant();
-                EnPlatformDocument doc = existing.FirstOrDefault(x => !matched.Contains(x) && (x.ReferenceLineId == line.Id || (EnReferenceRules.Key(x.DocumentType) + "|" + EnHash.Norm(x.Discipline).ToUpperInvariant() + "|" + EnHash.Norm(x.Title).ToUpperInvariant()) == key));
-                if (doc == null)
-                {
-                    doc = new EnPlatformDocument { Dossier = d, State = EnLineState.Missing };
-                    d.Documents.Add(doc);
-                }
-                matched.Add(doc);
-                doc.ReferenceLineId = line.Id; doc.Seq = line.Seq; doc.DocumentType = line.DocumentType; doc.Discipline = line.Discipline; doc.Title = line.Title; doc.Required = line.Required; doc.TenderStage = line.TenderStage;
-            }
-            // a line the new list dropped keeps its file and its state but stops being required
-            foreach (EnPlatformDocument x in existing.Where(x => !matched.Contains(x))) { x.Required = false; x.TenderStage = false; x.ReferenceLineId = null; }
-            return null;
-        }
 
         private static void Recompute(EnPlatformDossier d, bool afterAssess)
         {
@@ -248,108 +294,80 @@ namespace Services.NasbNiro.Engineering
         {
             if (dto == null || dto.ProductId <= 0) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
             string action = (dto.Action ?? string.Empty).Trim().ToLowerInvariant();
-            if (action != "assess" && action != "assign" && action != "complete" && action != "confirm" && action != "return") return EnText.Bad<EnDossierDto>("عمل نامعتبر است (assess، assign، complete، confirm یا return).");
+            if (action != "native-standard" && action != "assess" && action != "complete" && action != "confirm" && action != "return") return EnText.Bad<EnDossierDto>("عمل نامعتبر است (native-standard، assess، complete، confirm یا return).");
             PbProduct product = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == dto.ProductId && !p.Deleted, ct);
             if (product == null) return EnText.NotFound<EnDossierDto>("محصول پیدا نشد.");
             bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
             DateTimeOffset now = DateTimeOffset.Now;
             string note = EnText.Clean(dto.Note);
-            EnPlatformDossier d = await _uow.Set<EnPlatformDossier>().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == dto.ProductId && !x.Deleted, ct);
-            if (action == "assign")
+            string code = EnDossierBuilder.NormCode(dto.ReferenceCode);
+            List<EnPlatformDossier> all = await _uow.Set<EnPlatformDossier>().Include(x => x.Documents).Where(x => x.ProductId == dto.ProductId && !x.Deleted).ToListAsync(ct);
+            EnPlatformDossier d = code != null ? all.FirstOrDefault(x => x.ReferenceCode == code) : (all.Count == 1 ? all[0] : null);
+            if (action == "native-standard")
             {
-                // the standard basis of the platform (API 611 or API 612) is chosen by the engineering manager, never by a rule
-                List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
-                string pick = EnText.Clean(dto.ReferenceCode);
-                string why = AssignReason(_user.IsInRole(EnRoles.Manager), seat, codes.Count);
-                if (why == null && string.IsNullOrEmpty(pick)) why = "استاندارد مرجع را انتخاب کنید.";
-                if (why == null && !codes.Contains(pick)) why = "برای این استاندارد مرجع فهرست تاییدشده‌ای وجود ندارد.";
-                if (why == null && d != null && d.ReferenceCode != null && d.ReferenceCode != pick) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد مرجع");
+                // a fact of the original data sheet of the project this platform was built for: humans only; the standard is the client's, any code is accepted
+                string why = RecordStandardReason(writer, seat, product);
+                string basis = EnText.Clean(dto.StandardBasis);
+                if (why == null && code == null) why = "استاندارد دیتاشیت اصلی پلتفرم را بنویسید.";
+                why ??= EnText.Over(code, 40, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد");
+                if (why == null && d != null) why = "برای این استاندارد پرونده‌ای از پیش وجود دارد.";
                 if (why != null) return EnText.Bad<EnDossierDto>(why);
-                if (!product.IsActive) return EnText.Bad<EnDossierDto>("فقط محصول فعال ارزیابی می‌شود.");
-                if (d == null)
-                {
-                    d = new EnPlatformDossier { ProductId = product.Id, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
-                    _uow.Set<EnPlatformDossier>().Add(d);
-                }
-                else if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
-                if (d.ReferenceCode != pick)
-                {
-                    // a changed standard voids the confirmation; the agent re-builds the lines against the new list
-                    d.ReferenceCode = pick; d.ReferenceListId = null; d.ReferenceRevision = 0;
-                    if (d.Status != EnDossierStatus.NotAssessed) { d.Status = EnDossierStatus.NotAssessed; d.ConfirmedHash = null; d.ConfirmedAt = null; d.ConfirmedByUserId = null; d.Note = EnText.Cut("تغییر استاندارد مرجع به " + pick + ": " + note, 1000); }
-                }
+                d = new EnPlatformDossier { ProductId = product.Id, ReferenceCode = code, StandardBasis = basis, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
+                _uow.Set<EnPlatformDossier>().Add(d);
+                try { await _uow.SaveChangesAsync(ct); }
+                catch (DbUpdateException) { return EnText.Bad<EnDossierDto>("برای این استاندارد هم‌زمان پرونده ساخته شد."); }
+                return await GetDossierAsync(dto.ProductId, d.ReferenceCode, ct);
             }
-            else if (action == "assess")
+            if (d == null) return EnText.NotFound<EnDossierDto>(all.Count > 1 ? "استاندارد پرونده را مشخص کنید؛ این محصول بیش از یک پرونده دارد." : EnText.NotFoundDossier);
+            if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
+            string problem;
+            if (action == "assess")
             {
-                List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
-                string code = d?.ReferenceCode;
-                if (code == null && codes.Count == 1) code = codes[0];
-                EnReferenceList current = code == null ? null : await EnReferenceRules.CurrentAsync(_uow, false, ct, code);
-                string why = AssessReason(writer, current != null || codes.Count > 1);
-                if (why != null) return EnText.Bad<EnDossierDto>(why);
-                if (!product.IsActive) return EnText.Bad<EnDossierDto>("فقط محصول فعال ارزیابی می‌شود.");
-                if (d == null)
-                {
-                    d = new EnPlatformDossier { ProductId = product.Id, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
-                    _uow.Set<EnPlatformDossier>().Add(d);
-                }
-                else if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
-                if (current == null)
-                {
-                    // several approved standards and none chosen for this platform: the dossier waits empty for the manager's choice (ENG.PLATFORM.ASSIGN)
-                    d.ModifyDate = now; d.ModifierUserId = Me;
-                    try { await _uow.SaveChangesAsync(ct); }
-                    catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDossierDto>(EnText.Concurrency); }
-                    return await GetDossierAsync(dto.ProductId, ct);
-                }
-                d.ReferenceCode = code;
+                EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode);
+                problem = AssessReason(writer, current != null);
+                if (problem == null && !product.IsActive) problem = "فقط محصول فعال ارزیابی می‌شود.";
+                if (problem != null) return EnText.Bad<EnDossierDto>(problem);
                 bool changedList = d.ReferenceListId != current.Id;
                 string before = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
-                Merge(d, current);
+                EnDossierBuilder.Merge(d, current);
                 d.ReferenceListId = current.Id; d.ReferenceRevision = current.Revision;
-                await ProveAsync(d, ct);
+                await EnDossierBuilder.ProveAsync(_uow, d, ct);
                 d.AssessedAt = now;
                 bool changed = changedList || before != EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
                 if (d.Status == EnDossierStatus.NotAssessed || changed) Recompute(d, true);
             }
+            else if (action == "complete")
+            {
+                problem = CompleteReason(d, writer, seat);
+                if (problem != null) return EnText.Bad<EnDossierDto>(problem);
+                d.Status = EnDossierStatus.Completing; d.EditorUserIds = EnEditors.With(d.EditorUserIds, Me);
+            }
+            else if (action == "confirm")
+            {
+                problem = ConfirmReason(d, approver, seat, Me);
+                if (problem != null) return EnText.Bad<EnDossierDto>(problem);
+                EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode);
+                if (current == null || d.ReferenceListId != current.Id) return EnText.Bad<EnDossierDto>("فهرست مرجع تغییر کرده است؛ ابتدا ارزیابی دوباره انجام شود.");
+                d.Status = EnDossierStatus.Complete; d.ConfirmedByUserId = Me; d.ConfirmedAt = now; d.ConfirmedHash = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
+            }
             else
             {
-                if (d == null) return EnText.NotFound<EnDossierDto>(EnText.NotFoundDossier);
-                if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
-                string why;
-                if (action == "complete")
+                problem = ReturnReasonOf(d, approver) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
+                if (problem != null) return EnText.Bad<EnDossierDto>(problem);
+                if (dto.LineId.HasValue)
                 {
-                    why = CompleteReason(d, writer, seat);
-                    if (why != null) return EnText.Bad<EnDossierDto>(why);
-                    d.Status = EnDossierStatus.Completing; d.EditorUserIds = EnEditors.With(d.EditorUserIds, Me);
+                    EnPlatformDocument line = d.Documents.FirstOrDefault(x => x.Id == dto.LineId.Value);
+                    if (line == null) return EnText.NotFound<EnDossierDto>("ردیف پیدا نشد.");
+                    if (line.SystemProven) return EnText.Bad<EnDossierDto>("این ردیف را سامانه از وضعیت BOM یا مسیر ساخت اثبات کرده است و برگشت نمی‌خورد.");
+                    line.State = EnLineState.Missing; line.DocumentId = null; line.ControlledDocumentId = null; line.Revision = null; line.NotApplicableReason = null;
                 }
-                else if (action == "confirm")
-                {
-                    why = ConfirmReason(d, approver, seat, Me);
-                    if (why != null) return EnText.Bad<EnDossierDto>(why);
-                    EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode);
-                    if (current == null || d.ReferenceListId != current.Id) return EnText.Bad<EnDossierDto>("فهرست مرجع تغییر کرده است؛ ابتدا ارزیابی دوباره انجام شود.");
-                    d.Status = EnDossierStatus.Complete; d.ConfirmedByUserId = Me; d.ConfirmedAt = now; d.ConfirmedHash = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
-                }
-                else
-                {
-                    why = ReturnReasonOf(d, approver) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل برگشت");
-                    if (why != null) return EnText.Bad<EnDossierDto>(why);
-                    if (dto.LineId.HasValue)
-                    {
-                        EnPlatformDocument line = d.Documents.FirstOrDefault(x => x.Id == dto.LineId.Value);
-                        if (line == null) return EnText.NotFound<EnDossierDto>("ردیف پیدا نشد.");
-                        if (line.SystemProven) return EnText.Bad<EnDossierDto>("این ردیف را سامانه از وضعیت BOM یا مسیر ساخت اثبات کرده است و برگشت نمی‌خورد.");
-                        line.State = EnLineState.Missing; line.DocumentId = null; line.ControlledDocumentId = null; line.Revision = null; line.NotApplicableReason = null;
-                    }
-                    d.Status = EnDossierStatus.Incomplete; d.ConfirmedHash = null; d.ConfirmedAt = null; d.ConfirmedByUserId = null; d.Note = EnText.Cut("برگشت: " + note, 1000);
-                }
+                d.Status = EnDossierStatus.Incomplete; d.ConfirmedHash = null; d.ConfirmedAt = null; d.ConfirmedByUserId = null; d.Note = EnText.Cut("برگشت: " + note, 1000);
             }
             d.ModifyDate = now; d.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDossierDto>(EnText.Concurrency); }
-            return await GetDossierAsync(dto.ProductId, ct);
+            return await GetDossierAsync(dto.ProductId, d.ReferenceCode, ct);
         }
 
         // ---------------------------------------------------------------- supply
@@ -394,7 +412,7 @@ namespace Services.NasbNiro.Engineering
             if (d.Status == EnDossierStatus.Completing) d.Status = EnDossierStatus.Incomplete;   // a change after "complete" needs the engineer to say it again
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDossierDto>(EnText.Concurrency); }
-            return await GetDossierAsync(d.ProductId, ct);
+            return await GetDossierAsync(d.ProductId, d.ReferenceCode, ct);
         }
     }
 }
