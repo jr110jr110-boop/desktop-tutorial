@@ -30,6 +30,21 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnPlatformAssessStep>();
             services.AddScoped<IAgentStep, EnPlatformCompleteStep>();
             services.AddScoped<IAgentStep, EnPlatformConfirmStep>();
+            services.AddScoped<IAgentStep, EnCaseOpenStep>();
+            services.AddScoped<IAgentStep, EnCaseProposeStep>();
+            services.AddScoped<IAgentStep, EnCaseClassifyInputStep>();
+            services.AddScoped<IAgentStep, EnCaseConfirmStep>();
+            services.AddScoped<IAgentStep, EnCaseApproveStep>();
+            services.AddScoped<IAgentStep, EnTenderDraftStep>();
+            services.AddScoped<IAgentStep, EnTenderInputStep>();
+            services.AddScoped<IAgentStep, EnTenderRevalidateStep>();
+            services.AddScoped<IAgentStep, EnTenderReleaseStep>();
+            services.AddScoped<IAgentStep, EnCaseAwardStep>();
+            services.AddScoped<IAgentStep, EnCaseCloseStep>();
+            services.AddScoped<IAgentStep, EnClarSendStep>();
+            services.AddScoped<IAgentStep, EnClarAnswerStep>();
+            services.AddScoped<IAgentStep, EnClarCloseStep>();
+            services.AddScoped<IAgentStep, EnCharterReviewStep>();
             return services;
         }
     }
@@ -194,5 +209,6 @@ namespace Services.NasbNiro.Agents.Steps
     internal static class EnText2
     {
         public static string Cut(string s, int max) => s == null || s.Length <= max ? s : s.Substring(0, max);
+        public static string Num(int n) => n.ToString(CultureInfo.InvariantCulture);
     }
 }

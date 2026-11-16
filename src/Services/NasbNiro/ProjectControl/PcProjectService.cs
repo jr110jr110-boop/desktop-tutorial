@@ -760,6 +760,9 @@ namespace Services.NasbNiro.ProjectControl
                 if (c.ApprovedAt.HasValue) return Bad<PcCharterDto>("منشور قبلاً تایید شده است.");
                 if (Clean(c.ScopeDescription) == null) return Bad<PcCharterDto>("شرح محدوده منشور خالی است.");
                 if (!c.ManagerAcceptedAt.HasValue) return Bad<PcCharterDto>("مدیر پروژه باید اختیارات و تعهد خود را بپذیرد (charter/accept).");
+                // ENG-E1: engineering must have confirmed the CURRENT content of the charter (legacy contracts pass); one gate, one message
+                string engineeringRefusal = await Engineering.EnGates.CharterApproveRefusalAsync(_uow, dto.ContractId, cancellationToken);
+                if (engineeringRefusal != null) return Bad<PcCharterDto>(engineeringRefusal);
                 c.ApprovedAt = now; c.ApprovedByUserId = Me;
                 string error = await MarkStepAsync(dto.ContractId, PcInitiationStep.CharterApproved, Me, true, dto.Note, cancellationToken);
                 if (error != null) return Bad<PcCharterDto>(error);

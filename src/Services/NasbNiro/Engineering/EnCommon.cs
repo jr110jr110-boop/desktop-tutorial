@@ -274,6 +274,17 @@ namespace Services.NasbNiro.Engineering
     /// <summary>A file of a record: it exists in the store, has an allowed type, was uploaded by the one who attaches it and is not on another line of a dossier.</summary>
     internal static class EnFiles
     {
+        /// <summary>A file attached to a clarification: it exists, has an allowed type and was uploaded by the one who attaches it.</summary>
+        public static async Task<string> CheckOwnAsync(IUnitOfWork uow, Guid documentId, int me, CancellationToken ct)
+        {
+            var file = await uow.Set<Entities.Model.Document>().AsNoTracking().Where(d => d.Id == documentId).Select(d => new { d.Path, d.UploadedByUserId }).FirstOrDefaultAsync(ct);
+            if (file == null) return "فایل در مخزن اسناد پیدا نشد؛ ابتدا فایل را بارگذاری کنید.";
+            string extension = (Path.GetExtension(file.Path ?? string.Empty) ?? string.Empty).ToLowerInvariant();
+            if (!AttachmentRules.AllowedExtensions.Contains(extension)) return AttachmentText.ExtensionRefused(extension);
+            if (!file.UploadedByUserId.HasValue || file.UploadedByUserId.Value != me) return "فایل را باید خود شما بارگذاری کرده باشید.";
+            return null;
+        }
+
         public static async Task<string> CheckAsync(IUnitOfWork uow, Guid documentId, int me, int? ownLineId, CancellationToken ct)
         {
             var file = await uow.Set<Entities.Model.Document>().AsNoTracking().Where(d => d.Id == documentId).Select(d => new { d.Path, d.UploadedByUserId }).FirstOrDefaultAsync(ct);

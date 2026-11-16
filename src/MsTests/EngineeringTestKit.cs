@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model;
+using Entities.Model.NasbNiro.Contracts;
 using Entities.Model.NasbNiro.Engineering;
+using Entities.Model.NasbNiro.Sales;
 using Entities.Model.NasbNiro.ProductBank;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -120,6 +122,50 @@ namespace MsTests
                 d = Ok(await Supply(host, Eng1, l.Id, File(host, fileUploader)));
             Ok(await Dossier(host, Eng1, productId, "complete"));
             return Ok(await Dossier(host, Mgr1, productId, "confirm")).Id;
+        }
+
+        // ---------------------------------------------------------------- stage 3 helpers
+
+        public static int Inquiry(AppHost host, SlInquiryStatus status = SlInquiryStatus.Bidding, SlProductType type = SlProductType.SteamTurbine, DateTimeOffset? created = null, string number = null)
+        {
+            int id = 0;
+            host.Write(u =>
+            {
+                SlInquiry i = AppHost.Add(u, new SlInquiry { Number = number ?? "INQ-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "استعلام توربین", CustomerId = 1, ProductType = type, Status = status, ReceivedDate = DateTime.Today, CreateDate = created ?? DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+                u.SaveChanges(); id = i.Id;
+            }, Seeder);
+            return id;
+        }
+
+        public static int Contract(AppHost host, DateTimeOffset? created = null, bool workOrder = true, int equipmentId = 7)
+        {
+            int id = 0;
+            host.Write(u =>
+            {
+                ContractEntity c = AppHost.Add(u, new ContractEntity { Code = "C-" + Guid.NewGuid().ToString("N").Substring(0, 6), Title = "ساخت توربین", Employer = "کارفرما", Status = ContractStatus.Current, ContractDate = DateTimeOffset.Now.AddDays(-5), Price = 1_000_000_000m, CreateDate = created ?? DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+                u.SaveChanges();
+                if (workOrder) AppHost.Add(u, new WorkOrder { Code = "WO-" + c.Code, Title = "توربین", Count = 1, ContractId = c.Id, EquipmentId = equipmentId, CreateDate = DateTimeOffset.Now });
+                u.SaveChanges(); id = c.Id;
+            }, Seeder);
+            return id;
+        }
+
+        public static Task<ResponseDto<EnCaseDto>> CaseAct(AppHost host, ClaimsPrincipal who, int? id, string action, Action<EnCaseActionDto> set = null)
+        {
+            EnCaseActionDto dto = new EnCaseActionDto { Id = id, Action = action };
+            set?.Invoke(dto);
+            return host.As(who, p => p.GetRequiredService<IEnCaseService>().CaseActionAsync(dto, Ct));
+        }
+
+        public static Task<ResponseDto<EnCaseDto>> GetCase(AppHost host, ClaimsPrincipal who, int id) => host.As(who, p => p.GetRequiredService<IEnCaseService>().GetCaseAsync(id, Ct));
+
+        /// <summary>An inquiry case that the engineer proposed, the manager confirmed and the CEO approved (status TenderPreparation for a bidding inquiry).</summary>
+        public static async Task<EnCaseDto> ApprovedCase(AppHost host, int inquiry, bool platform, int? productId = null)
+        {
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
+            c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = platform ? 1 : 2; d.ProductId = productId; d.Basis = "مبنای آزمون برای تعیین نوع پرونده"; }));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            return Ok(await CaseAct(host, Ceo, c.Id, "approve"));
         }
     }
 }

@@ -230,6 +230,8 @@ namespace IocConfig
             services.AddHostedService<Services.NasbNiro.Engineering.EnHostedService>();   // ENG-E1: records the engineering cut-over instant once
             services.AddScoped<Services.NasbNiro.Engineering.IEnReferenceService, Services.NasbNiro.Engineering.EnReferenceService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnPlatformService, Services.NasbNiro.Engineering.EnPlatformService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnCaseService, Services.NasbNiro.Engineering.EnCaseService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnClarificationService, Services.NasbNiro.Engineering.EnClarificationService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();
             services.AddScoped<Services.NasbNiro.Quality.IMaterialSpecService, Services.NasbNiro.Quality.MaterialSpecService>();

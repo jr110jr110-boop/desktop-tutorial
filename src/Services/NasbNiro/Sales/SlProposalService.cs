@@ -225,6 +225,9 @@ namespace Services.NasbNiro.Sales
                         : $"قیمت پیشنهاد از سقف تأیید فروش ({SlText.Money(threshold.Value)} ریال) بیشتر است؛ تأیید با مدیرعامل است.");
                 if (LedgerMath.Touched(row.CreatorUserId, row.EditorUserIds, Me)) return Bad<SlProposalDto>(SlText.SameUser);
                 if (row.BelowCost && note == null) return Bad<SlProposalDto>("برای تأیید پیشنهاد زیر بهای تمام‌شده، دلیل را در توضیح بنویسید.");
+                // ENG-E1: the technical package of a controlled inquiry must have been released to commercial (legacy inquiries pass); one gate, one message
+                string engineeringRefusal = await Engineering.EnGates.ProposalApproveRefusalAsync(_uow, row.InquiryId, ct);
+                if (engineeringRefusal != null) return Bad<SlProposalDto>(engineeringRefusal);
                 row.Status = SlProposalStatus.Approved; row.ApprovedAt = now; row.ApprovedByUserId = Me; row.ApprovalNote = note;
             }
             else if (action == "submit")
