@@ -9,7 +9,7 @@ import { AuditRoles } from "@/composables/audit";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { BalanceRoles } from "@/composables/projectBalance";
 import { DncRoles } from "@/composables/dnc";
-import { AccountRoles, AgentRoles, AiRoles, GoLiveRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
+import { AccountRoles, AgentRoles, EngInboxRoles, AiRoles, GoLiveRoles, OpsDataRoles, IntegrityRoles, currentRole, DashboardRoles, FinanceRoles, FnRoles, hasRole, InventoryRoles, OfficeRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, Roles, SalesRoles, ServiceRoles } from "@/composables/roles";
 
 import Dashboard from "@/views/Dashboard.vue";
 
@@ -716,6 +716,7 @@ const routes: Array<RouteRecordRaw> = [
   // Agent layer: the gate inbox is for every signed-in person (the service shows only what waits for his roles); the master board for AgentRoles.board (PMO, CEO, AUDITOR).
   { path: "/agents/inbox", name: "AgInbox", component: () => import("@/views/agents/GateInbox.vue") },
   { path: "/agents/board", name: "AgBoard", component: () => import("@/views/agents/MasterBoard.vue"), meta: { roles: AgentRoles.board } },
+  { path: "/engineering/inbox", name: "EngInbox", component: () => import("@/views/engInbox/EngInbox.vue"), meta: { roles: EngInboxRoles.read } },
   { path: "/ai/assistant", name: "AiAssistant", component: () => import("@/views/ai/Assistant.vue") },
   { path: "/ai/notes", name: "AiNotes", component: () => import("@/views/ai/Notes.vue") },
   { path: "/ai/admin", name: "AiAdmin", redirect: { name: "AiAdminEndpoints" }, meta: { roles: AiRoles.readers } },

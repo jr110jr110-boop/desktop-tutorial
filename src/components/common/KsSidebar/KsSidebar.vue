@@ -329,7 +329,7 @@
 
 <script lang="ts" setup>
 import { Features } from "@/utils/features";
-import { AccountRoles, AgentRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, currentRole, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, userRoles, userRoleTitles } from "@/composables/roles";
+import { AccountRoles, AgentRoles, EngInboxRoles, AiRoles, GoLiveRoles, DashboardRoles, FinanceRoles, FnRoles, currentRole, hasRole, InventoryRoles, OfficeRoles, OpsDataRoles, ProcurementRoles, ProductionRoles, ProjectControlRoles, QualityRoles, SalesRoles, ServiceRoles, userRoles, userRoleTitles } from "@/composables/roles";
 import { canOpenTrace } from "@/composables/traceAccess";
 import { DncRoles } from "@/composables/dnc";
 import { EcRoles } from "@/composables/engChange";
@@ -695,6 +695,7 @@ onBeforeUnmount(() => {
 const agentLinks = computed<Links[]>(() => [
   { title: "کارتابل گیت", routeName: "AgInbox", badge: agentOpen.value },
   { title: "نمای ایجنت اصلی", routeName: "AgBoard", disabled: !hasRole(AgentRoles.board), hidden: !hasRole(AgentRoles.board) },
+  { title: "صندوق ورودی مهندسی", routeName: "EngInbox", disabled: !hasRole(EngInboxRoles.read), hidden: !hasRole(EngInboxRoles.read) },
 ]);
 const officeLinks = computed<Links[]>(() => [
   { title: "کارتابل اداری", routeName: "OfInbox", badge: inboxOpen.value },

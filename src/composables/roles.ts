@@ -626,3 +626,9 @@ export const AgentRoles = {
   /** retry a failed task and switch a step on or off (AgentRoles.Admins) */
   admin: ["PMO"],
 };
+
+/** ENG-F1 engineering inbox (EngInboxRoles in Services/NasbNiro/EngInbox/EngSource.cs): reading, and scan / dismiss for the engineering unit and the PMO. */
+export const EngInboxRoles = {
+  read: list("PMO,ENGINEERING,ENGINEER,PLANNING,QC,QA,CONSTRUCTION,PRODUCTIONMANAGER,SHOPSUPERVISOR,CEO,AUDITOR"),
+  operate: list("ENGINEERING,PMO"),
+};
