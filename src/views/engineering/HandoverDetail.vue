@@ -8,7 +8,7 @@ import EnInfoList from "@/components/engineering/EnInfoList.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWaiverCard from "@/components/engineering/EnWaiverCard.vue";
 import { getEnGap, getEnHandover, getEnHandovers, postEnHandoverAction, requestEnWaiver } from "@/api/EngineeringAPIs";
-import { completeness, downloadDoc, enPaths, EnRoles, faDigits, faNum, handoverStatuses, hoursUntil, runEn, stamp, useEnDialog } from "@/composables/engineering";
+import { completeness, downloadDoc, enPaths, EnRoles, enUnits, faDigits, faNum, handoverStatuses, hoursUntil, runEn, stamp, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -51,6 +51,7 @@ const reason = (title: string, action: string, okText: string) =>
 const locked = computed(() => h.value && h.value.status !== undefined && [0, 2].includes(h.value.status) && !h.value.canSubmit);
 const lines = computed(() => [...(h.value?.lines || [])].sort((a: any, b: any) => Number(b.forMyUnit) - Number(a.forMyUnit) || a.seq - b.seq));
 const pct = computed(() => (h.value ? completeness(h.value.requiredCount, h.value.requiredCount - h.value.missingRequiredCount) : null));
+const unitsText = (u: string | null) => (u ? u.split(",").map((c) => enUnits.find((x) => x.code === c.trim())?.text || c).join("، ") : "همه");
 const isLink = (p: string) => typeof p === "string" && p.startsWith("/");
 
 function waiverDialog() {
@@ -126,7 +127,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
                   <a v-else-if="l.documentId" href="#" @click.prevent="downloadDoc(l.documentId, l.title)">دریافت فایل</a><span v-if="l.revision"> — {{ l.revision }}</span>
                   <span v-if="!l.linkPath && !l.documentId" class="inv-muted">—</span>
                 </td>
-                <td class="small">{{ l.units || "همه" }}</td>
+                <td class="small">{{ unitsText(l.units) }}</td>
               </tr>
             </tbody>
           </table>
