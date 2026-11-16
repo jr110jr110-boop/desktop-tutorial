@@ -40,7 +40,7 @@ namespace Services.NasbNiro.Engineering
 
         public static async Task<List<EnRiskRow>> ComputeAsync(IUnitOfWork uow, CancellationToken ct)
         {
-            List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.CeoApprovedAt != null
+            List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (c.CeoApprovedAt != null || (c.Kind != EnCaseKind.Turbine && c.EngConfirmedAt != null))
                 && (c.Status == EnCaseStatus.TenderPreparation || c.Status == EnCaseStatus.TenderIssued || c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering)).OrderBy(c => c.Id).Take(500).ToListAsync(ct);
             List<string> approved = await EnReferenceRules.ApprovedCodesAsync(uow, ct);
             List<int> contractIds = cases.Where(c => c.ContractId.HasValue).Select(c => c.ContractId.Value).ToList();

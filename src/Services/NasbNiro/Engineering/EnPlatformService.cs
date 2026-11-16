@@ -156,7 +156,7 @@ namespace Services.NasbNiro.Engineering
             : d.Documents.Any(EnPlatformRules.RequiredMissing) ? "ردیف‌های الزامی کامل نشده‌اند (" + EnText.Num(d.Documents.Count(EnPlatformRules.RequiredMissing)) + " مورد)." : null;
 
         private static string ConfirmReason(EnPlatformDossier d, bool approver, bool seat, int me) =>
-            !approver ? EnText.NotAllowed : seat ? EnText.AiNever : d.Status != EnDossierStatus.Completing ? "فقط پرونده «کامل‌شده، منتظر تایید» تایید می‌شود."
+            !approver ? EnText.NotAllowed + " (تایید کامل بودن مدارک پلتفرم فقط با مدیر مهندسی است)" : seat ? EnText.AiNever : d.Status != EnDossierStatus.Completing ? "فقط پرونده «کامل‌شده، منتظر تایید» تایید می‌شود."
             : d.Documents.Any(EnPlatformRules.RequiredMissing) ? "ردیف‌های الزامی کامل نیستند." : EnEditors.Has(d.EditorUserIds, me) || d.CreatorUserId == me ? EnText.SameUser : null;
 
         private static string ReturnReasonOf(EnPlatformDossier d, bool approver) =>
@@ -220,7 +220,7 @@ namespace Services.NasbNiro.Engineering
 
         private async Task<EnDossierDto> DossierDtoAsync(PbProduct product, EnPlatformDossier d, List<EnPlatformDossier> all, EnReferenceList current, CancellationToken ct)
         {
-            bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
+            bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.Manager);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
             EnDossierDto dto = new EnDossierDto { ProductId = product.Id, ProductCode = product.Code, ProductTitle = product.Title, Status = 0, StatusText = EnText.Dossier(EnDossierStatus.NotAssessed), NativeStandardMissing = all.Count == 0 };
             dto.OtherDossiers = all.Where(x => d == null || x.Id != d.Id).OrderBy(x => x.ReferenceCode, StringComparer.Ordinal).Select(x => new EnDossierRefDto { Id = x.Id, ReferenceCode = x.ReferenceCode, Status = (int)x.Status, StatusText = EnText.Dossier(x.Status) }).ToList();
@@ -299,7 +299,7 @@ namespace Services.NasbNiro.Engineering
             if (action != "native-standard" && action != "assess" && action != "complete" && action != "confirm" && action != "return") return EnText.Bad<EnDossierDto>("عمل نامعتبر است (native-standard، assess، complete، confirm یا return).");
             PbProduct product = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == dto.ProductId && !p.Deleted, ct);
             if (product == null) return EnText.NotFound<EnDossierDto>("محصول پیدا نشد.");
-            bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
+            bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.Manager);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
             DateTimeOffset now = DateTimeOffset.Now;
             string note = EnText.Clean(dto.Note);
@@ -312,8 +312,9 @@ namespace Services.NasbNiro.Engineering
                 string why = RecordStandardReason(writer, seat, product);
                 string basis = EnText.Clean(dto.StandardBasis);
                 if (why == null && code == null) why = "استاندارد دیتاشیت اصلی پلتفرم را بنویسید.";
-                why ??= EnText.Over(code, 40, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد");
+                why ??= EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد");
                 if (why == null && d != null) why = "برای این استاندارد پرونده‌ای از پیش وجود دارد.";
+                if (why == null && !await EnOrigin.HasDossierAsync(_uow, product.Id, ct) && await EnOrigin.IsUnregisteredNewDesignAsync(_uow, product.Id, ct)) why = EnOrigin.UnregisteredNew;
                 if (why != null) return EnText.Bad<EnDossierDto>(why);
                 d = new EnPlatformDossier { ProductId = product.Id, ReferenceCode = code, StandardBasis = basis, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<EnPlatformDossier>().Add(d);

@@ -103,9 +103,12 @@ namespace Services.NasbNiro.Engineering
             EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == caseId && !x.Deleted, ct);
             if (c == null) return EnText.NotFoundCase;
             if (c.Kind != EnCaseKind.Turbine || c.Classification != EnClassification.New) return "فقط پروندهٔ طرح جدید می‌تواند پلتفرم شود.";
-            if (c.Status != EnCaseStatus.InEngineering && c.Status != EnCaseStatus.HandedOver && c.Status != EnCaseStatus.Accepted && c.Status != EnCaseStatus.Released) return "طرح جدید پس از شروع مهندسی پروژه پیشنهاد می‌شود.";
+            // only after the PMO released the handover of the case: the documents of the design exist and were handed over
+            if (!await _uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == caseId && !h.Deleted && h.Status == EnHandoverStatus.Released, ct)) return "ثبت پلتفرم فقط پس از ابلاغ تحویل مدارک این پرونده (تحویل ابلاغ‌شده توسط PMO) ممکن است.";
             PbProduct p = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == productId && !x.Deleted, ct);
             if (p == null || !p.IsActive) return "محصول فعال پیدا نشد.";
+            if (!await EnOrigin.BelongsToCaseAsync(_uow, c, productId, ct)) return "این محصول به این پروندهٔ طراحی جدید تعلق ندارد (محصول باید همان محصول دستور کار قرارداد پرونده باشد).";
+            if (!string.Equals(c.ReferenceCode, code, StringComparison.Ordinal)) return "استاندارد پلتفرم باید همان استاندارد پروژهٔ این پرونده (" + (c.ReferenceCode ?? "—") + ") باشد.";
             if (await _uow.Set<EnPlatformDossier>().AsNoTracking().AnyAsync(d => d.ProductId == productId && d.ReferenceCode == code && !d.Deleted, ct)) return "برای این محصول و استاندارد پرونده پلتفرم از پیش وجود دارد.";
             if (await _uow.Set<EnPlatformRegistration>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed && x.ProductId == productId && x.ReferenceCode == code && x.Id != (exceptId ?? 0), ct)) return "پیشنهاد بازی برای این محصول و استاندارد منتظر تصمیم است.";
             return null;
@@ -117,7 +120,7 @@ namespace Services.NasbNiro.Engineering
             if (!_user.IsInRole(EnRoles.Manager)) return EnText.Bad<EnRegistrationDto>(EnText.NotAllowed + " (پیشنهاد با مدیر مهندسی است)");
             if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnRegistrationDto>(EnText.AiNever);
             string code = EnDossierBuilder.NormCode(dto.ReferenceCode), basis = EnText.Clean(dto.StandardBasis), rationale = EnText.Clean(dto.Rationale);
-            string why = code == null ? "کد استاندارد را بنویسید." : EnText.Over(code, 40, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد") ?? EnText.ReasonShort(rationale, 30, "دلیل پلتفرم‌شدن") ?? EnText.Over(rationale, 2000, "دلیل");
+            string why = code == null ? "کد استاندارد را بنویسید." : EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد") ?? EnText.ReasonShort(rationale, 30, "دلیل پلتفرم‌شدن") ?? EnText.Over(rationale, 2000, "دلیل");
             why ??= await ContentProblemAsync(dto.CaseId, dto.ProductId, code, null, ct);
             if (why != null) return EnText.Bad<EnRegistrationDto>(why);
             DateTimeOffset now = DateTimeOffset.Now;
@@ -131,6 +134,21 @@ namespace Services.NasbNiro.Engineering
             await _uow.SaveChangesAsync(ct);
             await SyncAsync(r, ct);
             return await GetRegistrationAsync(r.Id, ct);
+        }
+
+        /// <summary>Copies state, file, revision and units from the lines of the Released handover of the case to the matching dossier lines (document type + title).</summary>
+        private async Task CopyFromHandoverAsync(EnPlatformDossier d, int caseId, CancellationToken ct)
+        {
+            EnHandover h = await _uow.Set<EnHandover>().AsNoTracking().Include(x => x.Lines).Where(x => x.CaseId == caseId && !x.Deleted && x.Status == EnHandoverStatus.Released).OrderByDescending(x => x.Id).FirstOrDefaultAsync(ct);
+            if (h == null) return;
+            foreach (EnPlatformDocument x in d.Documents)
+            {
+                EnHandoverLine l = h.Lines.OrderBy(y => y.Seq).FirstOrDefault(y => EnDossierBuilder.TypeTitle(y.DocumentType, y.Title) == EnDossierBuilder.TypeTitle(x.DocumentType, x.Title));
+                if (l == null) continue;
+                if (l.Units != null) x.Units = l.Units;
+                if (x.SystemProven || l.LinkPath != null || l.State != EnLineState.Available || !l.DocumentId.HasValue) continue;   // a system line is proven by the bank (ProveAsync), not copied
+                x.State = EnLineState.Available; x.DocumentId = l.DocumentId; x.Revision = l.Revision;
+            }
         }
 
         public async Task<ResponseDto<EnRegistrationDto>> DecideAsync(EnRegistrationDecisionDto dto, CancellationToken ct)
@@ -161,6 +179,7 @@ namespace Services.NasbNiro.Engineering
                     return EnText.Bad<EnRegistrationDto>(r.DecisionNote);
                 }
                 EnPlatformDossier d = await EnDossierBuilder.EnsureAsync(_uow, r.ProductId, r.ReferenceCode, r.StandardBasis, Me, now, ct);
+                await CopyFromHandoverAsync(d, r.CaseId, ct);   // the dossier starts with what the Released handover carried: state, file, revision and units of every matching line
                 r.Status = EnRegStatus.Approved; r.ApprovedByUserId = Me; r.ApprovedAt = now; r.DecisionNote = note; r.ModifyDate = now; r.ModifierUserId = Me;
                 EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == r.CaseId, ct);
                 if (c != null) EnEvents.Add(_uow, c, "platform-registered", Me, r.Number + ": " + r.ReferenceCode);

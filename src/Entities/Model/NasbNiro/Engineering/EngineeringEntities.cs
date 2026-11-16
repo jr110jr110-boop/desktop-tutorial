@@ -294,7 +294,7 @@ namespace Entities.Model.NasbNiro.Engineering
 
         public int MissingRequiredCount { get; set; }
         public int? WaiverId { get; set; }
-        public int? SubmittedByUserId { get; set; }
+        public int? SubmitConfirmedByUserId { get; set; }
         public DateTimeOffset? SubmittedAt { get; set; }
         public int? AcceptedByUserId { get; set; }
         public DateTimeOffset? AcceptedAt { get; set; }
@@ -351,7 +351,11 @@ namespace Entities.Model.NasbNiro.Engineering
         /// <summary>JSON: the missing lines at the request.</summary>
         public string MissingSnapshot { get; set; }
 
-        public DateTimeOffset DebtDueAt { get; set; }
+        /// <summary>The deadline in hours (1..Engineering.Waiver.MaxDebtHours, ceiling 72) asked by the manager; the CEO may only lower it at approval. It counts from the CEO's approval.</summary>
+        public int DebtHours { get; set; }
+
+        /// <summary>Approval time + <see cref="DebtHours"/>; null until the CEO approves.</summary>
+        public DateTimeOffset? DebtDueAt { get; set; }
         public EnWaiverStatus Status { get; set; }
         public int RequestedByUserId { get; set; }
         public DateTimeOffset RequestedAt { get; set; }
@@ -373,7 +377,8 @@ namespace Entities.Model.NasbNiro.Engineering
     public class EnDocumentDebt : BaseEntity
     {
         public int WaiverId { get; set; }
-        public int HandoverLineId { get; set; }
+        /// <summary>The handover line the debt is about; null for the debt of the unconfirmed platform dossier (<see cref="EnDebtTypes.DossierConfirm"/>).</summary>
+        public int? HandoverLineId { get; set; }
         public int CaseId { get; set; }
         public int ContractId { get; set; }
         public int? ProductId { get; set; }
@@ -384,6 +389,13 @@ namespace Entities.Model.NasbNiro.Engineering
         public DateTimeOffset? SettledAt { get; set; }
         public int? SettledByUserId { get; set; }
         public Guid? SettledDocumentId { get; set; }
+    }
+
+    public static class EnDebtTypes
+    {
+        /// <summary>The DocumentType of the debt of a waived handover whose platform dossier was not confirmed complete; it settles when the manager confirms the dossier.</summary>
+        public const string DossierConfirm = "DOSSIER-CONFIRM";
+        public const string DossierConfirmTitle = "تایید کامل بودن پرونده پلتفرم";
     }
 
     // ------------------------------------------------------------------------------------------ distribution
@@ -406,7 +418,7 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>Set when ENG.DIST.NOTIFY sent the notification of the unit.</summary>
         public DateTimeOffset? NoticeSentAt { get; set; }
-        public int? AcknowledgedByUserId { get; set; }
+        public int? ReceiptConfirmedByUserId { get; set; }
         public DateTimeOffset? AcknowledgedAt { get; set; }
 
         [Timestamp]

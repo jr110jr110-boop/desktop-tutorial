@@ -200,7 +200,7 @@ namespace MsTests
             {
                 AiSeatDefinition seat = AiSeatCatalog.Find(s.AgentCode);
                 Assert.IsNotNull(seat, s.Code + " names an agent that is not a seat: " + s.AgentCode);
-                Assert.IsTrue(AgentCodes.Process.Contains(s.AgentCode), s.Code);
+                Assert.IsTrue(AgentCodes.Process.Contains(s.AgentCode) || (s.AgentCode == AgentCodes.Master && s.Code == "ENG.STANDARD.GAP"), s.Code + " (only the standard-gap report belongs to the main agent)");
                 Assert.IsFalse(string.IsNullOrWhiteSpace(s.Title), s.Code);
                 Assert.IsFalse(s.Title.Contains("عامل") && !s.Title.Contains("مدیرعامل"), s.Code + " says عامل");
                 var info = s.GateInfo(new AgentWorkItem { TargetType = "X", TargetId = 7, TargetNumber = "N-7" });

@@ -7,6 +7,7 @@ using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Agents;
 using Entities.Model.NasbNiro.Engineering;
+using Entities.Model.NasbNiro.ProductBank;
 using Entities.Model.NasbNiro.ProjectControl;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,14 +30,19 @@ namespace Services.NasbNiro.Agents.Steps
             return AgentStepResult.Done("EnHandover", r.Data.Id, r.Data.Number, doneSummary.Replace("{n}", r.Data.Number));
         }
 
-        /// <summary>The open debts whose source now exists: a platform dossier line that is available, or an approved project MDR row with a file of the same type and title.</summary>
+        /// <summary>The open debts whose source now exists: a platform dossier line that is available, a system BOM / OPC line whose released BOM / approved routing exists, an approved project MDR row with a file of the same type and title, or the confirmed dossier of a dossier debt.</summary>
         protected static IQueryable<int> ReadyDebtIds(IUnitOfWork uow) =>
-            from d in uow.Set<EnDocumentDebt>().AsNoTracking()
-            where !d.Deleted && d.Status == EnDebtStatus.Open
-            join l in uow.Set<EnHandoverLine>().AsNoTracking() on d.HandoverLineId equals l.Id
-            where (l.PlatformDocumentId != null && uow.Set<EnPlatformDocument>().Any(p => p.Id == l.PlatformDocumentId && p.State == EnLineState.Available && (p.DocumentId != null || p.SystemProven)))
-               || (l.PlatformDocumentId == null && uow.Set<PcEngineeringDeliverable>().Any(m => !m.Deleted && m.ContractId == d.ContractId && m.DocumentType == l.DocumentType && m.Title == l.Title && m.IssueState == PcIssueState.Approved && m.DocumentId != null))
-            select d.Id;
+            uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open
+                && ((d.HandoverLineId == null && d.DocumentType == EnDebtTypes.DossierConfirm
+                        && uow.Set<EnCase>().Any(c => c.Id == d.CaseId && uow.Set<EnPlatformDossier>().Any(p => !p.Deleted && p.ProductId == c.ProductId && p.ReferenceCode == c.ReferenceCode && p.Status == EnDossierStatus.Complete)))
+                    || (d.HandoverLineId != null && uow.Set<EnHandoverLine>().Any(l => l.Id == d.HandoverLineId
+                        && ((l.PlatformDocumentId != null && uow.Set<EnPlatformDocument>().Any(p => p.Id == l.PlatformDocumentId && p.State == EnLineState.Available && (p.DocumentId != null || p.SystemProven)))
+                            || (l.PlatformDocumentId == null && l.LinkPath != null
+                                && ((l.DocumentType == EnDocTypes.Bom && uow.Set<PbBomHeader>().Any(b => !b.Deleted && b.ProductId == d.ProductId && b.Status == PbBomStatus.Released))
+                                    || (l.DocumentType == EnDocTypes.Opc && uow.Set<PbOpcRouting>().Any(o => !o.Deleted && o.ProductId == d.ProductId && o.Status == PbRoutingStatus.Approved)
+                                        && !uow.Set<PbOpcRouting>().Any(o => !o.Deleted && o.ProductId == d.ProductId && (o.Status == PbRoutingStatus.Draft || o.Status == PbRoutingStatus.UnderReview)))))
+                            || (l.PlatformDocumentId == null && l.LinkPath == null && uow.Set<PcEngineeringDeliverable>().Any(m => !m.Deleted && m.ContractId == d.ContractId && m.DocumentType == l.DocumentType && m.Title == l.Title && m.IssueState == PcIssueState.Approved && m.DocumentId != null)))))))
+                .Select(d => d.Id);
     }
 
     /// <summary>ENG.HANDOVER.DRAFT (Agent): a won case whose charter review is confirmed (or that has no charter) and that has no open handover; the agent drafts the handover from the reference list and the sources, a round after a PMO return included.</summary>
@@ -49,7 +55,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.ContractId != null && c.Classification != EnClassification.None && (c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering)
+            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.ContractId != null && (c.Classification != EnClassification.None || (c.Kind != EnCaseKind.Turbine && c.EngConfirmedAt != null)) && (c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering)
                     && (c.CharterReviewOutcome == EnCharterOutcome.Confirmed || !uow.Set<PcProjectCharter>().Any(ch => ch.ContractId == c.ContractId && !ch.Deleted))
                     && !uow.Set<EnHandover>().Any(h => h.CaseId == c.Id && !h.Deleted && (h.Status == EnHandoverStatus.Draft || h.Status == EnHandoverStatus.Submitted || h.Status == EnHandoverStatus.Accepted || h.Status == EnHandoverStatus.Released)))
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId, Returned = uow.Set<EnHandover>().Any(h => h.CaseId == c.Id && h.Status == EnHandoverStatus.Returned) }).ToListAsync(ct);

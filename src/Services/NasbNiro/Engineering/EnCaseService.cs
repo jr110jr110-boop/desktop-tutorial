@@ -269,7 +269,9 @@ namespace Services.NasbNiro.Engineering
         {
             if (kind != EnClassification.Platform) return null;
             if (!productId.HasValue) return "برای نوع پلتفرم، محصول بانک را مشخص کنید.";
-            return await _uow.Set<PbProduct>().AsNoTracking().AnyAsync(p => p.Id == productId.Value && !p.Deleted && p.IsActive) ? null : "محصول فعال با این شناسه در بانک محصول نیست.";
+            if (!await _uow.Set<PbProduct>().AsNoTracking().AnyAsync(p => p.Id == productId.Value && !p.Deleted && p.IsActive)) return "محصول فعال با این شناسه در بانک محصول نیست.";
+            // a product is a platform only when it has a dossier: the standard of its original data sheet recorded by engineering, or the registration of a New design approved by the CEO
+            return await EnOrigin.HasDossierAsync(_uow, productId.Value, CancellationToken.None) ? null : EnOrigin.NoDossier;
         }
 
         public async Task<ResponseDto<EnCaseDto>> CaseActionAsync(EnCaseActionDto dto, CancellationToken ct)
@@ -360,6 +362,7 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "confirm":
                     why = ConfirmReason(c, w);
+                    if (why == null && c.ProposedClassification == EnClassification.Platform) why = await ProductProblemAsync(c.ProposedProductId, EnClassification.Platform);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.ClassificationHash = EnCaseRules.ClassHash(c); c.EngConfirmedByUserId = Me; c.EngConfirmedAt = now; c.Status = EnCaseStatus.AwaitingCeoApproval;
                     EnEvents.Add(_uow, c, "eng-confirmed", Me, null);
@@ -368,7 +371,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     why = StandardReason(c, w);
                     string code = EnDossierBuilder.NormCode(dto.ReferenceCode), evidence = EnText.Clean(dto.StandardEvidence);
-                    if (why == null) why = code == null ? "استاندارد پروژه را از دیتاشیت کارفرما بنویسید." : EnText.Over(code, 40, "کد استاندارد") ?? EnText.ReasonShort(evidence, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(evidence, 500, "مبنای استاندارد");
+                    if (why == null) why = code == null ? "استاندارد پروژه را از دیتاشیت کارفرما بنویسید." : EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(evidence, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(evidence, 500, "مبنای استاندارد");
                     bool change = c.ReferenceCode != null && c.ReferenceCode != code;
                     if (why == null && change) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد");
                     if (why == null && dto.StandardAttachmentId.HasValue) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
@@ -380,6 +383,7 @@ namespace Services.NasbNiro.Engineering
                         bool decided = c.Status != EnCaseStatus.AwaitingEngConfirm;
                         c.Status = EnCaseStatus.AwaitingEngConfirm; c.EngConfirmedByUserId = null; c.EngConfirmedAt = null; c.CeoApprovedByUserId = null; c.CeoApprovedAt = null; c.ClassificationHash = null;
                         c.TenderReleasedByUserId = null; c.TenderReleasedAt = null; c.TenderHash = null; c.ReturnReason = EnText.Cut("استاندارد پروژه تغییر کرد: " + note, 1000);
+                        if (decided) await EnDecision.VoidOpenHandoversAsync(_uow, _notify, c, Me, now, ct);   // the decision the handover was drafted under is gone
                         if (decided) { c.ProposedClassification = c.Classification == EnClassification.None ? c.ProposedClassification : c.Classification; if (c.Classification != EnClassification.None) { c.ProposedProductId = c.ProductId; c.ProposedWithChanges = c.PlatformWithChanges; c.ProposedChangeNote = c.ChangeNote; } }
                     }
                     EnEvents.Add(_uow, c, change ? "standard-changed" : "standard-set", Me, code + " — " + evidence + (change ? " — " + note : string.Empty));
@@ -403,6 +407,7 @@ namespace Services.NasbNiro.Engineering
                 case "approve":
                 {
                     why = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct));
+                    if (why == null && c.ProposedClassification == EnClassification.Platform) why = await ProductProblemAsync(c.ProposedProductId, EnClassification.Platform);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.ApprovedGapHash = (await EnGaps.LiveAsync(_uow, c.Id, ct))?.ContentHash;
                     c.Classification = c.ProposedClassification; c.ProductId = c.ProposedProductId; c.PlatformWithChanges = c.ProposedWithChanges; c.ChangeNote = c.ProposedChangeNote;
@@ -421,6 +426,7 @@ namespace Services.NasbNiro.Engineering
                     c.TenderReleasedByUserId = null; c.TenderReleasedAt = null; c.TenderHash = null; c.ReturnReason = EnText.Cut(note, 1000);
                     c.ProposedClassification = c.Classification; c.ProposedProductId = c.ProductId; c.ProposedWithChanges = c.PlatformWithChanges; c.ProposedChangeNote = c.ChangeNote;
                     c.EditorUserIds = EnEditors.With(c.EditorUserIds, Me);
+                    await EnDecision.VoidOpenHandoversAsync(_uow, _notify, c, Me, now, ct);   // the decision the handover was drafted under is gone
                     EnEvents.Add(_uow, c, "reclassify-requested", Me, note);
                     break;
                 case "save-concept":
@@ -456,6 +462,7 @@ namespace Services.NasbNiro.Engineering
                         foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
                     }
                     why = ReleaseReason(c, w, docs, makers);
+                    if (why == null && c.Kind == EnCaseKind.Turbine) why = await EnDecision.RefusalAsync(_uow, c, ct);   // an approval whose standard-gap report went stale does not release a tender package
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.TenderHash = await EnCaseRules.TenderHashAsync(_uow, c, ct); c.TenderReleasedByUserId = Me; c.TenderReleasedAt = now; c.Status = EnCaseStatus.TenderIssued;
                     EnEvents.Add(_uow, c, "tender-released", Me, "تعداد مدارک بسته: " + EnText.Num(docs));

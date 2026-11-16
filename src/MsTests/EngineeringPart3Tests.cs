@@ -17,7 +17,7 @@ namespace MsTests
     {
         private static AppHost Started(string name) { AppHost h = NewHost(name); StartControl(h); return h; }
 
-        private static int Seed(AppHost host, EnClassification classification, EnCaseStatus status)
+        internal static int Seed(AppHost host, EnClassification classification, EnCaseStatus status)
         {
             int contract = Contract(host), id = 0;
             host.Write(u =>
@@ -26,6 +26,18 @@ namespace MsTests
                 u.SaveChanges(); id = c.Id;
             }, Seeder);
             return id;
+        }
+
+        /// <summary>The case reached the end of the engineering flow: its product and standard are set and the PMO released its handover (the registration needs that).</summary>
+        internal static void ReleaseHandover(AppHost host, int caseId, int product, string code)
+        {
+            host.Write(u =>
+            {
+                EnCase c = u.Set<EnCase>().Single(x => x.Id == caseId);
+                c.ProductId = product; c.ReferenceCode = code;
+                AppHost.Add(u, new EnHandover { Number = "EHO-T" + caseId, CaseId = caseId, ContractId = c.ContractId.Value, Round = 1, Status = EnHandoverStatus.Released, PreparedByUserId = 1001, CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+                u.SaveChanges();
+            }, Seeder);
         }
 
         [TestMethod]
@@ -84,11 +96,12 @@ namespace MsTests
             await ApprovedList(host, "REG-LIST", ("DWG", true, false));
             int newCase = Seed(host, EnClassification.New, EnCaseStatus.InEngineering), platformCase = Seed(host, EnClassification.Platform, EnCaseStatus.InEngineering), early = Seed(host, EnClassification.New, EnCaseStatus.Classifying);
             int product = Product(host, "99.77.00.000.1");
+            ReleaseHandover(host, newCase, product, "REG-LIST");
             Func<System.Security.Claims.ClaimsPrincipal, int, Action<EnRegistrationProposeDto>, Task<Common.Results.ResponseDto<EnRegistrationDto>>> propose = (who, caseId, set) => host.As(who, p => { var d = new EnRegistrationProposeDto { CaseId = caseId, ProductId = product, ReferenceCode = "REG-LIST", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }; set?.Invoke(d); return p.GetRequiredService<IEnRegistrationService>().ProposeAsync(d, Ct); });
             Refused(await propose(Eng1, newCase, null));                                                       // only the head of engineering proposes
             Refused(await propose(await SeatAsync(host, "AG-ENG", "ENGINEERING"), newCase, null));
             Refused(await propose(Mgr1, platformCase, null), "طرح جدید");
-            Refused(await propose(Mgr1, early, null), "پس از شروع");
+            Refused(await propose(Mgr1, early, null), "ابلاغ");
             Refused(await propose(Mgr1, newCase, d => d.Rationale = "کوتاه"), "30");
             Refused(await propose(Mgr1, newCase, d => d.ProductId = 999999), "محصول");
             Assert.AreEqual(0, host.Read(u => u.Set<EnPlatformDossier>().Count()), "nothing is a platform before the approval");
@@ -121,6 +134,7 @@ namespace MsTests
             await ApprovedList(host, "REG-LIST2", ("DWG", true, false));
             int newCase = Seed(host, EnClassification.New, EnCaseStatus.HandedOver);
             int product = Product(host, "99.77.00.000.2");
+            ReleaseHandover(host, newCase, product, "REG-LIST2");
             Func<Task<Common.Results.ResponseDto<EnRegistrationDto>>> propose = () => host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-LIST2", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct));
             Func<System.Security.Claims.ClaimsPrincipal, int, string, string, Task<Common.Results.ResponseDto<EnRegistrationDto>>> decide = (who, id, decision, note) => host.As(who, p => p.GetRequiredService<IEnRegistrationService>().DecideAsync(new EnRegistrationDecisionDto { Id = id, Decision = decision, Note = note }, Ct));
             EnRegistrationDto a = Ok(await propose());

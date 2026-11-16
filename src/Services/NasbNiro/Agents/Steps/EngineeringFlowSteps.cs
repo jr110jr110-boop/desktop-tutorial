@@ -92,16 +92,24 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
+            List<AgentWorkItem> items = new List<AgentWorkItem>();
+            if (!await EnControl.ActiveAsync(uow, ct)) return items;   // the engineering control has not started (or starts later): nothing to do yet
             bool any = await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview || l.Status == EnRefStatus.Approved), ct);
-            if (any) return new List<AgentWorkItem>();
-            var t = await uow.Set<PcMdrTemplate>().AsNoTracking().Where(x => !x.Deleted && x.IsActive && x.Lines.Any()).OrderBy(x => x.Id).Select(x => new { x.Id, x.Code, x.Title }).FirstOrDefaultAsync(ct);
-            return t == null ? new List<AgentWorkItem>() : new List<AgentWorkItem> { Item("PcMdrTemplate", t.Id, t.Code, null, null, "فهرست مدارک مرجع وجود ندارد؛ الگوی MDR «" + t.Title + "» آمادهٔ تبدیل به پیش‌نویس است.") };
+            if (!any)
+            {
+                var t = await uow.Set<PcMdrTemplate>().AsNoTracking().Where(x => !x.Deleted && x.IsActive && x.Lines.Any()).OrderBy(x => x.Id).Select(x => new { x.Id, x.Code, x.Title }).FirstOrDefaultAsync(ct);
+                if (t != null) items.Add(Item("PcMdrTemplate", t.Id, t.Code, null, null, "فهرست مدارک مرجع وجود ندارد؛ الگوی MDR «" + t.Title + "» آمادهٔ تبدیل به پیش‌نویس است."));
+            }
+            // a case under a standard that has no list in any status: the standard-gap report cannot compare; the agent drafts that list as a copy of the platform's base list for the engineers to adapt
+            foreach (var (c, p) in await EnGaps.TargetListMissingAsync(uow, ProcStepCommon.Cap, ct))
+                items.Add(Item("EnCase", c.Id, c.Number, null, null, "فهرست مدارک مرجع استاندارد " + c.ReferenceCode + " در هیچ وضعیتی وجود ندارد؛ پیش‌نویس آن از فهرست استاندارد " + p.BaseCode + " ساخته می‌شود."));
+            return items.Take(ProcStepCommon.Cap).ToList();
         }
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
         {
             IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
+            if (item.TargetType == "EnCase") return await DraftForGapAsync(item, uow, services, ct);
             PcMdrTemplate t = await uow.Set<PcMdrTemplate>().AsNoTracking().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
             if (t == null || t.Lines.Count == 0) return AgentStepResult.Waiting("الگوی MDR پیدا نشد یا ردیفی ندارد.");
             EnSaveReferenceDto dto = new EnSaveReferenceDto
@@ -113,6 +121,25 @@ namespace Services.NasbNiro.Agents.Steps
             ResponseDto<EnReferenceListDto> response = await services.GetRequiredService<IEnReferenceService>().SaveListAsync(dto, ct);
             if (!response.Success) return ProcStepCommon.Refusal(response);
             return AgentStepResult.Done("EnReferenceList", response.Data.Id, response.Data.Code, $"ایجنت مهندسی پیش‌نویس فهرست مدارک مرجع ({response.Data.LineCount} ردیف) را از الگوی MDR ساخت؛ مهندسی آن را بررسی و ارسال می‌کند.");
+        }
+
+        private static async Task<AgentStepResult> DraftForGapAsync(AgentWorkItem item, IUnitOfWork uow, IServiceProvider services, CancellationToken ct)
+        {
+            EnCase c = await uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
+            if (c == null) return AgentStepResult.Waiting("پروندهٔ مهندسی پیدا نشد.");
+            EnGaps.Plan p = await EnGaps.PlanOfAsync(uow, c, ct);
+            if (!p.Needed || p.TargetAnyList || p.BaseCode == null) return AgentStepResult.Waiting("فهرست این استاندارد دیگر لازم نیست یا از پیش وجود دارد.");
+            EnReferenceList baseList = await uow.Set<EnReferenceList>().AsNoTracking().Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == p.BaseCode).FirstOrDefaultAsync(ct);
+            if (baseList == null) return AgentStepResult.Waiting("فهرست تاییدشدهٔ استاندارد پایه پیدا نشد.");
+            EnSaveReferenceDto dto = new EnSaveReferenceDto
+            {
+                Code = EnText2.Cut(c.ReferenceCode, 60), Title = EnText2.Cut("فهرست مدارک مرجع — " + c.ReferenceCode, 300), StandardSource = EnText2.Cut(baseList.StandardSource, 200),
+                Note = EnText2.Cut("نسخهٔ بررسی‌نشده از " + p.BaseCode + " که باید با متن استاندارد " + c.ReferenceCode + " تطبیق داده شود.", 1000),
+                Lines = baseList.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, TenderStage = l.TenderStage, ClientSubmittal = l.ClientSubmittal, StandardClause = l.StandardClause, Note = l.Note, Units = l.Units }).ToList(),
+            };
+            ResponseDto<EnReferenceListDto> response = await services.GetRequiredService<IEnReferenceService>().SaveListAsync(dto, ct);
+            if (!response.Success) return ProcStepCommon.Refusal(response);
+            return AgentStepResult.Done("EnReferenceList", response.Data.Id, response.Data.Code, $"ایجنت مهندسی پیش‌نویس فهرست استاندارد {response.Data.Code} را (کپی بررسی‌نشدهٔ {p.BaseCode}) ساخت تا مهندسی آن را با متن استاندارد تطبیق دهد.");
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/reference", Title = "تهیهٔ فهرست مدارک مرجع" };
@@ -209,7 +236,8 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();
-            var rows = await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted) && !uow.Set<EnPlatformRegistration>().Any(g => g.ProductId == p.Id && !g.Deleted && g.Status == EnRegStatus.Proposed))
+            var rows = await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted) && !uow.Set<EnPlatformRegistration>().Any(g => g.ProductId == p.Id && !g.Deleted && g.Status == EnRegStatus.Proposed)
+                    && !EnOrigin.UnregisteredNewProducts(uow).Any(u => u.Id == p.Id))   // a New design becomes a platform only through the CEO-approved registration
                 .OrderBy(p => p.Id).Take(ProcStepCommon.Cap).Select(p => new { p.Id, p.Code }).ToListAsync(ct);
             return rows.Select(r => Item("PbProduct", r.Id, r.Code, null, null, $"استاندارد دیتاشیت پروژه‌ای که پلتفرم {r.Code} برای آن ساخته شد را ثبت کنید.")).ToList();
         }
@@ -269,10 +297,10 @@ namespace Services.NasbNiro.Agents.Steps
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDossierStatus.Completing)
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() + "/" + d.ReferenceCode }).ToListAsync(ct);
-            return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code, null, null, $"مدارک پلتفرم {r.Code} کامل اعلام شده و منتظر تایید مدیر مهندسی است.", EnRoles.RefApprovers)).ToList();
+            return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code, null, null, $"مدارک پلتفرم {r.Code} کامل اعلام شده و منتظر تایید مدیر مهندسی است.", EnRoles.Manager)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.RefApprovers, Link = Root + "/platforms", Title = "تایید مدارک پلتفرم " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/platforms", Title = "تایید مدارک پلتفرم " + item.TargetNumber };
     }
 
     // ------------------------------------------------------------------------------------------ the early warning (an emergency should never happen)
@@ -389,7 +417,10 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnStandardGapStep : EnStep
     {
         public override string Code => "ENG.STANDARD.GAP";
-        public override string Title => "ایجنت مهندسی: گزارش تفاوت استاندارد سفارش با استاندارد پلتفرم";
+        public override string Title => "ایجنت اصلی: گزارش تفاوت استاندارد سفارش با استاندارد پلتفرم";
+
+        /// <summary>The employer's rule: the MAIN agent builds the standard-gap report. The master seat writes only EnStandardGap, EnStandardGapLine and EnCaseEvent here (SeatApprovalGuard); it never writes a list, a decision or a confirmation.</summary>
+        public override string AgentCode => AgentCodes.Master;
         public override AgentStepKind Kind => AgentStepKind.Agent;
         public override string FallbackRoles => EnRoles.Manager;
 
@@ -414,7 +445,7 @@ namespace Services.NasbNiro.Agents.Steps
             IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
             EnCase c = await uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == item.TargetId && !x.Deleted, ct);
             if (c == null) return AgentStepResult.Waiting("پروندهٔ مهندسی پیدا نشد.");
-            string text = await EnGaps.BuildAsync(uow, c, services.GetService<IEnReferenceService>(), services.GetService<global::Services.NasbNiro.Office.INotificationService>(), services.GetRequiredService<global::Services.NasbNiro.Inventory.IInventoryUserContext>().UserId, ct);
+            string text = await EnGaps.BuildAsync(uow, c, services.GetService<global::Services.NasbNiro.Office.INotificationService>(), services.GetRequiredService<global::Services.NasbNiro.Inventory.IInventoryUserContext>().UserId, ct);
             return AgentStepResult.Done("EnCase", c.Id, c.Number, text);
         }
 

@@ -53,6 +53,7 @@ namespace MsTests
         {
             AppHost host = Started("case2");
             int product = Product(host);
+            await NativeDossier(host, product);
             int inquiry = Inquiry(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
             Refused(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.Basis = "مبنای آزمون برای پلتفرم"; }), "محصول");

@@ -150,6 +150,9 @@ namespace ViewModels.NasbNiro.ProjectControlDtos
         public string Boundaries { get; set; }
         public string TimeBaselineEstimate { get; set; }
         public string CostEstimate { get; set; }
+
+        /// <summary>True when the cost estimate was left out because the reader is not one of the charter writers or managers.</summary>
+        public bool CostEstimateMasked { get; set; }
         public string AlternativesAnalysis { get; set; }
         public string Assumptions { get; set; }
         public string Constraints { get; set; }

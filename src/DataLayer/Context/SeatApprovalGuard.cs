@@ -54,6 +54,17 @@ namespace DataLayer.Context
             "Entities.Model.NasbNiro.Office",
         };
 
+        /// <summary>
+        /// The only tables outside those namespaces that the coordinator seat may write: the standard-gap report is the MAIN agent's (the employer's rule). None of the three has a decision column that the master writes
+        /// (the gap confirmation, EnStandardGap.ConfirmedByUserId, stays guarded like every other decision column).
+        /// </summary>
+        private static readonly HashSet<string> MasterAllowedTypes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Entities.Model.NasbNiro.Engineering.EnStandardGap",
+            "Entities.Model.NasbNiro.Engineering.EnStandardGapLine",
+            "Entities.Model.NasbNiro.Engineering.EnCaseEvent",
+        };
+
         private static readonly ConcurrentDictionary<Type, string[]> ColumnsOfType = new ConcurrentDictionary<Type, string[]>();
 
         public static bool IsSeatName(string userName) => !string.IsNullOrWhiteSpace(userName) && userName.Trim().StartsWith(SeatPrefix, StringComparison.OrdinalIgnoreCase);
@@ -74,7 +85,7 @@ namespace DataLayer.Context
                 .OrderBy(x => x.Entity, StringComparer.Ordinal).ThenBy(x => x.Property, StringComparer.Ordinal)
                 .ToList();
 
-        public static bool Allowed(Type entityType) => entityType != null && MasterAllowedNamespaces.Contains(entityType.Namespace);
+        public static bool Allowed(Type entityType) => entityType != null && (MasterAllowedNamespaces.Contains(entityType.Namespace) || MasterAllowedTypes.Contains(entityType.FullName));
 
         internal static void Check(DbContext context, IHttpContextAccessor accessor)
         {

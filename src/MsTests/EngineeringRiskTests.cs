@@ -24,6 +24,7 @@ namespace MsTests
         {
             await ApprovedList(host);
             int product = Product(host);
+            await NativeDossier(host, product);
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "توربین ساخته‌شده با همین مشخصات"; }));

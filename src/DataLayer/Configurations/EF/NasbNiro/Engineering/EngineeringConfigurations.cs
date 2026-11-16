@@ -228,7 +228,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
             {
                 b.ToTable("EnPlatformRegistrations");
                 b.Property(x => x.Number).HasMaxLength(50).IsRequired();
-                b.Property(x => x.ReferenceCode).HasMaxLength(40).IsRequired();
+                b.Property(x => x.ReferenceCode).HasMaxLength(60).IsRequired();
                 b.Property(x => x.StandardBasis).HasMaxLength(500).IsRequired();
                 b.Property(x => x.Rationale).HasMaxLength(2000).IsRequired();
                 b.Property(x => x.ContentHash).HasMaxLength(100).IsRequired();

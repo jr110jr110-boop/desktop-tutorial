@@ -141,6 +141,19 @@ namespace Services.NasbNiro.Engineering
             return "تحویل مدارک به PMO قفل است: " + body + ". فقط معافیت اضطراری تاییدشده توسط مدیرعامل این قفل را باز می‌کند.";
         }
 
+        /// <summary>The same rule <see cref="SourcesAsync"/> uses: the BOM line is available with a Released BOM of the product, the OPC line with an Approved routing and none in Draft or UnderReview.</summary>
+        public static async Task<bool> SystemLineReadyAsync(IUnitOfWork uow, int? productId, string documentType, CancellationToken ct)
+        {
+            if (!productId.HasValue) return false;
+            int pid = productId.Value;
+            string type = EnReferenceRules.Key(documentType);
+            if (type == EnDocTypes.Bom) return await uow.Set<Entities.Model.NasbNiro.ProductBank.PbBomHeader>().AsNoTracking().AnyAsync(b => !b.Deleted && b.ProductId == pid && b.Status == Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released, ct);
+            if (type == EnDocTypes.Opc)
+                return await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, ct)
+                    && !await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && (o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Draft || o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.UnderReview), ct);
+            return false;
+        }
+
         public static async Task<bool> DebtSourceReadyAsync(IUnitOfWork uow, EnDocumentDebt debt, EnHandoverLine line, CancellationToken ct)
         {
             if (line.PlatformDocumentId.HasValue)
@@ -148,6 +161,7 @@ namespace Services.NasbNiro.Engineering
                 EnPlatformDocument d = await uow.Set<EnPlatformDocument>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == line.PlatformDocumentId.Value, ct);
                 return d != null && d.State == EnLineState.Available && (d.DocumentId.HasValue || d.SystemProven);
             }
+            if (line.LinkPath != null) return await SystemLineReadyAsync(uow, debt.ProductId, line.DocumentType, ct);   // a BOM / OPC line of the system: proven by the bank, no file
             string type = EnReferenceRules.Key(line.DocumentType), title = EnHash.Norm(line.Title).ToUpperInvariant();
             List<PcEngineeringDeliverable> mdr = await uow.Set<PcEngineeringDeliverable>().AsNoTracking().Where(x => x.ContractId == debt.ContractId && !x.Deleted).ToListAsync(ct);
             return mdr.Any(x => EnReferenceRules.Key(x.DocumentType) == type && EnHash.Norm(x.Title).ToUpperInvariant() == title && DeliverableReady(x));
@@ -247,7 +261,11 @@ namespace Services.NasbNiro.Engineering
         }
 
         private async Task<string> AcceptReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
-            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmittedByUserId == w.Me ? EnText.SameUser : null);
+            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmitConfirmedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
+
+        /// <summary>The decision of the case (both signatures, the stored hashes) is re-checked inside the same call; one refusal message.</summary>
+        private async Task<string> DecisionAsync(EnHandover h, CancellationToken ct) =>
+            await EnDecision.RefusalAsync(_uow, await _uow.Set<EnCase>().AsNoTracking().FirstAsync(x => x.Id == h.CaseId, ct), ct);
 
         private async Task<string> ReturnReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده برگشت می‌خورد." : null);
@@ -263,7 +281,7 @@ namespace Services.NasbNiro.Engineering
 
         private async Task<string> ReleaseBaseReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
-                : h.SubmittedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : null);
+                : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
 
         private static string VoidReasonOf(EnHandover h, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft && h.Status != EnHandoverStatus.Returned ? "فقط پیش‌نویس یا تحویل برگشت‌خورده ابطال می‌شود." : null;
@@ -308,7 +326,7 @@ namespace Services.NasbNiro.Engineering
                 result.Add(new EnWaiverDto
                 {
                     Id = w.Id, Number = w.Number, HandoverId = w.HandoverId, HandoverNumber = hn.TryGetValue(w.HandoverId, out string hnum) ? hnum : null, CaseId = w.CaseId, CaseNumber = cn.TryGetValue(w.CaseId, out string cnum) ? cnum : null,
-                    Reason = w.Reason, MissingLines = snap.Lines, DossierUnconfirmed = snap.DossierUnconfirmed, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
+                    Reason = w.Reason, MissingLines = snap.Lines, DossierUnconfirmed = snap.DossierUnconfirmed, DebtHours = w.DebtHours, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
                     RequestedByName = names.Name(w.RequestedByUserId), RequestedAtText = EnText.Stamp(w.RequestedAt), WaitingHours = w.Status == EnWaiverStatus.Requested ? (int)Math.Floor((now - w.RequestedAt).TotalHours) : 0,
                     DecidedByName = names.Name(w.DecidedByUserId), DecidedAtText = EnText.Stamp(w.DecidedAt), DecisionNote = w.DecisionNote, Used = w.UsedAt.HasValue, Covers = w.Status == EnWaiverStatus.Approved && coverage == null, CoverageNote = coverage,
                     RowVersion = EnConcurrency.Text(w.RowVersion), CanDecide = decide == null, DecideBlockedReason = decide,
@@ -322,7 +340,7 @@ namespace Services.NasbNiro.Engineering
             Who w = await WhoAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
             DateTimeOffset today = DateTimeOffset.Now;
-            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmittedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }), ct);
+            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmitConfirmedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }), ct);
             int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
             List<int> caseIds = rows.Select(r => r.CaseId).Distinct().ToList(), hids = rows.Select(r => r.Id).ToList(), contractIds = rows.Select(r => r.ContractId).Distinct().ToList();
             Dictionary<int, EnCase> cases = await _uow.Set<EnCase>().AsNoTracking().Where(c => caseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
@@ -330,7 +348,7 @@ namespace Services.NasbNiro.Engineering
             List<EnWaiver> waivers = await _uow.Set<EnWaiver>().AsNoTracking().Where(x => !x.Deleted && hids.Contains(x.HandoverId)).OrderBy(x => x.Id).ToListAsync(ct);
             List<EnDistribution> dist = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => !d.Deleted && hids.Contains(d.HandoverId)).OrderBy(d => d.Unit).ToListAsync(ct);
             List<EnDocumentDebt> debts = await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && waivers.Select(x => x.Id).Contains(d.WaiverId)).OrderBy(d => d.Id).ToListAsync(ct);
-            Dictionary<int, string> debtUsers = await EnUsers.NamesAsync(_uow, debts.Select(d => d.SettledByUserId).Concat(dist.Select(d => d.AcknowledgedByUserId)), ct);
+            Dictionary<int, string> debtUsers = await EnUsers.NamesAsync(_uow, debts.Select(d => d.SettledByUserId).Concat(dist.Select(d => d.ReceiptConfirmedByUserId)), ct);
             Dictionary<int, string> caseNames = cases.ToDictionary(k => k.Key, k => k.Value.Number);
             Dictionary<int, string> waiverNames = waivers.ToDictionary(x => x.Id, x => x.Number);
             List<EnHandoverDto> result = new List<EnHandoverDto>();
@@ -341,6 +359,7 @@ namespace Services.NasbNiro.Engineering
                 LockState ls = await LockAsync(h, c, ct);
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
                 string submit = SubmitReason(h, w, ls, live, now), request = WaiverRequestReason(h, w, ls, live != null && live.UsedAt == null ? live : null);
+                if (submit == null && h.Status == EnHandoverStatus.Draft) submit = await EnDecision.RefusalAsync(_uow, c, ct);
                 string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w);
                 EnWaiver shown = waivers.Where(x => x.HandoverId == h.Id || x.Id == h.WaiverId).OrderByDescending(x => x.Id).FirstOrDefault();
                 EnWaiverDto waiverDto = shown == null ? null : (await WaiverDtosAsync(new List<EnWaiver> { shown }, ct))[0];
@@ -351,7 +370,7 @@ namespace Services.NasbNiro.Engineering
                     Complete = h.Status == EnHandoverStatus.Draft ? !ls.Locked : h.Complete, MissingRequiredCount = h.Status == EnHandoverStatus.Draft ? ls.Missing : h.MissingRequiredCount, RequiredCount = h.Lines.Count(l => l.Required),
                     PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = h.Status == EnHandoverStatus.Draft ? EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed) : null,
                     WaiverId = h.WaiverId, WaiverNumber = h.WaiverId.HasValue && waiverNames.TryGetValue(h.WaiverId.Value, out string wn) ? wn : null,
-                    SubmittedByName = names.Name(h.SubmittedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
+                    SubmittedByName = names.Name(h.SubmitConfirmedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
                     ReturnedByName = names.Name(h.ReturnedByUserId), ReturnedAtText = EnText.Stamp(h.ReturnedAt), ReturnReason = h.ReturnReason, ReleasedByName = names.Name(h.ReleasedByUserId), ReleasedAtText = EnText.Stamp(h.ReleasedAt),
                     StandardGap = await GapSummaryAsync(c.Id, ct),
                     Note = h.Note, VoidReason = h.VoidReason, TouchedByMe = EnEditors.Has(h.EditorUserIds, Me), RowVersion = EnConcurrency.Text(h.RowVersion), Waiver = waiverDto,
@@ -371,7 +390,7 @@ namespace Services.NasbNiro.Engineering
             return new EnDistributionDto
             {
                 Id = d.Id, HandoverId = d.HandoverId, HandoverNumber = handoverNumber, ContractId = d.ContractId, Unit = (int)d.Unit, UnitText = EnText.Unit(d.Unit), Roles = d.Roles, Status = (int)d.Status, StatusText = d.Status == EnDistStatus.Draft ? "پیش‌نویس (منتظر ابلاغ PMO)" : "ابلاغ‌شده", ScopeNote = d.ScopeNote, DocumentCount = d.DocumentCount, CanEditScope = edit == null, EditScopeBlockedReason = edit, NotifiedAtText = EnText.Stamp(d.NotifiedAt),
-                AcknowledgedByName = names.Name(d.AcknowledgedByUserId), AcknowledgedAtText = EnText.Stamp(d.AcknowledgedAt), Acknowledged = d.AcknowledgedAt.HasValue, RowVersion = EnConcurrency.Text(d.RowVersion), CanAcknowledge = why == null, AcknowledgeBlockedReason = why,
+                AcknowledgedByName = names.Name(d.ReceiptConfirmedByUserId), AcknowledgedAtText = EnText.Stamp(d.AcknowledgedAt), Acknowledged = d.AcknowledgedAt.HasValue, RowVersion = EnConcurrency.Text(d.RowVersion), CanAcknowledge = why == null, AcknowledgeBlockedReason = why,
             };
         }
 
@@ -446,7 +465,7 @@ namespace Services.NasbNiro.Engineering
             List<EnDistribution> rows = await q.OrderBy(d => d.HandoverId).ThenBy(d => d.Unit).Take(500).ToListAsync(ct);
             List<int> hids = rows.Select(r => r.HandoverId).Distinct().ToList();
             var heads = await _uow.Set<EnHandover>().AsNoTracking().Where(h => hids.Contains(h.Id)).Select(h => new { h.Id, h.Number, h.Status }).ToListAsync(ct);
-            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.Select(r => r.AcknowledgedByUserId), ct);
+            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.Select(r => r.ReceiptConfirmedByUserId), ct);
             return ResponseDtoHelper.Ok(rows.Select(d => { var head = heads.FirstOrDefault(x => x.Id == d.HandoverId); return DistDto(d, head?.Number, head == null ? EnHandoverStatus.Void : head.Status, names, w); }).ToList());
         }
 
@@ -469,12 +488,12 @@ namespace Services.NasbNiro.Engineering
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, ct);
             int maxHours = Math.Min(72, (int)settings[EnSettingKeys.WaiverMaxDebtHours]);   // the ceiling of the employer is 72 hours, whatever the setting says
             DateTimeOffset now = DateTimeOffset.Now;
-            DateTimeOffset due = dto.DebtDueAt;
-            if (due <= now) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک (تاریخ و ساعت) باید در آینده باشد.");
-            if (due > now.AddHours(maxHours)) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت آینده نمی‌شود (سقف ۷۲ ساعت).");
+            int hours = dto.DebtHours;   // the deadline counts from the CEO's approval, so a request that waits long never comes out already overdue
+            if (hours < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک را به ساعت (دست‌کم ۱ ساعت) بنویسید.");
+            if (hours > maxHours) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت نمی‌شود (سقف ۷۲ ساعت).");
             EnWaiver waiver = new EnWaiver
             {
-                HandoverId = h.Id, CaseId = h.CaseId, Reason = reason, DebtDueAt = due, Status = EnWaiverStatus.Requested, RequestedByUserId = Me, RequestedAt = now,
+                HandoverId = h.Id, CaseId = h.CaseId, Reason = reason, DebtHours = hours, DebtDueAt = null, Status = EnWaiverStatus.Requested, RequestedByUserId = Me, RequestedAt = now,
                 MissingSnapshot = JsonSerializer.Serialize(new EnHandoverRules.Snapshot { Lines = ls.Keys, DossierUnconfirmed = ls.DossierUnconfirmed }), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
             };
             waiver.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Waiver, "EWV", now.DateTime, ct);
@@ -501,11 +520,16 @@ namespace Services.NasbNiro.Engineering
             why ??= EnText.Over(note, 1000, "توضیح");
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             waiver.Status = decision == "approve" ? EnWaiverStatus.Approved : EnWaiverStatus.Rejected; waiver.DecidedByUserId = Me; waiver.DecidedAt = now; waiver.DecisionNote = note;
-            if (decision == "approve" && dto.DebtDueAt.HasValue)
+            if (decision == "approve")
             {
-                if (dto.DebtDueAt.Value >= waiver.DebtDueAt) return EnText.Bad<EnWaiverDto>("مدیرعامل فقط می‌تواند مهلت را کوتاه‌تر کند، نه بیشتر از مهلت درخواست‌شده.");
-                if (dto.DebtDueAt.Value <= now) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک باید در آینده باشد.");
-                waiver.DebtDueAt = dto.DebtDueAt.Value;
+                int hours = waiver.DebtHours;
+                if (dto.DebtHours.HasValue)
+                {
+                    if (dto.DebtHours.Value > waiver.DebtHours) return EnText.Bad<EnWaiverDto>("مدیرعامل فقط می‌تواند مهلت را کوتاه‌تر کند، نه بیشتر از مهلت درخواست‌شده.");
+                    if (dto.DebtHours.Value < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک دست‌کم ۱ ساعت است.");
+                    hours = dto.DebtHours.Value;
+                }
+                waiver.DebtHours = hours; waiver.DebtDueAt = now.AddHours(hours);   // counted from the approval
             }
             waiver.ModifyDate = now; waiver.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
@@ -600,14 +624,16 @@ namespace Services.NasbNiro.Engineering
                     await RefreshLinesAsync(h, c, ct);
                     LockState ls = await LockAsync(h, c, ct);
                     EnWaiver waiver = await _uow.Set<EnWaiver>().FirstOrDefaultAsync(x => x.HandoverId == h.Id && !x.Deleted && x.Status == EnWaiverStatus.Approved && x.UsedAt == null, ct);
-                    why = SubmitReason(h, w, ls, waiver, now);
+                    why = SubmitReason(h, w, ls, waiver, now) ?? await EnDecision.RefusalAsync(_uow, c, ct);   // the CEO's classification approval must be in force right now
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
-                    h.Status = EnHandoverStatus.Submitted; h.SubmittedByUserId = Me; h.SubmittedAt = now; h.MissingRequiredCount = ls.Missing; h.Complete = !ls.Locked; h.ContentHash = EnHandoverRules.LineHash(h.Lines);
+                    h.Status = EnHandoverStatus.Submitted; h.SubmitConfirmedByUserId = Me; h.SubmittedAt = now; h.MissingRequiredCount = ls.Missing; h.Complete = !ls.Locked; h.ContentHash = EnHandoverRules.LineHash(h.Lines);
                     if (ls.Locked)
                     {
                         h.WaiverId = waiver.Id; waiver.UsedAt = now; waiver.ModifyDate = now; waiver.ModifierUserId = Me;
                         foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = l.Id, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt, Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = l.Id, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                        if (ls.DossierUnconfirmed)   // the waiver also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     c.Status = EnCaseStatus.HandedOver;
                     EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با معافیت " + waiver.Number : string.Empty));
@@ -687,7 +713,7 @@ namespace Services.NasbNiro.Engineering
                     why = AckReason(dist, w);
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     if (!EnConcurrency.Apply(_uow, dist, dto.RowVersion)) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
-                    dist.AcknowledgedByUserId = Me; dist.AcknowledgedAt = now; dist.ModifyDate = now; dist.ModifierUserId = Me;
+                    dist.ReceiptConfirmedByUserId = Me; dist.AcknowledgedAt = now; dist.ModifyDate = now; dist.ModifierUserId = Me;
                     break;
             }
             h.ModifyDate = now; h.ModifierUserId = Me; c.ModifyDate = now; c.ModifierUserId = Me;
@@ -726,10 +752,20 @@ namespace Services.NasbNiro.Engineering
             int settled = 0;
             foreach (EnDocumentDebt d in open)
             {
-                EnHandoverLine line = await _uow.Set<EnHandoverLine>().AsNoTracking().FirstOrDefaultAsync(l => l.Id == d.HandoverLineId, ct);
+                if (!d.HandoverLineId.HasValue)
+                {
+                    // the debt of an unconfirmed platform dossier settles only when the dossier is complete and confirmed
+                    EnCase dc = d.DocumentType == EnDebtTypes.DossierConfirm ? await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == d.CaseId, ct) : null;
+                    if (dc == null || !dc.ProductId.HasValue || !await EnPlatformRules.IsCompleteAsync(_uow, dc.ProductId.Value, dc.ReferenceCode, ct)) continue;
+                    d.Status = EnDebtStatus.Settled; d.SettledAt = now; d.SettledByUserId = Me; d.ModifyDate = now; d.ModifierUserId = Me;
+                    settled++;
+                    continue;
+                }
+                EnHandoverLine line = await _uow.Set<EnHandoverLine>().AsNoTracking().FirstOrDefaultAsync(l => l.Id == d.HandoverLineId.Value, ct);
                 if (line == null || !await EnHandoverRules.DebtSourceReadyAsync(_uow, d, line, ct)) continue;
                 Guid? file = null;
-                if (line.PlatformDocumentId.HasValue) file = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(x => x.Id == line.PlatformDocumentId.Value).Select(x => x.DocumentId).FirstOrDefaultAsync(ct);
+                if (line.LinkPath != null) { }   // a system line has no file: the released BOM / approved routing is the proof
+                else if (line.PlatformDocumentId.HasValue) file = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(x => x.Id == line.PlatformDocumentId.Value).Select(x => x.DocumentId).FirstOrDefaultAsync(ct);
                 else
                 {
                     string type = EnReferenceRules.Key(line.DocumentType), title = EnHash.Norm(line.Title).ToUpperInvariant();

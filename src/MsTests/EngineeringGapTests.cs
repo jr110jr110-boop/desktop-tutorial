@@ -74,10 +74,13 @@ namespace MsTests
             EnStandardGap g = host.Read(u => u.Set<EnStandardGap>().Single(x => x.CaseId == s.Case.Id));
             Assert.AreEqual(0, host.Read(u => u.Set<EnStandardGapLine>().Count(x => x.GapId == g.Id)));
             StringAssert.Contains(g.Summary, "هنوز تعریف نشده");
+            Assert.AreEqual(0, host.Read(u => u.Set<EnReferenceList>().Count(l => l.Code == "API-613")), "the gap step (the main agent) writes no list");
+            AgentWorkItem draftItem = (await EngineeringStandardsTests.Discover(host, seat, "ENG.REF.DRAFT")).Single(i => i.TargetType == "EnCase" && i.TargetId == s.Case.Id);   // the engineering agent drafts the missing list
+            Assert.AreEqual(AgentStepOutcome.Done, (await EngineeringStandardsTests.Run(host, seat, "ENG.REF.DRAFT", draftItem)).Outcome);
             EnReferenceList copy = host.Read(u => u.Set<EnReferenceList>().Single(l => l.Code == "API-613"));
             Assert.AreEqual(EnRefStatus.Draft, copy.Status, "never auto-submitted");
             StringAssert.Contains(copy.Note, "بررسی‌نشده");
-            Assert.AreEqual(0, (await EngineeringStandardsTests.Discover(host, seat, "ENG.STANDARD.GAP")).Count(i => i.TargetId == s.Case.Id), "no second draft");
+            Assert.AreEqual(0, (await EngineeringStandardsTests.Discover(host, seat, "ENG.REF.DRAFT")).Count(i => i.TargetType == "EnCase" && i.TargetId == s.Case.Id), "no second draft");
         }
 
         [TestMethod]

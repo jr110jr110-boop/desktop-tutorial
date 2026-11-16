@@ -34,7 +34,7 @@ namespace Services.NasbNiro.Agents
 
     /// <summary>
     /// The coordinator (AG-MASTER): reconciles the steps of every agent (so a gate that was passed closes, a late gate is told to the PMO, a switched-off agent hands its work to people),
-    /// and puts the tasks of a dead run back in the queue. It writes only the tables of the agent layer, the AI module and the inbox (the data layer enforces it).
+    /// and puts the tasks of a dead run back in the queue. It writes only the tables of the agent layer, the AI module and the inbox, and the three tables of the standard-gap report (EnStandardGap, EnStandardGapLine, EnCaseEvent) for the one step it owns (the data layer enforces it).
     /// </summary>
     public sealed class AgentMasterJob : IAiSeatJob
     {
@@ -56,8 +56,9 @@ namespace Services.NasbNiro.Agents
         {
             int requeued = await _executor.RequeueStaleAsync(StaleAfter, ct);
             AgentReconcileResult reconcile = await _reconciler.ReconcileAsync(null, ct);
-            AiSeatJobResult result = AiSeatJobResult.Done(string.Create(CultureInfo.InvariantCulture, $"requeued={requeued}; {reconcile.Describe()}"));
-            result.Quiet = requeued == 0 && !reconcile.Changed && reconcile.Errors.Count == 0;
+            AgentRunSummary own = await _executor.RunAgentAsync(Code, ct);   // the steps the coordinator owns itself (the standard-gap report): it does what is queued for it, as its own seat
+            AiSeatJobResult result = AiSeatJobResult.Done(string.Create(CultureInfo.InvariantCulture, $"requeued={requeued}; {reconcile.Describe()}") + (own.Executed > 0 ? "; " + own.Describe() : string.Empty));
+            result.Quiet = requeued == 0 && !reconcile.Changed && reconcile.Errors.Count == 0 && own.Executed == 0;
             return result;
         }
     }

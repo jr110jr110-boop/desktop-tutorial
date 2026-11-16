@@ -70,7 +70,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int Id { get; set; }
         public int WaiverId { get; set; }
         public string WaiverNumber { get; set; }
-        public int HandoverLineId { get; set; }
+        public int? HandoverLineId { get; set; }
         public int CaseId { get; set; }
         public string CaseNumber { get; set; }
         public int ContractId { get; set; }
@@ -109,7 +109,11 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Reason { get; set; }
         public List<string> MissingLines { get; set; } = new List<string>();
         public bool DossierUnconfirmed { get; set; }
-        public DateTimeOffset DebtDueAt { get; set; }
+        /// <summary>The deadline in hours that was asked (and, after the approval, the one that counts).</summary>
+        public int DebtHours { get; set; }
+
+        /// <summary>Null until the CEO approves: approval time + DebtHours.</summary>
+        public DateTimeOffset? DebtDueAt { get; set; }
         public string DebtDueAtText { get; set; }
         public int Status { get; set; }
         public string StatusText { get; set; }
@@ -141,8 +145,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int HandoverId { get; set; }
         public string Reason { get; set; }
 
-        /// <summary>The deadline (date and time) for the missing documents: after now and at most Engineering.Waiver.MaxDebtHours (72) hours ahead.</summary>
-        public DateTimeOffset DebtDueAt { get; set; }
+        /// <summary>The time allowed for the missing documents, in hours (1..Engineering.Waiver.MaxDebtHours, ceiling 72), counted from the CEO's approval.</summary>
+        public int DebtHours { get; set; }
     }
 
     /// <summary>Decision: approve or reject (the CEO only, and not the one who requested it).</summary>
@@ -152,8 +156,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Decision { get; set; }
         public string Note { get; set; }
 
-        /// <summary>At approval the CEO may only shorten the deadline (earlier than requested), never lengthen it.</summary>
-        public DateTimeOffset? DebtDueAt { get; set; }
+        /// <summary>At approval the CEO may only lower the hours asked, never raise them.</summary>
+        public int? DebtHours { get; set; }
         public string RowVersion { get; set; }
     }
 

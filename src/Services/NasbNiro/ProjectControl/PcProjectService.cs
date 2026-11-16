@@ -685,8 +685,14 @@ namespace Services.NasbNiro.ProjectControl
         {
             PcProjectCharter c = await _uow.Set<PcProjectCharter>().AsNoTracking().FirstOrDefaultAsync(x => x.ContractId == contractId && !x.Deleted, cancellationToken);
             Dictionary<int, string> names = await InventoryUsers.GetNamesAsync(_uow, new int?[] { c?.ApprovedByUserId }, cancellationToken);
-            return ResponseDtoHelper.Ok(ToDto(c, contractId, names, await CharterListAsync(contractId, cancellationToken)));
+            PcCharterDto dto = ToDto(c, contractId, names, await CharterListAsync(contractId, cancellationToken));
+            // ENG-E1 fix round A: the cost section is the project price; only the charter writers and the managers read it (the other readers, engineering among them, get it masked). The six roles include everyone who can save the charter, so a save never wipes the text.
+            if (!_user.IsInRole(CostReaders)) { dto.CostEstimate = null; dto.CostEstimateMasked = true; }
+            return ResponseDtoHelper.Ok(dto);
         }
+
+        /// <summary>The roles that read the cost estimate section of the project charter.</summary>
+        internal const string CostReaders = "PMO,CEO,PROJECTMANAGER,PLANNING,COMMERCIAL,FINANCIAL";
 
         /// <summary>Priority 4d: the structured list of pre-assigned resources of the charter (the pool resource, the quantity and a note).</summary>
         private async Task<List<PcCharterResourceDto>> CharterListAsync(int contractId, CancellationToken ct) =>

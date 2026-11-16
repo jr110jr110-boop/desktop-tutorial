@@ -20,7 +20,7 @@ namespace MsTests
     {
         private static AppHost Started(string name) { AppHost h = NewHost(name); StartControl(h); return h; }
 
-        private static Task<ResponseDto<EnHandoverDto>> Act(AppHost host, ClaimsPrincipal who, string action, Action<EnHandoverActionDto> set = null)
+        internal static Task<ResponseDto<EnHandoverDto>> Act(AppHost host, ClaimsPrincipal who, string action, Action<EnHandoverActionDto> set = null)
         {
             EnHandoverActionDto dto = new EnHandoverActionDto { Action = action };
             set?.Invoke(dto);
@@ -28,14 +28,14 @@ namespace MsTests
         }
 
         private static Task<ResponseDto<EnWaiverDto>> Request(AppHost host, ClaimsPrincipal who, int handover, string reason, DateTimeOffset due) =>
-            host.As(who, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = handover, Reason = reason, DebtDueAt = due }, Ct));
+            host.As(who, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = handover, Reason = reason, DebtHours = (int)Math.Round((due - DateTimeOffset.Now).TotalHours) }, Ct));   // the deadline is in hours and counts from the CEO's approval
 
         private static Task<ResponseDto<EnWaiverDto>> Decide(AppHost host, ClaimsPrincipal who, int waiver, string decision, string note = null) =>
             host.As(who, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = waiver, Decision = decision, Note = note }, Ct));
 
         private static Task<ResponseDto<EnHandoverDto>> Get(AppHost host, ClaimsPrincipal who, int id) => host.As(who, p => p.GetRequiredService<IEnHandoverService>().GetHandoverAsync(id, Ct));
 
-        private static int Deliverable(AppHost host, int contract, string type, PcIssueState state = PcIssueState.Approved, bool file = true)
+        internal static int Deliverable(AppHost host, int contract, string type, PcIssueState state = PcIssueState.Approved, bool file = true)
         {
             Guid? doc = file ? File(host, 2111) : (Guid?)null;
             int id = 0;
@@ -51,7 +51,7 @@ namespace MsTests
             host.Write(u => { u.Set<PcEngineeringDeliverable>().First(x => x.Id == deliverable).IssueState = state; u.SaveChanges(); }, Seeder);
 
         /// <summary>A new-design contract case approved by the CEO (so the contract is won), with a reference list of two required documents.</summary>
-        private static async Task<(int Contract, int CaseId)> NewDesign(AppHost host)
+        internal static async Task<(int Contract, int CaseId)> NewDesign(AppHost host)
         {
             await ApprovedList(host, "VDDR-H", ("DWG", true, false), ("DATASHEET", true, false));
             int contract = Contract(host);
@@ -130,7 +130,7 @@ namespace MsTests
             DateTimeOffset due = DateTimeOffset.Now.AddHours(72);   // exactly the ceiling is accepted
             Refused(await Request(host, Eng1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
             Refused(await Request(host, Mgr1, h.Id, "کوتاه", due), "50");
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(-1)), "آینده");
+            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(-1)), "ساعت");
             Refused(await Request(host, Mgr1, h.Id, new string((char)0x645, 49), due), "50");   // 49 characters
             Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(73)), "72");
             EnWaiverDto w = Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
@@ -157,7 +157,7 @@ namespace MsTests
             Assert.AreEqual((int)EnHandoverStatus.Submitted, s.Status);
             Assert.IsFalse(s.Complete);
             Assert.AreEqual(2, s.Debts.Count);
-            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt == due));
+            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt > DateTimeOffset.Now.AddHours(71) && d.DueAt <= DateTimeOffset.Now.AddHours(72)));   // 72 hours counted from the approval
             Assert.AreEqual((int)EnCaseStatus.HandedOver, Ok(await GetCase(host, Mgr1, caseId)).Status);
             // the waiver is spent: a new handover round needs a new one
             Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
@@ -276,6 +276,7 @@ namespace MsTests
             AppHost host = Started("ho3");
             await ApprovedList(host, "VDDR-P", ("DWG", true, false));
             int product = Product(host);
+            Ok(await Dossier(host, Eng1, product, "assess", code: "VDDR-P"));   // a product is a platform only with a dossier
             int contract = Contract(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
@@ -336,7 +337,7 @@ namespace MsTests
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
             Assert.AreEqual(43, steps.Count);
-            Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
+            Assert.IsTrue(steps.All(s => s.AgentCode == (s.Code == "ENG.STANDARD.GAP" ? "AG-MASTER" : "AG-ENG") && s.Code.StartsWith("ENG.") && s.Code.Length <= 60), "the main agent owns the standard-gap report, the engineering agent every other step");
             Assert.AreEqual(16, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
             Assert.AreEqual(26, steps.Count(s => s.Station == 5));
@@ -464,6 +465,191 @@ namespace MsTests
             Assert.IsTrue((await Run("ENG.DEBT.SETTLE", settle[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done);
             Assert.AreEqual(0, (await Discover("ENG.DEBT.SETTLE")).Count);
             Assert.IsTrue((await Run("ENG.DEBT.SETTLE", settle[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done, "a second run is harmless");
+        }
+
+        // ================================================================ fix round A
+
+        private const string LongReason = "دلیل کافی برای این معافیت اضطراری نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده";
+
+        private static async Task<(int Contract, int CaseId, EnHandoverDto Draft)> CompleteDraftAsync(AppHost host)
+        {
+            (int contract, int caseId) = await NewDesign(host);
+            Deliverable(host, contract, "DWG"); Deliverable(host, contract, "DATASHEET");
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(0, h.MissingRequiredCount);
+            return (contract, caseId, h);
+        }
+
+        private static void Edit(AppHost host, int caseId, Action<EnCase> change) =>
+            host.Write(u => { change(u.Set<EnCase>().Single(x => x.Id == caseId)); u.SaveChanges(); }, Seeder);
+
+        [TestMethod]
+        public async Task Submit_Accept_And_Release_Each_Re_Check_That_The_Classification_Approval_Is_Still_In_Force()
+        {
+            AppHost host = Started("fixc2");
+            (int contract, int caseId, EnHandoverDto h) = await CompleteDraftAsync(host);
+            EnCase before = host.Read(u => u.Set<EnCase>().Single(x => x.Id == caseId));
+            const string fragment = "تصویب نوع پرونده معتبر نیست";
+
+            // the CEO signature, the manager signature, the classification hash and the gap hash: each one alone stops the submit
+            Edit(host, caseId, c => c.CeoApprovedAt = null);
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), fragment);
+            Assert.IsFalse(Ok(await Get(host, Mgr1, h.Id)).CanSubmit, "the button says the same as the service");
+            Edit(host, caseId, c => { c.CeoApprovedAt = before.CeoApprovedAt; c.EngConfirmedByUserId = null; });
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), fragment);
+            Edit(host, caseId, c => { c.EngConfirmedByUserId = before.EngConfirmedByUserId; c.ClassificationHash = "0000"; });
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), fragment);
+            Edit(host, caseId, c => { c.ClassificationHash = before.ClassificationHash; c.ApprovedGapHash = "a-gap-that-never-existed"; });
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), fragment);
+            Edit(host, caseId, c => c.ApprovedGapHash = null);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+
+            // accept
+            Edit(host, caseId, c => c.CeoApprovedByUserId = null);
+            Refused(await Act(host, Pmo1, "accept", d => d.Id = h.Id), fragment);
+            Edit(host, caseId, c => c.CeoApprovedByUserId = before.CeoApprovedByUserId);
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+
+            // release
+            Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id));
+            Edit(host, caseId, c => c.ClassificationHash = "1111");
+            Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), fragment);
+            Assert.IsFalse(Ok(await Get(host, Pmo2, h.Id)).CanRelease);
+            Edit(host, caseId, c => c.ClassificationHash = before.ClassificationHash);
+            Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+        }
+
+        [TestMethod]
+        public async Task A_Stale_Standard_Gap_Report_After_The_Approval_Stops_The_Handover_And_The_Tender_Release()
+        {
+            AppHost host = Started("fixh6");
+            await ApprovedList(host, "BASE-X", ("DWG", true, false));
+            (int contract, int caseId, EnHandoverDto h) = await CompleteDraftAsync(host);
+            int baseRev = host.Read(u => u.Set<EnReferenceList>().Single(l => l.Code == "BASE-X" && l.Status == EnRefStatus.Approved).Revision);
+            int targetRev = host.Read(u => u.Set<EnReferenceList>().Single(l => l.Code == "VDDR-H" && l.Status == EnRefStatus.Approved).Revision);
+            host.Write(u =>
+            {
+                AppHost.Add(u, new EnStandardGap { Number = "ESG-T-1", CaseId = caseId, BaseCode = "BASE-X", TargetCode = "VDDR-H", BaseRevision = baseRev, TargetRevision = targetRev, Status = EnGapStatus.Confirmed, ContentHash = "gap-1", CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now });
+                u.Set<EnCase>().Single(x => x.Id == caseId).ApprovedGapHash = "gap-1";
+                u.SaveChanges();
+            }, Seeder);
+            Assert.IsTrue(Ok(await Get(host, Mgr1, h.Id)).CanSubmit, "the report still matches the approval");
+            // a new approved revision of the base list after the approval: the report is out of date
+            host.Write(u => { u.Set<EnReferenceList>().Single(l => l.Code == "BASE-X" && l.Status == EnRefStatus.Approved).Revision = baseRev + 1; u.SaveChanges(); }, Seeder);
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), "تصویب نوع پرونده معتبر نیست");
+            host.Write(u => { u.Set<EnReferenceList>().Single(l => l.Code == "BASE-X" && l.Status == EnRefStatus.Approved).Revision = baseRev; u.Set<EnStandardGap>().Single().Status = EnGapStatus.Void; u.SaveChanges(); }, Seeder);
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), "تصویب نوع پرونده معتبر نیست");   // a voided report
+        }
+
+        [TestMethod]
+        public async Task A_Reclassification_And_A_Standard_Change_Void_The_Open_Handover_And_The_Agent_Drafts_A_New_One_After_The_New_Approval()
+        {
+            AppHost host = Started("fixvoid");
+            (int contract, int caseId, EnHandoverDto h) = await CompleteDraftAsync(host);
+            await ApprovedList(host, "OTHER-STD", ("DWG", true, false), ("DATASHEET", true, false));
+            // the manager sends the case back for a new decision: the open draft is voided with a Persian reason, in the same save
+            Ok(await CaseAct(host, Mgr1, caseId, "reclassify", d => d.Note = "دلیل تغییر نوع پرونده برای آزمون"));
+            EnHandover voided = host.Read(u => u.Set<EnHandover>().Single(x => x.Id == h.Id));
+            Assert.AreEqual(EnHandoverStatus.Void, voided.Status);
+            StringAssert.Contains(voided.VoidReason, "تصمیم تازه");
+            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Assert.IsTrue(host.Read(u => u.Set<EnCaseEvent>().Any(e => e.CaseId == caseId && e.Kind == "handover-void")));
+            // the new decision round, then the agent drafts round 2
+            Ok(await CaseAct(host, Mgr2, caseId, "confirm"));
+            Ok(await CaseAct(host, Ceo, caseId, "approve"));
+            EnHandoverDto second = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(2, second.Round);
+            // a changed standard is a new decision round too: the open draft is voided
+            Ok(await SetStandard(host, Eng1, caseId, "OTHER-STD", note: "کارفرما استاندارد را در دیتاشیت اصلاح کرد"));
+            Assert.AreEqual(EnHandoverStatus.Void, host.Read(u => u.Set<EnHandover>().Single(x => x.Id == second.Id)).Status);
+            Assert.AreEqual((int)EnCaseStatus.AwaitingEngConfirm, Ok(await GetCase(host, Mgr1, caseId)).Status);
+        }
+
+        [TestMethod]
+        public async Task The_Waiver_Deadline_Is_In_Hours_Counts_From_The_Approval_And_The_Ceo_May_Only_Lower_It()
+        {
+            AppHost host = Started("fixhours");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Func<int, Task<Common.Results.ResponseDto<EnWaiverDto>>> ask = hours => host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = hours }, Ct));
+            Refused(await ask(0), "ساعت");
+            Refused(await ask(73), "72");
+            EnWaiverDto w = Ok(await ask(72));
+            Assert.AreEqual(72, w.DebtHours);
+            Assert.IsNull(w.DebtDueAt, "no deadline before the CEO approves");
+            // the request waits a month: the deadline still starts at the approval
+            host.Write(u => { foreach (EnWaiver x in u.Set<EnWaiver>().ToList()) x.RequestedAt = DateTimeOffset.Now.AddDays(-30); u.SaveChanges(); }, Seeder);
+            Refused(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 73 }, Ct)), "کوتاه‌تر");   // raising is refused
+            EnWaiverDto done = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 24 }, Ct)));
+            Assert.AreEqual(24, done.DebtHours);
+            Assert.IsTrue(done.DebtDueAt > DateTimeOffset.Now.AddHours(23) && done.DebtDueAt <= DateTimeOffset.Now.AddHours(24), "approval time + 24 hours, never already in the past");
+        }
+
+        [TestMethod]
+        public async Task The_Debt_Of_A_System_Bom_Or_Opc_Line_Settles_When_The_Bom_Is_Released_And_The_Routing_Approved()
+        {
+            AppHost host = Started("fixsys");
+            (int contract, int caseId) = await NewDesign(host);
+            int product = Product(host);
+            Edit(host, caseId, c => c.ProductId = product);
+            Deliverable(host, contract, "DWG"); Deliverable(host, contract, "DATASHEET");
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(2, h.MissingRequiredCount, "the BOM and the OPC line of the system are missing");
+            Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = 48 }, Ct)));
+            int waiver = host.Read(u => u.Set<EnWaiver>().Single().Id);
+            Ok(await Decide(host, Ceo, waiver, "approve"));
+            EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Assert.AreEqual(2, s.Debts.Count);
+            Assert.AreEqual(0, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))), "nothing is settled without the proof");
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbBomHeader { ProductId = product, Code = "BOM-FIX", AssemblyPartNumber = "SYS", Title = "BOM", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released });
+                u.SaveChanges();
+            }, Seeder);
+            Assert.AreEqual(1, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))), "the released BOM settles the BOM debt only");
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbOpcRouting { ProductId = product, PartNumber = "SYS", Title = "OPC", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                u.SaveChanges();
+            }, Seeder);
+            Assert.AreEqual(1, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))));
+            Assert.IsTrue(host.Read(u => u.Set<EnDocumentDebt>().All(d => d.Status == EnDebtStatus.Settled)));
+        }
+
+        [TestMethod]
+        public async Task A_Waiver_On_An_Unconfirmed_Dossier_Creates_A_Dossier_Debt_That_Settles_When_The_Manager_Confirms()
+        {
+            AppHost host = Started("fixdoss");
+            await ApprovedList(host, "VDDR-P", ("DWG", true, false));
+            int product = Product(host);
+            EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess", code: "VDDR-P"));
+            Ok(await Supply(host, Eng1, d.Lines.Single(l => l.DocumentType == "DWG").Id, File(host, 2111)));
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbBomHeader { ProductId = product, Code = "BOM-D", AssemblyPartNumber = "SYS", Title = "BOM", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released });
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbOpcRouting { ProductId = product, PartNumber = "SYS", Title = "OPC", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                u.SaveChanges();
+            }, Seeder);
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", x => x.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", x => { x.Classification = 1; x.ProductId = product; x.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-P"));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", x => x.CaseId = c.Id));
+            Assert.AreEqual(0, h.MissingRequiredCount, "no line is missing: only the dossier confirmation locks the handover");
+            StringAssert.Contains(h.LockMessage, "قفل");
+            Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = 24 }, Ct)));
+            Ok(await Decide(host, Ceo, host.Read(u => u.Set<EnWaiver>().Single().Id), "approve"));
+            EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", x => x.Id = h.Id));
+            EnDebtDto debt = s.Debts.Single();
+            Assert.AreEqual(EnDebtTypes.DossierConfirm, debt.DocumentType);
+            Assert.IsNull(debt.HandoverLineId);
+            Assert.AreEqual(0, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))), "the dossier is not confirmed yet");
+            Ok(await Dossier(host, Eng1, product, "complete", code: "VDDR-P"));
+            Ok(await Dossier(host, Mgr1, product, "confirm", code: "VDDR-P"));
+            Assert.AreEqual(1, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))));
+            Assert.AreEqual(EnDebtStatus.Settled, host.Read(u => u.Set<EnDocumentDebt>().Single().Status));
         }
     }
 }

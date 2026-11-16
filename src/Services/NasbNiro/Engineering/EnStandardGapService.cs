@@ -76,8 +76,24 @@ namespace Services.NasbNiro.Engineering
                 "گزارش تفاوت استاندارد " + g.Number + " منتظر تایید مدیر مهندسی است: " + EnText.Cut(g.Summary, 150), "/engineering/standard-gaps/" + EnText.Num(g.Id), EnRoles.Manager + "," + EnRoles.Ceo, ct, null, Entities.Model.NasbNiro.Office.OfInboxKind.Approval);
         }
 
+        /// <summary>The cases (before the CEO approval) whose platform is assessed under another standard whose list does not exist in any status: the engineering agent drafts that list from the base list (ENG.REF.DRAFT).</summary>
+        public static async Task<List<(EnCase Case, Plan Plan)>> TargetListMissingAsync(IUnitOfWork uow, int take, CancellationToken ct)
+        {
+            EnCaseStatus a = EnCaseStatus.AwaitingEngConfirm, b = EnCaseStatus.AwaitingCeoApproval;
+            List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (c.Status == a || c.Status == b) && c.ProposedClassification == EnClassification.Platform && c.ReferenceCode != null
+                && !uow.Set<EnReferenceList>().Any(l => !l.Deleted && l.Code == c.ReferenceCode)).OrderBy(c => c.Id).Take(200).ToListAsync(ct);
+            List<(EnCase, Plan)> result = new List<(EnCase, Plan)>();
+            foreach (EnCase c in cases)
+            {
+                Plan p = await PlanOfAsync(uow, c, ct);
+                if (p.Needed && !p.TargetAnyList && p.BaseCode != null && p.BaseRevision > 0) result.Add((c, p));
+                if (result.Count >= take) break;
+            }
+            return result;
+        }
+
         /// <summary>Idempotent: voids the live gap that no longer fits the case and builds the one that does.</summary>
-        public static async Task<string> BuildAsync(IUnitOfWork uow, EnCase c, IEnReferenceService refs, INotificationService notify, int me, CancellationToken ct)
+        public static async Task<string> BuildAsync(IUnitOfWork uow, EnCase c, INotificationService notify, int me, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
             Plan p = await PlanOfAsync(uow, c, ct);
@@ -98,7 +114,8 @@ namespace Services.NasbNiro.Engineering
             EnReferenceList targetList = p.TargetRevision == 0 ? null : await uow.Set<EnReferenceList>().AsNoTracking().Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == target).FirstOrDefaultAsync(ct);
             PbProduct product = await uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == p.ProductId.Value, ct);
             EnStandardGap gap = new EnStandardGap { CaseId = c.Id, ProductId = p.ProductId, BaseCode = p.BaseCode, TargetCode = target, BaseRevision = p.BaseRevision, TargetRevision = p.TargetRevision, Status = EnGapStatus.Draft, CreateDate = now, CreatorUserId = me, ModifyDate = now, ModifierUserId = me };
-            gap.Number = await EnNumbers.NextAsync(uow, EnNumbers.StandardGap, "ESG", now.DateTime, ct);
+            // the master agent owns this report and writes only EnStandardGap, EnStandardGapLine and EnCaseEvent: the number comes from the case (no shared counter table)
+            gap.Number = "ESG-" + c.Number + "-" + EnText.Num(1 + await uow.Set<EnStandardGap>().CountAsync(g => g.CaseId == c.Id, ct));
             string productText = product?.Code ?? EnText.Num(p.ProductId.Value);
             if (baseList != null && targetList != null)
             {
@@ -124,17 +141,7 @@ namespace Services.NasbNiro.Engineering
                 if (targetList == null)
                 {
                     gap.Summary = head + "فهرست مدارک تاییدشدهٔ استاندارد " + target + " هنوز تعریف نشده است و مقایسه ممکن نیست.";
-                    if (!p.TargetAnyList && baseList != null && refs != null)
-                    {
-                        EnSaveReferenceDto dto = new EnSaveReferenceDto
-                        {
-                            Code = EnText.Cut(target, 60), Title = EnText.Cut("فهرست مدارک مرجع — " + target, 300), StandardSource = EnText.Cut(baseList.StandardSource, 200),
-                            Note = EnText.Cut("نسخهٔ بررسی‌نشده از " + p.BaseCode + " که باید با متن استاندارد " + target + " تطبیق داده شود.", 1000),
-                            Lines = baseList.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, TenderStage = l.TenderStage, ClientSubmittal = l.ClientSubmittal, StandardClause = l.StandardClause, Note = l.Note, Units = l.Units }).ToList(),
-                        };
-                        ResponseDto<EnReferenceListDto> r = await refs.SaveListAsync(dto, ct);
-                        gap.Summary += r.Success ? " پیش‌نویس فهرست استاندارد " + target + " (کپی بررسی‌نشدهٔ " + p.BaseCode + ") ساخته شد تا مهندسی آن را با متن استاندارد تطبیق دهد." : " ساخت پیش‌نویس فهرست خودکار نشد.";
-                    }
+                    if (!p.TargetAnyList && baseList != null) gap.Summary += " ایجنت مهندسی پیش‌نویس فهرست این استاندارد را (کپی بررسی‌نشدهٔ " + p.BaseCode + ") می‌سازد تا مهندسی آن را با متن استاندارد تطبیق دهد.";
                 }
                 else gap.Summary = head + "فهرست مدارک تاییدشده‌ای برای استاندارد پایه وجود ندارد و مقایسه ممکن نیست.";
             }
