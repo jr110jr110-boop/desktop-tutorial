@@ -55,6 +55,8 @@ namespace Services.NasbNiro.Engineering
         public const int Waiver = 854;
         public const int Deviation = 855;
         public const int StandardGap = 856;
+        public const int InfoRequest = 857;
+        public const int PlatformRegistration = 858;
 
         /// <summary>For example "ENG-1405-0012": the Shamsi year and a sequence of the year.</summary>
         public static async Task<string> NextAsync(IUnitOfWork uow, int kind, string prefix, DateTime date, CancellationToken ct)
@@ -192,6 +194,14 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The system-proven BOM line is for these units, the OPC line for those (the employer's rule).</summary>
         public static readonly string Bom = Join(new[] { EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning, EnUnit.Qc });
         public static readonly string Opc = Join(new[] { EnUnit.Production, EnUnit.Planning, EnUnit.Qc, EnUnit.Qa });
+
+        /// <summary>The roles of each unit (who receives the notice, asks the PMO and confirms the receipt).</summary>
+        public static readonly (EnUnit Unit, string Roles)[] UnitRoles =
+        {
+            (EnUnit.Qa, "QA"), (EnUnit.Qc, "QC"), (EnUnit.Production, "PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION"), (EnUnit.Procurement, "COMMERCIAL"), (EnUnit.Warehouse, "WAREHOUSE,WHSUPERVISOR"), (EnUnit.Planning, "PLANNING"),
+        };
+
+        public static string RolesOf(EnUnit unit) => UnitRoles.First(x => x.Unit == unit).Roles;
 
         private static string Join(IEnumerable<EnUnit> units) => string.Join(",", units.Distinct().OrderBy(u => (int)u).Select(u => u.ToString()));
 

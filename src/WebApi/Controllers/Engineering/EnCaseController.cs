@@ -32,6 +32,9 @@ namespace WebApi.Controllers
         [HttpGet("cases/{id:int}")]
         public async Task<IActionResult> CaseAsync(int id, CancellationToken ct) => Ok(await _cases.GetCaseAsync(id, ct));
 
+        [HttpGet("cases/{id:int}/charter-view")]
+        public async Task<IActionResult> CharterViewAsync(int id, CancellationToken ct) => Ok(await _cases.GetCharterViewAsync(id, ct));
+
         [HttpGet("cases/gate")]
         public async Task<IActionResult> GateAsync([FromQuery] int? inquiryId, [FromQuery] int? contractId, CancellationToken ct) => Ok(await _cases.GetGateStateAsync(inquiryId, contractId, ct));
 

@@ -191,10 +191,7 @@ namespace Services.NasbNiro.Engineering
             Me = Me, Writer = _user.IsInRole(EnRoles.Writers), Manager = _user.IsInRole(EnRoles.Manager), Ceo = _user.IsInRole(EnRoles.Ceo), Pmo = _user.IsInRole(EnRoles.Pmo), PmoSide = _user.IsInRole(EnRoles.PmoSide), Seat = await EnActors.IsSeatAsync(_uow, Me, ct),
         };
 
-        private static readonly (EnUnit Unit, string Roles)[] Units =
-        {
-            (EnUnit.Qa, "QA"), (EnUnit.Qc, "QC"), (EnUnit.Production, "PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION"), (EnUnit.Procurement, "COMMERCIAL"), (EnUnit.Warehouse, "WAREHOUSE,WHSUPERVISOR"), (EnUnit.Planning, "PLANNING"),
-        };
+        private static readonly (EnUnit Unit, string Roles)[] Units = EnUnits.UnitRoles;
 
         // ---------------------------------------------------------------- state
 

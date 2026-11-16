@@ -296,13 +296,13 @@ namespace MsTests
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(41, steps.Count);
+            Assert.AreEqual(43, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
             Assert.AreEqual(16, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
-            Assert.AreEqual(24, steps.Count(s => s.Station == 5));
+            Assert.AreEqual(26, steps.Count(s => s.Station == 5));
             Assert.AreEqual(14, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(41, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(43, steps.Select(s => s.Code).Distinct().Count());
         }
 
         [TestMethod]

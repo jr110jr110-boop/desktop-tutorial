@@ -27,6 +27,7 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<PagedList<EnCaseDto>>> GetCasesAsync(EnCaseQuery query, CancellationToken ct);
         Task<ResponseDto<EnCaseDto>> GetCaseAsync(int id, CancellationToken ct);
         Task<ResponseDto<EnGateStateDto>> GetGateStateAsync(int? inquiryId, int? contractId, CancellationToken ct);
+        Task<ResponseDto<EnCharterViewDto>> GetCharterViewAsync(int caseId, CancellationToken ct);
         Task<ResponseDto<EnCaseDto>> CaseActionAsync(EnCaseActionDto dto, CancellationToken ct);
     }
 
@@ -220,6 +221,30 @@ namespace Services.NasbNiro.Engineering
             EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && !x.Deleted, ct);
             if (c == null) return EnText.NotFound<EnCaseDto>(EnText.NotFoundCase);
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnCase> { c }, true, ct))[0]);
+        }
+
+        /// <summary>The charter without prices: the cost section and every amount stay out (a structural projection, not a mask).</summary>
+        public async Task<ResponseDto<EnCharterViewDto>> GetCharterViewAsync(int caseId, CancellationToken ct)
+        {
+            if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnCharterViewDto>(EnText.NotAllowed);
+            EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == caseId && !x.Deleted, ct);
+            if (c == null) return EnText.NotFound<EnCharterViewDto>(EnText.NotFoundCase);
+            if (!c.ContractId.HasValue) return EnText.Bad<EnCharterViewDto>("این پرونده هنوز قرارداد ندارد و منشوری برای آن نیست.");
+            string code = await _uow.Set<ContractEntity>().AsNoTracking().Where(k => k.Id == c.ContractId.Value).Select(k => k.Code).FirstOrDefaultAsync(ct);
+            EnCharterViewDto dto = new EnCharterViewDto { CaseId = c.Id, CaseNumber = c.Number, ContractId = c.ContractId.Value, ContractCode = code, PriceNotice = "بخش برآورد هزینه و مبالغ قرارداد برای مهندسی منتشر نمی‌شود؛ فقط مدیران مبلغ پروژه را می‌بینند.", CharterReviewOutcome = (int)c.CharterReviewOutcome, CharterReviewOutcomeText = EnText.Charter(c.CharterReviewOutcome) };
+            PcProjectCharter charter = await _uow.Set<PcProjectCharter>().AsNoTracking().Where(x => x.ContractId == c.ContractId.Value && !x.Deleted).OrderByDescending(x => x.Id)
+                .Select(x => new PcProjectCharter { Overview = x.Overview, ScopeDescription = x.ScopeDescription, Requirements = x.Requirements, Deliverables = x.Deliverables, Boundaries = x.Boundaries, TimeBaselineEstimate = x.TimeBaselineEstimate, AlternativesAnalysis = x.AlternativesAnalysis, Assumptions = x.Assumptions, Constraints = x.Constraints, Risks = x.Risks, Stakeholders = x.Stakeholders, PreAssignedResources = x.PreAssignedResources, ManagerAuthority = x.ManagerAuthority, ManagerAcceptedAt = x.ManagerAcceptedAt, ApprovedAt = x.ApprovedAt })
+                .FirstOrDefaultAsync(ct);   // the cost section is not even read
+            dto.CharterExists = charter != null;
+            if (charter != null)
+            {
+                dto.Overview = charter.Overview; dto.ScopeDescription = charter.ScopeDescription; dto.Requirements = charter.Requirements; dto.Deliverables = charter.Deliverables; dto.Boundaries = charter.Boundaries; dto.TimeBaselineEstimate = charter.TimeBaselineEstimate;
+                dto.AlternativesAnalysis = charter.AlternativesAnalysis; dto.Assumptions = charter.Assumptions; dto.Constraints = charter.Constraints; dto.Risks = charter.Risks; dto.Stakeholders = charter.Stakeholders; dto.PreAssignedResources = charter.PreAssignedResources; dto.ManagerAuthority = charter.ManagerAuthority;
+                dto.ManagerAcceptedAtText = EnText.Stamp(charter.ManagerAcceptedAt); dto.ApprovedAtText = EnText.Stamp(charter.ApprovedAt);
+                dto.ContentHash = EnCaseRules.CharterHash(charter);
+                dto.CharterStale = c.CharterReviewOutcome != EnCharterOutcome.None && c.CharterHash != dto.ContentHash;
+            }
+            return ResponseDtoHelper.Ok(dto);
         }
 
         public async Task<ResponseDto<EnGateStateDto>> GetGateStateAsync(int? inquiryId, int? contractId, CancellationToken ct)

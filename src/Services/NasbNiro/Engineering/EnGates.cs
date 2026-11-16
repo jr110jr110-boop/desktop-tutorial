@@ -43,11 +43,14 @@ namespace Services.NasbNiro.Engineering
         public static async Task<PcProjectCharter> CharterAsync(IUnitOfWork uow, int contractId, CancellationToken ct) =>
             await uow.Set<PcProjectCharter>().AsNoTracking().Where(c => c.ContractId == contractId && !c.Deleted).OrderByDescending(c => c.Id).FirstOrDefaultAsync(ct);
 
-        /// <summary>The text of every section of the charter: engineering confirms exactly this content.</summary>
-        public static string CharterHash(PcProjectCharter c) => c == null ? null : EnHash.Of(string.Join("#", new[]
+        /// <summary>The price-free text sections of the charter, in a fixed order: this is what engineering sees and confirms. The cost estimate section is never part of it (the employer's rule: only managers see the project price), so a change of the cost section alone does not void the confirmation and any other change does.</summary>
+        public static string[] PriceFreeSections(PcProjectCharter c) => new[]
         {
-            c.Overview, c.ScopeDescription, c.Requirements, c.Deliverables, c.Boundaries, c.TimeBaselineEstimate, c.CostEstimate, c.AlternativesAnalysis, c.Assumptions, c.Constraints, c.Risks, c.Stakeholders, c.PreAssignedResources, c.ManagerAuthority,
-        }.Select(EnHash.Norm)));
+            c.Overview, c.ScopeDescription, c.Requirements, c.Deliverables, c.Boundaries, c.TimeBaselineEstimate, c.AlternativesAnalysis, c.Assumptions, c.Constraints, c.Risks, c.Stakeholders, c.PreAssignedResources, c.ManagerAuthority,
+        };
+
+        /// <summary>The hash engineering confirms: over exactly the price-free sections, so a change of the cost section alone does not void the confirmation and any other change does.</summary>
+        public static string CharterHash(PcProjectCharter c) => c == null ? null : EnHash.Of(string.Join("#", PriceFreeSections(c).Select(EnHash.Norm)));
 
         public static bool TenderPassed(EnCaseStatus s) => s == EnCaseStatus.TenderIssued || s == EnCaseStatus.Awarded || s == EnCaseStatus.InEngineering || s == EnCaseStatus.HandedOver || s == EnCaseStatus.Accepted || s == EnCaseStatus.Released;
     }

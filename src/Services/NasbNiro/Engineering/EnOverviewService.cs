@@ -61,12 +61,14 @@ namespace Services.NasbNiro.Engineering
             o.WaiversAwaitingCeo = await _uow.Set<EnWaiver>().AsNoTracking().CountAsync(w => !w.Deleted && w.Status == EnWaiverStatus.Requested, ct);
             DateTimeOffset? oldest = await _uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested).OrderBy(w => w.RequestedAt).Select(w => (DateTimeOffset?)w.RequestedAt).FirstOrDefaultAsync(ct);
             o.OldestWaiverWaitingHours = oldest.HasValue ? Math.Max(0, (int)Math.Floor((now - oldest.Value).TotalHours)) : 0;   // a request never expires: it is an alarm until the CEO decides
-            o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null, ct);
+            o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null && d.Status == EnDistStatus.Notified, ct);
             List<EnRiskRow> risk = await EnRisk.ComputeAsync(_uow, ct);
             o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
             o.DeviationsAwaiting = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved), ct);
             o.StandardsDeviationsOpen = o.DeviationsAwaiting + o.WaiversAwaitingCeo;
             o.StandardGapsOpen = await _uow.Set<EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnGapStatus.Draft, ct);
+            o.InfoRequestsOpen = await _uow.Set<EnInfoRequest>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnInfoStatus.Open, ct);
+            o.RegistrationsOpen = await _uow.Set<EnPlatformRegistration>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed, ct);
             return ResponseDtoHelper.Ok(o);
         }
     }

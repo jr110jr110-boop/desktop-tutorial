@@ -170,6 +170,42 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string RowVersion { get; set; }
     }
 
+    /// <summary>The project charter as engineering sees it: every text section EXCEPT the cost estimate, and no amount of the contract (only managers see the project price). The confirmation of engineering binds to the hash of exactly these sections.</summary>
+    public class EnCharterViewDto
+    {
+        public int CaseId { get; set; }
+        public string CaseNumber { get; set; }
+        public int ContractId { get; set; }
+        public string ContractCode { get; set; }
+        public bool CharterExists { get; set; }
+
+        /// <summary>A Persian note that the cost section is not published to engineering.</summary>
+        public string PriceNotice { get; set; }
+        public string Overview { get; set; }
+        public string ScopeDescription { get; set; }
+        public string Requirements { get; set; }
+        public string Deliverables { get; set; }
+        public string Boundaries { get; set; }
+        public string TimeBaselineEstimate { get; set; }
+        public string AlternativesAnalysis { get; set; }
+        public string Assumptions { get; set; }
+        public string Constraints { get; set; }
+        public string Risks { get; set; }
+        public string Stakeholders { get; set; }
+        public string PreAssignedResources { get; set; }
+        public string ManagerAuthority { get; set; }
+        public string ManagerAcceptedAtText { get; set; }
+        public string ApprovedAtText { get; set; }
+
+        /// <summary>The hash of the price-free sections (what the engineering confirmation binds to).</summary>
+        public string ContentHash { get; set; }
+        public int CharterReviewOutcome { get; set; }
+        public string CharterReviewOutcomeText { get; set; }
+
+        /// <summary>The charter changed after the confirmation of engineering (a change of the cost section alone never does this).</summary>
+        public bool CharterStale { get; set; }
+    }
+
     /// <summary>The state of the engineering gate of an inquiry or a contract: for the sales and project screens (legacy shown with its note).</summary>
     public class EnGateStateDto
     {

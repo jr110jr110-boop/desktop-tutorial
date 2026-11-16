@@ -243,6 +243,23 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "اطلاع‌رسانی مدارک " + item.TargetNumber + " به واحدها" };
     }
 
+    /// <summary>ENG.INFO.ANSWER (Input, PMO): a unit that needs more than its notice asked the PMO; the PMO answers (never with a price). The question waits without expiring.</summary>
+    internal sealed class EnInfoAnswerStep : EnHandoverStep
+    {
+        public override string Code => "ENG.INFO.ANSWER";
+        public override string Title => "پاسخ PMO به پرسش واحد دربارهٔ مدارک مهندسی";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+        public override string FallbackRoles => EnRoles.Pmo;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnInfoRequest>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnInfoStatus.Open).OrderBy(x => x.Id).Take(ProcStepCommon.Cap).Select(x => new { x.Id, x.Number, x.ContractId, x.Unit }).ToListAsync(ct);
+            return rows.Select(r => Item("EnInfoRequest", r.Id, r.Number, r.ContractId, null, $"واحد {EnText.Unit(r.Unit)} دربارهٔ مدارک مهندسی پرسیده است ({r.Number}) و منتظر پاسخ PMO است (پاسخ بدون قیمت).", EnRoles.Pmo)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = Root + "/info-requests/" + Id(item.TargetId), Title = "پاسخ به پرسش " + item.TargetNumber };
+    }
+
     /// <summary>ENG.DIST.ACK (Input): a unit confirms the receipt of the released documents (the roles of the row decide who).</summary>
     internal sealed class EnDistAckStep : EnHandoverStep
     {

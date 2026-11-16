@@ -59,6 +59,8 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnDistDraftStep>();
             services.AddScoped<IAgentStep, EnDistNotifyStep>();
             services.AddScoped<IAgentStep, EnDistAckStep>();
+            services.AddScoped<IAgentStep, EnInfoAnswerStep>();
+            services.AddScoped<IAgentStep, EnPlatformRegisterStep>();
             services.AddScoped<IAgentStep, EnDevManagerStep>();
             services.AddScoped<IAgentStep, EnDevCeoStep>();
             services.AddScoped<IAgentStep, EnRiskWatchStep>();
@@ -207,12 +209,29 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();
-            var rows = await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted))
+            var rows = await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted) && !uow.Set<EnPlatformRegistration>().Any(g => g.ProductId == p.Id && !g.Deleted && g.Status == EnRegStatus.Proposed))
                 .OrderBy(p => p.Id).Take(ProcStepCommon.Cap).Select(p => new { p.Id, p.Code }).ToListAsync(ct);
             return rows.Select(r => Item("PbProduct", r.Id, r.Code, null, null, $"استاندارد دیتاشیت پروژه‌ای که پلتفرم {r.Code} برای آن ساخته شد را ثبت کنید.")).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/platforms/" + Id(item.TargetId), Title = "ثبت استاندارد دیتاشیت پلتفرم " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.PLATFORM.REGISTER (HumanGate, CEO): the head of engineering proposed that the product of a New design becomes a platform; only the CEO approves (never an AI seat). The request waits without expiring.</summary>
+    internal sealed class EnPlatformRegisterStep : EnStep
+    {
+        public override string Code => "ENG.PLATFORM.REGISTER";
+        public override string Title => "تصمیم مدیرعامل دربارهٔ پلتفرم‌شدن طرح جدید";
+        public override AgentStepKind Kind => AgentStepKind.HumanGate;
+        public override string FallbackRoles => null;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed).OrderBy(x => x.Id).Take(ProcStepCommon.Cap).Select(x => new { x.Id, x.Number, x.ReferenceCode }).ToListAsync(ct);
+            return rows.Select(r => Item("EnPlatformRegistration", r.Id, r.Number, null, null, $"پیشنهاد ثبت طرح جدید به عنوان پلتفرم ({r.Number}، استاندارد {r.ReferenceCode}) منتظر تصمیم مدیرعامل است.", EnRoles.Ceo)).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = Root + "/platform-registrations/" + Id(item.TargetId), Title = "تصمیم دربارهٔ پلتفرم‌شدن طرح جدید " + item.TargetNumber };
     }
 
     /// <summary>ENG.PLATFORM.COMPLETE (Input): an assessed dossier with missing documents (or complete but not yet declared complete): the engineers upload the documents, which exist only in their hands.</summary>

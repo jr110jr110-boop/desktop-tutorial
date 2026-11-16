@@ -80,6 +80,9 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int EnStandardsDeviationsOpen { get; set; }
         public int EnStandardGapsOpen { get; set; }
 
+        /// <summary>New designs proposed as platforms that wait for the CEO.</summary>
+        public int EnPlatformRegistrationsAwaiting { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 

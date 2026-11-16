@@ -48,5 +48,11 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int DeviationsAwaiting { get; set; }
         public int StandardsDeviationsOpen { get; set; }
         public int StandardGapsOpen { get; set; }
+
+        /// <summary>Questions of the units to the PMO that wait for an answer.</summary>
+        public int InfoRequestsOpen { get; set; }
+
+        /// <summary>New designs proposed as platforms that wait for the CEO.</summary>
+        public int RegistrationsOpen { get; set; }
     }
 }

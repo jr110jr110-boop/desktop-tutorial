@@ -224,6 +224,8 @@ namespace Services.NasbNiro.Finance
             d.EnDeviationsAwaiting = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && (x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.Requested || x.Status == Entities.Model.NasbNiro.Engineering.EnDeviationStatus.ManagerApproved), ct);
             d.EnStandardsDeviationsOpen = d.EnDeviationsAwaiting + d.EnWaiversAwaitingCeo;
             d.EnStandardGapsOpen = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnGapStatus.Draft, ct);
+            d.EnPlatformRegistrationsAwaiting = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnPlatformRegistration>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnRegStatus.Proposed, ct);
+            Alert(d.EnPlatformRegistrationsAwaiting > 0, "danger", $"{d.EnPlatformRegistrationsAwaiting} پیشنهاد ثبت طرح جدید به عنوان پلتفرم منتظر تصمیم مدیرعامل است", "/engineering/platform-registrations");
             Alert(d.EnStandardGapsOpen > 0, "warning", $"{d.EnStandardGapsOpen} گزارش تفاوت استاندارد منتظر تایید مدیر مهندسی است", "/engineering/standard-gaps");
             Alert(d.EnDeviationsAwaiting > 0, "danger", $"{d.EnDeviationsAwaiting} انحراف از استاندارد منتظر تصمیم مدیر مهندسی یا مدیرعامل است", "/engineering/deviations");
             var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);

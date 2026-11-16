@@ -224,6 +224,32 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
                 b.HasOne<PbProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
             });
+            builder.Entity<EnPlatformRegistration>(b =>
+            {
+                b.ToTable("EnPlatformRegistrations");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.ReferenceCode).HasMaxLength(40).IsRequired();
+                b.Property(x => x.StandardBasis).HasMaxLength(500).IsRequired();
+                b.Property(x => x.Rationale).HasMaxLength(2000).IsRequired();
+                b.Property(x => x.ContentHash).HasMaxLength(100).IsRequired();
+                b.Property(x => x.DecisionNote).HasMaxLength(1000);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => x.Status);
+                b.HasIndex(x => new { x.ProductId, x.ReferenceCode, x.Status });
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
+            });
+            builder.Entity<EnInfoRequest>(b =>
+            {
+                b.ToTable("EnInfoRequests");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.Question).HasMaxLength(2000).IsRequired();
+                b.Property(x => x.Answer).HasMaxLength(2000);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.CaseId, x.Status });
+                b.HasIndex(x => x.Status);
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
+                b.HasOne<EnHandover>().WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.NoAction);
+            });
             builder.Entity<EnStandardGapLine>(b =>
             {
                 b.ToTable("EnStandardGapLines");

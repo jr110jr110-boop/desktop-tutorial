@@ -233,6 +233,8 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.Engineering.IEnHandoverService, Services.NasbNiro.Engineering.EnHandoverService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnDeviationService, Services.NasbNiro.Engineering.EnDeviationService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnStandardGapService, Services.NasbNiro.Engineering.EnStandardGapService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnInfoRequestService, Services.NasbNiro.Engineering.EnInfoRequestService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnRegistrationService, Services.NasbNiro.Engineering.EnRegistrationService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnOverviewService, Services.NasbNiro.Engineering.EnOverviewService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnClarificationService, Services.NasbNiro.Engineering.EnClarificationService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
