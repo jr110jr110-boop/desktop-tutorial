@@ -81,7 +81,7 @@ namespace Services.NasbNiro.Engineering
                     d.Documents.Add(doc);
                 }
                 matched.Add(doc);
-                doc.ReferenceLineId = line.Id; doc.Seq = line.Seq; doc.DocumentType = line.DocumentType; doc.Discipline = line.Discipline; doc.Title = line.Title; doc.Required = line.Required; doc.TenderStage = line.TenderStage;
+                doc.ReferenceLineId = line.Id; doc.Seq = line.Seq; doc.DocumentType = line.DocumentType; doc.Discipline = line.Discipline; doc.Title = line.Title; doc.Required = line.Required; doc.TenderStage = line.TenderStage; doc.Units = line.Units;
             }
             // a line the new list dropped keeps its file and its state but stops being required
             foreach (EnPlatformDocument x in existing.Where(x => !matched.Contains(x))) { x.Required = false; x.TenderStage = false; x.ReferenceLineId = null; }

@@ -263,7 +263,7 @@ namespace MsTests
             {
                 IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var problems = new List<string>();
-                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN" })
+                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN", "ENG.DIST.DRAFT", "ENG.DIST.NOTIFY", "ENG.DIST.ACK" })
                 {
                     IAgentStep step = scope.ServiceProvider.GetServices<IAgentStep>().Single(x => x.Code == code);
                     try { step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult(); }

@@ -31,6 +31,10 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         /// <summary>For a line the system proves from its own state (BOM, manufacturing route): the page of the product bank instead of a file.</summary>
         public string LinkPath { get; set; }
         public string Note { get; set; }
+
+        /// <summary>The units that need the document (empty = all) and whether the reader's own unit does.</summary>
+        public string Units { get; set; }
+        public bool ForMyUnit { get; set; }
     }
 
     public class EnDistributionDto
@@ -43,6 +47,16 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string UnitText { get; set; }
         public string Roles { get; set; }
         public string NotifiedAtText { get; set; }
+
+        /// <summary>0 draft (the PMO may still edit the notice), 1 notified.</summary>
+        public int Status { get; set; }
+        public string StatusText { get; set; }
+
+        /// <summary>What this unit needs from the handover (contract, case, standard, count and titles of its documents).</summary>
+        public string ScopeNote { get; set; }
+        public int DocumentCount { get; set; }
+        public bool CanEditScope { get; set; }
+        public string EditScopeBlockedReason { get; set; }
         public string AcknowledgedByName { get; set; }
         public string AcknowledgedAtText { get; set; }
         public bool Acknowledged { get; set; }
@@ -210,6 +224,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int? DistributionId { get; set; }
         public string Action { get; set; }
         public string Note { get; set; }
+
+        /// <summary>For edit-scope: the new notice text of the unit (required, at most 2000 characters).</summary>
+        public string ScopeNote { get; set; }
         public string RowVersion { get; set; }
     }
 }

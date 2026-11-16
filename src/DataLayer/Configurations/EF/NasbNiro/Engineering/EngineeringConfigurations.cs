@@ -37,6 +37,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Discipline).HasMaxLength(100);
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.StandardClause).HasMaxLength(300);
+                b.Property(x => x.Units).HasMaxLength(120);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.ListId);
             });
@@ -63,6 +64,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.Revision).HasMaxLength(30);
                 b.Property(x => x.NotApplicableReason).HasMaxLength(500);
+                b.Property(x => x.Units).HasMaxLength(120);
                 b.HasIndex(x => x.DossierId);
                 b.HasOne<EnReferenceLine>().WithMany().HasForeignKey(x => x.ReferenceLineId).OnDelete(DeleteBehavior.NoAction);
             });
@@ -149,6 +151,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.Title).HasMaxLength(300).IsRequired();
                 b.Property(x => x.Revision).HasMaxLength(30);
                 b.Property(x => x.LinkPath).HasMaxLength(300);
+                b.Property(x => x.Units).HasMaxLength(120);
                 b.Property(x => x.Note).HasMaxLength(500);
                 b.HasIndex(x => x.HandoverId);
             });
@@ -183,6 +186,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
             {
                 b.ToTable("EnDistributions");
                 b.Property(x => x.Roles).HasMaxLength(200).IsRequired();
+                b.Property(x => x.ScopeNote).HasMaxLength(2000);
                 b.HasIndex(x => new { x.HandoverId, x.Unit }).IsUnique().HasFilter(NotDeleted);
                 b.HasOne<EnHandover>().WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.Restrict);
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);

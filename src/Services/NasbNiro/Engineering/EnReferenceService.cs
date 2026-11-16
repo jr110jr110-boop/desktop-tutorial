@@ -20,7 +20,7 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The canonical content an approval binds to: the lines in order, with everything that decides what "complete" means.</summary>
         public static string Hash(string code, int revision, IEnumerable<EnReferenceLine> lines) =>
             EnHash.Of(EnHash.Norm(code) + "#" + EnText.Num(revision) + "#" + string.Join(";", lines.OrderBy(l => l.Seq).Select(l =>
-                string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Discipline), EnHash.Norm(l.Title), l.Required ? "1" : "0", l.TenderStage ? "1" : "0", l.ClientSubmittal ? "1" : "0", EnHash.Norm(l.StandardClause)))));
+                string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Discipline), EnHash.Norm(l.Title), l.Required ? "1" : "0", l.TenderStage ? "1" : "0", l.ClientSubmittal ? "1" : "0", EnHash.Norm(l.StandardClause)) + (string.IsNullOrEmpty(l.Units) ? string.Empty : "|U:" + l.Units))));
 
         /// <summary>The current list: the approved list with the latest approval.</summary>
         public static async Task<EnReferenceList> CurrentAsync(IUnitOfWork uow, bool track, CancellationToken ct, string code = null)
@@ -105,7 +105,7 @@ namespace Services.NasbNiro.Engineering
                     PreparedByUserId = l.PreparedByUserId, PreparedByName = names.Name(l.PreparedByUserId), SubmittedAt = l.SubmittedAt, SubmittedAtText = EnText.Stamp(l.SubmittedAt),
                     ApprovedByUserId = l.ApprovedByUserId, ApprovedByName = names.Name(l.ApprovedByUserId), ApprovedAt = l.ApprovedAt, ApprovedAtText = EnText.Stamp(l.ApprovedAt), Note = l.Note, VoidReason = l.VoidReason,
                     LineCount = l.Lines.Count, RequiredCount = l.Lines.Count(x => x.Required), TenderStageCount = l.Lines.Count(x => x.TenderStage), TouchedByMe = EnEditors.Touched(l.PreparedByUserId, l.EditorUserIds, Me),
-                    Lines = withLines ? l.Lines.OrderBy(x => x.Seq).Select(x => new EnReferenceLineDto { Id = x.Id, Seq = x.Seq, DocumentType = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = x.StandardClause, Note = x.Note }).ToList() : new List<EnReferenceLineDto>(),
+                    Lines = withLines ? l.Lines.OrderBy(x => x.Seq).Select(x => new EnReferenceLineDto { Id = x.Id, Seq = x.Seq, DocumentType = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = x.StandardClause, Note = x.Note, Units = x.Units }).ToList() : new List<EnReferenceLineDto>(),
                     RowVersion = EnConcurrency.Text(l.RowVersion),
                     CanEdit = edit == null, EditBlockedReason = edit, CanSubmit = submit == null, SubmitBlockedReason = submit, CanApprove = approve == null, ApproveBlockedReason = approve,
                     CanReturn = ret == null, ReturnBlockedReason = ret, CanRevise = revise == null, ReviseBlockedReason = revise, CanVoid = voidR == null, VoidBlockedReason = voidR,
@@ -161,6 +161,8 @@ namespace Services.NasbNiro.Engineering
                 if (EnText.Clean(x.DocumentType) == null || EnText.Clean(x.Title) == null) return "نوع و عنوان هر ردیف الزامی است.";
                 p = EnText.Over(x.DocumentType, 100, "نوع مدرک") ?? EnText.Over(x.Discipline, 100, "رشته") ?? EnText.Over(x.Title, 300, "عنوان ردیف") ?? EnText.Over(x.StandardClause, 300, "بند استاندارد") ?? EnText.Over(x.Note, 500, "توضیح ردیف");
                 if (p != null) return p;
+                EnUnits.Normalize(x.Units, out p);
+                if (p != null) return p;
             }
             return null;
         }
@@ -170,7 +172,7 @@ namespace Services.NasbNiro.Engineering
             l.Lines.Clear();
             int seq = 0;
             foreach (EnReferenceLineDto x in lines)
-                l.Lines.Add(new EnReferenceLine { Seq = ++seq, DocumentType = x.DocumentType.Trim(), Discipline = EnText.Clean(x.Discipline), Title = x.Title.Trim(), Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = EnText.Clean(x.StandardClause), Note = EnText.Clean(x.Note) });
+                l.Lines.Add(new EnReferenceLine { Seq = ++seq, DocumentType = x.DocumentType.Trim(), Discipline = EnText.Clean(x.Discipline), Title = x.Title.Trim(), Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = EnText.Clean(x.StandardClause), Note = EnText.Clean(x.Note), Units = EnUnits.Normalize(x.Units, out _) });
         }
 
         public async Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct)
@@ -290,7 +292,7 @@ namespace Services.NasbNiro.Engineering
                     int revision = (await _uow.Set<EnReferenceList>().Where(l => l.Code == row.Code).Select(l => (int?)l.Revision).MaxAsync(ct) ?? 0) + 1;
                     EnReferenceList copy = new EnReferenceList { Code = row.Code, Title = row.Title, StandardSource = row.StandardSource, Revision = revision, Status = EnRefStatus.Draft, PreparedByUserId = Me, EditorUserIds = EnEditors.With(null, Me), Note = note, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me };
                     foreach (EnReferenceLine x in row.Lines.OrderBy(x => x.Seq))
-                        copy.Lines.Add(new EnReferenceLine { Seq = x.Seq, DocumentType = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = x.StandardClause, Note = x.Note });
+                        copy.Lines.Add(new EnReferenceLine { Seq = x.Seq, DocumentType = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = x.StandardClause, Note = x.Note, Units = x.Units });
                     _uow.Set<EnReferenceList>().Add(copy);
                     try { await _uow.SaveChangesAsync(ct); }
                     catch (DbUpdateConcurrencyException) { return EnText.Bad<EnReferenceListDto>(EnText.Concurrency); }

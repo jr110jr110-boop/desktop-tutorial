@@ -23,6 +23,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public bool ClientSubmittal { get; set; }
         public string StandardClause { get; set; }
         public string Note { get; set; }
+
+        /// <summary>The units that need the document (comma-separated: Qa, Qc, Production, Procurement, Warehouse, Planning); empty = all units. Editable while the list is a draft.</summary>
+        public string Units { get; set; }
     }
 
     public class EnReferenceListDto

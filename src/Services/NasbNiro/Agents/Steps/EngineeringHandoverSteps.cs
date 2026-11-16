@@ -201,7 +201,28 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = HandoverLink(item.TargetId), Title = "ابلاغ مدارک " + item.TargetNumber + " به اجرا" };
     }
 
-    /// <summary>ENG.DIST.NOTIFY (Agent): a released handover that was not distributed yet; the agent notifies the six units.</summary>
+    /// <summary>ENG.DIST.DRAFT (Agent): a handover accepted by the PMO has no distribution rows yet; the agent builds one row per unit with a deterministic notice text that lists only what that unit needs. The PMO may edit a text until the release.</summary>
+    internal sealed class EnDistDraftStep : EnHandoverStep
+    {
+        public override string Code => "ENG.DIST.DRAFT";
+        public override string Title => "ایجنت مهندسی: تهیهٔ یادداشت ابلاغ هر واحد برای تحویل پذیرفته‌شده";
+        public override AgentStepKind Kind => AgentStepKind.Agent;
+        public override string FallbackRoles => EnRoles.Writers;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Accepted && !uow.Set<EnDistribution>().Any(d => d.HandoverId == h.Id && !d.Deleted))
+                .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId }).ToListAsync(ct);
+            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, $"تحویل {r.Number} پذیرفته شده ولی یادداشت ابلاغ واحدها هنوز ساخته نشده است.")).ToList();
+        }
+
+        public override Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct) =>
+            CallAsync(services, new EnHandoverActionDto { Action = "draft-distribution", Id = item.TargetId }, "ایجنت مهندسی برای تحویل {n} یادداشت ابلاغ هر واحد را ساخت؛ PMO می‌تواند آن‌ها را پیش از ابلاغ ویرایش کند.", ct);
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "یادداشت ابلاغ واحدها برای " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.DIST.NOTIFY (Agent): a released handover whose units were not notified yet; the agent sends each unit its own notice text.</summary>
     internal sealed class EnDistNotifyStep : EnHandoverStep
     {
         public override string Code => "ENG.DIST.NOTIFY";
@@ -211,13 +232,13 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Released && !uow.Set<EnDistribution>().Any(d => d.HandoverId == h.Id && !d.Deleted))
+            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Released && !uow.Set<EnDistribution>().Any(d => d.HandoverId == h.Id && !d.Deleted && d.NoticeSentAt != null))
                 .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId }).ToListAsync(ct);
             return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, $"مدارک {r.Number} ابلاغ شده ولی به واحدها اطلاع داده نشده است.")).ToList();
         }
 
         public override Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct) =>
-            CallAsync(services, new EnHandoverActionDto { Action = "distribute", Id = item.TargetId }, "ایجنت مهندسی ابلاغ مدارک {n} را به واحدهای کیفیت، بازرسی، تولید، خرید، انبار و برنامه‌ریزی اطلاع داد.", ct);
+            CallAsync(services, new EnHandoverActionDto { Action = "distribute", Id = item.TargetId }, "ایجنت مهندسی ابلاغ مدارک {n} را با یادداشت مخصوص هر واحد به واحدهای تضمین کیفیت، کنترل کیفیت، تولید، تدارکات، انبار و برنامه‌ریزی اطلاع داد.", ct);
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "اطلاع‌رسانی مدارک " + item.TargetNumber + " به واحدها" };
     }
@@ -232,7 +253,7 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnDistribution>().AsNoTracking().Where(d => !d.Deleted && d.AcknowledgedAt == null).OrderBy(d => d.Id).Take(ProcStepCommon.Cap)
+            var rows = await uow.Set<EnDistribution>().AsNoTracking().Where(d => !d.Deleted && d.AcknowledgedAt == null && d.Status == EnDistStatus.Notified && d.NoticeSentAt != null).OrderBy(d => d.Id).Take(ProcStepCommon.Cap)
                 .Select(d => new { d.Id, d.HandoverId, d.ContractId, d.Unit, d.Roles, Number = uow.Set<EnHandover>().Where(h => h.Id == d.HandoverId).Select(h => h.Number).FirstOrDefault() }).ToListAsync(ct);
             return rows.Select(r => Item("EnDistribution", r.Id, r.Number, r.ContractId, null, $"واحد {EnText.Unit(r.Unit)} هنوز دریافت مدارک {r.Number} را تایید نکرده است.", r.Roles)).ToList();
         }

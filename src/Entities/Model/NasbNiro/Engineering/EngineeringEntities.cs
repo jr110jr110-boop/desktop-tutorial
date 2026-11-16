@@ -36,6 +36,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnUnit { Qa = 1, Qc = 2, Production = 3, Procurement = 4, Warehouse = 5, Planning = 6 }
 
+    /// <summary>Draft: the agent built the row with its notice text and the PMO may still edit it; Notified: the PMO released the handover (the notification is sent by ENG.DIST.NOTIFY).</summary>
+    public enum EnDistStatus { Draft = 0, Notified = 1 }
+
     // ------------------------------------------------------------------------------------------ the reference document list
 
     /// <summary>A revision of the reference list of engineering documents (VDDR) a platform needs to be complete. Based on API 611/612 and PMBOK; the system ships no content of its own.</summary>
@@ -87,6 +90,9 @@ namespace Entities.Model.NasbNiro.Engineering
         public bool ClientSubmittal { get; set; }
         public string StandardClause { get; set; }
         public string Note { get; set; }
+
+        /// <summary>The units that need this document (comma-separated names of <see cref="EnUnit"/>); empty = all units.</summary>
+        public string Units { get; set; }
     }
 
     // ------------------------------------------------------------------------------------------ the platform dossier
@@ -143,6 +149,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
         public string Revision { get; set; }
         public string NotApplicableReason { get; set; }
+
+        /// <summary>Copied from the reference line: the units that need the document (empty = all).</summary>
+        public string Units { get; set; }
 
         /// <summary>The system proved the line from its own state (a released BOM, an approved routing); no file is needed.</summary>
         public bool SystemProven { get; set; }
@@ -325,6 +334,9 @@ namespace Entities.Model.NasbNiro.Engineering
         /// <summary>The bank page that proves a system-derived line (BOM, manufacturing route); no file.</summary>
         public string LinkPath { get; set; }
 
+        /// <summary>The units that need the document (empty = all); the notice of each unit counts only its own documents.</summary>
+        public string Units { get; set; }
+
         public string Note { get; set; }
     }
 
@@ -383,7 +395,17 @@ namespace Entities.Model.NasbNiro.Engineering
         public int ContractId { get; set; }
         public EnUnit Unit { get; set; }
         public string Roles { get; set; }
-        public DateTimeOffset NotifiedAt { get; set; }
+        public EnDistStatus Status { get; set; }
+
+        /// <summary>The notice text of the unit (what that unit needs from the handover); built by the agent, editable by the PMO until the release.</summary>
+        public string ScopeNote { get; set; }
+        public int DocumentCount { get; set; }
+
+        /// <summary>Set when the PMO released the handover.</summary>
+        public DateTimeOffset? NotifiedAt { get; set; }
+
+        /// <summary>Set when ENG.DIST.NOTIFY sent the notification of the unit.</summary>
+        public DateTimeOffset? NoticeSentAt { get; set; }
         public int? AcknowledgedByUserId { get; set; }
         public DateTimeOffset? AcknowledgedAt { get; set; }
 

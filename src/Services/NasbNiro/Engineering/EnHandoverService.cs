@@ -30,7 +30,7 @@ namespace Services.NasbNiro.Engineering
         public EnLineState State;
         public Guid? DocumentId;
         public int? PlatformDocumentId, DeliverableId;
-        public string LinkPath;
+        public string LinkPath, Units;
         public string Key => EnReferenceRules.Key(Type) + "|" + EnHash.Norm(Discipline).ToUpperInvariant() + "|" + EnHash.Norm(Title).ToUpperInvariant();
     }
 
@@ -40,7 +40,7 @@ namespace Services.NasbNiro.Engineering
         public static bool DeliverableReady(PcEngineeringDeliverable d) => d.IssueState == PcIssueState.Approved && d.DocumentId.HasValue;
 
         public static string LineHash(IEnumerable<EnHandoverLine> lines) =>
-            EnHash.Of(string.Join(";", lines.OrderBy(l => l.Seq).Select(l => string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Title), l.Required ? "1" : "0", EnText.Num((int)l.State), l.DocumentId?.ToString("N") ?? "-", EnHash.Norm(l.Revision)))));
+            EnHash.Of(string.Join(";", lines.OrderBy(l => l.Seq).Select(l => string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Title), l.Required ? "1" : "0", EnText.Num((int)l.State), l.DocumentId?.ToString("N") ?? "-", EnHash.Norm(l.Revision)) + (string.IsNullOrEmpty(l.Units) ? string.Empty : "|U:" + l.Units))));
 
         /// <summary>The Code of the Approved list the handover lines come from: spare parts and service may use the one chosen at the confirm; else the standard of the project.</summary>
         public static string ListCode(EnCase c) => c.Kind != EnCaseKind.Turbine && !string.IsNullOrWhiteSpace(c.HandoverListCode) ? c.HandoverListCode : c.ReferenceCode;
@@ -56,13 +56,13 @@ namespace Services.NasbNiro.Engineering
                 if (!result.Any(x => EnReferenceRules.Key(x.Type) == EnDocTypes.Bom))
                 {
                     int? rev = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbBomHeader>().AsNoTracking().Where(b => !b.Deleted && b.ProductId == pid && b.Status == Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released).OrderByDescending(b => b.Revision).Select(b => (int?)b.Revision).FirstOrDefaultAsync(ct);
-                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Bom, Discipline = "تولید", Title = "BOM منتشرشده", Required = true, State = rev.HasValue ? EnLineState.Available : EnLineState.Missing, Revision = rev.HasValue ? rev.Value.ToString(CultureInfo.InvariantCulture) : null, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/bom" });
+                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Bom, Discipline = "تولید", Title = "BOM منتشرشده", Required = true, State = rev.HasValue ? EnLineState.Available : EnLineState.Missing, Revision = rev.HasValue ? rev.Value.ToString(CultureInfo.InvariantCulture) : null, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/bom", Units = EnUnits.Bom });
                 }
                 if (!result.Any(x => EnReferenceRules.Key(x.Type) == EnDocTypes.Opc))
                 {
                     bool ok = await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, ct)
                         && !await uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().AsNoTracking().AnyAsync(o => !o.Deleted && o.ProductId == pid && (o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Draft || o.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.UnderReview), ct);
-                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Opc, Discipline = "تولید", Title = "چارت مسیر ساخت (OPC) تاییدشده", Required = true, State = ok ? EnLineState.Available : EnLineState.Missing, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/routing" });
+                    result.Add(new EnSourceLine { Seq = seq++, Type = EnDocTypes.Opc, Discipline = "تولید", Title = "چارت مسیر ساخت (OPC) تاییدشده", Required = true, State = ok ? EnLineState.Available : EnLineState.Missing, LinkPath = "/product-bank/products/" + pid.ToString(CultureInfo.InvariantCulture) + "/routing", Units = EnUnits.Opc });
                 }
             }
             return result;
@@ -76,7 +76,7 @@ namespace Services.NasbNiro.Engineering
                 EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == c.ProductId.Value && x.ReferenceCode == c.ReferenceCode && !x.Deleted, ct);
                 if (d == null) return result;
                 foreach (EnPlatformDocument x in d.Documents.OrderBy(x => x.Seq).ThenBy(x => x.Id))
-                    result.Add(new EnSourceLine { Seq = x.Seq, Type = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, State = x.State, DocumentId = x.DocumentId, Revision = x.Revision, PlatformDocumentId = x.Id });
+                    result.Add(new EnSourceLine { Seq = x.Seq, Type = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, State = x.State, DocumentId = x.DocumentId, Revision = x.Revision, PlatformDocumentId = x.Id, Units = x.Units });
                 return result;
             }
             EnReferenceList list = await EnReferenceRules.CurrentAsync(uow, false, ct, ListCode(c));
@@ -88,14 +88,25 @@ namespace Services.NasbNiro.Engineering
                 PcEngineeringDeliverable m = mdr.FirstOrDefault(x => EnReferenceRules.Key(x.DocumentType) == type && EnHash.Norm(x.Title).ToUpperInvariant() == title && DeliverableReady(x))
                     ?? mdr.FirstOrDefault(x => EnReferenceRules.Key(x.DocumentType) == type && EnHash.Norm(x.Title).ToUpperInvariant() == title);
                 bool ready = m != null && DeliverableReady(m);
-                result.Add(new EnSourceLine { Seq = l.Seq, Type = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = ready ? EnLineState.Available : EnLineState.Missing, DocumentId = ready ? m.DocumentId : null, Revision = ready ? m.Revision : null, DeliverableId = m?.Id });
+                result.Add(new EnSourceLine { Seq = l.Seq, Type = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = ready ? EnLineState.Available : EnLineState.Missing, DocumentId = ready ? m.DocumentId : null, Revision = ready ? m.Revision : null, DeliverableId = m?.Id, Units = l.Units });
             }
             return result;
         }
 
         public static void Apply(EnHandoverLine line, EnSourceLine s)
         {
-            line.State = s.State; line.DocumentId = s.DocumentId; line.Revision = s.Revision; line.PlatformDocumentId = s.PlatformDocumentId; line.DeliverableId = s.DeliverableId; line.LinkPath = s.LinkPath;
+            line.State = s.State; line.DocumentId = s.DocumentId; line.Revision = s.Revision; line.PlatformDocumentId = s.PlatformDocumentId; line.DeliverableId = s.DeliverableId; line.LinkPath = s.LinkPath; line.Units = s.Units;
+        }
+
+        /// <summary>The notice text of one unit: what that unit needs from the handover (deterministic: contract, case, standard, count and titles of its own documents), cut with an ellipsis at the column length.</summary>
+        public static string ScopeNote(string contractCode, string caseNumber, string standard, EnUnit unit, IEnumerable<EnHandoverLine> lines, out int count)
+        {
+            List<EnHandoverLine> mine = lines.Where(l => EnUnits.Includes(l.Units, unit)).OrderBy(l => l.Seq).ThenBy(l => l.Id).ToList();
+            count = mine.Count;
+            string head = "مدارک مهندسی قرارداد " + (contractCode ?? "—") + " (پرونده " + caseNumber + "، استاندارد " + (string.IsNullOrWhiteSpace(standard) ? "—" : standard) + ") برای واحد " + EnText.Unit(unit) + ": ";
+            string body = count == 0 ? "برای این واحد مدرکی در این تحویل نیست." : EnText.Num(count) + " مدرک: " + string.Join("؛ ", mine.Select(l => l.Title));
+            string text = head + body;
+            return text.Length > 2000 ? text.Substring(0, 1999) + "…" : text;
         }
 
         /// <summary>The keys of the required lines that are missing.</summary>
@@ -244,12 +255,24 @@ namespace Services.NasbNiro.Engineering
         private async Task<string> ReturnReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده برگشت می‌خورد." : null);
 
-        private async Task<string> ReleaseReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
+        private async Task<string> ReleaseReasonAsync(EnHandover h, Who w, CancellationToken ct) => await ReleaseBaseReasonAsync(h, w, ct) ?? await DistributionNotReadyAsync(h, ct);
+
+        /// <summary>The release is refused while the distribution rows are missing or any unit's notice text is empty.</summary>
+        private async Task<string> DistributionNotReadyAsync(EnHandover h, CancellationToken ct)
+        {
+            List<string> notes = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted && d.Status == EnDistStatus.Draft).Select(d => d.ScopeNote).ToListAsync(ct);
+            return notes.Count < Units.Length || notes.Any(string.IsNullOrWhiteSpace) ? "ابلاغ ممکن نیست: ردیف توزیع واحدها و یادداشت هر واحد هنوز آماده نیست (ایجنت مهندسی آن‌ها را می‌سازد و یادداشت هیچ واحدی خالی نمی‌ماند)." : null;
+        }
+
+        private async Task<string> ReleaseBaseReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
                 : h.SubmittedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : null);
 
         private static string VoidReasonOf(EnHandover h, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft && h.Status != EnHandoverStatus.Returned ? "فقط پیش‌نویس یا تحویل برگشت‌خورده ابطال می‌شود." : null;
+
+        private static string EditScopeReason(EnDistribution d, EnHandoverStatus handover, Who w) =>
+            !w.Pmo ? EnText.NotAllowed + " (یادداشت ابلاغ واحد را PMO ویرایش می‌کند)" : w.Seat ? EnText.AiNever : handover != EnHandoverStatus.Accepted || d.Status != EnDistStatus.Draft ? "یادداشت ابلاغ فقط تا پیش از ابلاغ تحویل (وضعیت پذیرفته‌شده) ویرایش می‌شود." : null;
 
         private static string DecideReason(EnWaiver w, Who who, DateTimeOffset now) =>
             !who.Ceo ? EnText.NotAllowed + " (تایید معافیت اضطراری فقط با مدیرعامل است)" : who.Seat ? EnText.AiNever : w.Status != EnWaiverStatus.Requested ? "فقط درخواست معافیت در انتظار تصمیم تصمیم‌گیری می‌شود."
@@ -314,6 +337,7 @@ namespace Services.NasbNiro.Engineering
             Dictionary<int, string> caseNames = cases.ToDictionary(k => k.Key, k => k.Value.Number);
             Dictionary<int, string> waiverNames = waivers.ToDictionary(x => x.Id, x => x.Number);
             List<EnHandoverDto> result = new List<EnHandoverDto>();
+            List<EnUnit> myUnits = Units.Where(u => _user.IsInRole(u.Roles)).Select(u => u.Unit).ToList();   // the units of the reader (none for the PMO or the CEO)
             foreach (EnHandover h in rows)
             {
                 EnCase c = cases[h.CaseId];
@@ -334,8 +358,8 @@ namespace Services.NasbNiro.Engineering
                     ReturnedByName = names.Name(h.ReturnedByUserId), ReturnedAtText = EnText.Stamp(h.ReturnedAt), ReturnReason = h.ReturnReason, ReleasedByName = names.Name(h.ReleasedByUserId), ReleasedAtText = EnText.Stamp(h.ReleasedAt),
                     StandardGap = await GapSummaryAsync(c.Id, ct),
                     Note = h.Note, VoidReason = h.VoidReason, TouchedByMe = EnEditors.Has(h.EditorUserIds, Me), RowVersion = EnConcurrency.Text(h.RowVersion), Waiver = waiverDto,
-                    Lines = h.Lines.OrderBy(l => l.Seq).ThenBy(l => l.Id).Select(l => new EnHandoverLineDto { Id = l.Id, Seq = l.Seq, DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = (int)l.State, StateText = EnText.LineState(l.State), DocumentId = l.DocumentId, Revision = l.Revision, PlatformDocumentId = l.PlatformDocumentId, DeliverableId = l.DeliverableId, LinkPath = l.LinkPath, Note = l.Note }).ToList(),
-                    Distribution = dist.Where(d => d.HandoverId == h.Id).Select(d => DistDto(d, h.Number, debtUsers, w)).ToList(),
+                    Lines = h.Lines.OrderBy(l => l.Seq).ThenBy(l => l.Id).Select(l => new EnHandoverLineDto { Id = l.Id, Seq = l.Seq, DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, State = (int)l.State, StateText = EnText.LineState(l.State), DocumentId = l.DocumentId, Revision = l.Revision, PlatformDocumentId = l.PlatformDocumentId, DeliverableId = l.DeliverableId, LinkPath = l.LinkPath, Note = l.Note, Units = l.Units, ForMyUnit = myUnits.Any(u => EnUnits.Includes(l.Units, u)) }).ToList(),
+                    Distribution = dist.Where(d => d.HandoverId == h.Id).Select(d => DistDto(d, h.Number, h.Status, debtUsers, w)).ToList(),
                     Debts = debts.Where(d => waivers.Any(x => x.Id == d.WaiverId && x.HandoverId == h.Id)).Select(d => DebtDto(d, debtUsers, waiverNames, caseNames, today)).ToList(),
                     CanSubmit = submit == null, SubmitBlockedReason = submit, CanRequestWaiver = request == null, RequestWaiverBlockedReason = request, CanAccept = accept == null, AcceptBlockedReason = accept,
                     CanReturn = ret == null, ReturnBlockedReason = ret, CanRelease = release == null, ReleaseBlockedReason = release, CanVoid = voidR == null, VoidBlockedReason = voidR,
@@ -344,18 +368,18 @@ namespace Services.NasbNiro.Engineering
             return result;
         }
 
-        private EnDistributionDto DistDto(EnDistribution d, string handoverNumber, Dictionary<int, string> names, Who w)
+        private EnDistributionDto DistDto(EnDistribution d, string handoverNumber, EnHandoverStatus handover, Dictionary<int, string> names, Who w)
         {
-            string why = AckReason(d, w);
+            string why = AckReason(d, w), edit = EditScopeReason(d, handover, w);
             return new EnDistributionDto
             {
-                Id = d.Id, HandoverId = d.HandoverId, HandoverNumber = handoverNumber, ContractId = d.ContractId, Unit = (int)d.Unit, UnitText = EnText.Unit(d.Unit), Roles = d.Roles, NotifiedAtText = EnText.Stamp(d.NotifiedAt),
+                Id = d.Id, HandoverId = d.HandoverId, HandoverNumber = handoverNumber, ContractId = d.ContractId, Unit = (int)d.Unit, UnitText = EnText.Unit(d.Unit), Roles = d.Roles, Status = (int)d.Status, StatusText = d.Status == EnDistStatus.Draft ? "پیش‌نویس (منتظر ابلاغ PMO)" : "ابلاغ‌شده", ScopeNote = d.ScopeNote, DocumentCount = d.DocumentCount, CanEditScope = edit == null, EditScopeBlockedReason = edit, NotifiedAtText = EnText.Stamp(d.NotifiedAt),
                 AcknowledgedByName = names.Name(d.AcknowledgedByUserId), AcknowledgedAtText = EnText.Stamp(d.AcknowledgedAt), Acknowledged = d.AcknowledgedAt.HasValue, RowVersion = EnConcurrency.Text(d.RowVersion), CanAcknowledge = why == null, AcknowledgeBlockedReason = why,
             };
         }
 
         private string AckReason(EnDistribution d, Who w) =>
-            d.AcknowledgedAt.HasValue ? "این واحد قبلاً دریافت را تایید کرده است." : w.Seat ? EnText.AiNever : !_user.IsInRole(d.Roles) ? EnText.NotAllowed + " (تایید دریافت با نقش‌های واحد " + EnText.Unit(d.Unit) + " است)" : null;
+            d.AcknowledgedAt.HasValue ? "این واحد قبلاً دریافت را تایید کرده است." : d.Status != EnDistStatus.Notified || !d.NoticeSentAt.HasValue ? "ابلاغ این واحد هنوز ارسال نشده است." : w.Seat ? EnText.AiNever : !_user.IsInRole(d.Roles) ? EnText.NotAllowed + " (تایید دریافت با نقش‌های واحد " + EnText.Unit(d.Unit) + " است)" : null;
 
         public async Task<ResponseDto<PagedList<EnHandoverDto>>> GetHandoversAsync(EnHandoverQuery query, CancellationToken ct)
         {
@@ -424,9 +448,9 @@ namespace Services.NasbNiro.Engineering
             if (onlyOpen) q = q.Where(d => d.AcknowledgedAt == null);
             List<EnDistribution> rows = await q.OrderBy(d => d.HandoverId).ThenBy(d => d.Unit).Take(500).ToListAsync(ct);
             List<int> hids = rows.Select(r => r.HandoverId).Distinct().ToList();
-            Dictionary<int, string> numbers = await _uow.Set<EnHandover>().AsNoTracking().Where(h => hids.Contains(h.Id)).ToDictionaryAsync(h => h.Id, h => h.Number, ct);
+            var heads = await _uow.Set<EnHandover>().AsNoTracking().Where(h => hids.Contains(h.Id)).Select(h => new { h.Id, h.Number, h.Status }).ToListAsync(ct);
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.Select(r => r.AcknowledgedByUserId), ct);
-            return ResponseDtoHelper.Ok(rows.Select(d => DistDto(d, numbers.TryGetValue(d.HandoverId, out string n) ? n : null, names, w)).ToList());
+            return ResponseDtoHelper.Ok(rows.Select(d => { var head = heads.FirstOrDefault(x => x.Id == d.HandoverId); return DistDto(d, head?.Number, head == null ? EnHandoverStatus.Void : head.Status, names, w); }).ToList());
         }
 
         // ---------------------------------------------------------------- the waiver
@@ -546,14 +570,14 @@ namespace Services.NasbNiro.Engineering
         {
             if (dto == null) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
             string action = (dto.Action ?? string.Empty).Trim().ToLowerInvariant();
-            string[] all = { "draft", "refresh", "submit", "accept", "return", "release", "void", "distribute", "acknowledge" };
+            string[] all = { "draft", "refresh", "submit", "accept", "return", "release", "void", "draft-distribution", "edit-scope", "distribute", "acknowledge" };
             if (!all.Contains(action)) return EnText.Bad<EnHandoverDto>("عمل نامعتبر است (" + string.Join("، ", all) + ").");
             Who w = await WhoAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
             if (action == "draft") return await DraftAsync(dto, w, now, ct);
             int? id = dto.Id;
             EnDistribution dist = null;
-            if (action == "acknowledge")
+            if (action == "acknowledge" || action == "edit-scope")
             {
                 if (!dto.DistributionId.HasValue) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
                 dist = await _uow.Set<EnDistribution>().FirstOrDefaultAsync(d => d.Id == dto.DistributionId.Value && !d.Deleted, ct);
@@ -563,7 +587,7 @@ namespace Services.NasbNiro.Engineering
             if (!id.HasValue) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
             EnHandover h = await _uow.Set<EnHandover>().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id.Value && !x.Deleted, ct);
             if (h == null) return EnText.NotFound<EnHandoverDto>(EnText.NotFoundHandover);
-            if (action != "acknowledge" && !EnConcurrency.Apply(_uow, h, dto.RowVersion)) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
+            if (action != "acknowledge" && action != "edit-scope" && !EnConcurrency.Apply(_uow, h, dto.RowVersion)) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
             EnCase c = await _uow.Set<EnCase>().FirstAsync(x => x.Id == h.CaseId, ct);
             string note = EnText.Clean(dto.Note);
             string why;
@@ -609,6 +633,7 @@ namespace Services.NasbNiro.Engineering
                     why = await ReleaseReasonAsync(h, w, ct);
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     h.Status = EnHandoverStatus.Released; h.ReleasedByUserId = Me; h.ReleasedAt = now; c.Status = EnCaseStatus.Released;
+                    foreach (EnDistribution row in await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct)) { row.Status = EnDistStatus.Notified; row.NotifiedAt = now; row.ModifyDate = now; row.ModifierUserId = Me; }   // the notice texts are frozen; ENG.DIST.NOTIFY sends them
                     EnEvents.Add(_uow, c, "handover-released", Me, h.Number);
                     break;
                 case "void":
@@ -618,13 +643,49 @@ namespace Services.NasbNiro.Engineering
                     h.Status = EnHandoverStatus.Void; h.VoidReason = EnText.Cut(note, 1000);
                     EnEvents.Add(_uow, c, "handover-void", Me, note);
                     break;
+                case "draft-distribution":
+                {
+                    if (!w.Writer) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed);
+                    if (h.Status != EnHandoverStatus.Accepted) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع فقط برای تحویل پذیرفته‌شده ساخته می‌شود.");
+                    if (await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct)) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع این تحویل قبلاً ساخته شده است.");
+                    string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
+                    foreach ((EnUnit unit, string roles) in Units)
+                    {
+                        string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count);
+                        _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Draft, ScopeNote = text, DocumentCount = count, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                    }
+                    EnEvents.Add(_uow, c, "distribution-drafted", Me, h.Number);
+                    break;
+                }
+                case "edit-scope":
+                {
+                    string text = EnText.Clean(dto.ScopeNote);
+                    why = EditScopeReason(dist, h.Status, w) ?? (text == null ? "یادداشت ابلاغ واحد نباید خالی باشد." : EnText.Over(text, 2000, "یادداشت ابلاغ"));
+                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
+                    if (!EnConcurrency.Apply(_uow, dist, dto.RowVersion)) return EnText.Bad<EnHandoverDto>(EnText.InvalidData);
+                    dist.ScopeNote = text; dist.ModifyDate = now; dist.ModifierUserId = Me;
+                    EnEvents.Add(_uow, c, "distribution-note-edited", Me, EnText.Unit(dist.Unit));
+                    break;
+                }
                 case "distribute":
+                {
                     if (!w.Writer) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed);
                     if (h.Status != EnHandoverStatus.Released) return EnText.Bad<EnHandoverDto>("فقط تحویل ابلاغ‌شده توزیع می‌شود.");
-                    if (await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct)) return EnText.Bad<EnHandoverDto>("توزیع این تحویل قبلاً انجام شده است.");
-                    foreach ((EnUnit unit, string roles) in Units)
-                        _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, NotifiedAt = now, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                    List<EnDistribution> rows = await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
+                    if (rows.Any(d => d.NoticeSentAt.HasValue)) return EnText.Bad<EnHandoverDto>("توزیع این تحویل قبلاً انجام شده است.");
+                    if (rows.Count == 0)
+                    {
+                        // a handover released before the per-unit notices existed: the rows are made now, already notified
+                        string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
+                        foreach ((EnUnit unit, string roles) in Units)
+                        {
+                            string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count);
+                            _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Notified, ScopeNote = text, DocumentCount = count, NotifiedAt = now, NoticeSentAt = now, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                        }
+                    }
+                    else foreach (EnDistribution d in rows) { d.NoticeSentAt = now; d.ModifyDate = now; d.ModifierUserId = Me; }
                     break;
+                }
                 default:   // acknowledge
                     why = AckReason(dist, w);
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
@@ -654,8 +715,8 @@ namespace Services.NasbNiro.Engineering
             await OfficeGates.SyncAsync(_notify, "EN-HO-ACCEPT-" + h.Id, h.Status == EnHandoverStatus.Submitted, "Engineering", nameof(EnHandover), h.Id, "پذیرش تحویل مدارک مهندسی " + h.Number, link, EnRoles.PmoSide, ct, null, OfInboxKind.Approval);
             await OfficeGates.SyncAsync(_notify, "EN-HO-RELEASE-" + h.Id, h.Status == EnHandoverStatus.Accepted, "Engineering", nameof(EnHandover), h.Id, "ابلاغ مدارک مهندسی " + h.Number + " به اجرا", link, EnRoles.Pmo, ct, null, OfInboxKind.Approval);
             List<EnDistribution> rows = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
-            foreach (EnDistribution d in rows)
-                await OfficeGates.SyncAsync(_notify, "EN-DIST-" + d.Id, !d.AcknowledgedAt.HasValue, "Engineering", nameof(EnDistribution), d.Id, "دریافت مدارک مهندسی " + h.Number + " (" + EnText.Unit(d.Unit) + ")", link, d.Roles, ct, null, OfInboxKind.Task);
+            foreach (EnDistribution d in rows.Where(d => d.Status == EnDistStatus.Notified && d.NoticeSentAt.HasValue))
+                await OfficeGates.SyncAsync(_notify, "EN-DIST-" + d.Id, !d.AcknowledgedAt.HasValue, "Engineering", nameof(EnDistribution), d.Id, EnText.Cut("دریافت مدارک مهندسی " + h.Number + " (" + EnText.Unit(d.Unit) + "): " + d.ScopeNote, 280), link, d.Roles, ct, null, OfInboxKind.Task);
         }
 
         // ---------------------------------------------------------------- debts

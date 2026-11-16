@@ -150,6 +150,8 @@ namespace MsTests
 
             // accept and release: the releaser did not submit or prepare; only the PMO releases
             Ok(await Act(host, Pmo1, "accept", d => d.Id = r2.Id));
+            Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ ممکن نیست");   // the distribution rows are not built yet
+            Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = r2.Id));
             Refused(await Act(host, Eng1, "release", d => d.Id = r2.Id));
             Refused(await Act(host, Mgr1, "release", d => d.Id = r2.Id));
             EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = r2.Id));
@@ -221,6 +223,7 @@ namespace MsTests
             ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO");
             Refused(await Act(host, seatPmo, "accept", d => d.Id = h.Id));
             Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            Ok(await Act(host, seat, "draft-distribution", d => d.Id = h.Id));
             Refused(await Act(host, seatPmo, "release", d => d.Id = h.Id));
             Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
             EnHandoverDto dist = Ok(await Act(host, seat, "distribute", d => d.Id = h.Id));
@@ -293,13 +296,78 @@ namespace MsTests
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(40, steps.Count);
+            Assert.AreEqual(41, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
             Assert.AreEqual(16, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
-            Assert.AreEqual(23, steps.Count(s => s.Station == 5));
-            Assert.AreEqual(13, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(40, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(24, steps.Count(s => s.Station == 5));
+            Assert.AreEqual(14, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
+            Assert.AreEqual(41, steps.Select(s => s.Code).Distinct().Count());
+        }
+
+        [TestMethod]
+        public async Task Each_Unit_Gets_Its_Own_Notice_The_Pmo_May_Edit_It_Until_The_Release_And_The_Release_Needs_Every_Notice()
+        {
+            AppHost host = Started("dist1");
+            EnSaveReferenceDto dto = Ref("VDDR-U", ("DWG", true, false), ("DATASHEET", true, false));
+            dto.Lines[0].Units = "production, qc"; dto.Lines[1].Units = "Nope";
+            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(dto, Ct)), "شناخته‌شده");
+            dto.Lines[1].Units = null;
+            EnReferenceListDto list = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(dto, Ct)));
+            Assert.AreEqual("Qc,Production", list.Lines[0].Units);
+            Assert.IsTrue(string.IsNullOrEmpty(list.Lines[1].Units), "empty = all units");
+            Ok(await RefAction(host, Eng1, list.Id, "submit"));
+            Ok(await RefAction(host, Mgr1, list.Id, "approve"));
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-U"));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            Deliverable(host, contract, "DWG"); Deliverable(host, contract, "DATASHEET");
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = c.Id));
+            Assert.AreEqual("Qc,Production", h.Lines.Single(l => l.DocumentType == "DWG").Units);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            // the line shows who it is for
+            EnHandoverDto asProduction = Ok(await Get(host, Prod1, h.Id)), asQa = Ok(await Get(host, Qa1, h.Id)), asPmo = Ok(await Get(host, Pmo1, h.Id));
+            Assert.IsTrue(asProduction.Lines.All(l => l.ForMyUnit));
+            Assert.IsFalse(asQa.Lines.Single(l => l.DocumentType == "DWG").ForMyUnit);
+            Assert.IsTrue(asQa.Lines.Single(l => l.DocumentType == "DATASHEET").ForMyUnit);
+            Assert.IsTrue(asPmo.Lines.All(l => !l.ForMyUnit), "the PMO has no unit of its own");
+            // no rows yet: no release
+            Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), "ابلاغ ممکن نیست");
+            Refused(await Act(host, Qa1, "draft-distribution", d => d.Id = h.Id));
+            EnHandoverDto rows = Ok(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id));
+            Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id), "قبلاً");
+            Assert.AreEqual(6, rows.Distribution.Count);
+            Assert.IsTrue(rows.Distribution.All(d => d.Status == (int)EnDistStatus.Draft && !string.IsNullOrWhiteSpace(d.ScopeNote)));
+            EnDistributionDto prod = rows.Distribution.Single(d => d.Unit == (int)EnUnit.Production), qa = rows.Distribution.Single(d => d.Unit == (int)EnUnit.Qa);
+            Assert.AreEqual(2, prod.DocumentCount);
+            Assert.AreEqual(1, qa.DocumentCount);
+            StringAssert.Contains(prod.ScopeNote, "مدرک DWG");
+            Assert.IsFalse(qa.ScopeNote.Contains("مدرک DWG"), "the quality assurance notice lists only its own document");
+            // only the PMO edits a notice, never to empty, never an AI seat
+            ClaimsPrincipal seatPmo = await SeatAsync(host, "AG-ENG", "PMO");
+            Refused(await Act(host, Eng1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "متن تازه"; }));
+            Refused(await Act(host, Mgr1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "متن تازه"; }));
+            Refused(await Act(host, seatPmo, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "متن تازه"; }));
+            Refused(await Act(host, Pmo1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "  "; }), "خالی");
+            Refused(await Act(host, Pmo1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = new string('x', 2001); }), "2000");
+            EnHandoverDto edited = Ok(await Act(host, Pmo1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "متن تازهٔ PMO برای تضمین کیفیت"; }));
+            Assert.AreEqual("متن تازهٔ PMO برای تضمین کیفیت", edited.Distribution.Single(d => d.Unit == (int)EnUnit.Qa).ScopeNote);
+            // a notice that is empty in the data blocks the release
+            host.Write(u => { u.Set<EnDistribution>().First(d => d.Id == qa.Id).ScopeNote = ""; u.SaveChanges(); }, Seeder);
+            Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), "ابلاغ ممکن نیست");
+            host.Write(u => { u.Set<EnDistribution>().First(d => d.Id == qa.Id).ScopeNote = "متن تازهٔ PMO برای تضمین کیفیت"; u.SaveChanges(); }, Seeder);
+            EnHandoverDto released = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            Assert.IsTrue(released.Distribution.All(d => d.Status == (int)EnDistStatus.Notified && !d.CanEditScope));
+            Refused(await Act(host, Pmo1, "edit-scope", d => { d.DistributionId = qa.Id; d.ScopeNote = "پس از ابلاغ"; }));
+            // the notification is sent by the agent step; before it a unit cannot confirm the receipt
+            Refused(await Act(host, Qa1, "acknowledge", d => d.DistributionId = qa.Id), "هنوز ارسال نشده");
+            Ok(await Act(host, Eng1, "distribute", d => d.Id = h.Id));
+            Refused(await Act(host, Eng1, "distribute", d => d.Id = h.Id), "قبلاً");
+            Ok(await Act(host, Qa1, "acknowledge", d => d.DistributionId = qa.Id));
         }
 
         [TestMethod]
@@ -338,6 +406,11 @@ namespace MsTests
             Assert.AreEqual(1, (await Discover("ENG.HANDOVER.ACCEPT")).Count);
             Assert.AreEqual(2, (await Discover("ENG.DEBT.SUPPLY")).Count);
             Ok(await Act(host, Pmo1, "accept", d => d.Id = handover));
+            var distDraft = await Discover("ENG.DIST.DRAFT");
+            Assert.AreEqual(1, distDraft.Count);
+            Assert.IsTrue((await Run("ENG.DIST.DRAFT", distDraft[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done);
+            Assert.AreEqual(0, (await Discover("ENG.DIST.DRAFT")).Count, "the rows are built once");
+            Assert.AreEqual(0, (await Discover("ENG.DIST.NOTIFY")).Count, "nothing is notified before the release");
             Assert.AreEqual(1, (await Discover("ENG.HANDOVER.RELEASE")).Count);
             Ok(await Act(host, Pmo2, "release", d => d.Id = handover));
             var notify = await Discover("ENG.DIST.NOTIFY");

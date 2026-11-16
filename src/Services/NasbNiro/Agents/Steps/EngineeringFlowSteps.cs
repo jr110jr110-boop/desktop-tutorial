@@ -56,6 +56,7 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnDebtSupplyStep>();
             services.AddScoped<IAgentStep, EnHandoverAcceptStep>();
             services.AddScoped<IAgentStep, EnHandoverReleaseStep>();
+            services.AddScoped<IAgentStep, EnDistDraftStep>();
             services.AddScoped<IAgentStep, EnDistNotifyStep>();
             services.AddScoped<IAgentStep, EnDistAckStep>();
             services.AddScoped<IAgentStep, EnDevManagerStep>();

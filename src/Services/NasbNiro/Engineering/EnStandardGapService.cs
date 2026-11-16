@@ -130,7 +130,7 @@ namespace Services.NasbNiro.Engineering
                         {
                             Code = EnText.Cut(target, 60), Title = EnText.Cut("فهرست مدارک مرجع — " + target, 300), StandardSource = EnText.Cut(baseList.StandardSource, 200),
                             Note = EnText.Cut("نسخهٔ بررسی‌نشده از " + p.BaseCode + " که باید با متن استاندارد " + target + " تطبیق داده شود.", 1000),
-                            Lines = baseList.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, TenderStage = l.TenderStage, ClientSubmittal = l.ClientSubmittal, StandardClause = l.StandardClause, Note = l.Note }).ToList(),
+                            Lines = baseList.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, TenderStage = l.TenderStage, ClientSubmittal = l.ClientSubmittal, StandardClause = l.StandardClause, Note = l.Note, Units = l.Units }).ToList(),
                         };
                         ResponseDto<EnReferenceListDto> r = await refs.SaveListAsync(dto, ct);
                         gap.Summary += r.Success ? " پیش‌نویس فهرست استاندارد " + target + " (کپی بررسی‌نشدهٔ " + p.BaseCode + ") ساخته شد تا مهندسی آن را با متن استاندارد تطبیق دهد." : " ساخت پیش‌نویس فهرست خودکار نشد.";

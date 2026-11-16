@@ -184,6 +184,35 @@ namespace Services.NasbNiro.Engineering
         public static string Charter(EnCharterOutcome o) => o switch { EnCharterOutcome.Confirmed => "تاییدشده توسط مهندسی", EnCharterOutcome.Returned => "برگشت‌خورده از مهندسی", _ => "بررسی‌نشده" };
     }
 
+    /// <summary>The units of a document line: comma-separated names of the distribution unit enum, empty = every unit.</summary>
+    internal static class EnUnits
+    {
+        public static readonly EnUnit[] All = { EnUnit.Qa, EnUnit.Qc, EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning };
+
+        /// <summary>The system-proven BOM line is for these units, the OPC line for those (the employer's rule).</summary>
+        public static readonly string Bom = Join(new[] { EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning, EnUnit.Qc });
+        public static readonly string Opc = Join(new[] { EnUnit.Production, EnUnit.Planning, EnUnit.Qc, EnUnit.Qa });
+
+        private static string Join(IEnumerable<EnUnit> units) => string.Join(",", units.Distinct().OrderBy(u => (int)u).Select(u => u.ToString()));
+
+        /// <summary>The canonical text of the units of a line (null = all), or a Persian message when a name is not a unit.</summary>
+        public static string Normalize(string text, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            List<EnUnit> units = new List<EnUnit>();
+            foreach (string part in text.Split(new[] { ',', '،', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0))
+            {
+                if (!Enum.TryParse(part, true, out EnUnit u) || !Enum.IsDefined(typeof(EnUnit), u)) { error = "واحد «" + part + "» شناخته‌شده نیست (" + string.Join("، ", All.Select(x => x.ToString())) + ")."; return null; }
+                units.Add(u);
+            }
+            if (units.Count == 0 || units.Distinct().Count() == All.Length) return null;
+            return Join(units);
+        }
+
+        public static bool Includes(string units, EnUnit unit) => string.IsNullOrWhiteSpace(units) || units.Split(',', StringSplitOptions.RemoveEmptyEntries).Any(x => string.Equals(x.Trim(), unit.ToString(), StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>SHA-256 of a canonical text: an approval binds to the exact content it saw.</summary>
     internal static class EnHash
     {
