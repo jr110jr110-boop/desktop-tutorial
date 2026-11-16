@@ -28,9 +28,9 @@ async function load() {
   }
   message.value = "";
   x.value = d;
-  const [dv] = await getEnDeviations({ PageSize: 500 });
+  const [dv] = await getEnDeviations({ ProductId: d.productId, PageSize: 500 });
   const map: Record<number, any> = {};
-  (dv?.data || []).filter((v: any) => v.targetType === "EnPlatformDocument" && (!v.productId || v.productId === d.productId)).forEach((v: any) => (map[v.targetId] = v));
+  (dv?.data || []).filter((v: any) => v.targetType === "EnPlatformDocument").forEach((v: any) => (map[v.targetId] = v));
   deviations.value = map;
 }
 onMounted(load);
@@ -108,8 +108,8 @@ function standardDialog() {
           <EnAction :can="x.canRecordStandard" :reason="x.recordStandardBlockedReason" :roles="EnRoles.writers" label="ثبت استاندارد از دیتاشیت اصلی" variant="outline-primary" @go="standardDialog" />
           <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" label="ارزیابی دوباره" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
           <EnAction :can="x.canComplete" :reason="x.completeBlockedReason" :roles="EnRoles.writers" label="اعلام کامل‌شدن" variant="outline-primary" @go="runEn(() => act('complete'), 'کامل‌شدن اعلام شد.', load)" />
-          <EnAction :can="x.canConfirm" :reason="x.confirmBlockedReason" :roles="[...EnRoles.manager, ...EnRoles.ceo]" label="تایید کامل بودن" variant="success" @go="runEn(() => act('confirm'), 'پرونده تایید شد.', load)" />
-          <EnAction :can="x.canReturn" :reason="x.returnBlockedReason" :roles="[...EnRoles.manager, ...EnRoles.ceo]" label="برگشت به ناقص" variant="outline-danger" @go="reason('برگشت به ناقص', 'return', 'دلیل برگشت', 'پرونده به ناقص برگشت.')" />
+          <EnAction :can="x.canConfirm" :reason="x.confirmBlockedReason" :roles="EnRoles.manager" label="تایید کامل بودن" variant="success" @go="runEn(() => act('confirm'), 'پرونده تایید شد.', load)" />
+          <EnAction :can="x.canReturn" :reason="x.returnBlockedReason" :roles="EnRoles.manager" label="برگشت به ناقص" variant="outline-danger" @go="reason('برگشت به ناقص', 'return', 'دلیل برگشت', 'پرونده به ناقص برگشت.')" />
         </div>
 
         <div v-for="[disc, lines] in groups" :key="disc" class="mb-3">

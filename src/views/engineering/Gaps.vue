@@ -9,7 +9,7 @@ import { enPaths, faDigits, faNum, gapStatuses } from "@/composables/engineering
 import { fail } from "@/composables/inventory";
 import { usePagedList } from "@/composables/fn";
 
-// The standard-gap reports (what changes when a project's standard differs from the platform's): made by the engineering agent, confirmed by the head of engineering.
+// The standard-gap reports (what changes when a project's standard differs from the platform's): made by the main agent (AG-MASTER), confirmed by the head of engineering.
 const route = useRoute();
 const router = useRouter();
 const filters = ref({ Status: null as number | null, OnlyOpen: false });
@@ -45,7 +45,7 @@ watch(selected, loadDetail);
         <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
       </div>
       <p v-if="list.loading.value" class="inv-muted">در حال خواندن…</p>
-      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">گزارش تفاوت دو استانداردی نیست؛ ایجنت مهندسی وقتی استاندارد پروژه با استاندارد پلتفرم فرق کند آن را می‌سازد.</p>
+      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">گزارش تفاوت دو استانداردی نیست؛ ایجنت اصلی وقتی استاندارد پروژه با استاندارد پلتفرم فرق کند آن را می‌سازد.</p>
       <div v-else class="table-responsive">
         <table class="table table-sm table-hover">
           <thead><tr><th>شماره</th><th>پرونده</th><th>از</th><th>به</th><th>وضعیت</th><th>افزوده</th><th>حذف</th><th>تغییر الزام</th></tr></thead>

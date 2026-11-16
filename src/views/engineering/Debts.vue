@@ -42,12 +42,12 @@ const left = (iso: string) => {
           <thead><tr><th>مدرک</th><th>مجوز اضطرار</th><th>پرونده</th><th>پلتفرم</th><th>مهلت</th><th>وضعیت</th></tr></thead>
           <tbody>
             <tr v-for="b in list.rows.value" :key="b.id" :class="b.overdue && b.status === 0 ? 'table-danger' : ''">
-              <td>{{ b.documentType }} — {{ b.title }}</td>
+              <td>{{ b.handoverLineId ? b.documentType + " — " + b.title : "تایید کامل بودن پرونده پلتفرم" }}</td>
               <td><router-link :to="enPaths.waivers + '/' + b.waiverId">{{ faDigits(b.waiverNumber) }}</router-link></td>
               <td><router-link :to="enPaths.case(b.caseId)">{{ faDigits(b.caseNumber) }}</router-link></td>
-              <td><router-link v-if="b.productId" :to="enPaths.platform(b.productId, b.referenceCode)">پرونده پلتفرم</router-link><span v-else>—</span></td>
+              <td><router-link v-if="b.productId" :to="enPaths.platform(b.productId, b.referenceCode)">پرونده استاندارد {{ b.referenceCode }}</router-link><span v-else>—</span></td>
               <td>{{ stamp(b.dueAt) }}<div v-if="b.status === 0" :class="['small', b.overdue ? 'text-danger fw-bold' : 'inv-muted']">{{ b.overdue ? `گذشته از موعد (${faNum(b.overdueDays, 0)} روز) — ` : "" }}{{ left(b.dueAt) }}</div></td>
-              <td><EnChip :status="b.status" :text="b.statusText" group="debt" /><div v-if="b.settledAtText" class="small inv-muted">{{ faDigits(b.settledAtText) }}</div></td>
+              <td><EnChip :status="b.status" :text="b.statusText" group="debt" /><div v-if="b.settledAtText" class="small inv-muted">{{ faDigits(b.settledAtText) }}</div><div v-if="b.status === 2 && b.voidReason" class="small inv-muted" data-test="en-debt-void">{{ b.voidReason }}</div></td>
             </tr>
           </tbody>
         </table>

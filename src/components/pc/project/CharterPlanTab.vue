@@ -76,7 +76,8 @@ watch(() => [props.contractId, props.kind], load);
     <div class="row g-2">
       <div v-for="f in fields" :key="f[0]" class="col-md-6">
         <label class="form-label small mb-0">{{ f[1] }}</label>
-        <textarea v-model="doc[f[0]]" :disabled="!canEdit || (isCharter && f[0] === 'preAssignedResources' && !!doc.preAssignedTextLocked)" class="form-control form-control-sm" rows="3"></textarea>
+        <textarea v-model="doc[f[0]]" :disabled="!canEdit || (isCharter && f[0] === 'preAssignedResources' && !!doc.preAssignedTextLocked) || (isCharter && f[0] === 'costEstimate' && !!doc.costEstimateMasked)" :placeholder="isCharter && f[0] === 'costEstimate' && doc.costEstimateMasked ? 'محرمانه' : undefined" class="form-control form-control-sm" rows="3"></textarea>
+        <div v-if="isCharter && f[0] === 'costEstimate' && doc.costEstimateMasked" class="small inv-muted" data-test="pc-cost-masked">محرمانه</div>
         <template v-if="isCharter && f[0] === 'preAssignedResources'">
           <div v-if="doc.preAssignedTextLocked" class="small inv-muted">متن قدیمی؛ فهرست زیر مرجع است و این متن فقط‌خواندنی است.</div>
           <CharterResourceList ref="listRef" v-model="doc.preAssignedList" :editable="canEdit" />

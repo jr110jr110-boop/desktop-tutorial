@@ -13,7 +13,7 @@ import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
 // A handover of the engineering documents to the PMO. LOCK-B: while the required documents are missing the submit is refused and the server's reason is written in the red banner.
-// An emergency permit (reason of at least 50 characters, a deadline of at most 72 hours) is decided by the CEO. The PMO accepts, returns or releases; the units acknowledge their notice.
+// An emergency permit (reason of at least 50 characters, a period of 1..72 hours counted from the CEO's approval) is decided by the CEO. The PMO accepts, returns or releases; the units acknowledge their notice.
 const route = useRoute();
 const id = computed(() => Number(route.params.id));
 const h = ref<any>(null);
@@ -54,17 +54,22 @@ const reason = (title: string, action: string, okText: string) =>
 
 const lines = computed(() => [...(h.value?.lines || [])].sort((a: any, b: any) => Number(b.forMyUnit) - Number(a.forMyUnit) || a.seq - b.seq));
 const pct = computed(() => (h.value ? completeness(h.value.requiredCount, h.value.requiredCount - h.value.missingRequiredCount) : null));
+// The two distribution steps are the PMO side's (the server refuses anyone else); the DTO has no flag for them, so the state below only tells when each one can make sense and the server decides.
+const distDraftOk = computed(() => h.value?.status === 3 && !h.value?.distribution?.length);
+const distDraftWhy = computed(() => (h.value?.distribution?.length ? "یادداشت ابلاغ واحدها قبلاً ساخته شده است." : "یادداشت ابلاغ فقط برای تحویل پذیرفته‌شده ساخته می‌شود."));
+const distSendOk = computed(() => h.value?.status === 4 && !!h.value?.distribution?.length);
+const distSendWhy = computed(() => (h.value?.status !== 4 ? "فقط تحویل منتشرشده به واحدها ابلاغ می‌شود." : "یادداشت ابلاغ واحدها هنوز ساخته نشده است."));
 const isLink = (p: string) => typeof p === "string" && p.startsWith("/");
 
 function waiverDialog() {
   d.ask({
     title: "درخواست مجوز اضطرار",
-    hint: "مدیرعامل تصمیم می‌گیرد. مهلت بدهی مدارک را تا حداکثر مهلت مجاز (حداکثر ۷۲ ساعت از اکنون) انتخاب کنید؛ بیشتر را سرور نمی‌پذیرد.",
+    hint: "مدیرعامل تصمیم می‌گیرد. مدیرعامل فقط می‌تواند ساعت‌ها را کمتر کند.",
     fields: [
       { key: "reason", label: "دلیل اضطرار", type: "textarea", required: true, min: 50, max: 2000 },
-      { key: "due", label: "مهلت بدهی مدارک (تاریخ و ساعت)", type: "datetime", required: true, value: new Date(Math.floor((Date.now() + 72 * 3600000) / 3600000) * 3600000).toISOString() },
+      { key: "hours", label: "مهلت تأمین مدرک (ساعت)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت" },
     ],
-    run: (v) => requestEnWaiver({ handoverId: id.value, reason: v.reason, debtDueAt: v.due }),
+    run: (v) => requestEnWaiver({ handoverId: id.value, reason: v.reason, debtHours: v.hours }),
     okText: "درخواست مجوز اضطرار برای مدیرعامل ثبت شد.",
   });
 }
@@ -139,7 +144,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         <div class="mb-3">
           <EnAction :can="h.canSubmit" :reason="h.submitBlockedReason" :roles="EnRoles.writers" label="ارسال به PMO" variant="primary" @go="runEn(() => act('submit'), 'تحویل به PMO ارسال شد.', load)" />
           <EnAction :can="h.canRequestWaiver" :reason="h.requestWaiverBlockedReason" :roles="EnRoles.manager" label="درخواست مجوز اضطرار" variant="outline-danger" @go="waiverDialog" />
-          <EnAction v-if="h.canRefresh !== undefined" :can="h.canRefresh" :reason="h.refreshBlockedReason" :roles="EnRoles.writers" label="بازخوانی مدارک از پرونده پلتفرم" variant="outline-secondary" @go="runEn(() => act('refresh'), 'مدارک بازخوانی شد.', load)" />
+          <EnAction :can="h.canRefresh" :reason="h.refreshBlockedReason" :roles="EnRoles.writers" label="بازخوانی مدارک از پرونده پلتفرم" variant="outline-secondary" @go="runEn(() => act('refresh'), 'مدارک بازخوانی شد.', load)" />
           <EnAction :can="h.canAccept" :reason="h.acceptBlockedReason" :roles="EnRoles.pmoSide" label="پذیرش" variant="success" @go="runEn(() => act('accept'), 'تحویل پذیرفته شد.', load)" />
           <EnAction :can="h.canReturn" :reason="h.returnBlockedReason" :roles="EnRoles.pmoSide" label="برگشت" variant="outline-danger" @go="reason('برگشت تحویل', 'return', 'تحویل برگشت داده شد.')" />
           <EnAction :can="h.canRelease" :reason="h.releaseBlockedReason" :roles="EnRoles.pmoSide" label="انتشار برای واحدها" variant="success" @go="runEn(() => act('release'), 'تحویل منتشر شد.', load)" />
@@ -151,7 +156,12 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         <EnWaiverCard v-else :waiver="h.waiver" @changed="load" />
 
         <h2 class="h6 mt-3">ابلاغ به واحدها</h2>
-        <p v-if="!h.distribution?.length" class="inv-muted">ابلاغی آماده نشده است؛ پس از انتشار، ایجنت ابلاغ هر واحد را می‌سازد.</p>
+        <p class="small inv-muted">یادداشت ابلاغ هر واحد را PMO یا ایجنت سمت PMO می‌سازد و ابلاغ می‌کند؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند.</p>
+        <div class="mb-2" data-test="en-dist-actions">
+          <EnAction :can="distDraftOk" :reason="distDraftWhy" :roles="EnRoles.pmo" label="ساخت یادداشت ابلاغ واحدها" variant="outline-primary" @go="runEn(() => act('draft-distribution'), 'یادداشت ابلاغ واحدها ساخته شد.', load)" />
+          <EnAction :can="distSendOk" :reason="distSendWhy" :roles="EnRoles.pmo" label="ابلاغ به واحدها" variant="primary" @go="runEn(() => act('distribute'), 'ابلاغ به واحدها انجام شد.', load)" />
+        </div>
+        <p v-if="!h.distribution?.length" class="inv-muted">ابلاغی آماده نشده است؛ پس از پذیرش تحویل، PMO یا ایجنت سمت PMO یادداشت ابلاغ هر واحد را می‌سازد.</p>
         <div v-else class="table-responsive">
           <table class="table table-sm" data-test="en-distribution">
             <thead><tr><th>واحد</th><th>وضعیت</th><th>مدارک</th><th>دامنه کار</th><th>تایید دریافت</th><th></th></tr></thead>
@@ -170,8 +180,13 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
 
         <h2 class="h6 mt-3">بدهی مدارک</h2>
         <p v-if="!h.debts?.length" class="inv-muted">بدهی ثبت نشده است.</p>
-        <ul v-else class="small">
-          <li v-for="b in h.debts" :key="b.id" :class="b.overdue ? 'text-danger' : ''">{{ b.documentType }} — {{ b.title }} — مهلت {{ stamp(b.dueAt) }} <EnChip :status="b.status" :text="b.statusText" group="debt" /><span v-if="b.status === 0 && hoursUntil(b.dueAt) !== null"> ({{ (hoursUntil(b.dueAt) as number) >= 0 ? faNum(hoursUntil(b.dueAt), 0) + " ساعت مانده" : "گذشته از موعد" }})</span></li>
+        <ul v-else class="small" data-test="en-debts">
+          <li v-for="b in h.debts" :key="b.id" :class="b.overdue && b.status === 0 ? 'text-danger' : ''">
+            {{ b.handoverLineId ? b.documentType + " — " + b.title : "تایید کامل بودن پرونده پلتفرم" }} — مهلت {{ stamp(b.dueAt) }} <EnChip :status="b.status" :text="b.statusText" group="debt" />
+            <span v-if="b.status === 0 && hoursUntil(b.dueAt) !== null"> ({{ (hoursUntil(b.dueAt) as number) >= 0 ? faNum(hoursUntil(b.dueAt), 0) + " ساعت مانده" : "گذشته از موعد" }})</span>
+            <router-link v-if="b.referenceCode && b.productId" class="ms-2" :to="enPaths.platform(b.productId, b.referenceCode)">پرونده استاندارد {{ b.referenceCode }}</router-link>
+            <div v-if="b.status === 2 && b.voidReason" class="inv-muted">ابطال: {{ b.voidReason }}</div>
+          </li>
         </ul>
 
         <template v-if="canInfo">

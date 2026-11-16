@@ -35,9 +35,9 @@ const waiting = computed(() => {
   if (!x) return [];
   const rows: { text: string; hours: number | null; to: string }[] = [];
   if (x.waiversAwaitingCeo > 0) rows.push({ text: `${n(x.waiversAwaitingCeo)} درخواست مجوز اضطرار منتظر تصمیم مدیرعامل است`, hours: x.oldestWaiverWaitingHours, to: enPaths.waivers });
-  // Who the deviations wait for and the oldest wait come from the server when it sends them (deviationsAwaitingCeo, oldestDeviationWaitingHours, oldestRegistrationWaitingHours).
-  if (x.deviationsAwaiting > 0) rows.push({ text: `${n(x.deviationsAwaiting)} انحراف از استاندارد منتظر تصمیم است` + (x.deviationsAwaitingCeo > 0 ? ` (${n(x.deviationsAwaitingCeo)} مورد منتظر مدیرعامل)` : ""), hours: x.oldestDeviationWaitingHours ?? null, to: enPaths.deviations });
-  if (x.registrationsOpen > 0) rows.push({ text: `${n(x.registrationsOpen)} درخواست ثبت پلتفرم منتظر تصمیم مدیرعامل است`, hours: x.oldestRegistrationWaitingHours ?? null, to: enPaths.registrations });
+  // Who the deviations wait for and the oldest waits come from the server (deviationsAwaitingManager, deviationsAwaitingCeo, oldestDeviationWaitingHours, oldestRegistrationWaitingHours).
+  if (x.deviationsAwaiting > 0) rows.push({ text: `${n(x.deviationsAwaiting)} انحراف از استاندارد منتظر تصمیم است (${n(x.deviationsAwaitingManager)} مورد منتظر مدیر مهندسی، ${n(x.deviationsAwaitingCeo)} مورد منتظر مدیرعامل)`, hours: x.oldestDeviationWaitingHours, to: enPaths.deviations });
+  if (x.registrationsOpen > 0) rows.push({ text: `${n(x.registrationsOpen)} درخواست ثبت پلتفرم منتظر تصمیم مدیرعامل است`, hours: x.oldestRegistrationWaitingHours, to: enPaths.registrations });
   return rows;
 });
 </script>

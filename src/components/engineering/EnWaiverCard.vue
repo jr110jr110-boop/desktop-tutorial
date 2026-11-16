@@ -1,12 +1,13 @@
 <script setup lang="ts">
-// An emergency waiver of the document lock: the reason, the missing lines, the debt deadline (date-time, at most 72 hours), who asked and for how long it has waited. The CEO decides
-// (approve with an optional shorter deadline, or reject with a note); the buttons follow the DTO flags and the server's refusal is written inside the dialog.
+// An emergency waiver of the document lock: the reason, the missing lines, the debt period in hours (1..72, counted from the CEO's approval; the deadline date-time exists only after the
+// approval), who asked and for how long it has waited. The CEO decides (approve, optionally lowering the hours, or reject with a note); the buttons follow the DTO flags and the server's refusal
+// is written inside the dialog.
 import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
 import { decideEnWaiver } from "@/api/EngineeringAPIs";
-import { enPaths, EnRoles, faDigits, stamp, useEnDialog } from "@/composables/engineering";
+import { enPaths, EnRoles, faDigits, faNum, stamp, useEnDialog } from "@/composables/engineering";
 
 const props = defineProps<{ waiver: any }>();
 const emit = defineEmits(["changed"]);
@@ -14,12 +15,12 @@ const d = useEnDialog(() => emit("changed"));
 function approve() {
   d.ask({
     title: "تایید مجوز اضطرار",
-    hint: "مهلت بدهی را می‌توانید کوتاه‌تر کنید؛ بیشتر از مهلت درخواست‌شده نمی‌شود.",
+    hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت. فقط می‌توانید ساعت‌ها را کمتر کنید، بیشتر از ساعت درخواست‌شده نمی‌شود.",
     fields: [
-      { key: "due", label: "مهلت بدهی مدارک", type: "datetime", value: props.waiver.debtDueAt },
+      { key: "hours", label: "مهلت تأمین مدرک (ساعت)", type: "number", required: true, lo: 1, hi: Math.min(72, props.waiver.debtHours || 72), value: props.waiver.debtHours || 72 },
       { key: "n", label: "یادداشت (اختیاری)", type: "textarea", max: 2000 },
     ],
-    run: (v) => decideEnWaiver({ id: props.waiver.id, decision: "approve", note: v.n, debtDueAt: v.due || null, rowVersion: props.waiver.rowVersion }),
+    run: (v) => decideEnWaiver({ id: props.waiver.id, decision: "approve", note: v.n, debtHours: v.hours, rowVersion: props.waiver.rowVersion }),
     okText: "مجوز اضطرار تایید شد.",
   });
 }
@@ -44,7 +45,8 @@ function reject() {
     <EnWait v-if="waiver.status === 0" :hours="waiver.waitingHours" text="مجوز اضطرار منتظر تصمیم مدیرعامل است" />
     <dl class="en-kv">
       <dt>دلیل</dt><dd class="en-pre">{{ waiver.reason }}</dd>
-      <dt>مهلت بدهی</dt><dd>{{ stamp(waiver.debtDueAt) }}</dd>
+      <dt>مدت مهلت</dt><dd data-test="en-waiver-hours">{{ faNum(waiver.debtHours, 0) }} ساعت از لحظهٔ تایید مدیرعامل</dd>
+      <dt v-if="waiver.status === 1 && waiver.debtDueAt">مهلت تأمین مدرک</dt><dd v-if="waiver.status === 1 && waiver.debtDueAt" data-test="en-waiver-due">{{ stamp(waiver.debtDueAt) }}</dd>
       <dt>مدارک کم</dt><dd><span v-if="!waiver.missingLines?.length">—</span><template v-else><div v-for="m in waiver.missingLines" :key="m">{{ m }}</div></template></dd>
       <dt v-if="waiver.dossierUnconfirmed">پرونده پلتفرم</dt><dd v-if="waiver.dossierUnconfirmed">تایید نشده</dd>
       <dt>پوشش</dt><dd>{{ waiver.covers ? "همه کمبودها را می‌پوشاند" : "کمبودها را کامل نمی‌پوشاند" }}<span v-if="waiver.coverageNote"> — {{ waiver.coverageNote }}</span></dd>

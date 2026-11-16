@@ -19,7 +19,8 @@ export const getEnCases = (q: EnQuery) => call("get", base + "cases", undefined,
 export const getEnCase = (id: number) => call("get", base + "cases/" + id);
 /** The charter of the case without any price (the only charter view engineering reads). */
 export const getEnCharterView = (id: number) => call("get", base + "cases/" + id + "/charter-view");
-/** body: { id, action: propose|change|confirm|return|approve|reclassify|save-concept|release-tender|charter-confirm|charter-return|cancel|set-standard|save-opinion, ... } */
+/** body: { id, action: propose|change|confirm|return|approve|reclassify|save-concept|add-tender-document|release-tender|charter-confirm|charter-return|cancel|set-standard|save-opinion, rowVersion, ... }
+ *  add-tender-document: { documentId (an uploaded file), title }; set-standard: { referenceCode (at most 60), standardEvidence, standardAttachmentId, note }. */
 export const postEnCaseAction = (body: any) => call("post", base + "cases/action", body);
 
 // ---- clarifications
@@ -49,18 +50,20 @@ export const postEnReferenceAction = (body: any) => call("post", base + "referen
 // ---- handovers, waivers, debts, distribution
 export const getEnHandovers = (q: EnQuery) => call("get", base + "handovers", undefined, clean(q));
 export const getEnHandover = (id: number) => call("get", base + "handovers/" + id);
-/** body: { id | caseId | distributionId, action: draft|refresh|submit|accept|return|release|void|draft-distribution|edit-scope|distribute|acknowledge, note, scopeNote, rowVersion } */
+/** body: { id | caseId | distributionId, action: draft|refresh|submit|accept|return|release|void|draft-distribution|edit-scope|distribute|acknowledge, note, scopeNote, rowVersion }
+ *  draft-distribution and distribute are the PMO's only (the PMO user or the PMO-side agent). */
 export const postEnHandoverAction = (body: any) => call("post", base + "handovers/action", body);
 export const getEnWaivers = (q: EnQuery) => call("get", base + "waivers", undefined, clean(q));
 export const getEnWaiver = (id: number) => call("get", base + "waivers/" + id);
-/** body: { handoverId, reason (min 50), debtDueAt (ISO date-time, at most 72 hours ahead) } */
+/** body: { handoverId, reason (min 50), debtHours (whole hours 1..72, counted from the CEO's approval) } */
 export const requestEnWaiver = (body: any) => call("post", base + "waivers/request", body);
-/** body: { id, decision: approve|reject, note, debtDueAt (the CEO may shorten it), rowVersion } */
+/** body: { id, decision: approve|reject, note, debtHours (optional; the CEO may only lower it), rowVersion } */
 export const decideEnWaiver = (body: any) => call("post", base + "waivers/decide", body);
 export const getEnDebts = (q: EnQuery) => call("get", base + "debts", undefined, clean(q));
 export const getEnDistributions = (handoverId?: number | null, onlyOpen = false) => call("get", base + "distributions", undefined, clean({ handoverId, onlyOpen }));
 
 // ---- standards deviations
+/** filters: Status, CaseId, ProductId, OnlyOpen, PageNumber, PageSize (at most 500). */
 export const getEnDeviations = (q: EnQuery) => call("get", base + "deviations", undefined, clean(q));
 export const getEnDeviation = (id: number) => call("get", base + "deviations/" + id);
 /** body: { id, decision: approve|reject, note, rowVersion } */

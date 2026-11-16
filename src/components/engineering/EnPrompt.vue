@@ -13,6 +13,9 @@ export interface EnField {
   min?: number;
   max?: number;
   value?: any;
+  /** For a number field: the whole-number range allowed (checked here; the server decides again). */
+  lo?: number;
+  hi?: number;
   hint?: string;
   options?: { value: any; text: string }[];
 }
@@ -41,6 +44,16 @@ function go() {
       continue;
     }
     const v = values.value[f.key];
+    if (f.type === "number" && (f.lo !== undefined || f.hi !== undefined)) {
+      const num = Number(v);
+      const empty = v === "" || v === null || v === undefined;
+      if ((empty && f.required) || (!empty && (!Number.isInteger(num) || num < (f.lo ?? -Infinity) || num > (f.hi ?? Infinity)))) {
+        local.value = `«${f.label}» باید عدد صحیح${f.lo !== undefined ? " از " + faNum(f.lo, 0) : ""}${f.hi !== undefined ? " تا " + faNum(f.hi, 0) : ""} باشد.`;
+        return;
+      }
+      out[f.key] = empty ? null : num;
+      continue;
+    }
     if (f.required && (v === null || v === undefined || (typeof v === "string" && v.trim() === "") || (Array.isArray(v) && !v.length))) {
       local.value = `«${f.label}» را وارد کنید.`;
       return;
@@ -72,7 +85,7 @@ function go() {
           <option value="">—</option>
           <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.text }}</option>
         </select>
-        <input v-else v-model="values[f.key]" :maxlength="f.max" :type="f.type === 'number' ? 'number' : 'text'" class="form-control form-control-sm" />
+        <input v-else v-model="values[f.key]" :maxlength="f.max" :min="f.lo" :max="f.type === 'number' ? f.hi : undefined" :step="f.type === 'number' ? 1 : undefined" :type="f.type === 'number' ? 'number' : 'text'" :data-test="f.type === 'number' ? 'en-hours' : undefined" class="form-control form-control-sm" />
         <div v-if="f.min && (f.type === 'textarea' || !f.type || f.type === 'text')" class="en-count" data-test="en-counter">
           {{ faNum(String(values[f.key] || "").trim().length, 0) }} از حداقل {{ faNum(f.min, 0) }} نویسه
         </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A standard-gap report (made by the engineering agent): summary, counts and the lines grouped Added / Removed / RequiredChanged / Same. The manager confirms with an impact note;
+// A standard-gap report (made by the main agent): summary, counts and the lines grouped Added / Removed / RequiredChanged / Same. The manager confirms with an impact note;
 // the button follows canConfirm and shows the server's reason when disabled.
 import { computed } from "vue";
 import EnAction from "@/components/engineering/EnAction.vue";

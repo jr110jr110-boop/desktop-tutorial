@@ -12,7 +12,6 @@ import {
 } from "@/api/EngineeringAPIs";
 import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, downloadDoc, handoverStatuses, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
-import { hasRole } from "@/composables/roles";
 
 // An engineering case laid out as the paths of the employer's diagram: (1) platform or new design, (2) the tender technical package, (3) clarification through commercial,
 // (4) charter review, (5) handover to the PMO. The agent prepares; the buttons are the gates. Every button takes its state and reason from the DTO.
@@ -99,7 +98,7 @@ const standardDialog = () =>
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
     hint: "استاندارد را کارفرما تعیین می‌کند؛ اینجا فقط کد و شاهد آن از دیتاشیت ثبت می‌شود.",
     fields: [
-      { key: "code", label: "کد استاندارد (مطابق دیتاشیت)", required: true, max: 40, value: c.value.referenceCode || "" },
+      { key: "code", label: "کد استاندارد (مطابق دیتاشیت)", required: true, max: 60, value: c.value.referenceCode || "" },
       { key: "evidence", label: "شاهد از دیتاشیت (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "file", label: "فایل دیتاشیت (اختیاری)", type: "file" as const },
       ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
@@ -194,7 +193,7 @@ async function registerDialog() {
     hint: "مدیر مهندسی پیشنهاد می‌دهد و مدیرعامل تصمیم می‌گیرد.",
     fields: [
       { key: "productId", label: "محصول", type: "select", required: true, options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
-      { key: "code", label: "کد استاندارد", required: true, max: 40, value: c.value.referenceCode || "" },
+      { key: "code", label: "کد استاندارد", required: true, max: 60, value: c.value.referenceCode || "" },
       { key: "basis", label: "مبنای استاندارد (دیتاشیت و بند)", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "why", label: "توجیه ثبت", type: "textarea", required: true, min: 15, max: 2000 },
     ],
@@ -316,12 +315,12 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               </dl>
               <template v-if="c.tenderDocuments?.length">
                 <div class="small mt-2"><strong>مدارک بسته:</strong></div>
-                <ul class="small mb-0"><li v-for="t in c.tenderDocuments" :key="t.documentId || t.id"><a href="#" @click.prevent="downloadDoc(t.documentId, t.title || 'document')">{{ t.title || t.name }}</a></li></ul>
+                <ul class="small mb-0"><li v-for="(t, i) in c.tenderDocuments" :key="t.documentId || i"><a v-if="t.documentId" href="#" @click.prevent="downloadDoc(t.documentId, t.title || 'document')">{{ t.title }}</a><span v-else>{{ t.title }}</span><span v-if="t.revision" class="inv-ltr"> — {{ t.revision }}</span><span v-if="t.issuedAtText" class="inv-muted"> — {{ faDigits(t.issuedAtText) }}</span><span v-if="t.addedByAgent" class="inv-badge info ms-1">افزوده‌شده توسط ایجنت</span></li></ul>
               </template>
               <div v-if="c.tenderStale" class="en-banner amber mt-2 mb-0">محتوای بسته پس از آخرین بررسی تغییر کرده است؛ ایجنت آن را دوباره بررسی می‌کند.</div>
             </div>
             <EnAction :can="c.canSaveConcept" :reason="c.saveConceptBlockedReason" :roles="EnRoles.writers" label="ثبت یادداشت طرح مفهومی" variant="outline-primary" @go="conceptDialog" />
-            <EnAction v-if="c.canAddTenderDocument !== undefined" :can="c.canAddTenderDocument" :reason="c.addTenderDocumentBlockedReason" :roles="EnRoles.writers" label="افزودن مدرک طرح مفهومی یا بسته مناقصه" variant="outline-primary" @go="tenderDocDialog" />
+            <EnAction :can="c.canAddTenderDocument" :reason="c.addTenderDocumentBlockedReason" :roles="EnRoles.writers" label="افزودن مدرک طرح مفهومی یا بسته مناقصه" variant="outline-primary" @go="tenderDocDialog" />
             <EnAction :can="c.canReleaseTender" :reason="c.releaseTenderBlockedReason" :roles="EnRoles.manager" label="انتشار بسته فنی" variant="success" @go="direct('release-tender', 'بسته فنی منتشر شد.')" />
           </li>
 
@@ -346,7 +345,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <EnAction :can="x.canReask" :reason="x.reaskBlockedReason" :roles="EnRoles.writers" label="پرسش مجدد" variant="outline-secondary" @go="reaskDialog(x)" />
               <EnAction :can="x.canVoid" :reason="x.voidBlockedReason" :roles="EnRoles.writers" label="ابطال" variant="outline-danger" @go="voidClar(x)" />
             </div>
-            <button v-if="hasRole(EnRoles.writers) && c.canAskClarification !== false" class="btn btn-sm btn-outline-primary" type="button" @click="newQuestion">پرسش تازه</button>
+            <EnAction :can="c.canAskClarification" reason="برای این وضعیت پرونده پرسش ثبت نمی‌شود." :roles="EnRoles.writers" label="پرسش تازه" variant="outline-primary" @go="newQuestion" />
           </li>
 
           <!-- 4 -->
@@ -384,7 +383,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <EnAction :can="r.canDecide" :reason="r.decideBlockedReason" :roles="EnRoles.ceo" label="رد ثبت" variant="outline-danger" @go="regDecide(r, 'reject')" />
               <EnAction :can="r.canWithdraw" :reason="r.withdrawBlockedReason" :roles="EnRoles.manager" label="پس‌گرفتن" variant="outline-secondary" @go="regDecide(r, 'withdraw')" />
             </div>
-            <EnAction v-if="c.canProposeRegistration !== undefined" :can="c.canProposeRegistration" :reason="c.proposeRegistrationBlockedReason" :roles="EnRoles.manager" label="پیشنهاد ثبت این طراحی به‌عنوان پلتفرم" variant="outline-primary" @go="registerDialog" />
+            <EnAction :can="c.canProposeRegistration" :reason="c.proposeRegistrationBlockedReason" :roles="EnRoles.manager" label="پیشنهاد ثبت این طراحی به‌عنوان پلتفرم" variant="outline-primary" @go="registerDialog" />
           </li>
         </ol>
 

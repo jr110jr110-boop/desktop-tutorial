@@ -79,7 +79,7 @@ export const handoverStatuses: Record<number, string> = { 0: "پیش‌نویس"
 export const waiverStatuses: Record<number, string> = { 0: "درخواست‌شده", 1: "تاییدشده", 2: "ردشده", 4: "ابطال‌شده" };
 export const debtStatuses: Record<number, string> = { 0: "باز", 1: "تسویه‌شده", 2: "ابطال‌شده" };
 export const distStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "ابلاغ‌شده" };
-export const deviationKinds: Record<number, string> = { 1: "کاربرد ندارد", 2: "تسهیل فهرست مرجع", 3: "اضطرار" };
+export const deviationKinds: Record<number, string> = { 1: "کاربرد ندارد", 2: "تسهیل فهرست مرجع", 3: "مجوز اضطرار" };
 export const deviationStatuses: Record<number, string> = { 0: "درخواست‌شده", 1: "تایید مدیر مهندسی", 2: "تاییدشده", 3: "ردشده", 4: "ابطال‌شده" };
 export const gapStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "تاییدشده", 2: "ابطال‌شده" };
 export const gapKinds: Record<number, string> = { 0: "بدون تغییر", 1: "افزوده", 2: "حذف‌شده", 3: "تغییر الزام" };
@@ -226,6 +226,7 @@ export async function runEn(run: () => Promise<any>, okText: string, reload: () 
 
 /** Persian names of the event kinds of a case (the server writes a code; an unknown code is shown as it is). */
 export const eventKinds: Record<string, string> = {
+  "tender-document-added": "مدرک به بسته فنی مناقصه افزوده شد", "debts-voided": "بدهی‌های مدارک باطل شد",
   opened: "پرونده باز شد", analysed: "تحلیل انجام شد", proposed: "پیشنهاد ثبت شد", changed: "پیشنهاد اصلاح شد", "eng-confirmed": "تایید مدیر مهندسی", "ceo-approved": "تایید مدیرعامل",
   "returned-by-manager": "برگشت توسط مدیر مهندسی", "returned-by-ceo": "برگشت توسط مدیرعامل", "reclassify-requested": "درخواست تغییر طبقه‌بندی", "concept-saved": "یادداشت طرح مفهومی ذخیره شد",
   "opinion-saved": "نظر فنی ثبت شد", "standard-set": "استاندارد از دیتاشیت ثبت شد", "standard-changed": "استاندارد تغییر کرد", "standard-gap-built": "گزارش تفاوت دو استاندارد ساخته شد",

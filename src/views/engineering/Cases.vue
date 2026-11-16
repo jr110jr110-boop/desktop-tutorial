@@ -52,7 +52,7 @@ watch(() => route.query, () => {
               <td><EnChip :status="c.status" :text="c.statusText" group="case" /></td>
               <td>{{ c.classificationText }}</td>
               <td>{{ faDigits(String(c.openClarifications || 0)) }}</td>
-              <td><span v-if="c.platformIncomplete" class="inv-badge warn">مدارک پلتفرم ناقص</span><span v-if="c.documentRiskAwarded" class="inv-badge bad ms-1" :title="c.documentRisk || ''">خطر مدارک</span></td>
+              <td><span v-if="c.platformIncomplete" class="inv-badge warn">مدارک پلتفرم ناقص</span><span v-if="c.documentRisk" :class="['inv-badge ms-1', c.documentRiskAwarded ? 'bad' : 'warn']" :title="c.documentRisk" data-test="en-risk-badge">خطر مدارک{{ c.documentRiskAwarded ? " (برنده‌شده)" : "" }}</span></td>
             </tr>
           </tbody>
         </table>
