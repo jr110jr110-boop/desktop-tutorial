@@ -155,7 +155,7 @@ namespace Services.NasbNiro.Engineering
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
-                    Id = c.Id, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
+                    Id = c.Id, ReferenceCode = c.ReferenceCode, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
                     CustomerName = inq != null && customers.TryGetValue(inq.CustomerId, out string cn) ? cn : con?.Employer, CustomerRequirementNote = c.CustomerRequirementNote, Status = (int)c.Status, StatusText = EnText.Case(c.Status),
                     Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification), ProductId = c.ProductId, ProductCode = c.ProductId.HasValue && products.TryGetValue(c.ProductId.Value, out string pc) ? pc : null,
                     PlatformWithChanges = c.PlatformWithChanges, ChangeNote = c.ChangeNote,
@@ -283,6 +283,16 @@ namespace Services.NasbNiro.Engineering
                 case "confirm":
                     why = ConfirmReason(c, w);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    if (c.ProposedClassification == EnClassification.New)
+                    {
+                        // the standard basis of a new design is a human choice when more than one Code is approved (API 611 and API 612); no rule decides between them
+                        List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
+                        string pick = EnText.Clean(dto.ReferenceCode);
+                        if (codes.Count > 1 && string.IsNullOrEmpty(pick)) return EnText.Bad<EnCaseDto>("برای طرح جدید باید استاندارد مرجع (فهرست مدارک) انتخاب شود؛ کدهای تاییدشده: " + string.Join("، ", codes) + ".");
+                        if (!string.IsNullOrEmpty(pick) && !codes.Contains(pick)) return EnText.Bad<EnCaseDto>("برای استاندارد مرجع انتخاب‌شده فهرست تاییدشده‌ای وجود ندارد.");
+                        c.ReferenceCode = codes.Count == 1 ? codes[0] : (string.IsNullOrEmpty(pick) ? null : pick);
+                    }
+                    else c.ReferenceCode = null;
                     c.ClassificationHash = EnCaseRules.ClassHash(c); c.EngConfirmedByUserId = Me; c.EngConfirmedAt = now; c.Status = EnCaseStatus.AwaitingCeoApproval;
                     EnEvents.Add(_uow, c, "eng-confirmed", Me, null);
                     break;

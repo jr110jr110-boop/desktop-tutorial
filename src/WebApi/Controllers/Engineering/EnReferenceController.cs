@@ -31,7 +31,7 @@ namespace WebApi.Controllers
         public async Task<IActionResult> ListAsync(int id, CancellationToken ct) => Ok(await _service.GetListAsync(id, ct));
 
         [HttpGet("current")]
-        public async Task<IActionResult> CurrentAsync(CancellationToken ct) => Ok(await _service.GetCurrentAsync(ct));
+        public async Task<IActionResult> CurrentAsync([FromQuery] string code, CancellationToken ct) => Ok(await _service.GetCurrentAsync(code, ct));
 
         [HttpPost("lists")]
         public async Task<IActionResult> SaveAsync([FromBody] EnSaveReferenceDto dto, CancellationToken ct) => Ok(await _service.SaveListAsync(dto, ct));

@@ -57,7 +57,9 @@ namespace Services.NasbNiro.Engineering
             o.OpenDebts = await _uow.Set<EnDocumentDebt>().AsNoTracking().CountAsync(d => !d.Deleted && d.Status == EnDebtStatus.Open, ct);
             o.OverdueDebts = await _uow.Set<EnDocumentDebt>().AsNoTracking().CountAsync(d => !d.Deleted && d.Status == EnDebtStatus.Open && d.DueDate < today, ct);
             DateTimeOffset now = DateTimeOffset.Now;
-            o.WaiversAwaitingCeo = await _uow.Set<EnWaiver>().AsNoTracking().CountAsync(w => !w.Deleted && w.Status == EnWaiverStatus.Requested && w.ExpiresAt > now, ct);
+            o.WaiversAwaitingCeo = await _uow.Set<EnWaiver>().AsNoTracking().CountAsync(w => !w.Deleted && w.Status == EnWaiverStatus.Requested, ct);
+            DateTimeOffset? oldest = await _uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested).OrderBy(w => w.RequestedAt).Select(w => (DateTimeOffset?)w.RequestedAt).FirstOrDefaultAsync(ct);
+            o.OldestWaiverWaitingHours = oldest.HasValue ? Math.Max(0, (int)Math.Floor((now - oldest.Value).TotalHours)) : 0;   // a request never expires: it is an alarm until the CEO decides
             o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null, ct);
             return ResponseDtoHelper.Ok(o);
         }

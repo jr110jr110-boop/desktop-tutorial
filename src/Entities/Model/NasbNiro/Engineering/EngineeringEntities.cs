@@ -27,7 +27,7 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnHandoverStatus { Draft = 0, Submitted = 1, Returned = 2, Accepted = 3, Released = 4, Void = 5 }
 
-    public enum EnWaiverStatus { Requested = 0, Approved = 1, Rejected = 2, Expired = 3, Void = 4 }
+    public enum EnWaiverStatus { Requested = 0, Approved = 1, Rejected = 2, Void = 4 }
 
     public enum EnDebtStatus { Open = 0, Settled = 1, Void = 2 }
 
@@ -93,6 +93,9 @@ namespace Entities.Model.NasbNiro.Engineering
     {
         public int ProductId { get; set; }
         public int? ReferenceListId { get; set; }
+
+        /// <summary>The Code of the reference list (the standard basis, e.g. API 611 or API 612) this platform is assessed against; chosen by the engineering manager when more than one Code is approved.</summary>
+        public string ReferenceCode { get; set; }
         public int ReferenceRevision { get; set; }
         public EnDossierStatus Status { get; set; }
         public DateTimeOffset? AssessedAt { get; set; }
@@ -159,6 +162,9 @@ namespace Entities.Model.NasbNiro.Engineering
         public EnClassification Classification { get; set; }
         public int? ProductId { get; set; }
         public bool PlatformWithChanges { get; set; }
+
+        /// <summary>The Code of the reference list a New-design handover is built from; set by the manager at the classification confirm.</summary>
+        public string ReferenceCode { get; set; }
         public string ChangeNote { get; set; }
 
         public EnClassification ProposedClassification { get; set; }
@@ -309,7 +315,6 @@ namespace Entities.Model.NasbNiro.Engineering
         public DateTimeOffset RequestedAt { get; set; }
 
         /// <summary>A request that nobody decided by then expires; an approval that was not used by then expires too.</summary>
-        public DateTimeOffset ExpiresAt { get; set; }
 
         public int? DecidedByUserId { get; set; }
         public DateTimeOffset? DecidedAt { get; set; }

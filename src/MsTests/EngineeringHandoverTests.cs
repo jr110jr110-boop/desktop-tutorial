@@ -177,6 +177,26 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task A_Waiver_Request_Never_Expires_And_Stays_An_Alarm_Until_The_Ceo_Decides()
+        {
+            AppHost host = Started("ho9");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Mgr1, "draft", d => d.CaseId = caseId));
+            Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این معافیت اضطراری نوشته شده است", DateTime.Today.AddDays(10)));
+            host.Write(u => { foreach (EnWaiver w in u.Set<EnWaiver>().ToList()) { w.RequestedAt = DateTimeOffset.Now.AddDays(-30); } u.SaveChanges(); }, Seeder);
+            ClaimsPrincipal seat = await SeatAsync(host);
+            List<Services.NasbNiro.Agents.AgentWorkItem> gate = await host.As(seat, async p => await p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Single(x => x.Code == "ENG.WAIVER.DECIDE").DiscoverAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), DateTime.Today, Ct));
+            Assert.AreEqual(1, gate.Count, "thirty days later the gate is still open");
+            EnOverviewDto o = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnOverviewService>().GetOverviewAsync(Ct)));
+            Assert.AreEqual(1, o.WaiversAwaitingCeo);
+            Assert.IsTrue(o.OldestWaiverWaitingHours >= 719 && o.OldestWaiverWaitingHours <= 721);
+            EnWaiverDto w1 = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().GetWaiversAsync(new EnWaiverQuery(), Ct))).Single();
+            Assert.AreEqual(0, w1.Status, "still requested, never expired");
+            Ok(await Decide(host, Ceo, w1.Id, "approve", null));
+            Assert.AreEqual(0, Ok(await host.As(Ceo, p => p.GetRequiredService<IEnOverviewService>().GetOverviewAsync(Ct))).WaiversAwaitingCeo);
+        }
+
+        [TestMethod]
         public async Task A_Seat_Never_Submits_Accepts_Releases_Or_Acknowledges_And_Prepares_The_Draft()
         {
             AppHost host = Started("ho2");
@@ -266,17 +286,17 @@ namespace MsTests
         }
 
         [TestMethod]
-        public void The_Engineering_E1_Catalogue_Has_Thirty_One_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
+        public void The_Engineering_E1_Catalogue_Has_Thirty_Two_Steps_Of_The_Engineering_Agent_On_The_Right_Stations()
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(31, steps.Count);
+            Assert.AreEqual(32, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG" && s.Code.StartsWith("ENG.") && s.Code.Length <= 60));
             Assert.AreEqual(14, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
-            Assert.AreEqual(16, steps.Count(s => s.Station == 5));
+            Assert.AreEqual(17, steps.Count(s => s.Station == 5));
             Assert.AreEqual(11, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(31, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(32, steps.Select(s => s.Code).Distinct().Count());
         }
 
         [TestMethod]

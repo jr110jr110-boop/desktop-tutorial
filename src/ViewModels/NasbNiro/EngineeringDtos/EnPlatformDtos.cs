@@ -53,6 +53,10 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     public class EnDossierDto
     {
         public int Id { get; set; }
+        public string ReferenceCode { get; set; }
+        public bool CanAssign { get; set; }
+        public string AssignBlockedReason { get; set; }
+        public List<string> ApprovedCodes { get; set; }
         public int ProductId { get; set; }
         public string ProductCode { get; set; }
         public string ProductTitle { get; set; }
@@ -102,6 +106,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     public class EnDossierActionDto
     {
         public int ProductId { get; set; }
+
+        /// <summary>For the action assign: the Code of the reference list (the standard basis) this platform is assessed against.</summary>
+        public string ReferenceCode { get; set; }
         public string Action { get; set; }
         public int? LineId { get; set; }
         public string Note { get; set; }

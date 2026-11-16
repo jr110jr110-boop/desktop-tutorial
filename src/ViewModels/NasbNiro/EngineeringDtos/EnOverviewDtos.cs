@@ -37,6 +37,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int OpenDebts { get; set; }
         public int OverdueDebts { get; set; }
         public int WaiversAwaitingCeo { get; set; }
+        public int OldestWaiverWaitingHours { get; set; }
         public int DistributionsUnacknowledged { get; set; }
     }
 }

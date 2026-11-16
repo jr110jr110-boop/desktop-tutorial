@@ -28,6 +28,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
     public class EnCaseDto
     {
         public int Id { get; set; }
+        public string ReferenceCode { get; set; }
         public string Number { get; set; }
         public string Title { get; set; }
         public int? InquiryId { get; set; }
@@ -131,6 +132,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Basis { get; set; }
         public string Note { get; set; }
         public string ConceptNote { get; set; }
+
+        /// <summary>At the confirm of a New design: the Code of the reference list (the standard basis); required when more than one Code is approved.</summary>
+        public string ReferenceCode { get; set; }
         public string RowVersion { get; set; }
     }
 

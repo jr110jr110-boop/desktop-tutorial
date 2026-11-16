@@ -23,19 +23,30 @@ namespace Services.NasbNiro.Engineering
                 string.Join("|", EnText.Num(l.Seq), EnHash.Norm(l.DocumentType), EnHash.Norm(l.Discipline), EnHash.Norm(l.Title), l.Required ? "1" : "0", l.TenderStage ? "1" : "0", l.ClientSubmittal ? "1" : "0", EnHash.Norm(l.StandardClause)))));
 
         /// <summary>The current list: the approved list with the latest approval.</summary>
-        public static Task<EnReferenceList> CurrentAsync(IUnitOfWork uow, bool track, CancellationToken ct)
+        public static async Task<EnReferenceList> CurrentAsync(IUnitOfWork uow, bool track, CancellationToken ct, string code = null)
         {
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                // no Code given: only an unambiguous basis answers (exactly one approved Code); with several Codes a human must choose
+                List<string> codes = await ApprovedCodesAsync(uow, ct);
+                if (codes.Count != 1) return null;
+                code = codes[0];
+            }
             IQueryable<EnReferenceList> q = uow.Set<EnReferenceList>();
             if (!track) q = q.AsNoTracking();
-            return q.Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).FirstOrDefaultAsync(ct);
+            return await q.Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code).OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).FirstOrDefaultAsync(ct);
         }
+
+        /// <summary>The Codes (standard bases, e.g. API 611 and API 612) that have an approved list right now; one approved list per Code.</summary>
+        public static Task<List<string>> ApprovedCodesAsync(IUnitOfWork uow, CancellationToken ct) =>
+            uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => l.Code).Distinct().OrderBy(c => c).ToListAsync(ct);
     }
 
     public interface IEnReferenceService
     {
         Task<ResponseDto<PagedList<EnReferenceListDto>>> GetListsAsync(EnReferenceQuery query, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> GetListAsync(int id, CancellationToken ct);
-        Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(CancellationToken ct);
+        Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(string code, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> ListActionAsync(EnReferenceActionDto dto, CancellationToken ct);
     }
@@ -83,7 +94,6 @@ namespace Services.NasbNiro.Engineering
             bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.ApprovedByUserId }), ct);
-            EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);
             List<string> codes = rows.Select(r => r.Code).Distinct().ToList();
             List<string> openCodes = await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && codes.Contains(l.Code) && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview)).Select(l => l.Code).Distinct().ToListAsync(ct);
             return rows.Select(l =>
@@ -91,7 +101,7 @@ namespace Services.NasbNiro.Engineering
                 string edit = EditReason(l, writer), submit = SubmitReason(l, writer, seat), approve = ApproveReason(l, approver, seat, Me), ret = ReturnReasonOf(l, approver), revise = ReviseReason(l, writer, openCodes.Contains(l.Code)), voidR = VoidReasonOf(l, approver);
                 return new EnReferenceListDto
                 {
-                    Id = l.Id, Code = l.Code, Title = l.Title, StandardSource = l.StandardSource, Revision = l.Revision, Status = (int)l.Status, StatusText = EnText.RefStatus(l.Status), IsCurrent = current != null && current.Id == l.Id,
+                    Id = l.Id, Code = l.Code, Title = l.Title, StandardSource = l.StandardSource, Revision = l.Revision, Status = (int)l.Status, StatusText = EnText.RefStatus(l.Status), IsCurrent = l.Status == EnRefStatus.Approved,   // one approved list per Code
                     PreparedByUserId = l.PreparedByUserId, PreparedByName = names.Name(l.PreparedByUserId), SubmittedAt = l.SubmittedAt, SubmittedAtText = EnText.Stamp(l.SubmittedAt),
                     ApprovedByUserId = l.ApprovedByUserId, ApprovedByName = names.Name(l.ApprovedByUserId), ApprovedAt = l.ApprovedAt, ApprovedAtText = EnText.Stamp(l.ApprovedAt), Note = l.Note, VoidReason = l.VoidReason,
                     LineCount = l.Lines.Count, RequiredCount = l.Lines.Count(x => x.Required), TenderStageCount = l.Lines.Count(x => x.TenderStage), TouchedByMe = EnEditors.Touched(l.PreparedByUserId, l.EditorUserIds, Me),
@@ -122,10 +132,10 @@ namespace Services.NasbNiro.Engineering
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnReferenceList> { l }, true, ct))[0]);
         }
 
-        public async Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(CancellationToken ct)
+        public async Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(string code, CancellationToken ct)
         {
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
-            EnReferenceList l = await EnReferenceRules.CurrentAsync(_uow, false, ct);
+            EnReferenceList l = await EnReferenceRules.CurrentAsync(_uow, false, ct, code);
             if (l == null) return EnText.NotFound<EnReferenceListDto>("فهرست مدارک مرجع تاییدشده‌ای وجود ندارد؛ ابتدا فهرست را تهیه و تایید کنید.");
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnReferenceList> { l }, true, ct))[0]);
         }

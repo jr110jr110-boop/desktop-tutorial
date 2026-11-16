@@ -32,7 +32,7 @@ namespace Services.NasbNiro.Engineering
             EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && !x.Deleted, ct);
             if (d == null || d.Status != EnDossierStatus.Complete || d.ConfirmedHash == null) return false;
             if (d.ConfirmedHash != Hash(d.ProductId, d.ReferenceRevision, d.Documents)) return false;
-            EnReferenceList current = await EnReferenceRules.CurrentAsync(uow, false, ct);
+            EnReferenceList current = await EnReferenceRules.CurrentAsync(uow, false, ct, d.ReferenceCode);
             return current != null && d.ReferenceListId == current.Id && !d.Documents.Any(RequiredMissing);
         }
     }
@@ -61,6 +61,19 @@ namespace Services.NasbNiro.Engineering
         private int Me => _user.UserId;
 
         // ---------------------------------------------------------------- the rules
+
+        private static string AssignReason(bool manager, bool seat, int codes) =>
+            !manager ? "فقط مدیر مهندسی استاندارد مرجع پلتفرم را تعیین می‌کند." : seat ? EnText.AiNever : codes == 0 ? "فهرست مدارک مرجع تاییدشده‌ای وجود ندارد." : null;
+
+        private static bool IsStale(EnPlatformDossier d, Dictionary<string, int> currentIds) =>
+            d.Status != EnDossierStatus.NotAssessed && (d.ReferenceCode == null || !currentIds.TryGetValue(d.ReferenceCode, out int id) || d.ReferenceListId != id);
+
+        /// <summary>The id of the current approved list of each Code.</summary>
+        private async Task<Dictionary<string, int>> CurrentIdsAsync(CancellationToken ct)
+        {
+            List<EnReferenceList> rows = await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).ToListAsync(ct);
+            return rows.GroupBy(l => l.Code).ToDictionary(g => g.Key, g => g.OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).First().Id);
+        }
 
         private static string AssessReason(bool writer, bool hasReference) =>
             !writer ? EnText.NotAllowed : !hasReference ? "فهرست مدارک مرجع تاییدشده‌ای وجود ندارد؛ ابتدا فهرست مرجع تایید شود." : null;
@@ -101,7 +114,7 @@ namespace Services.NasbNiro.Engineering
                 if (s == EnDossierStatus.NotAssessed) q = q.Where(p => !_uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status != EnDossierStatus.NotAssessed));
                 else q = q.Where(p => _uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status == s));
             }
-            EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);
+            Dictionary<string, int> currentIds = await CurrentIdsAsync(ct);
             return ResponseDtoHelper.Ok(await EnPaging.CutAsync(q.OrderBy(p => p.Code).ThenBy(p => p.Id), query.PageNumber, query.PageSize, async rows =>
             {
                 List<int> ids = rows.Select(r => r.Id).ToList();
@@ -114,7 +127,7 @@ namespace Services.NasbNiro.Engineering
                     {
                         Counts(d, out int r, out int a, out int m, out int t);
                         dto.RequiredCount = r; dto.AvailableCount = a; dto.MissingCount = m; dto.TenderStageMissingCount = t; dto.ReferenceRevision = d.ReferenceRevision;
-                        dto.Stale = current != null && d.Status != EnDossierStatus.NotAssessed && d.ReferenceListId != current.Id; dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt);
+                        dto.Stale = IsStale(d, currentIds); dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt);
                     }
                     return dto;
                 }).ToList();
@@ -126,8 +139,13 @@ namespace Services.NasbNiro.Engineering
             bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
             bool seat = await EnActors.IsSeatAsync(_uow, Me, ct);
             EnDossierDto dto = new EnDossierDto { ProductId = product.Id, ProductCode = product.Code, ProductTitle = product.Title, Status = 0, StatusText = EnText.Dossier(EnDossierStatus.NotAssessed) };
+            List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
+            dto.ApprovedCodes = codes; dto.ReferenceCode = d?.ReferenceCode;
             string assess = AssessReason(writer, current != null);
+            if (assess != null && current == null && codes.Count > 1 && (d == null || d.ReferenceCode == null)) assess = "چند استاندارد مرجع تاییدشده وجود دارد؛ مدیر مهندسی باید استاندارد این پلتفرم را تعیین کند.";
             dto.CanAssess = assess == null; dto.AssessBlockedReason = assess;
+            string assign = AssignReason(_user.IsInRole(EnRoles.Manager), seat, codes.Count);
+            dto.CanAssign = assign == null; dto.AssignBlockedReason = assign;
             if (d == null)
             {
                 dto.SupplyBlockedReason = "ابتدا ارزیابی انجام شود."; dto.CompleteBlockedReason = dto.SupplyBlockedReason; dto.ConfirmBlockedReason = dto.SupplyBlockedReason; dto.ReturnBlockedReason = dto.SupplyBlockedReason;
@@ -138,7 +156,7 @@ namespace Services.NasbNiro.Engineering
             string complete = CompleteReason(d, writer, seat), confirm = ConfirmReason(d, approver, seat, Me), ret = ReturnReasonOf(d, approver), supply = SupplyReason(d, writer);
             dto.Id = d.Id; dto.ReferenceListId = d.ReferenceListId; dto.ReferenceRevision = d.ReferenceRevision; dto.Status = (int)d.Status; dto.StatusText = EnText.Dossier(d.Status);
             dto.ReferenceTitle = d.ReferenceListId.HasValue ? await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => l.Id == d.ReferenceListId.Value).Select(l => l.Title).FirstOrDefaultAsync(ct) : null;
-            dto.Stale = current != null && d.ReferenceListId != current.Id;
+            dto.Stale = current != null && d.ReferenceListId != current.Id; dto.ReferenceCode = d.ReferenceCode;
             dto.RequiredCount = r; dto.AvailableCount = a; dto.MissingCount = m; dto.TenderStageMissingCount = t;
             dto.AssessedAtText = EnText.Stamp(d.AssessedAt); dto.ConfirmedByName = names.Name(d.ConfirmedByUserId); dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt); dto.Note = d.Note;
             dto.TouchedByMe = EnEditors.Has(d.EditorUserIds, Me); dto.RowVersion = EnConcurrency.Text(d.RowVersion);
@@ -159,7 +177,7 @@ namespace Services.NasbNiro.Engineering
             PbProduct product = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId && !p.Deleted, ct);
             if (product == null) return EnText.NotFound<EnDossierDto>("محصول پیدا نشد.");
             EnPlatformDossier d = await _uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && !x.Deleted, ct);
-            return ResponseDtoHelper.Ok(await DossierDtoAsync(product, d, await EnReferenceRules.CurrentAsync(_uow, false, ct), ct));
+            return ResponseDtoHelper.Ok(await DossierDtoAsync(product, d, await EnReferenceRules.CurrentAsync(_uow, false, ct, d?.ReferenceCode), ct));
         }
 
         public async Task<ResponseDto<EnPlatformSummaryDto>> GetSummaryAsync(CancellationToken ct)
@@ -167,13 +185,14 @@ namespace Services.NasbNiro.Engineering
             if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<EnPlatformSummaryDto>(EnText.NotAllowed);
             List<int> products = await _uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive).Select(p => p.Id).ToListAsync(ct);
             List<EnPlatformDossier> dossiers = await _uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && products.Contains(d.ProductId)).ToListAsync(ct);
-            EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);
-            EnPlatformSummaryDto s = new EnPlatformSummaryDto { Products = products.Count, HasApprovedReference = current != null, ReferenceRevision = current?.Revision ?? 0 };
+            Dictionary<string, int> currentIds = await CurrentIdsAsync(ct);
+            EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);   // the sole basis when there is exactly one
+            EnPlatformSummaryDto s = new EnPlatformSummaryDto { Products = products.Count, HasApprovedReference = currentIds.Count > 0, ReferenceRevision = current?.Revision ?? 0 };
             s.Incomplete = dossiers.Count(d => d.Status == EnDossierStatus.Incomplete);
             s.Completing = dossiers.Count(d => d.Status == EnDossierStatus.Completing);
             s.Complete = dossiers.Count(d => d.Status == EnDossierStatus.Complete);
             s.NotAssessed = products.Count - s.Incomplete - s.Completing - s.Complete;
-            s.Stale = current == null ? 0 : dossiers.Count(d => d.Status != EnDossierStatus.NotAssessed && d.ReferenceListId != current.Id);
+            s.Stale = dossiers.Count(d => IsStale(d, currentIds));
             return ResponseDtoHelper.Ok(s);
         }
 
@@ -229,7 +248,7 @@ namespace Services.NasbNiro.Engineering
         {
             if (dto == null || dto.ProductId <= 0) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
             string action = (dto.Action ?? string.Empty).Trim().ToLowerInvariant();
-            if (action != "assess" && action != "complete" && action != "confirm" && action != "return") return EnText.Bad<EnDossierDto>("عمل نامعتبر است (assess، complete، confirm یا return).");
+            if (action != "assess" && action != "assign" && action != "complete" && action != "confirm" && action != "return") return EnText.Bad<EnDossierDto>("عمل نامعتبر است (assess، assign، complete، confirm یا return).");
             PbProduct product = await _uow.Set<PbProduct>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == dto.ProductId && !p.Deleted, ct);
             if (product == null) return EnText.NotFound<EnDossierDto>("محصول پیدا نشد.");
             bool writer = _user.IsInRole(EnRoles.Writers), approver = _user.IsInRole(EnRoles.RefApprovers);
@@ -237,10 +256,15 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset now = DateTimeOffset.Now;
             string note = EnText.Clean(dto.Note);
             EnPlatformDossier d = await _uow.Set<EnPlatformDossier>().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == dto.ProductId && !x.Deleted, ct);
-            if (action == "assess")
+            if (action == "assign")
             {
-                EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);
-                string why = AssessReason(writer, current != null);
+                // the standard basis of the platform (API 611 or API 612) is chosen by the engineering manager, never by a rule
+                List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
+                string pick = EnText.Clean(dto.ReferenceCode);
+                string why = AssignReason(_user.IsInRole(EnRoles.Manager), seat, codes.Count);
+                if (why == null && string.IsNullOrEmpty(pick)) why = "استاندارد مرجع را انتخاب کنید.";
+                if (why == null && !codes.Contains(pick)) why = "برای این استاندارد مرجع فهرست تاییدشده‌ای وجود ندارد.";
+                if (why == null && d != null && d.ReferenceCode != null && d.ReferenceCode != pick) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد مرجع");
                 if (why != null) return EnText.Bad<EnDossierDto>(why);
                 if (!product.IsActive) return EnText.Bad<EnDossierDto>("فقط محصول فعال ارزیابی می‌شود.");
                 if (d == null)
@@ -249,6 +273,37 @@ namespace Services.NasbNiro.Engineering
                     _uow.Set<EnPlatformDossier>().Add(d);
                 }
                 else if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
+                if (d.ReferenceCode != pick)
+                {
+                    // a changed standard voids the confirmation; the agent re-builds the lines against the new list
+                    d.ReferenceCode = pick; d.ReferenceListId = null; d.ReferenceRevision = 0;
+                    if (d.Status != EnDossierStatus.NotAssessed) { d.Status = EnDossierStatus.NotAssessed; d.ConfirmedHash = null; d.ConfirmedAt = null; d.ConfirmedByUserId = null; d.Note = EnText.Cut("تغییر استاندارد مرجع به " + pick + ": " + note, 1000); }
+                }
+            }
+            else if (action == "assess")
+            {
+                List<string> codes = await EnReferenceRules.ApprovedCodesAsync(_uow, ct);
+                string code = d?.ReferenceCode;
+                if (code == null && codes.Count == 1) code = codes[0];
+                EnReferenceList current = code == null ? null : await EnReferenceRules.CurrentAsync(_uow, false, ct, code);
+                string why = AssessReason(writer, current != null || codes.Count > 1);
+                if (why != null) return EnText.Bad<EnDossierDto>(why);
+                if (!product.IsActive) return EnText.Bad<EnDossierDto>("فقط محصول فعال ارزیابی می‌شود.");
+                if (d == null)
+                {
+                    d = new EnPlatformDossier { ProductId = product.Id, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
+                    _uow.Set<EnPlatformDossier>().Add(d);
+                }
+                else if (!EnConcurrency.Apply(_uow, d, dto.RowVersion)) return EnText.Bad<EnDossierDto>(EnText.InvalidData);
+                if (current == null)
+                {
+                    // several approved standards and none chosen for this platform: the dossier waits empty for the manager's choice (ENG.PLATFORM.ASSIGN)
+                    d.ModifyDate = now; d.ModifierUserId = Me;
+                    try { await _uow.SaveChangesAsync(ct); }
+                    catch (DbUpdateConcurrencyException) { return EnText.Bad<EnDossierDto>(EnText.Concurrency); }
+                    return await GetDossierAsync(dto.ProductId, ct);
+                }
+                d.ReferenceCode = code;
                 bool changedList = d.ReferenceListId != current.Id;
                 string before = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
                 Merge(d, current);
@@ -273,7 +328,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     why = ConfirmReason(d, approver, seat, Me);
                     if (why != null) return EnText.Bad<EnDossierDto>(why);
-                    EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct);
+                    EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode);
                     if (current == null || d.ReferenceListId != current.Id) return EnText.Bad<EnDossierDto>("فهرست مرجع تغییر کرده است؛ ابتدا ارزیابی دوباره انجام شود.");
                     d.Status = EnDossierStatus.Complete; d.ConfirmedByUserId = Me; d.ConfirmedAt = now; d.ConfirmedHash = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
                 }

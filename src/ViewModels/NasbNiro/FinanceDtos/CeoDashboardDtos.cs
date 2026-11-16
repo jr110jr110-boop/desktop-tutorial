@@ -66,6 +66,10 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int EnOpenDebts { get; set; }
         public int EnOverdueDebts { get; set; }
 
+        /// <summary>Emergency-waiver requests waiting for the CEO (never expire; the tile is in its alarm state whenever this is above zero) and how many hours the oldest has waited.</summary>
+        public int EnWaiversAwaitingCeo { get; set; }
+        public int EnOldestWaiverWaitingHours { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 

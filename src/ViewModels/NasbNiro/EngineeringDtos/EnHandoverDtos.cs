@@ -98,8 +98,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string StatusText { get; set; }
         public string RequestedByName { get; set; }
         public string RequestedAtText { get; set; }
-        public string ExpiresAtText { get; set; }
-        public bool Expired { get; set; }
+        /// <summary>Whole hours a request has waited for the CEO; a request never expires, it stays an alarm until he decides.</summary>
+        public int WaitingHours { get; set; }
         public string DecidedByName { get; set; }
         public string DecidedAtText { get; set; }
         public string DecisionNote { get; set; }

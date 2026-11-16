@@ -28,6 +28,7 @@ namespace Services.NasbNiro.Agents.Steps
             services.AddScoped<IAgentStep, EnRefInputStep>();
             services.AddScoped<IAgentStep, EnRefApproveStep>();
             services.AddScoped<IAgentStep, EnPlatformAssessStep>();
+            services.AddScoped<IAgentStep, EnPlatformAssignStep>();
             services.AddScoped<IAgentStep, EnPlatformCompleteStep>();
             services.AddScoped<IAgentStep, EnPlatformConfirmStep>();
             services.AddScoped<IAgentStep, EnCaseOpenStep>();
@@ -146,8 +147,12 @@ namespace Services.NasbNiro.Agents.Steps
 
     internal static class EnCurrentList
     {
-        public static async Task<int?> IdAsync(IUnitOfWork uow, CancellationToken ct) =>
-            await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).Select(l => (int?)l.Id).FirstOrDefaultAsync(ct);
+        /// <summary>The current approved list of each Code: (Code, Id) pairs.</summary>
+        public static async Task<List<KeyValuePair<string, int>>> CurrentAsync(IUnitOfWork uow, CancellationToken ct)
+        {
+            var rows = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => new { l.Code, l.Id, l.ApprovedAt }).ToListAsync(ct);
+            return rows.GroupBy(r => r.Code).Select(g => new KeyValuePair<string, int>(g.Key, g.OrderByDescending(r => r.ApprovedAt).ThenByDescending(r => r.Id).First().Id)).OrderBy(p => p.Key).ToList();
+        }
     }
 
     /// <summary>ENG.PLATFORM.ASSESS (Agent): an active product that has no dossier, or whose dossier is against an older reference list. The agent builds the lines and proves what the system knows (a released BOM, an approved routing).</summary>
@@ -161,11 +166,16 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
-            int? current = await EnCurrentList.IdAsync(uow, ct);
-            if (!current.HasValue) return new List<AgentWorkItem>();
-            int list = current.Value;
+            var current = await EnCurrentList.CurrentAsync(uow, ct);
+            if (current.Count == 0) return new List<AgentWorkItem>();
+            List<int> ids = current.Select(c => c.Value).ToList();
+            List<string> codes = current.Select(c => c.Key).ToList();
+            bool several = codes.Count > 1;   // with several approved standards a platform without a chosen one waits for the manager (ENG.PLATFORM.ASSIGN)
             var rows = await uow.Set<PbProduct>().AsNoTracking().Where(p => !p.Deleted && p.IsActive
-                    && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted && d.Status != EnDossierStatus.NotAssessed && d.ReferenceListId == list))
+                    && !uow.Set<EnPlatformDossier>().Any(d => d.ProductId == p.Id && !d.Deleted
+                        && ((d.Status != EnDossierStatus.NotAssessed && d.ReferenceListId != null && ids.Contains(d.ReferenceListId.Value))
+                            || (several && d.ReferenceCode == null)
+                            || (d.ReferenceCode != null && !codes.Contains(d.ReferenceCode)))))
                 .OrderBy(p => p.Id).Take(ProcStepCommon.Cap).Select(p => new { p.Id, p.Code }).ToListAsync(ct);
             return rows.Select(r => Item("PbProduct", r.Id, r.Code, null, null, $"پلتفرم {r.Code} نسبت به فهرست مدارک مرجع جاری ارزیابی نشده است.")).ToList();
         }
@@ -174,10 +184,32 @@ namespace Services.NasbNiro.Agents.Steps
         {
             ResponseDto<EnDossierDto> response = await services.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = item.TargetId, Action = "assess" }, ct);
             if (!response.Success) return ProcStepCommon.Refusal(response);
+            if (response.Data.Status == (int)EnDossierStatus.NotAssessed) return AgentStepResult.Done("EnPlatformDossier", response.Data.Id, item.TargetNumber, $"چند استاندارد مرجع تاییدشده وجود دارد؛ پلتفرم {item.TargetNumber} بدون ردیف ثبت شد تا مدیر مهندسی استاندارد آن را تعیین کند.");
             return AgentStepResult.Done("EnPlatformDossier", response.Data.Id, item.TargetNumber, $"ایجنت مهندسی پلتفرم {item.TargetNumber} را ارزیابی کرد: {response.Data.MissingCount} مدرک الزامی کم است از {response.Data.RequiredCount}.");
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/platforms/" + Id(item.TargetId), Title = "ارزیابی مدارک پلتفرم " + item.TargetNumber };
+    }
+
+    /// <summary>ENG.PLATFORM.ASSIGN (Input): several standards (reference list Codes) are approved and this platform has none chosen; the engineering manager chooses. No rule decides between API 611 and API 612.</summary>
+    internal sealed class EnPlatformAssignStep : EnStep
+    {
+        public override string Code => "ENG.PLATFORM.ASSIGN";
+        public override string Title => "تعیین استاندارد مرجع پلتفرم توسط مدیر مهندسی";
+        public override AgentStepKind Kind => AgentStepKind.Input;
+        public override string FallbackRoles => EnRoles.Manager;
+
+        public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
+        {
+            if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();
+            var current = await EnCurrentList.CurrentAsync(uow, ct);
+            if (current.Count < 2) return new List<AgentWorkItem>();
+            var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.ReferenceCode == null && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted))
+                .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.ProductId, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() }).ToListAsync(ct);
+            return rows.Select(r => Item("PbProduct", r.ProductId, r.Code, null, null, $"پلتفرم {r.Code}: چند استاندارد مرجع تاییدشده است؛ مدیر مهندسی باید استاندارد این پلتفرم را تعیین کند.")).ToList();
+        }
+
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/platforms/" + Id(item.TargetId), Title = "تعیین استاندارد مرجع پلتفرم " + item.TargetNumber };
     }
 
     /// <summary>ENG.PLATFORM.COMPLETE (Input): an assessed dossier with missing documents (or complete but not yet declared complete): the engineers upload the documents, which exist only in their hands.</summary>
@@ -191,10 +223,10 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
-            int? current = await EnCurrentList.IdAsync(uow, ct);
-            if (!current.HasValue) return new List<AgentWorkItem>();
-            int list = current.Value;
-            var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDossierStatus.Incomplete && d.ReferenceListId == list && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted))
+            var current = await EnCurrentList.CurrentAsync(uow, ct);
+            if (current.Count == 0) return new List<AgentWorkItem>();
+            List<int> ids = current.Select(c => c.Value).ToList();
+            var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDossierStatus.Incomplete && d.ReferenceListId != null && ids.Contains(d.ReferenceListId.Value) && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted))
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.ProductId, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault(), Missing = d.Documents.Count(x => x.Required && x.State == EnLineState.Missing) }).ToListAsync(ct);
             return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code, null, null, r.Missing > 0 ? $"پلتفرم {r.Code}: {r.Missing} مدرک الزامی هنوز موجود نیست." : $"پلتفرم {r.Code}: همهٔ مدارک الزامی هست؛ مهندسی «کامل است» را ثبت کند.")).ToList();
         }

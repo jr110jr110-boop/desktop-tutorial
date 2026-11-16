@@ -103,8 +103,6 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The shortest reason of an emergency waiver request.</summary>
         public const int WaiverReasonMin = 30;
 
-        /// <summary>Hours a waiver request waits for the CEO, and an approved waiver waits for the submission (like the two-person safety requests).</summary>
-        public const int WaiverHours = 72;
     }
 
     internal static class EnText
@@ -168,7 +166,7 @@ namespace Services.NasbNiro.Engineering
 
         public static string Waiver(EnWaiverStatus s) => s switch
         {
-            EnWaiverStatus.Requested => "درخواست‌شده", EnWaiverStatus.Approved => "تاییدشده", EnWaiverStatus.Rejected => "ردشده", EnWaiverStatus.Expired => "منقضی‌شده", _ => "ابطال‌شده",
+            EnWaiverStatus.Requested => "درخواست‌شده", EnWaiverStatus.Approved => "تاییدشده", EnWaiverStatus.Rejected => "ردشده", _ => "ابطال‌شده",
         };
 
         public static string Unit(EnUnit u) => u switch

@@ -92,7 +92,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             DateTimeOffset now = DateTimeOffset.Now;
             var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Draft
-                    && (!h.Lines.Any(l => l.Required && l.State == EnLineState.Missing) || uow.Set<EnWaiver>().Any(w => w.HandoverId == h.Id && !w.Deleted && w.Status == EnWaiverStatus.Approved && w.UsedAt == null && w.ExpiresAt > now)))
+                    && (!h.Lines.Any(l => l.Required && l.State == EnLineState.Missing) || uow.Set<EnWaiver>().Any(w => w.HandoverId == h.Id && !w.Deleted && w.Status == EnWaiverStatus.Approved && w.UsedAt == null)))
                 .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId }).ToListAsync(ct);
             return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, $"تحویل مدارک {r.Number} آمادهٔ ارسال به PMO است.", EnRoles.Manager)).ToList();
         }
@@ -111,7 +111,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
-            var rows = await uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested && w.ExpiresAt > now)
+            var rows = await uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested)
                 .OrderBy(w => w.Id).Take(ProcStepCommon.Cap).Select(w => new { w.Id, w.Number, ContractId = uow.Set<EnHandover>().Where(h => h.Id == w.HandoverId).Select(h => (int?)h.ContractId).FirstOrDefault() }).ToListAsync(ct);
             return rows.Select(r => Item("EnWaiver", r.Id, r.Number, r.ContractId, null, $"معافیت اضطراری {r.Number} منتظر تصمیم مدیرعامل است.", EnRoles.Ceo)).ToList();
         }

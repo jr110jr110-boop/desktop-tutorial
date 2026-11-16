@@ -67,7 +67,7 @@ namespace MsTests
             Ok(await RefAction(host, Mgr1, draft.Id, "approve"));
             Assert.AreEqual(1, host.Read(u => u.Set<EnReferenceList>().Count(l => l.Status == EnRefStatus.Approved)));
             Assert.AreEqual((int)EnRefStatus.Superseded, host.Read(u => (int)u.Set<EnReferenceList>().Single(l => l.Id == first.Id).Status));
-            Assert.AreEqual(2, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetCurrentAsync(Ct))).Revision);
+            Assert.AreEqual(2, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetCurrentAsync(null, Ct))).Revision);
         }
 
         [TestMethod]
