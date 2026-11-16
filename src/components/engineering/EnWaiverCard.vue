@@ -11,29 +11,24 @@ import { enPaths, EnRoles, faDigits, stamp, useEnDialog } from "@/composables/en
 const props = defineProps<{ waiver: any }>();
 const emit = defineEmits(["changed"]);
 const d = useEnDialog(() => emit("changed"));
-const localInput = (iso: string) => {
-  const t = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}T${p(t.getHours())}:${p(t.getMinutes())}`;
-};
 function approve() {
   d.ask({
-    title: "تایید معافیت اضطراری",
+    title: "تایید مجوز اضطرار",
     hint: "مهلت بدهی را می‌توانید کوتاه‌تر کنید؛ بیشتر از مهلت درخواست‌شده نمی‌شود.",
     fields: [
-      { key: "due", label: "مهلت بدهی مدارک", type: "datetime", value: localInput(props.waiver.debtDueAt) },
+      { key: "due", label: "مهلت بدهی مدارک", type: "datetime", value: props.waiver.debtDueAt },
       { key: "n", label: "یادداشت (اختیاری)", type: "textarea", max: 2000 },
     ],
-    run: (v) => decideEnWaiver({ id: props.waiver.id, decision: "approve", note: v.n, debtDueAt: v.due ? new Date(v.due).toISOString() : null, rowVersion: props.waiver.rowVersion }),
-    okText: "معافیت تایید شد.",
+    run: (v) => decideEnWaiver({ id: props.waiver.id, decision: "approve", note: v.n, debtDueAt: v.due || null, rowVersion: props.waiver.rowVersion }),
+    okText: "مجوز اضطرار تایید شد.",
   });
 }
 function reject() {
   d.ask({
-    title: "رد معافیت اضطراری",
+    title: "رد مجوز اضطرار",
     fields: [{ key: "n", label: "دلیل رد", type: "textarea", required: true, min: 15, max: 2000 }],
     run: (v) => decideEnWaiver({ id: props.waiver.id, decision: "reject", note: v.n, rowVersion: props.waiver.rowVersion }),
-    okText: "معافیت رد شد.",
+    okText: "مجوز اضطرار رد شد.",
   });
 }
 </script>
@@ -41,12 +36,12 @@ function reject() {
 <template>
   <div class="en-box" data-test="en-waiver">
     <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
-      <strong>معافیت {{ faDigits(waiver.number) }}</strong>
+      <strong>مجوز اضطرار {{ faDigits(waiver.number) }}</strong>
       <EnChip :status="waiver.status" :text="waiver.statusText" group="waiver" />
       <router-link :to="enPaths.handover(waiver.handoverId)" class="small">تحویل {{ faDigits(waiver.handoverNumber) }}</router-link>
       <span class="small inv-muted">{{ waiver.requestedByName }} — {{ faDigits(waiver.requestedAtText || "") }}</span>
     </div>
-    <EnWait v-if="waiver.status === 0" :hours="waiver.waitingHours" text="معافیت اضطراری منتظر تصمیم مدیرعامل است" />
+    <EnWait v-if="waiver.status === 0" :hours="waiver.waitingHours" text="مجوز اضطرار منتظر تصمیم مدیرعامل است" />
     <dl class="en-kv">
       <dt>دلیل</dt><dd class="en-pre">{{ waiver.reason }}</dd>
       <dt>مهلت بدهی</dt><dd>{{ stamp(waiver.debtDueAt) }}</dd>
@@ -55,8 +50,8 @@ function reject() {
       <dt>پوشش</dt><dd>{{ waiver.covers ? "همه کمبودها را می‌پوشاند" : "کمبودها را کامل نمی‌پوشاند" }}<span v-if="waiver.coverageNote"> — {{ waiver.coverageNote }}</span></dd>
       <dt v-if="waiver.decidedByName">تصمیم</dt><dd v-if="waiver.decidedByName">{{ waiver.decidedByName }}، {{ faDigits(waiver.decidedAtText || "") }}<span v-if="waiver.decisionNote"> — {{ waiver.decisionNote }}</span></dd>
     </dl>
-    <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="تایید معافیت" variant="success" @go="approve" />
-    <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="رد معافیت" variant="outline-danger" @go="reject" />
+    <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="تایید مجوز اضطرار" variant="success" @go="approve" />
+    <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="رد مجوز اضطرار" variant="outline-danger" @go="reject" />
     <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />
   </div>
 </template>

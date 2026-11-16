@@ -1,33 +1,37 @@
 <script setup lang="ts">
 // The questions of the units to the PMO (a unit user asks, the PMO answers, the asker closes). Only the people who may read this list load it (EnRoles.infoReaders).
 // The answer must not contain a price: the server's hint is written in the answer dialog.
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
-import { askEnInfo, getEnInfoRequests, postEnInfoAction } from "@/api/EngineeringAPIs";
-import { enPaths, EnRoles, enUnits, faDigits, infoStatuses, runEn, useEnDialog } from "@/composables/engineering";
+import { askEnInfo, getEnInfoRequest, getEnInfoRequests, postEnInfoAction } from "@/api/EngineeringAPIs";
+import { enPaths, EnRoles, enUnits, faDigits, infoStatuses, runEn, unitName, unitRoles, useEnDialog, useFocusItem } from "@/composables/engineering";
 import { hasRole } from "@/composables/roles";
 
 const props = defineProps<{ handoverId?: number | null; caseId?: number | null; highlightId?: number | null }>();
-const rows = ref<any[]>([]);
+const listed = ref<any[]>([]);
+const one = useFocusItem(() => props.highlightId || null, getEnInfoRequest);
+const rows = computed(() => one.merge(listed.value));
 const loading = ref(false);
 async function load() {
   loading.value = true;
   const [d] = await getEnInfoRequests({ HandoverId: props.handoverId, CaseId: props.caseId, PageSize: 100 });
   loading.value = false;
-  rows.value = d?.data || [];
+  listed.value = d?.data || [];
+  await one.load();
 }
 onMounted(load);
-watch(() => [props.handoverId, props.caseId], load);
+watch(() => [props.handoverId, props.caseId, props.highlightId], load);
 const d = useEnDialog(load);
-const unitRoles = hasRole(EnRoles.infoReaders) && !hasRole(["PMO", "CEO", "AUDITOR"]);
+// The server accepts a question only from a member of the unit asked for: the form offers the user's own units only.
+const myUnits = enUnits.filter((u) => hasRole(unitRoles[u.value]));
 const act = (r: any, action: string, answer?: string) => postEnInfoAction({ id: r.id, action, answer, rowVersion: r.rowVersion });
 function ask() {
   d.ask({
     title: "پرسش از PMO",
     fields: [
-      { key: "unit", label: "واحد پرسنده", type: "select", required: true, options: enUnits.map((u) => ({ value: String(u.value), text: u.text })) },
+      { key: "unit", label: "واحد پرسنده", type: "select", required: true, options: myUnits.map((u) => ({ value: String(u.value), text: u.text })), value: myUnits.length === 1 ? String(myUnits[0].value) : "" },
       { key: "q", label: "پرسش", type: "textarea", required: true, min: 10, max: 2000 },
     ],
     run: (v) => askEnInfo({ handoverId: props.handoverId, caseId: props.caseId, unit: Number(v.unit), question: v.q }),
@@ -53,7 +57,7 @@ const withdraw = (r: any) =>
     <div v-for="r in rows" :key="r.id" :class="['en-box', highlightId === r.id ? 'border-primary' : '']">
       <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
         <strong>{{ faDigits(r.number) }}</strong><EnChip :status="r.status" :text="r.statusText || infoStatuses[r.status]" group="info" />
-        <span class="small">واحد {{ r.unitText }} — {{ r.askedByName }} {{ faDigits(r.askedAtText || "") }}</span>
+        <span class="small">واحد {{ unitName(r.unit ?? r.unitText) }} — {{ r.askedByName }} {{ faDigits(r.askedAtText || "") }}</span>
         <router-link v-if="r.handoverId" :to="enPaths.handover(r.handoverId)" class="small">تحویل {{ faDigits(r.handoverNumber || "") }}</router-link>
       </div>
       <p class="en-pre mb-1">{{ r.question }}</p>
@@ -62,7 +66,7 @@ const withdraw = (r: any) =>
       <EnAction :can="r.canClose" :reason="r.closeBlockedReason" :roles="EnRoles.infoReaders" label="بستن" variant="success" @go="runEn(() => act(r, 'close'), 'پرسش بسته شد.', load)" />
       <EnAction :can="r.canVoid" :reason="r.voidBlockedReason" :roles="EnRoles.infoReaders" label="پس‌گرفتن" variant="outline-secondary" @go="withdraw(r)" />
     </div>
-    <button v-if="unitRoles && (handoverId || caseId)" class="btn btn-sm btn-outline-primary" type="button" @click="ask">پرسش از PMO</button>
+    <button v-if="myUnits.length && (handoverId || caseId)" class="btn btn-sm btn-outline-primary" type="button" @click="ask">پرسش از PMO</button>
     <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />
   </div>
 </template>

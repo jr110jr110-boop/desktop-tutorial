@@ -69,3 +69,9 @@ a.en-tile:hover { background: #e9eef3; }
 .en-gapline.RequiredChanged { background: #fff8e1; }
 .en-count { font-size: 0.72rem; color: #6c757d; text-align: left; }
 .en-units label { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.8rem; font-size: 0.85rem; }
+.en-act { display: inline-flex; flex-direction: column; align-items: flex-start; }
+.en-act .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.en-alarm { background: #fdecee; border: 2px solid #dc3545; border-radius: 0.6rem; padding: 0.55rem 0.9rem; margin: 0.6rem 0; color: #842029; }
+.en-alarm .t { font-weight: 700; margin-bottom: 0.3rem; }
+.en-alarm ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; }
+.en-alarm a { color: #842029; font-weight: 600; text-decoration: underline; }

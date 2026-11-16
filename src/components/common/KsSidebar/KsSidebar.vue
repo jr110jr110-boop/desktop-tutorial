@@ -159,7 +159,7 @@
         title="مهندسی">
         <CopyIcon
           :class="sidebarState.isSidebarExpanded && 'ms-3'"
-          :fill="String($route.name || '').startsWith('En') ? Colors.primary : Colors.primaryLight"
+          :fill="$route.path.startsWith('/engineering') ? Colors.primary : Colors.primaryLight"
           width="18" />
       </KsSidebarLink>
 
@@ -772,9 +772,9 @@ const enLinks = computed<Links[]>(() => {
     { title: "فهرست مدارک مرجع", routeName: "EnReferenceLists", disabled: !r, hidden: !r },
     { title: "تحویل مدارک به PMO", routeName: "EnHandovers", disabled: !r, hidden: !r },
     { title: "بدهی مدارک", routeName: "EnDebts", disabled: !r, hidden: !r },
-    { title: "معافیت‌های اضطراری", routeName: "EnWaivers", disabled: !r, hidden: !r },
+    { title: "مجوزهای اضطرار", routeName: "EnWaivers", disabled: !r, hidden: !r },
     { title: "انحراف از استاندارد", routeName: "EnDeviations", disabled: !r, hidden: !r },
-    { title: "شکاف استاندارد", routeName: "EnGaps", disabled: !r, hidden: !r },
+    { title: "تفاوت استاندارد", routeName: "EnGaps", disabled: !r, hidden: !r },
     { title: "ثبت پلتفرم جدید", routeName: "EnRegistrations", disabled: !r, hidden: !r },
     { title: "پرسش واحدها از PMO", routeName: "EnInfoRequests", disabled: !i, hidden: !i },
   ];

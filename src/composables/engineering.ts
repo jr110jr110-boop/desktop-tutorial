@@ -42,6 +42,19 @@ export const enUnits: { value: number; text: string; code: string }[] = [
   { value: 6, text: "برنامه‌ریزی", code: "Planning" },
 ];
 
+/** Persian names of units from a stored value: a code, a comma-separated list (any case, any separator) or empty (= all units). Never an English name. */
+export function unitsText(csv: string | null | undefined): string {
+  const parts = String(csv ?? "").split(/[,،;]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (!parts.length) return "همهٔ واحدها";
+  return parts.map((c) => enUnits.find((u) => u.code.toLowerCase() === c || String(u.value) === c)?.text ?? (/[\u0600-\u06FF]/.test(c) ? c : "واحد نامشخص")).join("، ");
+}
+/** The unit of a single code (case-insensitive) or its number, as Persian text. */
+export const unitName = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "—" : unitsText(String(v)));
+/** The role names that make a user a member of a unit (EnUnits.UnitRoles). */
+export const unitRoles: Record<number, string[]> = {
+  1: ["QA"], 2: ["QC"], 3: ["PRODUCTIONMANAGER", "SHOPSUPERVISOR", "CONSTRUCTION"], 4: ["COMMERCIAL"], 5: ["WAREHOUSE", "WHSUPERVISOR"], 6: ["PLANNING"],
+};
+
 export const caseKinds: Record<number, string> = { 1: "توربین", 2: "قطعه یدکی", 3: "خدمات" };
 export const classifications: Record<number, string> = { 0: "تعیین‌نشده", 1: "پلتفرم (توربین ساخته‌شده)", 2: "طراحی جدید" };
 export const caseStatuses: Record<number, string> = {
@@ -100,6 +113,8 @@ export function chipOf(group: string, status: number | null | undefined): string
       return s === 1 ? "ok" : s === 2 ? "bad" : "warn";
     case "reg":
       return s === 1 ? "ok" : s === 2 ? "bad" : s === 0 ? "warn" : "info";
+    case "dist":
+      return s === 1 ? "ok" : "warn";
     case "info":
       return s === 0 ? "warn" : s === 1 ? "info" : s === 2 ? "ok" : "bad";
     default:
@@ -178,8 +193,14 @@ export function useEnDialog(reload: () => Promise<any> | void) {
   async function confirm(values: any) {
     if (!dlg.value || busy.value) return;
     busy.value = true;
-    const [, e] = await dlg.value.run(values);
-    busy.value = false;
+    let e: any = null;
+    try {
+      [, e] = await dlg.value.run(values);
+    } catch (x: any) {
+      e = new Error(x?.message || "عملیات انجام نشد.");
+    } finally {
+      busy.value = false;
+    }
     if (e) {
       error.value = errText(e);
       return;
@@ -207,8 +228,8 @@ export async function runEn(run: () => Promise<any>, okText: string, reload: () 
 export const eventKinds: Record<string, string> = {
   opened: "پرونده باز شد", analysed: "تحلیل انجام شد", proposed: "پیشنهاد ثبت شد", changed: "پیشنهاد اصلاح شد", "eng-confirmed": "تایید مدیر مهندسی", "ceo-approved": "تایید مدیرعامل",
   "returned-by-manager": "برگشت توسط مدیر مهندسی", "returned-by-ceo": "برگشت توسط مدیرعامل", "reclassify-requested": "درخواست تغییر طبقه‌بندی", "concept-saved": "یادداشت طرح مفهومی ذخیره شد",
-  "opinion-saved": "نظر فنی ثبت شد", "standard-set": "استاندارد از دیتاشیت ثبت شد", "standard-changed": "استاندارد تغییر کرد", "standard-gap-built": "گزارش شکاف استاندارد ساخته شد",
-  "standard-gap-confirmed": "گزارش شکاف تایید شد", "tender-package-created": "بسته فنی مناقصه ساخته شد", "tender-released": "بسته فنی منتشر شد", "tender-voided": "بسته فنی باطل شد",
+  "opinion-saved": "نظر فنی ثبت شد", "standard-set": "استاندارد از دیتاشیت ثبت شد", "standard-changed": "استاندارد تغییر کرد", "standard-gap-built": "گزارش تفاوت دو استاندارد ساخته شد",
+  "standard-gap-confirmed": "گزارش تفاوت دو استاندارد تایید شد", "tender-package-created": "بسته فنی مناقصه ساخته شد", "tender-released": "بسته فنی منتشر شد", "tender-voided": "بسته فنی باطل شد",
   awarded: "پرونده برنده شد", closed: "پرونده بسته شد", cancelled: "پرونده لغو شد", "handover-drafted": "پیش‌نویس تحویل ساخته شد", "handover-submitted": "تحویل به PMO ارسال شد",
   "handover-accepted": "PMO تحویل را پذیرفت", "handover-returned": "PMO تحویل را برگرداند", "handover-released": "تحویل منتشر شد", "handover-void": "تحویل باطل شد",
   "distribution-drafted": "ابلاغ واحدها آماده شد", "distribution-note-edited": "یادداشت دامنه واحد ویرایش شد", "info-request-void": "پرسش واحد پس گرفته شد", "platform-registered": "پلتفرم ثبت شد",
@@ -221,6 +242,8 @@ export async function uploadDoc(file: File): Promise<[string | null, Error | nul
   const res = await addDocument(form, "engineering", encodeURIComponent(file.name), "engineering");
   const [data, error] = res || [null, new Error("بارگذاری فایل ممکن نشد.")];
   if (error) return [null, error as Error];
+  // A refusal (size, type) comes with HTTP 200 and { success: false, message }: the server's text is shown whatever the status.
+  if (data && typeof data === "object" && data.success === false) return [null, new Error(data.message || "بارگذاری فایل ممکن نشد.")];
   const id = uploadedId(data);
   return id ? [id, null] : [null, new Error("شناسه فایل بارگذاری‌شده خوانده نشد.")];
 }
@@ -231,4 +254,35 @@ export async function downloadDoc(id: string, name = "document") {
   const [blob, error] = res || [null, new Error("دریافت فایل ممکن نشد.")];
   if (error || !blob) return fail(error || "دریافت فایل ممکن نشد.");
   saveBlob(blob as Blob, name);
+}
+
+/** Hours 00..23 for the deadline selector. */
+export const hourOptions = Array.from({ length: 24 }, (_, h) => ({ value: h, text: faDigits(String(h).padStart(2, "0")) + ":۰۰" }));
+/** Splits an ISO date-time into { date: yyyy-mm-dd, hour } in local time (the Shamsi date field takes yyyy-mm-dd). */
+export function splitDue(iso: string | null | undefined, fallbackHours = 72): { date: string; hour: number } {
+  let d = iso ? new Date(iso) : new Date(Date.now() + fallbackHours * 3600000);
+  if (!Number.isFinite(d.getTime())) d = new Date(Date.now() + fallbackHours * 3600000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return { date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, hour: d.getHours() };
+}
+/** ISO date-time of a date (yyyy-mm-dd) and an hour, or null when the date is empty or invalid. */
+export function joinDue(date: string | null | undefined, hour: number | string | null | undefined): string | null {
+  if (!date) return null;
+  const d = new Date(`${date}T${String(Number(hour) || 0).padStart(2, "0")}:00:00`);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+/** The single item an inbox link points to (/…/:id): read by its id, so it shows even when it is not on the first page of the list. */
+export function useFocusItem(getId: () => number | null, fetchOne: (id: number) => Promise<any>) {
+  const item = ref<any>(null);
+  async function load() {
+    const id = getId();
+    item.value = null;
+    if (!id) return;
+    const [d, e] = await fetchOne(id);
+    item.value = e || !d ? null : d;
+  }
+  /** The loaded rows with the focused item first (and not twice). */
+  const merge = (rows: any[]) => (item.value ? [item.value, ...rows.filter((r) => r.id !== item.value.id)] : rows);
+  return { item, load, merge };
 }
