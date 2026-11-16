@@ -1,3 +1,4 @@
+using DataLayer.Configurations.EF.NasbNiro.EngInbox;
 using DataLayer.Configurations.EF.NasbNiro.AfterSales;
 using DataLayer.Configurations.EF.NasbNiro.Ai;
 using DataLayer.Configurations.EF.NasbNiro.Ceo;
@@ -27,6 +28,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Inventory
             builder.AddLedgerConfigurations();
             builder.AddAssetsPayrollConfigurations();
             builder.AddSepidarTransferConfigurations();   // Sepidar transfer per document (SpTransferType, SpOutboxItem, SpOutboxAttempt)
+            builder.AddEngInboxConfigurations();   // ENG-F1: engineering inbox (EngInboxPackage and its lines)
             builder.AddCompletenessConfigurations();
             builder.AddCompletenessM2Configurations();
             builder.AddCompletenessM3Configurations();

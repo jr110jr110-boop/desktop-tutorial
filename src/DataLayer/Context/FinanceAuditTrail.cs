@@ -432,6 +432,7 @@ namespace DataLayer.Context
             AddAuditSeat();           // package 9: audit programme, runs, findings, reports, process audits (FinanceAuditTrail.AuditSeat.cs)
             AddAgents();              // agent layer: tasks of the process agents, their events, the step switches (FinanceAuditTrail.Agents.cs)
             AddSepidarTransfer();     // Sepidar transfer per document: kinds, queue items, attempts (FinanceAuditTrail.Sepidar.cs)
+            AddEngInbox();            // ENG-F1: engineering inbox packages and their document references (FinanceAuditTrail.EngInbox.cs)
             AddResources();           // project control priority 4: resource pool, standard rates, resource plan (FinanceAuditTrail.Resources.cs)
             AddGoLive();              // package G: legacy register, adoptions, PO drawing citation; engineering masters in the record-drift scope (FinanceAuditTrail.GoLive.cs)
             var more = new Dictionary<Type, string[]>
