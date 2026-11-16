@@ -496,6 +496,7 @@ const links = {
     { title: "پذیرش طراحی موجود", routeName: "DesignAdoptions", disabled: !hasRole(DesignRoles.readers) },
     { title: "درخواست‌های تغییر مهندسی (ECR)", routeName: "EngChangeRequests", disabled: !hasRole(EcRoles.readers) },
     { title: "دستورهای تغییر مهندسی (ECO)", routeName: "EngChangeOrders", disabled: !hasRole(EcRoles.readers) },
+    { title: "صندوق ورودی مهندسی", routeName: "EngInbox", disabled: !hasRole(EngInboxRoles.read) },
     { title: "بالانس خودکار مواد پروژه", routeName: "ProjectBalance", disabled: !hasRole(BalanceRoles.readers) },
     { title: "کالاهای جایگزین", routeName: "ProjectBalanceSubstitutes", disabled: !hasRole(BalanceRoles.readers) },
     { title: "نگاشت کد قدیم به شماره قطعه", routeName: "ProductBankMappings", disabled: !hasRole(PbRoles.readers) },
@@ -695,7 +696,6 @@ onBeforeUnmount(() => {
 const agentLinks = computed<Links[]>(() => [
   { title: "کارتابل گیت", routeName: "AgInbox", badge: agentOpen.value },
   { title: "نمای ایجنت اصلی", routeName: "AgBoard", disabled: !hasRole(AgentRoles.board), hidden: !hasRole(AgentRoles.board) },
-  { title: "صندوق ورودی مهندسی", routeName: "EngInbox", disabled: !hasRole(EngInboxRoles.read), hidden: !hasRole(EngInboxRoles.read) },
 ]);
 const officeLinks = computed<Links[]>(() => [
   { title: "کارتابل اداری", routeName: "OfInbox", badge: inboxOpen.value },

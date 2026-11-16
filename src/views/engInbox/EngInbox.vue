@@ -2,17 +2,22 @@
 // ENG-F1 «صندوق ورودی مهندسی»: what the engineering unit dropped into the server folder, what the engineering agent found wrong (and why it was refused) and what it did with each package.
 // Read by EngInboxRoles.read; scan now and dismiss by ENGINEERING and PMO. The agent applies a package to the product bank only through the normal BOM and routing drafts (people still sign them).
 import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import { downloadEngInboxFile, dismissEngInboxPackage, getEngInboxPackage, getEngInboxPackages, getEngInboxStatus, scanEngInbox } from "@/api/EngInboxAPIs";
 import { rowsOf } from "@/api/ApiClient";
 import { fa, faDigits, jalali } from "@/composables/agents";
 import { fail, ok } from "@/composables/inventory";
 import { EngInboxRoles, hasRole } from "@/composables/roles";
 
+const route = useRoute();
 const canOperate = hasRole(EngInboxRoles.operate);
 
 const statusTitles: Record<number, string> = { 1: "دریافت‌شده", 2: "ردشده", 3: "اعمال‌شده", 4: "متوقف در اعمال", 5: "جایگزین‌شده", 6: "بسته‌شده" };
 const kindTitles: Record<number, string> = { 1: "پلتفرم", 2: "پروژه" };
-const makeBuyTitles: Record<number, string> = { 1: "ساخت", 2: "خرید" };
+const makeBuyTitles: Record<number, string> = { 1: "ساخت", 2: "خرید", 3: "تأمین‌شده توسط کارفرما", 4: "پیمانکاری فرعی" };
+// the status of the BOM (PbBomStatus) and of the routing (PbRoutingStatus) arrive as numbers and are named here
+const bomStatusTitles: Record<number, string> = { 0: "پیش‌نویس", 1: "در حال بررسی", 2: "تأییدشده", 3: "منتشرشده", 4: "جایگزین‌شده", 5: "منسوخ" };
+const routingStatusTitles: Record<number, string> = { 0: "پیش‌نویس", 1: "در حال بررسی", 2: "تأییدشده", 3: "جایگزین‌شده" };
 
 const status = ref<any | null>(null);
 const rows = ref<any[]>([]);
@@ -104,9 +109,37 @@ async function download(which: "template" | "sample") {
   if (error) fail(error);
 }
 
+// the BOM as an indented tree: every line sits under its parent (the root first); lines whose parent is unknown are shown last at level zero
+const bomTree = computed<any[]>(() => {
+  const lines: any[] = selected.value?.bomLines || [];
+  const byParent = new Map<string, any[]>();
+  for (const l of lines) {
+    const key = l.parentCode || "";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(l);
+  }
+  const out: { line: any; depth: number }[] = [];
+  const seen = new Set<any>();
+  const walk = (parent: string, depth: number) => {
+    for (const l of byParent.get(parent) || []) {
+      if (seen.has(l)) continue;
+      seen.add(l);
+      out.push({ line: l, depth });
+      walk(l.partCode, depth + 1);
+    }
+  };
+  walk("", 0);
+  for (const l of lines) if (!seen.has(l)) out.push({ line: l, depth: 0 });
+  return out;
+});
+
 const statusClass = (s: number) => ({ 1: "info", 2: "bad", 3: "good", 4: "warn", 5: "muted", 6: "muted" } as Record<number, string>)[s] || "";
 
-onMounted(reload);
+onMounted(async () => {
+  await reload();
+  const q = Number(route.query.package);
+  if (Number.isInteger(q) && q > 0) await openPackage(q);
+});
 </script>
 
 <template>
@@ -118,9 +151,9 @@ onMounted(reload);
           <p>واحد مهندسی بستهٔ اسناد را در پوشهٔ سرور می‌گذارد؛ ایجنت مهندسی آن را می‌خواند، خطاها را با علت می‌نویسد و BOM و مسیر ساخت را به‌صورت پیش‌نویس در بانک محصول می‌سازد. امضا و تأیید با انسان است.</p>
         </div>
         <div class="ei-actions">
-          <button v-if="canOperate" :disabled="scanning || (status && !status.isConfigured)" class="ei-btn primary" type="button" @click="scan">{{ scanning ? "در حال بررسی..." : "بررسی پوشه" }}</button>
+          <button v-if="canOperate" :disabled="scanning || !status || !status.canScan" :title="status?.scanDisabledReason || ''" class="ei-btn primary" type="button" @click="scan">{{ scanning ? "در حال بررسی..." : "اسکن اکنون" }}</button>
           <button class="ei-btn" type="button" @click="download('template')">دریافت قالب خالی</button>
-          <button class="ei-btn" type="button" @click="download('sample')">دریافت نمونهٔ کامل</button>
+          <button class="ei-btn" type="button" @click="download('sample')">دریافت بستهٔ نمونه</button>
         </div>
       </div>
       <div v-if="status" class="ei-source">
@@ -129,6 +162,8 @@ onMounted(reload);
         <span v-if="status.lastScanAt" class="inv-muted">آخرین بررسی: {{ jalali(status.lastScanAt, true) }} — {{ status.lastScanNote }}</span>
         <span v-else class="inv-muted">هنوز بررسی انجام نشده است.</span>
       </div>
+      <p v-if="status && canOperate && status.scanDisabledReason" class="ei-warn">{{ status.scanDisabledReason }}</p>
+      <p v-if="status && status.applyPausedReason" class="ei-warn">{{ status.applyPausedReason }}</p>
       <div v-if="status" class="ei-tiles">
         <button v-for="s in [1, 2, 4, 3, 5, 6]" :key="s" :class="['ei-tile', statusClass(s), { on: filterStatus === s }]" type="button" @click="filterStatus = filterStatus === s ? '' : s; applyFilter()">
           <b>{{ fa(countOf(s)) }}</b><span>{{ statusTitles[s] }}</span>
@@ -187,8 +222,8 @@ onMounted(reload);
         </div>
         <div class="ei-links inv-muted">
           <div v-if="selected.productCode">محصول: <bdi class="inv-ltr" dir="ltr">{{ selected.productCode }}</bdi></div>
-          <div v-if="selected.bomCode">BOM: <bdi class="inv-ltr" dir="ltr">{{ selected.bomCode }}</bdi> — ویرایش {{ fa(selected.bomRevision) }} ({{ selected.bomStatus }})</div>
-          <div v-if="selected.routingPartNumber">مسیر ساخت: <bdi class="inv-ltr" dir="ltr">{{ selected.routingPartNumber }}</bdi> — ویرایش {{ fa(selected.routingRevision) }} ({{ selected.routingStatus }})</div>
+          <div v-if="selected.bomCode">BOM: <router-link v-if="selected.bomHeaderId" :to="{ name: 'ProductBankBomEdit', params: { id: selected.bomHeaderId } }"><bdi class="inv-ltr" dir="ltr">{{ selected.bomCode }}</bdi></router-link><bdi v-else class="inv-ltr" dir="ltr">{{ selected.bomCode }}</bdi> — ویرایش {{ fa(selected.bomRevision) }} ({{ bomStatusTitles[selected.bomStatusCode] || "" }})</div>
+          <div v-if="selected.routingPartNumber">مسیر ساخت: <router-link v-if="selected.routingId" :to="{ name: 'ProductBankRoutingEdit', params: { id: selected.routingId } }"><bdi class="inv-ltr" dir="ltr">{{ selected.routingPartNumber }}</bdi></router-link><bdi v-else class="inv-ltr" dir="ltr">{{ selected.routingPartNumber }}</bdi> — ویرایش {{ fa(selected.routingRevision) }} ({{ routingStatusTitles[selected.routingStatusCode] || "" }})</div>
           <div v-if="selected.storedPath">پوشهٔ بایگانی: <bdi class="inv-ltr" dir="ltr">{{ selected.storedPath }}</bdi></div>
         </div>
       </div>
@@ -220,16 +255,16 @@ onMounted(reload);
         <table v-else-if="tab === 'bom'" class="ei-table">
           <thead><tr><th>سطح</th><th>پدر</th><th>کد قطعه</th><th>شرح</th><th>تعداد</th><th>واحد</th><th>ساخت/خرید</th><th>جنس</th><th>نقشه</th></tr></thead>
           <tbody>
-            <tr v-for="(l, i) in selected.bomLines" :key="i">
-              <td>{{ fa(l.level) }}</td>
-              <td><bdi class="inv-ltr" dir="ltr">{{ l.parentCode }}</bdi></td>
-              <td><bdi class="inv-ltr" dir="ltr">{{ l.partCode }}</bdi></td>
-              <td>{{ l.description }}</td>
-              <td>{{ fa(l.qty) }}</td>
-              <td>{{ l.unit }}</td>
-              <td>{{ makeBuyTitles[l.makeBuy] || "" }}</td>
-              <td>{{ l.material }}</td>
-              <td><bdi class="inv-ltr" dir="ltr">{{ l.drawingNumber }} {{ l.drawingRevision }}</bdi></td>
+            <tr v-for="(n, i) in bomTree" :key="i">
+              <td>{{ fa(n.line.level) }}</td>
+              <td><bdi class="inv-ltr" dir="ltr">{{ n.line.parentCode }}</bdi></td>
+              <td :style="{ paddingInlineStart: 10 + n.depth * 18 + 'px' }"><bdi class="inv-ltr" dir="ltr">{{ n.line.partCode }}</bdi></td>
+              <td>{{ n.line.description }}</td>
+              <td>{{ fa(n.line.qty) }}</td>
+              <td>{{ n.line.unit }}</td>
+              <td>{{ makeBuyTitles[n.line.makeBuy] || "" }}</td>
+              <td>{{ n.line.material }}</td>
+              <td><bdi class="inv-ltr" dir="ltr">{{ n.line.drawingNumber }} {{ n.line.drawingRevision }}</bdi></td>
             </tr>
           </tbody>
         </table>
