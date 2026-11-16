@@ -34,7 +34,7 @@ watch(selected, loadDetail);
 <template>
   <div class="inv-page">
     <div class="inv-card">
-      <div class="inv-toolbar"><h1 class="inv-title">شکاف استاندارد</h1></div>
+      <div class="inv-toolbar"><h1 class="inv-title">تفاوت استاندارد</h1></div>
       <EnGapView v-if="detail" :gap="detail" @changed="reload" />
       <div class="inv-filters mb-3">
         <select v-model="filters.Status" class="form-select form-select-sm" aria-label="وضعیت">
@@ -45,7 +45,7 @@ watch(selected, loadDetail);
         <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
       </div>
       <p v-if="list.loading.value" class="inv-muted">در حال خواندن…</p>
-      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">گزارش شکافی نیست؛ ایجنت مهندسی وقتی استاندارد پروژه با استاندارد پلتفرم فرق کند آن را می‌سازد.</p>
+      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">گزارش تفاوت دو استانداردی نیست؛ ایجنت مهندسی وقتی استاندارد پروژه با استاندارد پلتفرم فرق کند آن را می‌سازد.</p>
       <div v-else class="table-responsive">
         <table class="table table-sm table-hover">
           <thead><tr><th>شماره</th><th>پرونده</th><th>از</th><th>به</th><th>وضعیت</th><th>افزوده</th><th>حذف</th><th>تغییر الزام</th></tr></thead>

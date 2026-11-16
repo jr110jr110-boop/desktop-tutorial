@@ -30,7 +30,7 @@ async function load() {
   x.value = d;
   const [dv] = await getEnDeviations({ PageSize: 500 });
   const map: Record<number, any> = {};
-  (dv?.data || []).filter((v: any) => v.targetType === "EnPlatformDocument").forEach((v: any) => (map[v.targetId] = v));
+  (dv?.data || []).filter((v: any) => v.targetType === "EnPlatformDocument" && (!v.productId || v.productId === d.productId)).forEach((v: any) => (map[v.targetId] = v));
   deviations.value = map;
 }
 onMounted(load);
@@ -46,7 +46,7 @@ const act = (action: string, note?: string) => postEnDossierAction({ productId: 
 function supply(l: any) {
   d.ask({
     title: l.state === 1 ? "جایگزینی فایل: " + l.title : "ثبت فایل: " + l.title,
-    fields: [{ key: "file", label: "فایل مدرک", type: "file", required: true }, { key: "rev", label: "ویرایش (Revision)", required: true, max: 20 }],
+    fields: [{ key: "file", label: "فایل مدرک", type: "file", required: true }, { key: "rev", label: "ویرایش مدرک", required: true, max: 20 }],
     run: async (v) => {
       const [id, e] = await uploadDoc(v.file);
       if (e) return [null, e];
@@ -68,10 +68,10 @@ const reason = (title: string, action: string, label: string, okText: string) =>
   d.ask({ title, fields: [{ key: "n", label, type: "textarea", required: true, min: 15, max: 2000 }], run: (v) => act(action, v.n), okText });
 function standardDialog() {
   d.ask({
-    title: "ثبت استاندارد بومی",
+    title: "ثبت استاندارد از دیتاشیت اصلی",
     fields: [{ key: "c", label: "کد استاندارد", required: true, max: 40 }, { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 }],
     run: (v) => postEnDossierAction({ productId: productId.value, action: "native-standard", referenceCode: v.c, standardBasis: v.b }),
-    okText: "استاندارد بومی ثبت شد.",
+    okText: "استاندارد از دیتاشیت اصلی ثبت شد.",
   });
 }
 </script>
@@ -105,7 +105,7 @@ function standardDialog() {
         <div v-if="x.note" class="small mb-2">یادداشت: {{ x.note }}</div>
 
         <div class="mb-3">
-          <EnAction :can="x.canRecordStandard" :reason="x.recordStandardBlockedReason" :roles="EnRoles.writers" label="ثبت استاندارد بومی" variant="outline-primary" @go="standardDialog" />
+          <EnAction :can="x.canRecordStandard" :reason="x.recordStandardBlockedReason" :roles="EnRoles.writers" label="ثبت استاندارد از دیتاشیت اصلی" variant="outline-primary" @go="standardDialog" />
           <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" label="ارزیابی دوباره" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
           <EnAction :can="x.canComplete" :reason="x.completeBlockedReason" :roles="EnRoles.writers" label="اعلام کامل‌شدن" variant="outline-primary" @go="runEn(() => act('complete'), 'کامل‌شدن اعلام شد.', load)" />
           <EnAction :can="x.canConfirm" :reason="x.confirmBlockedReason" :roles="[...EnRoles.manager, ...EnRoles.ceo]" label="تایید کامل بودن" variant="success" @go="runEn(() => act('confirm'), 'پرونده تایید شد.', load)" />

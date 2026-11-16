@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
@@ -13,6 +13,12 @@ const q = (k: string) => (route.query[k] !== undefined && route.query[k] !== "" 
 const filters = ref({ Status: q("status"), Classification: q("classification"), Contains: "", OnlyOpen: false });
 const list = usePagedList(getEnCases, filters, 25);
 onMounted(list.load);
+// A click on another overview card changes the query of the same page: the filters follow it.
+watch(() => route.query, () => {
+  filters.value.Status = q("status");
+  filters.value.Classification = q("classification");
+  list.search();
+});
 </script>
 
 <template>
@@ -46,7 +52,7 @@ onMounted(list.load);
               <td><EnChip :status="c.status" :text="c.statusText" group="case" /></td>
               <td>{{ c.classificationText }}</td>
               <td>{{ faDigits(String(c.openClarifications || 0)) }}</td>
-              <td><span v-if="c.platformIncomplete" class="inv-badge warn">مدارک پلتفرم ناقص</span></td>
+              <td><span v-if="c.platformIncomplete" class="inv-badge warn">مدارک پلتفرم ناقص</span><span v-if="c.documentRiskAwarded" class="inv-badge bad ms-1" :title="c.documentRisk || ''">خطر مدارک</span></td>
             </tr>
           </tbody>
         </table>

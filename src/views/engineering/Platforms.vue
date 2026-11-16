@@ -2,11 +2,9 @@
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
-import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
-import EnPrompt from "@/components/engineering/EnPrompt.vue";
-import { getEnPlatforms, getEnPlatformSummary, postEnDossierAction } from "@/api/EngineeringAPIs";
-import { completeness, dossierStatuses, enPaths, EnRoles, faDigits, faNum, useEnDialog } from "@/composables/engineering";
+import { getEnPlatforms, getEnPlatformSummary } from "@/api/EngineeringAPIs";
+import { completeness, dossierStatuses, enPaths, faDigits, faNum } from "@/composables/engineering";
 import { usePagedList } from "@/composables/fn";
 
 // The platform dossiers: one row per product and standard, and the products without any dossier as «ارزیابی‌نشده» with the action to record their own standard.
@@ -20,19 +18,6 @@ async function reload() {
   summary.value = s;
 }
 onMounted(reload);
-const d = useEnDialog(reload);
-function nativeStandard(p: any) {
-  d.ask({
-    title: "ثبت استاندارد بومی " + p.productCode,
-    hint: "استاندارد دیتاشیت اصلی این پلتفرم را ثبت کنید؛ پرونده مدارک برای آن ساخته می‌شود.",
-    fields: [
-      { key: "code", label: "کد استاندارد", required: true, max: 40 },
-      { key: "basis", label: "مبنای استاندارد (شماره دیتاشیت و بند)", required: true, min: 5, max: 500 },
-    ],
-    run: (v) => postEnDossierAction({ productId: p.productId, action: "native-standard", referenceCode: v.code, standardBasis: v.basis }),
-    okText: "استاندارد بومی ثبت شد.",
-  });
-}
 </script>
 
 <template>
@@ -74,7 +59,7 @@ function nativeStandard(p: any) {
                 <span v-else class="inv-muted small">—</span>
               </td>
               <td>
-                <EnAction v-if="p.nativeStandardMissing && !p.dossierId" :can="true" :roles="EnRoles.writers" label="ثبت استاندارد بومی" variant="outline-primary" @go="nativeStandard(p)" />
+                <router-link v-if="p.nativeStandardMissing && !p.dossierId" :to="enPaths.platform(p.productId)" class="btn btn-sm btn-outline-primary">ثبت استاندارد از دیتاشیت اصلی</router-link>
                 <span v-if="p.tenderStageMissingCount" class="small text-danger">{{ faDigits(String(p.tenderStageMissingCount)) }} مدرک مرحله مناقصه کم است</span>
               </td>
             </tr>
@@ -83,6 +68,5 @@ function nativeStandard(p: any) {
       </div>
       <QPager :page="list.page.value" :page-size="25" :total="list.total.value" @go="list.go" />
     </div>
-    <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />
   </div>
 </template>

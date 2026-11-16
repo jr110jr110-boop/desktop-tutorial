@@ -7,10 +7,10 @@ import EnGapView from "@/components/engineering/EnGapView.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
 import {
-  decideEnRegistration, getEnCase, getEnCharterView, getEnClarifications, getEnGap, getEnHandovers, getEnPlatforms, getEnRegistrations, postEnCaseAction, postEnClarificationAction,
+  decideEnRegistration, getEnCase, getEnCharterView, getEnClarifications, getEnGap, getEnHandovers, getEnPlatforms, getEnReferenceLists, getEnRegistrations, postEnCaseAction, postEnClarificationAction,
   proposeEnRegistration, saveEnClarification,
 } from "@/api/EngineeringAPIs";
-import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, handoverStatuses, runEn, useEnDialog } from "@/composables/engineering";
+import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, downloadDoc, handoverStatuses, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -28,6 +28,7 @@ const products = ref<{ value: number; text: string }[]>([]);
 const loading = ref(true);
 const message = ref("");
 const showCharter = ref(false);
+const sideError = ref("");
 
 async function load() {
   loading.value = true;
@@ -39,17 +40,26 @@ async function load() {
   }
   message.value = "";
   c.value = d;
-  const [cl] = await getEnClarifications({ CaseId: id.value, PageSize: 100 });
+  // The charter shown belongs to the case and its review state: it is read again after a change of case or a changed charter.
+  charter.value = null;
+  showCharter.value = false;
+  const errs: string[] = [];
+  const [cl, ce] = await getEnClarifications({ CaseId: id.value, PageSize: 100 });
   clars.value = cl?.data || [];
-  const [hs] = await getEnHandovers({ CaseId: id.value, PageSize: 50 });
+  if (ce) errs.push("شفاف‌سازی‌ها");
+  const [hs, he] = await getEnHandovers({ CaseId: id.value, PageSize: 50 });
   handovers.value = hs?.data || [];
-  const [rg] = await getEnRegistrations({ CaseId: id.value, PageSize: 20 });
+  if (he) errs.push("دورهای تحویل");
+  const [rg, re] = await getEnRegistrations({ CaseId: id.value, PageSize: 20 });
   regs.value = rg?.data || [];
+  if (re) errs.push("پیشنهادهای ثبت پلتفرم");
   gap.value = null;
   if (d.standardGap?.id) {
-    const [g] = await getEnGap(d.standardGap.id);
+    const [g, ge] = await getEnGap(d.standardGap.id);
     gap.value = g;
+    if (ge) errs.push("گزارش تفاوت دو استاندارد");
   }
+  sideError.value = errs.length ? "این بخش‌ها خوانده نشد: " + errs.join("، ") + "." : "";
 }
 onMounted(load);
 watch(id, load);
@@ -91,37 +101,92 @@ const standardDialog = () =>
     fields: [
       { key: "code", label: "کد استاندارد (مطابق دیتاشیت)", required: true, max: 40, value: c.value.referenceCode || "" },
       { key: "evidence", label: "شاهد از دیتاشیت (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
+      { key: "file", label: "فایل دیتاشیت (اختیاری)", type: "file" as const },
       ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
     ],
-    run: (v) => act("set-standard", { referenceCode: v.code, standardEvidence: v.evidence, note: v.note }),
+    run: async (v) => {
+      let att = c.value.standardAttachmentId || null;
+      if (v.file) {
+        const [fid, fe] = await uploadDoc(v.file);
+        if (fe) return [null, fe];
+        att = fid;
+      }
+      return act("set-standard", { referenceCode: v.code, standardEvidence: v.evidence, standardAttachmentId: att, note: v.note });
+    },
     okText: "استاندارد از دیتاشیت ثبت شد.",
   });
 const opinionDialog = () =>
   dlg.ask({
     title: "نظر فنی مهندسی",
     hint: "برای قطعه یدکی و خدمات، نظر فنی جای تعیین نوع و تایید مدیرعامل را می‌گیرد.",
-    fields: [{ key: "opinion", label: "نظر فنی", type: "textarea", required: true, max: 4000, value: c.value.opinionText || "" }, { key: "code", label: "کد فهرست مدارک تحویل (اختیاری)", max: 40, value: c.value.handoverListCode || "" }],
-    run: (v) => act("save-opinion", { opinionText: v.opinion, handoverListCode: v.code }),
+    fields: [{ key: "opinion", label: "نظر فنی", type: "textarea", required: true, min: 30, max: 4000, value: c.value.opinionText || "" }],
+    run: (v) => act("save-opinion", { opinionText: v.opinion }),
     okText: "نظر فنی ذخیره شد.",
+  });
+// Spare parts and services: the manager chooses the handover list at the confirm (the server reads it with the confirm action).
+async function confirmListDialog() {
+  const [d, e] = await getEnReferenceLists({ Status: 2, PageSize: 100 });
+  if (e) fail(e);
+  const options = (d?.data || []).filter((l: any) => l.isCurrent).map((l: any) => ({ value: l.code, text: `${l.code} — ${l.title}` }));
+  dlg.ask({
+    title: "تایید مدیر مهندسی",
+    hint: "فهرست مدارک تحویل این پرونده را (اختیاری) از فهرست‌های تاییدشده انتخاب کنید.",
+    fields: [{ key: "code", label: "فهرست مدارک تحویل", type: "select", options, value: c.value.handoverListCode || "" }],
+    run: (v) => act("confirm", { handoverListCode: v.code || null }),
+    okText: "تایید مدیر مهندسی ثبت شد.",
+  });
+}
+// Adding a tender or concept document: shown only when the server says it is allowed (canAddTenderDocument).
+const tenderDocDialog = () =>
+  dlg.ask({
+    title: "افزودن مدرک به بسته فنی مناقصه",
+    fields: [{ key: "title", label: "عنوان مدرک", required: true, max: 200 }, { key: "file", label: "فایل", type: "file", required: true }],
+    run: async (v) => {
+      const [fid, fe] = await uploadDoc(v.file);
+      return fe ? [null, fe] : act("add-tender-document", { documentId: fid, title: v.title });
+    },
+    okText: "مدرک به بسته افزوده شد.",
   });
 const conceptDialog = () =>
   dlg.ask({ title: "یادداشت طرح مفهومی", fields: [{ key: "t", label: "یادداشت", type: "textarea", required: true, max: 4000, value: c.value.conceptNote || "" }], run: (v) => act("save-concept", { conceptNote: v.t }), okText: "یادداشت ذخیره شد." });
 
 // clarifications
 const clarAct = (x: any, action: string, extra: any = {}) => postEnClarificationAction({ id: x.id, action, rowVersion: x.rowVersion, ...extra });
+// A file typed into a dialog is uploaded first; the server's refusal of the file stays in the dialog.
+const withFile = async (file: File | null): Promise<[string[], Error | null]> => {
+  if (!file) return [[], null];
+  const [fid, fe] = await uploadDoc(file);
+  return fe ? [[], fe] : [[fid as string], null];
+};
 const newQuestion = () =>
-  dlg.ask({ title: "پرسش تازه از کارفرما", fields: [{ key: "q", label: "پرسش", type: "textarea", required: true, max: 4000 }], run: (v) => saveEnClarification({ caseId: id.value, question: v.q }), okText: "پرسش ذخیره شد." });
+  dlg.ask({
+    title: "پرسش تازه از کارفرما",
+    fields: [{ key: "q", label: "پرسش", type: "textarea", required: true, max: 4000 }, { key: "file", label: "پیوست پرسش (اختیاری)", type: "file" }],
+    run: async (v) => {
+      const [att, fe] = await withFile(v.file);
+      return fe ? [null, fe] : saveEnClarification({ caseId: id.value, question: v.q, questionAttachments: att });
+    },
+    okText: "پرسش ذخیره شد.",
+  });
 const sendDialog = (x: any) =>
   dlg.ask({ title: "ثبت ارسال به کارفرما", fields: [{ key: "ref", label: "شماره نامه ارسالی", required: true, max: 100 }], run: (v) => clarAct(x, "send", { clientLetterRef: v.ref }), okText: "ارسال به کارفرما ثبت شد." });
 const answerDialog = (x: any) =>
-  dlg.ask({ title: "ثبت پاسخ کارفرما", fields: [{ key: "a", label: "پاسخ", type: "textarea", required: true, max: 4000 }], run: (v) => clarAct(x, "answer", { answer: v.a }), okText: "پاسخ ثبت شد." });
+  dlg.ask({
+    title: "ثبت پاسخ کارفرما",
+    fields: [{ key: "a", label: "پاسخ", type: "textarea", required: true, max: 4000 }, { key: "file", label: "نامهٔ پاسخ کارفرما (پیوست، اختیاری)", type: "file" }],
+    run: async (v) => {
+      const [att, fe] = await withFile(v.file);
+      return fe ? [null, fe] : clarAct(x, "answer", { answer: v.a, answerAttachments: att });
+    },
+    okText: "پاسخ ثبت شد.",
+  });
 const reaskDialog = (x: any) =>
   dlg.ask({ title: "پرسش مجدد", fields: [{ key: "q", label: "پرسش تازه", type: "textarea", required: true, max: 4000 }], run: (v) => clarAct(x, "reask", { question: v.q }), okText: "پرسش مجدد ثبت شد." });
 const voidClar = (x: any) =>
   dlg.ask({ title: "ابطال شفاف‌سازی", fields: [{ key: "n", label: "دلیل", type: "textarea", required: true, min: 15, max: 2000 }], run: (v) => clarAct(x, "void", { note: v.n }), okText: "شفاف‌سازی باطل شد." });
 
 // registration of a new design as a platform
-const canPropose = computed(() => c.value && c.value.classification === 2 && c.value.status >= 7 && c.value.status <= 10 && hasRole(EnRoles.manager) && !regs.value.some((r) => r.status === 0));
+// Whether the registration may be proposed is the server's decision (canProposeRegistration / proposeRegistrationBlockedReason on the case); without the flag nothing is shown.
 async function registerDialog() {
   await loadProducts();
   dlg.ask({
@@ -153,7 +218,11 @@ async function toggleCharter() {
     else charter.value = d;
   }
 }
-const charterSections = [["overview", "کلیات"], ["scopeDescription", "دامنه"], ["requirements", "الزامات"], ["deliverables", "تحویل‌دادنی‌ها"], ["boundaries", "مرزها"], ["assumptions", "فرض‌ها"], ["constraints", "محدودیت‌ها"], ["risks", "ریسک‌ها"]];
+const charterSections = [
+  ["overview", "کلیات"], ["scopeDescription", "دامنه"], ["requirements", "الزامات"], ["deliverables", "تحویل‌دادنی‌ها"], ["boundaries", "مرزها"], ["timeBaselineEstimate", "برآورد زمان پایه"],
+  ["alternativesAnalysis", "تحلیل گزینه‌ها"], ["assumptions", "فرض‌ها"], ["constraints", "محدودیت‌ها"], ["risks", "ریسک‌ها"], ["stakeholders", "ذی‌نفعان"], ["preAssignedResources", "منابع از پیش تعیین‌شده"],
+  ["managerAuthority", "اختیارات مدیر پروژه"],
+];
 const cls = (done: boolean, wait = false) => ({ done, wait });
 </script>
 
@@ -184,14 +253,15 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
           این پرونده {{ c.status === 2 ? "منتظر تایید مدیر مهندسی" : "منتظر تایید مدیرعامل" }} است؛ درخواست منقضی نمی‌شود و تا تصمیم گرفته شود هشدار می‌ماند.
         </div>
         <div v-if="c.returnReason" class="en-banner amber">برگشت‌خورده: {{ c.returnReason }}</div>
-        <div v-if="c.platformIncomplete && c.status >= 4 && c.status <= 7" class="en-banner red" data-test="en-risk-banner">
-          خطر مدارک: {{ c.platformWarning || "مدارک پلتفرم برای استاندارد این پروژه کامل و تایید نشده است." }}
+        <div v-if="sideError" class="en-banner amber" role="status">{{ sideError }}</div>
+        <div v-if="c.documentRisk" :class="['en-banner', c.documentRiskAwarded ? 'red' : 'amber']" data-test="en-risk-banner">
+          خطر مدارک{{ c.documentRiskAwarded ? " (پرونده برنده شده)" : "" }}: {{ c.documentRisk }}
         </div>
 
         <h2 class="h6">استاندارد پروژه (از دیتاشیت کارفرما)</h2>
         <div class="en-box" data-test="en-standard">
           <div v-if="c.standardMissing" class="en-banner amber mb-2">استاندارد این پروژه هنوز از دیتاشیت کارفرما ثبت نشده است.</div>
-          <dl v-else class="en-kv mb-2"><dt>کد استاندارد</dt><dd class="inv-ltr">{{ c.referenceCode }}</dd><dt>شاهد</dt><dd>{{ c.standardEvidence }}</dd></dl>
+          <dl v-else class="en-kv mb-2"><dt>کد استاندارد</dt><dd class="inv-ltr">{{ c.referenceCode }}</dd><dt>شاهد</dt><dd>{{ c.standardEvidence }}<a v-if="c.standardAttachmentId" href="#" class="ms-2" @click.prevent="downloadDoc(c.standardAttachmentId, 'datasheet')">دیدن دیتاشیت</a></dd></dl>
           <EnAction :can="c.canSetStandard" :reason="c.setStandardBlockedReason" :roles="EnRoles.standardSetters" :label="c.referenceCode ? 'تغییر استاندارد (با دلیل)' : 'ثبت از دیتاشیت'" variant="outline-primary" @go="standardDialog" />
         </div>
 
@@ -203,7 +273,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <div class="en-box">
                 <dl class="en-kv">
                   <dt>طبقه‌بندی فعلی</dt><dd>{{ c.classificationText }}<span v-if="c.productCode"> — {{ c.productCode }}</span></dd>
-                  <dt>پیشنهاد</dt><dd>{{ c.proposedClassificationText }}<span v-if="c.proposedProductCode"> — {{ c.proposedProductCode }}</span><span v-if="c.proposedWithChanges"> (با تغییرات)</span> <span v-if="c.proposedByAgent" class="inv-badge info">پیشنهاد ایجنت</span><span v-if="c.proposedByName"> {{ c.proposedByName }}</span></dd>
+                  <dt>پیشنهاد</dt><dd>{{ c.proposedClassificationText }}<span v-if="c.proposedProductCode"> — {{ c.proposedProductCode }}</span><span v-if="c.proposedWithChanges"> (با تغییرات)</span> <span v-if="c.proposedByAgent" class="inv-badge info">پیشنهاد ایجنت</span><span v-else-if="c.proposedByName"> {{ c.proposedByName }}</span></dd>
                   <dt>مبنا</dt><dd class="en-pre">{{ c.proposalBasis || "—" }}</dd>
                   <dt v-if="c.proposedChangeNote">تغییرات</dt><dd v-if="c.proposedChangeNote" class="en-pre">{{ c.proposedChangeNote }}</dd>
                   <dt>تایید مدیر مهندسی</dt><dd>{{ c.engConfirmedByName ? c.engConfirmedByName + "، " + faDigits(c.engConfirmedAtText || "") : "—" }}</dd>
@@ -227,10 +297,10 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
                   <dt>تایید مدیر مهندسی</dt><dd>{{ c.engConfirmedByName ? c.engConfirmedByName + "، " + faDigits(c.engConfirmedAtText || "") : "—" }}</dd></dl>
               </div>
               <EnAction :can="c.canSaveOpinion" :reason="c.saveOpinionBlockedReason" :roles="EnRoles.writers" label="ثبت نظر فنی" variant="outline-primary" @go="opinionDialog" />
-              <EnAction :can="c.canConfirm" :reason="c.confirmBlockedReason" :roles="EnRoles.manager" label="تایید مدیر مهندسی" variant="success" @go="direct('confirm', 'تایید مدیر مهندسی ثبت شد.')" />
+              <EnAction :can="c.canConfirm" :reason="c.confirmBlockedReason" :roles="EnRoles.manager" label="تایید مدیر مهندسی" variant="success" @go="confirmListDialog" />
               <EnAction :can="c.canReturn" :reason="c.returnBlockedReason" :roles="EnRoles.manager" label="برگشت با دلیل" variant="outline-danger" @go="reasonDialog('return', 'برگشت نظر فنی', 'دلیل برگشت', 'پرونده برگشت داده شد.')" />
             </template>
-            <h4 v-if="gap" class="h6 mt-2">شکاف استاندارد</h4>
+            <h4 v-if="gap" class="h6 mt-2">تفاوت استاندارد</h4>
             <EnGapView v-if="gap" :gap="gap" link @changed="load" />
             <p v-else-if="c.standardGap" class="small">{{ c.standardGap.number }}: {{ c.standardGap.summary }}</p>
           </li>
@@ -244,9 +314,14 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
                 <dt>انتشار</dt><dd>{{ c.tenderReleasedByName ? c.tenderReleasedByName + "، " + faDigits(c.tenderReleasedAtText || "") : "—" }}</dd>
                 <dt>یادداشت طرح مفهومی</dt><dd class="en-pre">{{ c.conceptNote || "—" }}</dd>
               </dl>
+              <template v-if="c.tenderDocuments?.length">
+                <div class="small mt-2"><strong>مدارک بسته:</strong></div>
+                <ul class="small mb-0"><li v-for="t in c.tenderDocuments" :key="t.documentId || t.id"><a href="#" @click.prevent="downloadDoc(t.documentId, t.title || 'document')">{{ t.title || t.name }}</a></li></ul>
+              </template>
               <div v-if="c.tenderStale" class="en-banner amber mt-2 mb-0">محتوای بسته پس از آخرین بررسی تغییر کرده است؛ ایجنت آن را دوباره بررسی می‌کند.</div>
             </div>
             <EnAction :can="c.canSaveConcept" :reason="c.saveConceptBlockedReason" :roles="EnRoles.writers" label="ثبت یادداشت طرح مفهومی" variant="outline-primary" @go="conceptDialog" />
+            <EnAction v-if="c.canAddTenderDocument !== undefined" :can="c.canAddTenderDocument" :reason="c.addTenderDocumentBlockedReason" :roles="EnRoles.writers" label="افزودن مدرک طرح مفهومی یا بسته مناقصه" variant="outline-primary" @go="tenderDocDialog" />
             <EnAction :can="c.canReleaseTender" :reason="c.releaseTenderBlockedReason" :roles="EnRoles.manager" label="انتشار بسته فنی" variant="success" @go="direct('release-tender', 'بسته فنی منتشر شد.')" />
           </li>
 
@@ -261,6 +336,8 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
                 <dt>ارسال به کارفرما (بازرگانی)</dt><dd>{{ x.sentToClientByName ? x.sentToClientByName + "، " + faDigits(x.sentToClientAtText || "") : "—" }}</dd>
                 <dt>شماره نامه</dt><dd>{{ x.clientLetterRef ? faDigits(x.clientLetterRef) : "—" }}</dd>
                 <dt>پاسخ کارفرما</dt><dd class="en-pre">{{ x.answer || "—" }}</dd>
+                <dt v-if="x.questionAttachments?.length">پیوست پرسش</dt><dd v-if="x.questionAttachments?.length"><a v-for="(a, i) in x.questionAttachments" :key="a" class="me-2" href="#" @click.prevent="downloadDoc(a, 'question-' + (i + 1))">فایل {{ faNum(i + 1, 0) }}</a></dd>
+                <dt v-if="x.answerAttachments?.length">پیوست پاسخ</dt><dd v-if="x.answerAttachments?.length"><a v-for="(a, i) in x.answerAttachments" :key="a" class="me-2" href="#" @click.prevent="downloadDoc(a, 'answer-' + (i + 1))">فایل {{ faNum(i + 1, 0) }}</a></dd>
               </dl>
               <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" label="ارسال به بازرگانی" variant="outline-primary" @go="runEn(() => clarAct(x, 'submit'), 'به بازرگانی ارسال شد.', load)" />
               <EnAction :can="x.canSend" :reason="x.sendBlockedReason" :roles="EnRoles.commercial" label="ثبت ارسال به کارفرما" variant="outline-primary" @go="sendDialog(x)" />
@@ -269,7 +346,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <EnAction :can="x.canReask" :reason="x.reaskBlockedReason" :roles="EnRoles.writers" label="پرسش مجدد" variant="outline-secondary" @go="reaskDialog(x)" />
               <EnAction :can="x.canVoid" :reason="x.voidBlockedReason" :roles="EnRoles.writers" label="ابطال" variant="outline-danger" @go="voidClar(x)" />
             </div>
-            <button v-if="hasRole(EnRoles.writers)" class="btn btn-sm btn-outline-primary" type="button" @click="newQuestion">پرسش تازه</button>
+            <button v-if="hasRole(EnRoles.writers) && c.canAskClarification !== false" class="btn btn-sm btn-outline-primary" type="button" @click="newQuestion">پرسش تازه</button>
           </li>
 
           <!-- 4 -->
@@ -284,6 +361,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <button v-if="c.charterExists" class="btn btn-sm btn-link px-0" type="button" @click="toggleCharter">{{ showCharter ? "بستن منشور" : "نمایش منشور (بدون قیمت)" }}</button>
               <div v-if="showCharter && charter" class="en-box" data-test="en-charter">
                 <template v-for="s in charterSections" :key="s[0]"><div v-if="charter[s[0]]"><strong>{{ s[1] }}</strong><p class="en-pre">{{ charter[s[0]] }}</p></div></template>
+                <p v-if="charter.managerAcceptedAtText || charter.approvedAtText" class="small inv-muted">{{ charter.managerAcceptedAtText ? "پذیرش مدیر پروژه: " + faDigits(charter.managerAcceptedAtText) + "  " : "" }}{{ charter.approvedAtText ? "تصویب: " + faDigits(charter.approvedAtText) : "" }}</p>
                 <p v-if="charter.priceNotice" class="small inv-muted">{{ charter.priceNotice }}</p>
               </div>
             </div>
@@ -306,7 +384,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               <EnAction :can="r.canDecide" :reason="r.decideBlockedReason" :roles="EnRoles.ceo" label="رد ثبت" variant="outline-danger" @go="regDecide(r, 'reject')" />
               <EnAction :can="r.canWithdraw" :reason="r.withdrawBlockedReason" :roles="EnRoles.manager" label="پس‌گرفتن" variant="outline-secondary" @go="regDecide(r, 'withdraw')" />
             </div>
-            <button v-if="canPropose" class="btn btn-sm btn-outline-primary" type="button" @click="registerDialog">پیشنهاد ثبت این طراحی به‌عنوان پلتفرم</button>
+            <EnAction v-if="c.canProposeRegistration !== undefined" :can="c.canProposeRegistration" :reason="c.proposeRegistrationBlockedReason" :roles="EnRoles.manager" label="پیشنهاد ثبت این طراحی به‌عنوان پلتفرم" variant="outline-primary" @go="registerDialog" />
           </li>
         </ol>
 

@@ -6,19 +6,21 @@ import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
-import { decideEnDeviation, getEnDeviations } from "@/api/EngineeringAPIs";
-import { deviationStatuses, enPaths, EnRoles, faDigits, useEnDialog } from "@/composables/engineering";
+import { decideEnDeviation, getEnDeviation, getEnDeviations } from "@/api/EngineeringAPIs";
+import { useFocusItem, deviationStatuses, enPaths, EnRoles, faDigits, useEnDialog } from "@/composables/engineering";
 import { usePagedList } from "@/composables/fn";
 
 // Standards deviations (not applicable, reference-list loosening, emergency). Two approvals in order: the head of engineering, then the CEO; nobody is skipped and the request never expires.
 const route = useRoute();
 const filters = ref({ Status: null as number | null, OnlyOpen: false });
 const list = usePagedList(getEnDeviations, filters, 25);
-onMounted(list.load);
-watch(() => route.params.id, list.load);
+const one = useFocusItem(() => Number(route.params.id) || null, getEnDeviation);
+const reload = async () => { await Promise.all([list.load(), one.load()]); };
+onMounted(reload);
+watch(() => route.params.id, reload);
 const focus = computed(() => Number(route.params.id) || null);
-const rows = computed(() => [...list.rows.value].sort((a, b) => Number(b.id === focus.value) - Number(a.id === focus.value) || Number(a.status > 1) - Number(b.status > 1) || a.status - b.status));
-const d = useEnDialog(list.load);
+const rows = computed(() => one.merge([...list.rows.value].sort((a, b) => Number(b.id === focus.value) - Number(a.id === focus.value) || Number(a.status > 1) - Number(b.status > 1) || a.status - b.status)));
+const d = useEnDialog(reload);
 function decide(x: any, decision: "approve" | "reject") {
   d.ask({
     title: (decision === "approve" ? "تایید انحراف " : "رد انحراف ") + faDigits(x.number),

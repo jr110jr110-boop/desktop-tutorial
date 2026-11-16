@@ -6,19 +6,21 @@ import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
-import { decideEnRegistration, getEnRegistrations } from "@/api/EngineeringAPIs";
-import { enPaths, EnRoles, faDigits, regStatuses, useEnDialog } from "@/composables/engineering";
+import { decideEnRegistration, getEnRegistration, getEnRegistrations } from "@/api/EngineeringAPIs";
+import { useFocusItem, enPaths, EnRoles, faDigits, regStatuses, useEnDialog } from "@/composables/engineering";
 import { usePagedList } from "@/composables/fn";
 
 // Registration of a New design as a platform: the head of engineering proposes (from the case page), the CEO decides. The request never expires.
 const route = useRoute();
 const filters = ref({ Status: null as number | null, OnlyOpen: false });
 const list = usePagedList(getEnRegistrations, filters, 25);
-onMounted(list.load);
-watch(() => route.params.id, list.load);
+const one = useFocusItem(() => Number(route.params.id) || null, getEnRegistration);
+const reload = async () => { await Promise.all([list.load(), one.load()]); };
+onMounted(reload);
+watch(() => route.params.id, reload);
 const focus = computed(() => Number(route.params.id) || null);
-const rows = computed(() => [...list.rows.value].sort((a, b) => Number(b.id === focus.value) - Number(a.id === focus.value) || a.status - b.status));
-const d = useEnDialog(list.load);
+const rows = computed(() => one.merge([...list.rows.value].sort((a, b) => Number(b.id === focus.value) - Number(a.id === focus.value) || a.status - b.status)));
+const d = useEnDialog(reload);
 function decide(x: any, decision: "approve" | "reject" | "withdraw") {
   d.ask({
     title: decision === "approve" ? "تایید ثبت پلتفرم" : decision === "reject" ? "رد ثبت پلتفرم" : "پس‌گرفتن پیشنهاد",

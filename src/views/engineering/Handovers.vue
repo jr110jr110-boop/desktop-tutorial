@@ -30,7 +30,7 @@ onMounted(list.load);
       <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">هنوز تحویلی ثبت نشده است؛ ایجنت مهندسی پس از برنده‌شدن پرونده، پیش‌نویس تحویل را می‌سازد.</p>
       <div v-else class="table-responsive">
         <table class="table table-sm table-hover">
-          <thead><tr><th>شماره</th><th>پرونده</th><th>قرارداد</th><th>دور</th><th>وضعیت</th><th>الزامی کم</th><th>معافیت</th></tr></thead>
+          <thead><tr><th>شماره</th><th>پرونده</th><th>قرارداد</th><th>دور</th><th>وضعیت</th><th>الزامی کم</th><th>مجوز اضطرار</th></tr></thead>
           <tbody>
             <tr v-for="h in list.rows.value" :key="h.id">
               <td><router-link :to="enPaths.handover(h.id)">{{ faDigits(h.number) }}</router-link></td>

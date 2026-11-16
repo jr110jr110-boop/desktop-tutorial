@@ -7,6 +7,7 @@ import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import { getEnReferenceList, postEnReferenceAction, saveEnReferenceList } from "@/api/EngineeringAPIs";
 import { enPaths, EnRoles, enUnits, errText, faDigits, faNum, runEn, useEnDialog } from "@/composables/engineering";
 import { fail, ok } from "@/composables/inventory";
+import { hasRole } from "@/composables/roles";
 
 // One reference document list. In Draft the grid is editable (seq, type, discipline, title, required, tender stage, client submittal, standard clause, units: empty = all six units).
 // Submitting, approving (never by whoever edited it), returning and revising follow the DTO flags. A revision that loosens the list needs the manager AND the CEO: the server opens the deviation.
@@ -19,6 +20,7 @@ const form = ref<any>({ code: "", title: "", standardSource: "", note: "", lines
 const loading = ref(false);
 const saving = ref(false);
 const saveError = ref("");
+const unitNotice = ref("");
 
 const blank = () => ({ seq: 0, documentType: "", discipline: "", title: "", required: true, tenderStage: false, clientSubmittal: false, standardClause: "", note: "", units: "" });
 async function load() {
@@ -38,12 +40,22 @@ async function load() {
 onMounted(load);
 watch(id, load);
 const d = useEnDialog(load);
-const editable = computed(() => isNew.value || !!x.value?.canEdit);
+const editable = computed(() => (isNew.value && hasRole(EnRoles.writers)) || !!x.value?.canEdit);
 const needsCheck = computed(() => !x.value || x.value.status <= 1);
-const unitsOf = (l: any): string[] => (l.units ? String(l.units).split(/[,،;]/).map((s) => s.trim()).filter(Boolean) : []);
-function toggleUnit(l: any, code: string) {
+// Stored units are enum names; empty = all six. The tick boxes of an empty value start from all six codes, so unticking one keeps the other five.
+const unitsOf = (l: any): string[] => {
+  const raw = l.units ? String(l.units).split(/[,،;]/).map((s) => s.trim().toLowerCase()).filter(Boolean) : [];
+  return raw.length ? enUnits.filter((u) => raw.includes(u.code.toLowerCase())).map((u) => u.code) : enUnits.map((u) => u.code);
+};
+function toggleUnit(l: any, code: string, ev?: Event) {
   const cur = unitsOf(l);
   const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
+  if (!next.length) {
+    unitNotice.value = "هر سطر دست‌کم یک واحد دارد؛ برای رساندن به همهٔ واحدها همهٔ واحدها را انتخاب کنید.";
+    if (ev?.target) (ev.target as HTMLInputElement).checked = true;
+    return;
+  }
+  unitNotice.value = "";
   l.units = next.length === enUnits.length ? "" : next.join(",");
 }
 const addLine = () => form.value.lines.push(blank());
@@ -76,7 +88,7 @@ const reason = (title: string, action: string, okText: string) =>
         <router-link :to="enPaths.references" class="btn btn-sm btn-outline-secondary">فهرست‌ها</router-link>
       </div>
       <p v-if="loading" class="inv-muted">در حال خواندن…</p>
-      <div v-if="needsCheck" class="en-banner amber" data-test="en-ref-check">این فهرست هنوز تاییدشده نیست؛ پیش از تایید باید با استاندارد API 611/612 و PMBOK تطبیق داده شود. محتوای فهرست را سیستم نمی‌سازد و بر عهده مهندسی است.</div>
+      <div v-if="needsCheck" class="en-banner amber" data-test="en-ref-check">این فهرست هنوز تاییدشده نیست؛ پیش از تایید باید با متن استاندارد {{ form.code || x?.code || "مربوط" }} و PMBOK تطبیق داده شود. محتوای فهرست را سیستم نمی‌سازد و بر عهده مهندسی است.</div>
       <div v-if="x?.status === 1" class="en-banner amber">منتظر تایید است؛ درخواست منقضی نمی‌شود.</div>
       <div v-if="x?.voidReason" class="en-banner red">ابطال‌شده: {{ x.voidReason }}</div>
       <template v-if="x">
@@ -106,12 +118,13 @@ const reason = (title: string, action: string, okText: string) =>
               <td><input v-model="l.tenderStage" :disabled="!editable" type="checkbox" /></td>
               <td><input v-model="l.clientSubmittal" :disabled="!editable" type="checkbox" /></td>
               <td><input v-model="l.standardClause" :disabled="!editable" class="form-control form-control-sm" maxlength="100" /></td>
-              <td class="en-units"><label v-for="u in enUnits" :key="u.value"><input :checked="!l.units || unitsOf(l).includes(u.code)" :disabled="!editable" type="checkbox" @change="toggleUnit(l, u.code)" /> {{ u.text }}</label></td>
+              <td class="en-units"><label v-for="u in enUnits" :key="u.value"><input :checked="unitsOf(l).includes(u.code)" :disabled="!editable" type="checkbox" @change="toggleUnit(l, u.code, $event)" /> {{ u.text }}</label></td>
               <td v-if="editable"><button class="btn btn-sm btn-outline-danger" type="button" @click="removeLine(i)">حذف</button></td>
             </tr>
           </tbody>
         </table>
       </div>
+      <div v-if="unitNotice" class="alert alert-warning py-2 small" role="status">{{ unitNotice }}</div>
       <div v-if="saveError" class="alert alert-danger py-2 small" role="alert">{{ saveError }}</div>
       <div v-if="x && !editable && x.editBlockedReason" class="small text-danger mb-2">{{ x.editBlockedReason }}</div>
       <div class="mt-2">

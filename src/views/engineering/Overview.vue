@@ -34,9 +34,10 @@ const waiting = computed(() => {
   const x = o.value;
   if (!x) return [];
   const rows: { text: string; hours: number | null; to: string }[] = [];
-  if (x.waiversAwaitingCeo > 0) rows.push({ text: `${n(x.waiversAwaitingCeo)} درخواست معافیت اضطراری منتظر تصمیم مدیرعامل است`, hours: x.oldestWaiverWaitingHours, to: enPaths.waivers });
-  if (x.deviationsAwaiting > 0) rows.push({ text: `${n(x.deviationsAwaiting)} انحراف از استاندارد منتظر تصمیم است`, hours: null, to: enPaths.deviations });
-  if (x.registrationsOpen > 0) rows.push({ text: `${n(x.registrationsOpen)} درخواست ثبت پلتفرم منتظر تصمیم مدیرعامل است`, hours: null, to: enPaths.registrations });
+  if (x.waiversAwaitingCeo > 0) rows.push({ text: `${n(x.waiversAwaitingCeo)} درخواست مجوز اضطرار منتظر تصمیم مدیرعامل است`, hours: x.oldestWaiverWaitingHours, to: enPaths.waivers });
+  // Who the deviations wait for and the oldest wait come from the server when it sends them (deviationsAwaitingCeo, oldestDeviationWaitingHours, oldestRegistrationWaitingHours).
+  if (x.deviationsAwaiting > 0) rows.push({ text: `${n(x.deviationsAwaiting)} انحراف از استاندارد منتظر تصمیم است` + (x.deviationsAwaitingCeo > 0 ? ` (${n(x.deviationsAwaitingCeo)} مورد منتظر مدیرعامل)` : ""), hours: x.oldestDeviationWaitingHours ?? null, to: enPaths.deviations });
+  if (x.registrationsOpen > 0) rows.push({ text: `${n(x.registrationsOpen)} درخواست ثبت پلتفرم منتظر تصمیم مدیرعامل است`, hours: x.oldestRegistrationWaitingHours ?? null, to: enPaths.registrations });
   return rows;
 });
 </script>
@@ -56,6 +57,7 @@ const waiting = computed(() => {
         <router-link v-for="w in waiting" :key="w.text" :to="w.to" class="d-block text-decoration-none mb-2">
           <EnWait :hours="w.hours" :text="w.text" />
         </router-link>
+        <router-link v-if="o.overdueDebts > 0" :to="{ path: enPaths.debts, query: { overdue: 1 } }" class="d-block text-decoration-none en-banner red" data-test="en-overdue-debts">{{ n(o.overdueDebts) }} بدهی مدارک از موعد گذشته است.</router-link>
         <div v-if="o.casesAtDocumentRisk > 0" :class="['en-banner', o.awardedCasesAtDocumentRisk > 0 ? 'red' : 'amber']" data-test="en-risk">
           {{ n(o.casesAtDocumentRisk) }} پرونده در معرض خطر تحویل مدارک است<span v-if="o.awardedCasesAtDocumentRisk > 0"> که {{ n(o.awardedCasesAtDocumentRisk) }} مورد آن برنده شده و در مهندسی است</span>.
           <router-link :to="enPaths.cases">دیدن پرونده‌ها</router-link>
@@ -69,6 +71,7 @@ const waiting = computed(() => {
         <h2 class="h6">بر اساس نوع</h2>
         <div class="en-tiles">
           <router-link v-for="c in o.casesByClassification" :key="c.key" :to="{ path: enPaths.cases, query: { classification: c.key } }" class="en-tile"><div class="t">{{ c.text }}</div><div class="v">{{ n(c.count) }}</div></router-link>
+          <p v-if="!o.casesByClassification?.length" class="inv-muted">پرونده‌ای برای تفکیک نوع نیست.</p>
         </div>
 
         <h2 class="h6">پرونده مدارک پلتفرم‌ها</h2>
@@ -91,7 +94,7 @@ const waiting = computed(() => {
           <router-link v-for="h in o.handoversWaiting" :key="h.key" :to="{ path: enPaths.handovers, query: { status: h.key } }" class="en-tile"><div class="t">تحویل: {{ h.text }}</div><div class="v">{{ n(h.count) }}</div></router-link>
           <router-link :to="enPaths.debts" :class="['en-tile', o.openDebts ? 'warn' : '']"><div class="t">بدهی مدارک باز</div><div class="v">{{ n(o.openDebts) }}</div></router-link>
           <router-link :to="{ path: enPaths.debts, query: { overdue: 1 } }" :class="['en-tile', o.overdueDebts ? 'bad' : 'ok']"><div class="t">بدهی گذشته از موعد</div><div class="v">{{ n(o.overdueDebts) }}</div></router-link>
-          <router-link :to="enPaths.waivers" :class="['en-tile', o.waiversAwaitingCeo ? 'bad' : '']"><div class="t">معافیت منتظر مدیرعامل</div><div class="v">{{ n(o.waiversAwaitingCeo) }}</div></router-link>
+          <router-link :to="enPaths.waivers" :class="['en-tile', o.waiversAwaitingCeo ? 'bad' : '']"><div class="t">مجوز اضطرار منتظر مدیرعامل</div><div class="v">{{ n(o.waiversAwaitingCeo) }}</div></router-link>
           <router-link :to="enPaths.handovers" class="en-tile"><div class="t">ابلاغ بدون تایید دریافت</div><div class="v">{{ n(o.distributionsUnacknowledged) }}</div></router-link>
         </div>
 
@@ -99,7 +102,7 @@ const waiting = computed(() => {
         <div class="en-tiles">
           <router-link :to="enPaths.cases" class="en-tile"><div class="t">شفاف‌سازی باز</div><div class="v">{{ n(o.openClarifications) }}</div></router-link>
           <router-link :to="enPaths.deviations" :class="['en-tile', o.deviationsAwaiting ? 'warn' : '']"><div class="t">انحراف منتظر تصمیم</div><div class="v">{{ n(o.deviationsAwaiting) }}</div><div class="n">{{ n(o.standardsDeviationsOpen) }} انحراف باز</div></router-link>
-          <router-link :to="enPaths.gaps" class="en-tile"><div class="t">شکاف استاندارد باز</div><div class="v">{{ n(o.standardGapsOpen) }}</div></router-link>
+          <router-link :to="enPaths.gaps" class="en-tile"><div class="t">تفاوت استاندارد باز</div><div class="v">{{ n(o.standardGapsOpen) }}</div></router-link>
           <router-link :to="enPaths.registrations" class="en-tile"><div class="t">ثبت پلتفرم جدید باز</div><div class="v">{{ n(o.registrationsOpen) }}</div></router-link>
           <router-link v-if="canInfo" :to="enPaths.infoRequests" class="en-tile"><div class="t">پرسش واحدها از PMO</div><div class="v">{{ n(o.infoRequestsOpen) }}</div></router-link>
           <div v-else class="en-tile"><div class="t">پرسش واحدها از PMO</div><div class="v">{{ n(o.infoRequestsOpen) }}</div></div>
