@@ -64,6 +64,45 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task The_Handover_Of_A_Case_With_A_Product_Carries_The_System_Proven_Bom_And_Opc_Lines_With_A_Link_And_No_File()
+        {
+            AppHost host = Started("hosys");
+            (int contract, int caseId) = await NewDesign(host);
+            int product = Product(host);
+            host.Write(u => { u.Set<EnCase>().First(x => x.Id == caseId).ProductId = product; u.SaveChanges(); }, Seeder);
+
+            // the list has only two document types of its own; the system adds the BOM and the OPC of the product as required lines, both missing while the bank has neither
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(4, h.Lines.Count);
+            Assert.AreEqual(4, h.MissingRequiredCount);
+            EnHandoverLineDto bom = h.Lines.Single(l => l.DocumentType == EnDocTypes.Bom);
+            EnHandoverLineDto opc = h.Lines.Single(l => l.DocumentType == EnDocTypes.Opc);
+            Assert.IsTrue(bom.Required && opc.Required);
+            Assert.AreEqual((int)EnLineState.Missing, bom.State);
+            Assert.AreEqual((int)EnLineState.Missing, opc.State);
+            Assert.AreEqual("/product-bank/products/" + product + "/bom", bom.LinkPath);
+            Assert.AreEqual("/product-bank/products/" + product + "/routing", opc.LinkPath);
+            Assert.IsNull(bom.DocumentId); Assert.IsNull(opc.DocumentId);
+
+            // a released BOM and an approved route make both lines available on the refresh; the revision of the BOM is shown, no file is attached
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbBomHeader { ProductId = product, Code = "BOM-SYS", AssemblyPartNumber = "SYS", Title = "BOM", Revision = 3, Status = Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released });
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbOpcRouting { ProductId = product, PartNumber = "SYS", Title = "OPC", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                u.SaveChanges();
+            }, Seeder);
+            h = Ok(await Get(host, Eng1, h.Id));
+            h = Ok(await Act(host, Eng1, "refresh", d => { d.Id = h.Id; d.RowVersion = h.RowVersion; }));
+            bom = h.Lines.Single(l => l.DocumentType == EnDocTypes.Bom);
+            opc = h.Lines.Single(l => l.DocumentType == EnDocTypes.Opc);
+            Assert.AreEqual((int)EnLineState.Available, bom.State);
+            Assert.AreEqual("3", bom.Revision);
+            Assert.AreEqual((int)EnLineState.Available, opc.State);
+            Assert.IsNull(bom.DocumentId); Assert.IsNull(opc.DocumentId);
+            Assert.AreEqual(2, h.MissingRequiredCount);   // only the two document types of the list are still missing
+        }
+
+        [TestMethod]
         public async Task The_Handover_Is_Locked_Until_Complete_And_A_Ceo_Waiver_Opens_It_Once_For_The_Missing_Set_And_The_Debts_Follow()
         {
             AppHost host = Started("ho1");
