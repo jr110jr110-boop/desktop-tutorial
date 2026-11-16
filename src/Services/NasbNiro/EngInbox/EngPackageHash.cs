@@ -12,30 +12,39 @@ namespace Services.NasbNiro.EngInbox
     /// </summary>
     public static class EngPackageHash
     {
-        public const string Version = "ENGPKG1";
+        public const string Version = "ENGPKG2";
 
         public static string Of(EngParsedPackage p, IReadOnlyDictionary<string, EngFileInfo> files)
         {
             var sb = new StringBuilder();
             string I(int n) => n.ToString(CultureInfo.InvariantCulture);
+            // every field is written as length:text, so a "|" or a line break inside a text can never move a boundary between two fields (B4)
+            void Row(string tag, params string[] fields)
+            {
+                sb.Append(tag);
+                foreach (string f in fields)
+                {
+                    string v = f ?? "";
+                    sb.Append(' ').Append(I(v.Length)).Append(':').Append(v);
+                }
+                sb.Append('\n');
+            }
             EngInfo i = p.Info;
             sb.Append(Version).Append('\n');
-            sb.Append("INFO|").Append(i.Kind.HasValue ? I((int)i.Kind.Value) : "").Append('|').Append(i.PlatformCode).Append('|').Append(i.Standard).Append('|').Append(I(i.PackageVersion)).Append('|')
-              .Append(i.ContractCode).Append('|').Append(i.ProjectCode).Append('|').Append(i.Title).Append('|').Append(I(i.SchemaVersion)).Append('\n');
+            Row("INFO", i.Kind.HasValue ? I((int)i.Kind.Value) : "", i.PlatformCode, i.Standard, I(i.PackageVersion), i.ContractCode, i.ProjectCode, i.Title, I(i.SchemaVersion));
             foreach (EngBomRow b in p.Bom)
-                sb.Append("BOM|").Append(I(b.Level)).Append('|').Append(b.ParentCode).Append('|').Append(b.PartCode).Append('|').Append(b.Description).Append('|').Append(EngText.Num(b.Qty)).Append('|').Append(b.Unit).Append('|')
-                  .Append(I((int)b.MakeBuy)).Append('|').Append(b.Material).Append('|').Append(b.DrawingNumber).Append('|').Append(b.DrawingRevision).Append('|').Append(b.Note).Append('\n');
+                Row("BOM", I(b.Level), b.ParentCode, b.PartCode, b.Description, EngText.Num(b.Qty), b.Unit, I((int)b.MakeBuy), b.Material, b.DrawingNumber, b.DrawingRevision, b.Note);
             foreach (EngOpcRow o in p.Opc)
-                sb.Append("OPC|").Append(o.PartCode).Append('|').Append(I(o.OperationNumber)).Append('|').Append(o.Description).Append('|').Append(o.WorkCenterCode).Append('|').Append(EngText.Num(o.SetupMinutes)).Append('|').Append(EngText.Num(o.RunMinutes)).Append('|')
-                  .Append(o.IsInspection ? "1" : "0").Append('|').Append(o.IsSpecialProcess ? "1" : "0").Append('|').Append(string.Join(",", o.Predecessors.OrderBy(x => x).Select(I))).Append('|').Append(o.StageCode).Append('\n');
+                Row("OPC", o.PartCode, I(o.OperationNumber), o.Description, o.WorkCenterCode, EngText.Num(o.SetupMinutes), EngText.Num(o.RunMinutes), o.IsInspection ? "1" : "0", o.IsSpecialProcess ? "1" : "0",
+                    string.Join(",", o.Predecessors.OrderBy(x => x).Select(I)), o.StageCode);
             foreach (EngDocRow d in p.Docs)
-                sb.Append("DOC|").Append(d.Number).Append('|').Append(d.Title).Append('|').Append(d.Revision).Append('|').Append(d.DocType).Append('|').Append(d.FileName).Append('|').Append(d.Required ? "1" : "0").Append('\n');
+                Row("DOC", d.Number, d.Title, d.Revision, d.DocType, d.FileName, d.Required ? "1" : "0");
             foreach (EngMdlRow m in p.Mdl)
-                sb.Append("MDL|").Append(m.Number).Append('|').Append(m.Title).Append('|').Append(m.DocType).Append('|').Append(m.CommitDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append('\n');
+                Row("MDL", m.Number, m.Title, m.DocType, m.CommitDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             if (files != null)
                 foreach (EngFileInfo f in p.Docs.Where(d => d.FileName != null && d.FileSha256 != null).Select(d => new EngFileInfo { Name = d.FileName, Size = d.FileSize ?? 0, Sha256 = d.FileSha256 })
                              .GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.First()).OrderBy(f => f.Name, StringComparer.Ordinal))
-                    sb.Append("FILE|").Append(f.Name).Append('|').Append(f.Size.ToString(CultureInfo.InvariantCulture)).Append('|').Append(f.Sha256).Append('\n');
+                    Row("FILE", f.Name, f.Size.ToString(CultureInfo.InvariantCulture), f.Sha256);
             return EngText.Sha256Hex(sb.ToString());
         }
     }

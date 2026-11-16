@@ -19,8 +19,18 @@ namespace Services.NasbNiro.EngInbox
         public const string Source = "Engineering:Source";
         public const string InboxFolder = "Engineering:InboxFolder";
         public const string StableSeconds = "Engineering:StableSeconds";
+        public const string MaxRefFileMb = "Engineering:MaxRefFileMb";
+        public const int DefaultMaxRefFileMb = 2048;
         public const int DefaultStableSeconds = 20;
         public const string DefaultFolderName = "Engineering-Inbox";
+
+        /// <summary>The largest referenced file the source hashes, in bytes (default 2 GB); a package may hold five times that in total.</summary>
+        public static long MaxRefFileBytesOf(IConfiguration configuration)
+        {
+            string text = configuration?[MaxRefFileMb];
+            int mb = int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) && n >= 1 && n <= 102400 ? n : DefaultMaxRefFileMb;
+            return mb * 1024L * 1024L;
+        }
 
         public static int StableSecondsOf(IConfiguration configuration)
         {
@@ -46,6 +56,12 @@ namespace Services.NasbNiro.EngInbox
 
         /// <summary>Everyone who can read BOMs of the product bank today, plus planning, the CEO and the auditor. No price exists in this data.</summary>
         public const string Readers = "PMO,ENGINEERING,ENGINEER,PLANNING,QC,QA,CONSTRUCTION,PRODUCTIONMANAGER,SHOPSUPERVISOR,CEO,AUDITOR";
+    }
+
+    /// <summary>The source could not move a package folder out of the inbox (permission, a locked file, a path that leaves the root). The ingest keeps the package and says so; it never treats the package as moved.</summary>
+    public sealed class EngSourceMoveException : System.IO.IOException
+    {
+        public EngSourceMoveException(string message) : base(message) { }
     }
 
     public enum EngSourceOutcome { Ingested = 1, Duplicate = 2, Rejected = 3 }
@@ -96,7 +112,10 @@ namespace Services.NasbNiro.EngInbox
 
         Task<EngPackageContent> ReadAsync(EngPackageHandle handle, CancellationToken ct);
 
-        /// <summary>Takes the package out of the inbox (the folder source moves the folder to _Processed or _Rejected and writes the note there). Returns where it went, relative to the root (empty when it cannot be moved).</summary>
+        /// <summary>A cheap signature of the package as the source holds it (names, sizes and last write times; nothing is hashed or read). The ingest uses it to recognise a package it already knows without reading and hashing its files; empty when the source cannot tell.</summary>
+        Task<string> SignatureAsync(EngPackageHandle handle, CancellationToken ct);
+
+        /// <summary>Takes the package out of the inbox (the folder source moves the folder to _Processed or _Rejected and writes the note there). Throws <see cref="EngSourceMoveException"/> when the package could not be moved. Returns where it went, relative to the root (empty when it cannot be moved).</summary>
         Task<string> MarkAsync(EngPackageHandle handle, EngSourceOutcome outcome, string note, CancellationToken ct);
     }
 
@@ -124,6 +143,8 @@ namespace Services.NasbNiro.EngInbox
             Task.FromResult(new EngPackageContent { Handle = handle, Problems = { NotConfiguredReason } });
 
         public Task<string> MarkAsync(EngPackageHandle handle, EngSourceOutcome outcome, string note, CancellationToken ct) => Task.FromResult("");
+
+        public Task<string> SignatureAsync(EngPackageHandle handle, CancellationToken ct) => Task.FromResult("");
     }
 
     public static class EngSourceFactory
@@ -144,7 +165,7 @@ namespace Services.NasbNiro.EngInbox
             if (string.Equals(name, "Api", StringComparison.OrdinalIgnoreCase)) return new EngApiSource(configuration);
             string folder = configuration?[EngConfigKeys.InboxFolder];
             if (string.IsNullOrWhiteSpace(folder)) folder = DefaultFolder(environment?.ContentRootPath);
-            return new EngFolderSource(folder.Trim(), TimeSpan.FromSeconds(EngConfigKeys.StableSecondsOf(configuration)), loggers?.CreateLogger<EngFolderSource>());
+            return new EngFolderSource(folder.Trim(), TimeSpan.FromSeconds(EngConfigKeys.StableSecondsOf(configuration)), loggers?.CreateLogger<EngFolderSource>(), null, EngConfigKeys.MaxRefFileBytesOf(configuration));
         }
     }
 }

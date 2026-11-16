@@ -108,14 +108,13 @@ namespace Services.NasbNiro.EngInbox
             if (ext != ".xlsx") { p.Error(null, 0, "پسوند فایل باید xlsx باشد."); return p; }
             if (workbook.Length > EngPackageLimits.MaxWorkbookBytes) { p.Error(null, 0, "حجم فایل اکسل بیش از ۲۰ مگابایت است."); return p; }
             if (!GuardZip(workbook, p)) return p;
-            if (!ScanFormulas(workbook, p)) { /* the findings are in; the sheets are still read to report everything */ }
-
             List<string> names;
             try { names = XlsxReader.SheetNames(workbook); }
             catch (XlsxFormatException ex) { p.Error(null, 0, ex.Message); return p; }
 
             string Find(string[] aliases) => names.FirstOrDefault(n => aliases.Contains(EngText.Norm(n)));
             string info = Find(InfoNames), bom = Find(BomNames), opc = Find(OpcNames), docs = Find(DocNames), mdl = Find(MdlNames);
+            ScanFormulas(workbook, p, new[] { info, bom, opc, docs, mdl });   // the findings are in; the sheets are still read to report everything
             if (info == null) p.Error(SheetInfo, 0, "برگه «مشخصات» (Info) در فایل نیست.");
             if (bom == null) p.Error(SheetBom, 0, "برگه «BOM» در فایل نیست.");
             if (opc == null) p.Error(SheetOpc, 0, "برگه «OPC» در فایل نیست.");
@@ -127,9 +126,58 @@ namespace Services.NasbNiro.EngInbox
             if (docs != null) ReadDocs(workbook, docs, files, p);
             if (mdl != null) ReadMdl(workbook, mdl, p);
 
+            LengthChecks(p);
             CrossChecks(p);
             if (!p.HasErrors) p.ContentHash = EngPackageHash.Of(p, files);
             return p;
+        }
+
+        // ------------------------------------------------------------------------------------------------ column lengths (B1)
+
+        /// <summary>The longest text each stored column takes (EngInboxConfigurations). A longer text is a finding with the sheet and the row, never a database error. The checks of the sheet readers already cover the standard, the title, the BOM description, material and note, the OPC description and work centre, the document number and the file name; the ones below are the rest.</summary>
+        public static class Max
+        {
+            public const int PlatformCode = 40, Standard = 60, ContractCode = 60, ProjectCode = 60, Title = 300, PreparedBy = 200, BomParent = 60, BomPart = 60, Description = 300, Unit = 30, Material = 200, DrawingNumber = 100,
+                DrawingRevision = 30, Note = 500, WorkCenter = 50, Predecessors = 200, Stage = 2, DocNumber = 100, DocRevision = 30, DocType = 60, FileName = 200;
+        }
+
+        private static void LengthChecks(EngParsedPackage p)
+        {
+            void Check(string sheet, int row, string label, string value, int max)
+            {
+                if (value != null && value.Length > max) p.Error(sheet, row, "«" + label + "» بیش از " + max.ToString(CultureInfo.InvariantCulture) + " نویسه است (" + value.Length.ToString(CultureInfo.InvariantCulture) + " نویسه)؛ کوتاه‌تر بنویسید.");
+            }
+            EngInfo i = p.Info;
+            Check(SheetInfo, 0, "کد پلتفرم", i.PlatformCode, Max.PlatformCode);
+            Check(SheetInfo, 0, "کد قرارداد", i.ContractCode, Max.ContractCode);
+            Check(SheetInfo, 0, "کد پروژه", i.ProjectCode, Max.ProjectCode);
+            Check(SheetInfo, 0, "تهیه‌کننده", i.PreparedBy, Max.PreparedBy);
+            foreach (EngBomRow b in p.Bom)
+            {
+                Check(SheetBom, b.SourceRow, "کد پدر", b.ParentCode, Max.BomParent);
+                Check(SheetBom, b.SourceRow, "کد قطعه", b.PartCode, Max.BomPart);
+                Check(SheetBom, b.SourceRow, "واحد", b.Unit, Max.Unit);
+                Check(SheetBom, b.SourceRow, "شمارهٔ نقشه", b.DrawingNumber, Max.DrawingNumber);
+                Check(SheetBom, b.SourceRow, "ویرایش نقشه", b.DrawingRevision, Max.DrawingRevision);
+            }
+            foreach (EngOpcRow o in p.Opc)
+            {
+                Check(SheetOpc, o.SourceRow, "کد قطعه", o.PartCode, Max.BomPart);
+                Check(SheetOpc, o.SourceRow, "پیش‌نیازها", string.Join(",", o.Predecessors), Max.Predecessors);
+                Check(SheetOpc, o.SourceRow, "ایستگاه", o.StageCode, Max.Stage);
+            }
+            foreach (EngDocRow d in p.Docs)
+            {
+                Check(SheetDocs, d.SourceRow, "عنوان", d.Title, Max.Description);
+                Check(SheetDocs, d.SourceRow, "ویرایش", d.Revision, Max.DocRevision);
+                Check(SheetDocs, d.SourceRow, "نوع", d.DocType, Max.DocType);
+            }
+            foreach (EngMdlRow m in p.Mdl)
+            {
+                Check(SheetMdl, m.SourceRow, "شمارهٔ مدرک", m.Number, Max.DocNumber);
+                Check(SheetMdl, m.SourceRow, "عنوان", m.Title, Max.Description);
+                Check(SheetMdl, m.SourceRow, "نوع", m.DocType, Max.DocType);
+            }
         }
 
         // ------------------------------------------------------------------------------------------------ zip guard and formulas
@@ -155,44 +203,17 @@ namespace Services.NasbNiro.EngInbox
             return true;
         }
 
-        /// <summary>A formula is never evaluated: the value Excel stored is used. A formula cell that has no stored value is an error (the file was not calculated or saved by Excel).</summary>
-        private static bool ScanFormulas(byte[] data, EngParsedPackage p)
+        /// <summary>A formula is never evaluated: the value Excel stored is used. A formula cell that has no stored value is an error (the file was not calculated or saved by Excel). Only the five known sheets are scanned.</summary>
+        private static bool ScanFormulas(byte[] data, EngParsedPackage p, IEnumerable<string> sheetNames)
         {
-            bool ok = true;
             try
             {
-                List<string> names = XlsxReader.SheetNames(data);
-                using (var zip = new ZipArchive(new MemoryStream(data, false), ZipArchiveMode.Read))
-                {
-                    int index = 0;
-                    foreach (ZipArchiveEntry e in zip.Entries.Where(x => x.FullName.StartsWith("xl/worksheets/", StringComparison.OrdinalIgnoreCase) && x.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.FullName, StringComparer.Ordinal))
-                    {
-                        string sheet = names.Count > index ? names[index] : "برگه " + (index + 1).ToString(CultureInfo.InvariantCulture);
-                        index++;
-                        var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersFromEntities = 1024 };
-                        using (Stream s = e.Open())
-                        using (XmlReader r = XmlReader.Create(s, settings))
-                        {
-                            bool inCell = false, hasF = false, hasV = false;
-                            string reference = null;
-                            int reported = 0;
-                            while (r.Read())
-                            {
-                                if (r.NodeType == XmlNodeType.Element && r.LocalName == "c") { inCell = !r.IsEmptyElement; hasF = hasV = false; reference = r.GetAttribute("r"); }
-                                else if (inCell && r.NodeType == XmlNodeType.Element && r.LocalName == "f") hasF = true;
-                                else if (inCell && r.NodeType == XmlNodeType.Element && r.LocalName == "v") hasV = !r.IsEmptyElement;
-                                else if (inCell && r.NodeType == XmlNodeType.EndElement && r.LocalName == "c")
-                                {
-                                    inCell = false;
-                                    if (hasF && !hasV && reported++ < 20) { ok = false; p.Error(sheet, RowOf(reference), "سلول " + reference + " فرمول دارد ولی مقدار ذخیره‌شده ندارد؛ فایل را در اکسل باز کنید، ذخیره کنید یا فرمول را به مقدار تبدیل کنید (فرمول هرگز محاسبه نمی‌شود)."); }
-                                }
-                            }
-                        }
-                    }
-                }
+                var cells = XlsxReader.FormulaCellsWithoutValue(data, new HashSet<string>(sheetNames.Where(n => n != null), StringComparer.Ordinal), 20);
+                foreach (var (sheet, reference) in cells)
+                    p.Error(sheet, RowOf(reference), "سلول " + reference + " فرمول دارد ولی مقدار ذخیره‌شده ندارد؛ فایل را در اکسل باز کنید، ذخیره کنید یا فرمول را به مقدار تبدیل کنید (فرمول هرگز محاسبه نمی‌شود).");
+                return cells.Count == 0;
             }
-            catch (Exception ex) when (ex is InvalidDataException || ex is XmlException || ex is XlsxFormatException || ex is IOException) { /* the readers report a broken file */ }
-            return ok;
+            catch (XlsxFormatException) { return true; /* the readers report a broken file */ }
         }
 
         private static int RowOf(string reference)

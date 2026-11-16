@@ -33,6 +33,7 @@ namespace Services.NasbNiro.EngInbox
         private readonly TimeSpan _stable;
         private readonly ILogger _logger;
         private readonly Func<DateTime> _now;
+        private readonly long _maxFileBytes;
         private readonly ConcurrentDictionary<string, Seen> _seen = new ConcurrentDictionary<string, Seen>(StringComparer.Ordinal);
         private readonly object _gate = new object();
         private DateTime _checkedAt = DateTime.MinValue;
@@ -44,8 +45,9 @@ namespace Services.NasbNiro.EngInbox
             public DateTime Since;
         }
 
-        public EngFolderSource(string root, TimeSpan stable, ILogger logger = null, Func<DateTime> now = null)
+        public EngFolderSource(string root, TimeSpan stable, ILogger logger = null, Func<DateTime> now = null, long maxFileBytes = 2048L * 1024 * 1024)
         {
+            _maxFileBytes = maxFileBytes < 1024 ? 1024 : maxFileBytes;
             _root = string.IsNullOrWhiteSpace(root) ? null : root.Trim();
             _stable = stable < TimeSpan.Zero ? TimeSpan.Zero : stable;
             _logger = logger;
@@ -258,11 +260,16 @@ namespace Services.NasbNiro.EngInbox
                 long size = new FileInfo(book).Length;
                 if (size > EngPackageLimits.MaxWorkbookBytes) { content.Problems.Add("حجم فایل اکسل بیش از ۲۰ مگابایت است."); return content; }
                 content.Workbook = await File.ReadAllBytesAsync(book, ct);
+                long totalCap = _maxFileBytes * 5, hashed = 0;
                 foreach (string f in all)
                 {
                     ct.ThrowIfCancellationRequested();
                     if (f == book) continue;
                     if (IsLink(f)) { content.Problems.Add("فایل «" + Path.GetFileName(f) + "» یک میان‌بر (لینک) است و خوانده نمی‌شود."); continue; }
+                    long length = new FileInfo(f).Length;
+                    if (length > _maxFileBytes) { content.Problems.Add("فایل «" + Path.GetFileName(f) + "» بزرگ‌تر از سقف " + (_maxFileBytes / (1024 * 1024)).ToString(CultureInfo.InvariantCulture) + " مگابایت است و بررسی نمی‌شود؛ آن را از بسته جدا کنید یا سقف را مدیر سیستم بالا ببرد."); continue; }
+                    if (hashed + length > totalCap) { content.Problems.Add("مجموع حجم فایل‌های بسته از سقف " + (totalCap / (1024 * 1024)).ToString(CultureInfo.InvariantCulture) + " مگابایت بیشتر است؛ بسته را کوچک‌تر کنید."); break; }
+                    hashed += length;
                     content.Files[Path.GetFileName(f)] = await FactsAsync(f, ct);
                 }
             }
@@ -271,6 +278,25 @@ namespace Services.NasbNiro.EngInbox
                 content.Problems.Add("پوشهٔ بسته خوانده نشد (دسترسی یا قفل بودن فایل).");
             }
             return content;
+        }
+
+        public Task<string> SignatureAsync(EngPackageHandle handle, CancellationToken ct)
+        {
+            string dir = Resolve(handle, null);
+            if (dir == null) return Task.FromResult("");
+            try
+            {
+                var sb = new StringBuilder();
+                int count = 0;
+                foreach (string f in FilesOf(dir).OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    FileInfo fi = new FileInfo(f);
+                    sb.Append(fi.Name).Append('|').Append(fi.Length.ToString(CultureInfo.InvariantCulture)).Append('|').Append(fi.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture)).Append('\n');
+                    count++;
+                }
+                return Task.FromResult(EngText.Sha256Hex(sb.ToString()).Substring(0, 40) + "/" + count.ToString(CultureInfo.InvariantCulture));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return Task.FromResult(""); }
         }
 
         private static async Task<EngFileInfo> FactsAsync(string path, CancellationToken ct)
@@ -314,7 +340,7 @@ namespace Services.NasbNiro.EngInbox
         {
             var scratch = new EngPackageContent();
             string dir = Resolve(handle, scratch);
-            if (dir == null) return Task.FromResult("");
+            if (dir == null) throw new EngSourceMoveException("پوشهٔ بسته در صندوق ورودی پیدا نشد یا مسیرش معتبر نیست؛ جابه‌جا نشد.");
             try
             {
                 string root = Path.GetFullPath(_root);
@@ -333,7 +359,7 @@ namespace Services.NasbNiro.EngInbox
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 _logger?.LogWarning(ex, "Engineering inbox: the package folder could not be moved. پوشه بسته جابه‌جا نشد: {Id}", handle.Id);
-                return Task.FromResult("");
+                throw new EngSourceMoveException("پوشهٔ بسته جابه‌جا نشد (دسترسی یا فایل قفل)؛ در بررسی بعدی دوباره تلاش می‌شود.");
             }
         }
 

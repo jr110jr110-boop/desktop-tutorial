@@ -150,6 +150,43 @@ namespace Services.NasbNiro.Office
             catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is XmlException) { throw new XlsxFormatException(BrokenFile); }
         }
 
+        /// <summary>
+        /// ENG-F1: the formula cells of the named worksheets that have no stored value (the file was not calculated by Excel). The worksheet parts are found through workbook.xml and workbook.xml.rels (never by the order of
+        /// the files in the zip) and read through the same size-limited stream as the sheet reader. Only the named sheets are scanned; at most <paramref name="maxPerSheet"/> cells are reported per sheet.
+        /// </summary>
+        internal static List<(string Sheet, string Reference)> FormulaCellsWithoutValue(byte[] data, ISet<string> sheetNames, int maxPerSheet)
+        {
+            var found = new List<(string, string)>();
+            try
+            {
+                using ZipArchive zip = OpenZip(data);
+                foreach (SheetRef sh in Workbook(zip, out _))
+                {
+                    if (!sheetNames.Contains(sh.Name)) continue;
+                    ZipArchiveEntry e = Find(zip, sh.Path);
+                    if (e == null) continue;
+                    int reported = 0;
+                    using Stream s = OpenEntry(e);
+                    using XmlReader r = Open(s);
+                    bool inCell = false, hasF = false, hasV = false;
+                    string reference = null;
+                    while (r.Read())
+                    {
+                        if (r.NodeType == XmlNodeType.Element && r.LocalName == "c") { inCell = !r.IsEmptyElement; hasF = hasV = false; reference = r.GetAttribute("r"); }
+                        else if (inCell && r.NodeType == XmlNodeType.Element && r.LocalName == "f") hasF = true;
+                        else if (inCell && r.NodeType == XmlNodeType.Element && r.LocalName == "v") hasV = !r.IsEmptyElement;
+                        else if (inCell && r.NodeType == XmlNodeType.EndElement && r.LocalName == "c")
+                        {
+                            inCell = false;
+                            if (hasF && !hasV && reported++ < maxPerSheet) found.Add((sh.Name, reference));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is XmlException) { throw new XlsxFormatException(BrokenFile); }
+            return found;
+        }
+
         private static ZipArchive OpenZip(byte[] data)
         {
             if (data == null || data.Length < 4 || data[0] != 0x50 || data[1] != 0x4B) throw new XlsxFormatException("فایل، یک فایل اکسل (xlsx) نیست. فایل قدیمی xls را در اکسل با قالب xlsx ذخیره کنید.");

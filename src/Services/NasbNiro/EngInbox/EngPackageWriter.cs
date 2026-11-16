@@ -41,6 +41,9 @@ namespace Services.NasbNiro.EngInbox
     /// </summary>
     public static class EngPackageWriter
     {
+        /// <summary>The login name the sample package names as its preparer (a placeholder: a person of the engineering unit replaces it with his own login name; the tests seed a user with this name).</summary>
+        public const string SampleOriginator = "eng.sample";
+
         public const string SamplePlatformCode = "TEST-PLT-01";
         public const string SampleStandard = "API 610";
         public const string WorkbookFileName = "ENG-PACKAGE.xlsx";
@@ -72,7 +75,7 @@ namespace Services.NasbNiro.EngInbox
                 new object[] { "کد قرارداد", null, "فقط بستهٔ پروژه" },
                 new object[] { "کد پروژه", null, "فقط بستهٔ پروژه" },
                 new object[] { "عنوان", null, "عنوان بسته" },
-                new object[] { "تهیه‌کننده", null, "نام تهیه‌کنندهٔ بسته (متن آزاد)" },
+                new object[] { "تهیه‌کننده", null, "نام کاربری (login) یک کاربر فعال سامانه که بسته را تهیه کرده است؛ او نمی‌تواند BOM و مسیر ساخت همین بسته را بررسی یا تأیید کند" },
                 new object[] { "تاریخ", null, "شمسی (۱۴۰۵/۰۸/۲۵) یا میلادی (2026-11-16)" },
                 new object[] { "قالب", 1, "شمارهٔ قالب فایل؛ اکنون 1" },
             };
@@ -128,7 +131,7 @@ namespace Services.NasbNiro.EngInbox
                 new object[] { "استاندارد", SampleStandard, null },
                 new object[] { "نسخه بسته", version, null },
                 new object[] { "عنوان", "پمپ نمونهٔ آزمایشی (فرضی) TEST-PLT-01", null },
-                new object[] { "تهیه‌کننده", "واحد مهندسی (نمونه)", null },
+                new object[] { "تهیه‌کننده", EngPackageWriter.SampleOriginator, null },
                 new object[] { "تاریخ", "1405/08/25", null },
                 new object[] { "قالب", 1, null },
             };
