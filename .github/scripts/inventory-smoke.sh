@@ -13671,6 +13671,7 @@ as "$QA_TOKEN" POST $EN/info-requests/action "{\"id\":$EIR,\"action\":\"close\"}
 # Arithmetic: required documents of the handover = drawing, piping drawing (dossier) + BOM + OPC (system lines) = 4 missing; the datasheet is not required in list B. Debts at the submission = 4.
 call POST Contracts "{\"code\":\"ENGE1-B\",\"title\":\"قرارداد آزمون کنترل مهندسی ب\",\"status\":1,\"employer\":\"کارفرمای آزمون\",\"contractDate\":\"$(dd -5)T00:00:00+00:00\"}"; check "enge1 B: contract created" '.success and (.data.id|type) == "number"'
 EBK=$(val .data.id)
+call POST ContractEquipments "{\"contractId\":$EBK,\"equipmentId\":$SLEQ,\"count\":1}"; check "enge1 B: the equipment of the contract is recorded (a work order needs it)" '.success'
 call POST WorkOrders "{\"contractId\":$EBK,\"equipmentId\":$SLEQ,\"code\":\"ENGE1-B-WO\",\"title\":\"توربین ب\",\"description\":\"x\",\"count\":1}"; check "enge1 B: work order created" '.success and .data.id > 0'
 as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP2,\"action\":\"native-standard\",\"referenceCode\":\"ENGE1-STD-B\",\"standardBasis\":\"دیتاشیت شماره ۲۰ بند ۵\"}"; check "enge1 B: the standard of platform two is recorded (standard B)" '.success and .data.referenceCode == "ENGE1-STD-B" and .data.status == 0'
 as "$E_ENG" POST $EN/platforms/action "{\"productId\":$EP2,\"referenceCode\":\"ENGE1-STD-B\",\"action\":\"assess\"}"; check "enge1 B: the engineer assesses the dossier of platform two against list B" '.success and .data.status == 1'
@@ -13785,6 +13786,7 @@ ECK=$ENWK
 enrun
 as "$E_MG" GET "$EN/cases/$ECC"; check "enge1 C: the agent followed the win and drafted the handover (the case is in engineering)" ".success and .data.contractId == $ECK and .data.status == 7"
 ECH=$(val .data.openHandoverId)
+call POST ContractEquipments "{\"contractId\":$ECK,\"equipmentId\":$SLEQ,\"count\":1}"; check "enge1 C: the equipment of the contract is recorded (a work order needs it)" '.success'
 call POST WorkOrders "{\"contractId\":$ECK,\"equipmentId\":$SLEQ,\"code\":\"ENGE1-C-WO\",\"title\":\"توربین ج\",\"description\":\"x\",\"count\":1}"; check "enge1 C: a work order of the contract names the equipment of the product of the new design (the registration needs a product of the case)" '.success and .data.id > 0'
 as "$E_ENG" POST $EN/platform-registrations "{\"caseId\":$ECC,\"productId\":$EP3,\"referenceCode\":\"ENGE1-STD-A\",\"standardBasis\":\"دیتاشیت شماره ۳۰ بند ۱\",\"rationale\":\"طرح جدید ساخته و تحویل شد و برای سفارش‌های بعدی باید پلتفرم باشد\"}"; nomsg "enge1 C: the engineer cannot propose the registration (the head of engineering does)" "مجوز"
 as "$E_MG" POST $EN/platform-registrations "{\"caseId\":$ECC,\"productId\":$EP3,\"referenceCode\":\"ENGE1-STD-A\",\"standardBasis\":\"دیتاشیت شماره ۳۰ بند ۱\",\"rationale\":\"کوتاه\"}"; nomsg "enge1 C: the reason of the registration needs 30 characters" "30 نویسه"

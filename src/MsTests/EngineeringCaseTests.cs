@@ -163,6 +163,46 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task The_Award_Of_A_Won_Inquiry_Keeps_The_Decision_In_Force_And_Never_Repairs_A_Stale_One()
+        {
+            AppHost host = Started("awardbind");
+            int inquiry = Inquiry(host);
+            EnCaseDto c = await ApprovedCase(host, inquiry, false);
+            int contract = Contract(host);
+            host.Write(u =>
+            {
+                SlEstimate e = AppHost.Add(u, new SlEstimate { InquiryId = inquiry, Number = "EST-AW", Revision = 1, Status = SlEstimateStatus.Final, TotalCost = 100m, CreateDate = DateTimeOffset.Now });
+                u.SaveChanges();
+                AppHost.Add(u, new SlProposal { InquiryId = inquiry, EstimateId = e.Id, Number = "PRP-AW", Revision = 1, Price = 500m, Status = SlProposalStatus.Won, ContractId = contract, CreateDate = DateTimeOffset.Now, CreatorUserId = 1001, ModifyDate = DateTimeOffset.Now });
+                u.Set<SlInquiry>().Single(i => i.Id == inquiry).Status = SlInquiryStatus.Won;
+                u.SaveChanges();
+            }, Seeder);
+            c = Ok(await CaseAct(host, Eng1, c.Id, "award"));
+            Assert.AreEqual((int)EnCaseStatus.Awarded, c.Status);
+            EnCase row = host.Read(u => u.Set<EnCase>().First(x => x.Id == c.Id));
+            Assert.AreEqual(contract, row.ContractId);
+            Assert.AreEqual(Services.NasbNiro.Engineering.EnCaseRules.ClassHash(row), row.ClassificationHash, "the link of the contract must not put the approved decision out of force");
+            Assert.IsNull(await host.As(Eng1, async p => await Services.NasbNiro.Engineering.EnDecision.RefusalAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), row, Ct)));
+
+            // a decision that was stale before the award stays stale: the award never re-binds changed content
+            int inquiry2 = Inquiry(host, number: "INQ-AW-2");
+            EnCaseDto c2 = await ApprovedCase(host, inquiry2, false);
+            int contract2 = Contract(host);
+            host.Write(u =>
+            {
+                SlEstimate e = AppHost.Add(u, new SlEstimate { InquiryId = inquiry2, Number = "EST-AW2", Revision = 1, Status = SlEstimateStatus.Final, TotalCost = 100m, CreateDate = DateTimeOffset.Now });
+                u.SaveChanges();
+                AppHost.Add(u, new SlProposal { InquiryId = inquiry2, EstimateId = e.Id, Number = "PRP-AW2", Revision = 1, Price = 500m, Status = SlProposalStatus.Won, ContractId = contract2, CreateDate = DateTimeOffset.Now, CreatorUserId = 1001, ModifyDate = DateTimeOffset.Now });
+                u.Set<SlInquiry>().Single(i => i.Id == inquiry2).Status = SlInquiryStatus.Won;
+                u.Set<EnCase>().Single(x => x.Id == c2.Id).ProposedChangeNote = "متن پس از تصویب دست‌کاری شده است";
+                u.SaveChanges();
+            }, Seeder);
+            Ok(await CaseAct(host, Eng1, c2.Id, "award"));
+            EnCase row2 = host.Read(u => u.Set<EnCase>().First(x => x.Id == c2.Id));
+            Assert.AreNotEqual(Services.NasbNiro.Engineering.EnCaseRules.ClassHash(row2), row2.ClassificationHash);
+        }
+
+        [TestMethod]
         public async Task The_Proposal_Approval_Is_Refused_Until_The_Technical_Package_Is_Released_And_A_Legacy_Inquiry_Passes()
         {
             AppHost host = Started("choke1");

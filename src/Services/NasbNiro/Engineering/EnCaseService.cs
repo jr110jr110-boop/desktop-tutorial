@@ -525,7 +525,11 @@ namespace Services.NasbNiro.Engineering
                     int? contract = await _uow.Set<SlProposal>().AsNoTracking().Where(p => p.InquiryId == c.InquiryId.Value && !p.Deleted && p.ContractId.HasValue).OrderByDescending(p => p.Id).Select(p => p.ContractId).FirstOrDefaultAsync(ct);
                     if (!contract.HasValue) return EnText.Bad<EnCaseDto>("قرارداد این استعلام هنوز ساخته نشده است.");
                     if (await _uow.Set<EnCase>().AnyAsync(x => x.ContractId == contract.Value && x.Id != c.Id && !x.Deleted, ct)) return EnText.Bad<EnCaseDto>("برای این قرارداد پروندهٔ مهندسی دیگری باز است.");
+                    // The contract is derived by the system from the won proposal of the same inquiry: it is the identity of the case, not a change of the decided content.
+                    // A decision that is in force before the link stays bound to the same content after it; a decision that was already stale stays stale.
+                    bool bound = c.ClassificationHash != null && c.ClassificationHash == EnCaseRules.ClassHash(c);
                     c.ContractId = contract; c.Status = EnCaseStatus.Awarded;
+                    if (bound) c.ClassificationHash = EnCaseRules.ClassHash(c);
                     EnEvents.Add(_uow, c, "awarded", Me, null);
                     break;
                 }
