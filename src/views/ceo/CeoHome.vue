@@ -23,6 +23,7 @@ import IntegrityLight from "@/components/integrity/IntegrityLight.vue";
 import CeoKpiCluster from "@/components/ceo/CeoKpiCluster.vue";
 import CeoPulse from "@/components/ceo/CeoPulse.vue";
 import CeoResourceTile from "@/components/ceo/CeoResourceTile.vue";
+import CeoEngineeringTile from "@/components/ceo/CeoEngineeringTile.vue";
 import CeoSectionPanel from "@/components/ceo/CeoSection.vue";
 import OpsWidget from "@/components/opsData/OpsWidget.vue";
 import AuditWidget from "@/components/audit/AuditWidget.vue";
@@ -568,6 +569,7 @@ onBeforeUnmount(() => {
         </div>
         <CeoKpiCluster :class="{ narrow: size === 'm' || size === 's' }" :kpis="overview.headline" class="ceo-kpis" @open="openKpi" />
         <CeoResourceTile />
+        <CeoEngineeringTile />
 
         <div class="ceo-main">
           <div class="ceo-sections">
