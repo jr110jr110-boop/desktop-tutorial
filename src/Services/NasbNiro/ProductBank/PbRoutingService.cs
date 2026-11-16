@@ -130,7 +130,7 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbOpcDto>> SaveAsync(SavePbOpcDto dto, CancellationToken ct)
         {
-            if (IsAi) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.AiNeverApproves);
+            if (IsAi && !global::Services.NasbNiro.Agents.AgentMaker.Allows(global::Services.NasbNiro.EngInbox.EngInboxCodes.Apply)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.AiNeverApproves);
             if (!InRole(PbRoles.Writers)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.NotAllowed);
             if (dto == null || dto.Steps == null) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.InvalidData);
             string pn = PbText.PartNumber(dto.PartNumber);
@@ -204,7 +204,7 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbOpcDto>> SubmitAsync(PbOpcActionDto dto, CancellationToken ct)
         {
-            if (IsAi) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.AiNeverApproves);
+            if (IsAi && !global::Services.NasbNiro.Agents.AgentMaker.Allows(global::Services.NasbNiro.EngInbox.EngInboxCodes.Apply)) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.AiNeverApproves);
             PbOpcRouting r = dto == null ? null : await LoadAsync(dto.Id, true, ct);
             if (r == null) return ResponseDtoHelper.NotFound<PbOpcDto>(PbMessages.NotFound);
             if (r.Status != PbRoutingStatus.Draft) return ResponseDtoHelper.BadRequest<PbOpcDto>(PbMessages.OnlyDraft);

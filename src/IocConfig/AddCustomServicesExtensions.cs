@@ -186,6 +186,11 @@ namespace IocConfig
             // Sepidar transfer per document: the pluggable sender (Sepidar:Sender = None | File | Api; None by default) and the queue service
             services.AddScoped<Services.NasbNiro.Finance.Sp.ISepidarSender>(sp => Services.NasbNiro.Finance.Sp.SepidarSenderFactory.Create(sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()));
             services.AddScoped<Services.NasbNiro.Finance.Sp.ISpOutboxService, Services.NasbNiro.Finance.Sp.SpOutboxService>();
+            // ENG-F1: the engineering inbox (the source is a folder on the server; Engineering:Source = Folder | Api), the ingest and apply services and the creation of the folders at start
+            services.AddSingleton<Services.NasbNiro.EngInbox.IEngineeringSource>(sp => Services.NasbNiro.EngInbox.EngSourceFactory.Create(sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(), sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>(), sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()));
+            services.AddScoped<Services.NasbNiro.EngInbox.IEngInboxService, Services.NasbNiro.EngInbox.EngInboxService>();
+            services.AddScoped<Services.NasbNiro.EngInbox.IEngInboxApplyService, Services.NasbNiro.EngInbox.EngInboxApplyService>();
+            services.AddHostedService<Services.NasbNiro.EngInbox.EngInboxHostedService>();
             services.AddScoped<Services.NasbNiro.Finance.IAuditChainService, Services.NasbNiro.Finance.AuditChainService>();   // R1t D20: check of the hash chain of the audit trail
             // package D: scheduled verification of the audit chain (02:30, Integrity:Jobs=false switches the job off), the restore test results, «سلامت سوابق»
             services.AddScoped<Services.NasbNiro.Integrity.IRestoreTestService, Services.NasbNiro.Integrity.RestoreTestService>();
@@ -341,6 +346,7 @@ namespace IocConfig
             Services.NasbNiro.Agents.Steps.FinanceSteps.AddFinanceSteps(services);
             Services.NasbNiro.Agents.Steps.SepidarOutboxSteps.AddSepidarOutboxSteps(services);
             Services.NasbNiro.Agents.Steps.EngineeringSteps.AddEngineeringSteps(services);
+            Services.NasbNiro.Agents.Steps.EngInboxSteps.AddEngInboxSteps(services);   // ENG-F1
             Services.NasbNiro.Agents.Steps.SalesSteps.AddSalesSteps(services);
             Services.NasbNiro.Agents.Steps.ServiceSteps.AddServiceSteps(services);
             Services.NasbNiro.Agents.AgentStationProbes.AddAgentStationProbes(services);

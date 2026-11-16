@@ -106,7 +106,7 @@ namespace MsTests
 
             var configuration = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", reloadOnChange: false, optional: false)
-                .AddInMemoryCollection(new[] { new KeyValuePair<string, string>("UseInMemoryDatabase", "true") })
+                .AddInMemoryCollection(new[] { new KeyValuePair<string, string>("UseInMemoryDatabase", "true"), new KeyValuePair<string, string>("Engineering:Source", "Api") })   // ENG-F1: the API source is never configured, so no test host scans a real folder or opens a scan task; the inbox tests register their own source
                 .AddInMemoryCollection(settings ?? new Dictionary<string, string>())
                 .Build();
             services.AddSingleton<IConfigurationRoot>(provider => configuration);

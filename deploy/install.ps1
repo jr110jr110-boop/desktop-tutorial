@@ -858,6 +858,10 @@ try {
     Grant-FolderAccess $AppDir $poolIdentity 'RX'
     foreach ($rel in $DataFolders) { Grant-FolderAccess (Join-Path $AppDir $rel) $poolIdentity 'M' }
     Grant-FolderAccess $LogsDir $poolIdentity 'M'
+    # ENG-F1: the engineering inbox folder beside the application folder (an update of the program never touches it); the application identity reads, writes and moves packages there
+    $EngInboxDir = Join-Path $InstallRoot 'Engineering-Inbox'
+    if (-not (Test-Path $EngInboxDir)) { New-Item -ItemType Directory -Path $EngInboxDir -Force | Out-Null }
+    Grant-FolderAccess $EngInboxDir $poolIdentity 'M'
 
     if ($UploadedFilesFrom) {
         if (-not (Test-Path $UploadedFilesFrom)) { throw "Folder not found: $UploadedFilesFrom" }
@@ -1075,6 +1079,8 @@ ALTER ROLE db_backupoperator ADD MEMBER [NT AUTHORITY\SYSTEM];
     # the loopback switch is for the tests only and never stays on a server. FTP and camera passwords go in Dnc:Credentials:<key> on the server by hand, never in the package.
     if ($null -eq (Get-JsonSetting $settings @('Remote', 'Enabled'))) { Set-JsonSetting $settings @('Remote', 'Enabled') $false }
     if ($null -eq (Get-JsonSetting $settings @('Dnc', 'FolderRoots'))) { Set-JsonSetting $settings @('Dnc', 'FolderRoots') '' }
+    # ENG-F1: the inbox root, written once (a value the administrator set is kept)
+    if ($null -eq (Get-JsonSetting $settings @('Engineering', 'InboxFolder'))) { Set-JsonSetting $settings @('Engineering', 'InboxFolder') (Join-Path $InstallRoot 'Engineering-Inbox') }
     Remove-JsonSetting $settings @('Dnc', 'AllowLoopback')
     Write-JsonSettings $settings $settingsPath
     Write-Ok 'Database connection uses Windows authentication; sign-in key and audit key kept or created; the other settings were left as they are.'

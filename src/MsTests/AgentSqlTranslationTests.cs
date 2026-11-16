@@ -130,6 +130,21 @@ namespace MsTests
             }
         }
 
+        /// <summary>ENG-F1: the discover queries of the three inbox steps translate to SQL Server (run against the swallowing connection).</summary>
+        [TestMethod]
+        public void The_Discover_Queries_Of_The_Engineering_Inbox_Steps_Translate_To_Sql_Server()
+        {
+            AppHost host = AppHost.SqlTranslationOnly(new Swallow(), new NoConnect());
+            using (IServiceScope scope = host.Provider.CreateScope())
+            {
+                IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var steps = scope.ServiceProvider.GetServices<IAgentStep>().Where(x => x.Code.StartsWith("ENG.INBOX.", StringComparison.Ordinal)).ToList();
+                Assert.AreEqual(3, steps.Count);
+                foreach (IAgentStep step in steps)
+                    Probe(step.Code, () => step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult());
+            }
+        }
+
         /// <summary>The Sepidar transfer: the queries behind prepare (a change check per kind), send, the fix gate and the approval gate, and the dashboard alert, translated for every kind without being run.</summary>
         [TestMethod]
         public void The_Queries_Behind_The_Sepidar_Transfer_Translate_To_Sql_Server()

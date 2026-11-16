@@ -218,7 +218,7 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbBomDto>> SaveAsync(SavePbBomDto dto, CancellationToken ct)
         {
-            if (IsAi) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.AiNeverApproves);
+            if (IsAi && !global::Services.NasbNiro.Agents.AgentMaker.Allows(global::Services.NasbNiro.EngInbox.EngInboxCodes.Apply)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.AiNeverApproves);
             if (!InRole(PbRoles.Writers)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.NotAllowed);
             if (dto == null) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.InvalidData);
             string assembly = PbText.PartNumber(dto.AssemblyPartNumber);
@@ -390,7 +390,7 @@ namespace Services.NasbNiro.ProductBank
 
         public async Task<ResponseDto<PbBomDto>> SubmitAsync(PbBomActionDto dto, CancellationToken ct)
         {
-            if (IsAi) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.AiNeverApproves);
+            if (IsAi && !global::Services.NasbNiro.Agents.AgentMaker.Allows(global::Services.NasbNiro.EngInbox.EngInboxCodes.Apply)) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.AiNeverApproves);
             PbBomHeader h = dto == null ? null : await LoadAsync(dto.Id, true, ct);
             if (h == null) return ResponseDtoHelper.NotFound<PbBomDto>(PbMessages.NotFound);
             if (h.Status != PbBomStatus.Draft) return ResponseDtoHelper.BadRequest<PbBomDto>(PbMessages.OnlyDraft);

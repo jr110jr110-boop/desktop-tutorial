@@ -248,10 +248,10 @@ namespace MsTests
         {
             AppHost host = new AppHost("AgentEngCat_" + Guid.NewGuid().ToString("N"));
             List<IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<IAgentStep>().Where(s => s.Station == 5).ToList())).GetAwaiter().GetResult();
-            CollectionAssert.AreEquivalent(new[] { "ENG.INSTANTIATE", "ENG.BOM.INPUT", "ENG.OPC.INPUT", "ENG.BOM.SIGN", "ENG.BOM.RELEASE", "ENG.OPC.CHECK", "ENG.OPC.APPROVE", "ENG.OPC.PUBLISH" }, steps.Select(s => s.Code).ToList());
+            CollectionAssert.AreEquivalent(new[] { "ENG.INSTANTIATE", "ENG.BOM.INPUT", "ENG.OPC.INPUT", "ENG.BOM.SIGN", "ENG.BOM.RELEASE", "ENG.OPC.CHECK", "ENG.OPC.APPROVE", "ENG.OPC.PUBLISH", "ENG.INBOX.INGEST", "ENG.INBOX.FIX", "ENG.INBOX.APPLY" }, steps.Select(s => s.Code).ToList());
             Assert.IsTrue(steps.All(s => s.AgentCode == "AG-ENG"));
-            Assert.AreEqual(1, steps.Count(s => s.Kind == AgentStepKind.Agent), "only the instantiation is the agent's");
-            Assert.AreEqual(2, steps.Count(s => s.Kind == AgentStepKind.Input));
+            Assert.AreEqual(3, steps.Count(s => s.Kind == AgentStepKind.Agent), "the instantiation and the two inbox steps (ingest, apply) are the agent's");
+            Assert.AreEqual(3, steps.Count(s => s.Kind == AgentStepKind.Input));
             Assert.AreEqual(5, steps.Count(s => s.Kind == AgentStepKind.HumanGate));
             Assert.AreEqual(PbRoles.ReleaseRoles, steps.Single(s => s.Code == "ENG.BOM.RELEASE").GateInfo(new AgentWorkItem { TargetId = 1 }).Roles);
             Assert.AreEqual(PbRoles.CheckRoles, steps.Single(s => s.Code == "ENG.OPC.CHECK").GateInfo(new AgentWorkItem { TargetId = 1 }).Roles);
