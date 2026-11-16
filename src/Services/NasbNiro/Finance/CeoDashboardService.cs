@@ -208,6 +208,16 @@ namespace Services.NasbNiro.Finance
             d.PcOverloadedResources = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcResourceOverload>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == Entities.Model.NasbNiro.ProjectControl.PcOverloadStatus.Open, ct);
             d.PcOverloadsAccepted = await _uow.Set<Entities.Model.NasbNiro.ProjectControl.PcResourceOverload>().AsNoTracking().CountAsync(o => !o.Deleted && o.Status == Entities.Model.NasbNiro.ProjectControl.PcOverloadStatus.Accepted, ct);
             Alert(d.PcOverloadedResources > 0, "warning", $"{d.PcOverloadedResources} منبع بیش‌تخصیص‌یافته (بار طرح‌های تاییدشده بیش از ظرفیت) باز است", "/project-control/resources?tab=overloads");
+            // engineering control (ENG-E1): incomplete platforms and the open / overdue document debts (read directly, so the constructor stays as it is)
+            d.EnPlatformsTotal = await _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().AsNoTracking().CountAsync(p => !p.Deleted && p.IsActive, ct);
+            int enComplete = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDossierStatus.Complete
+                && _uow.Set<Entities.Model.NasbNiro.ProductBank.PbProduct>().Any(p => p.Id == x.ProductId && p.IsActive && !p.Deleted), ct);
+            d.EnPlatformsIncomplete = Math.Max(0, d.EnPlatformsTotal - enComplete);
+            d.EnOpenDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open, ct);
+            d.EnOverdueDebts = await _uow.Set<Entities.Model.NasbNiro.Engineering.EnDocumentDebt>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == Entities.Model.NasbNiro.Engineering.EnDebtStatus.Open && x.DueDate < today, ct);
+            Alert(d.EnOverdueDebts > 0, "danger", $"{d.EnOverdueDebts} بدهی مدارک مهندسی از سررسید گذشته است (مدرک معافیت اضطراری هنوز نیامده)", "/engineering/debts");
+            Alert(d.EnOpenDebts > 0 && d.EnOverdueDebts == 0, "info", $"{d.EnOpenDebts} بدهی مدارک مهندسی باز است", "/engineering/debts");
+            Alert(d.EnPlatformsIncomplete > 0, "info", $"{d.EnPlatformsIncomplete} پلتفرم از {d.EnPlatformsTotal} مدارک مهندسی کامل ندارد", "/engineering/platforms");
             // office automation: open decisions of approved minutes past their due date (read directly, so the constructor stays as it is)
             d.OverdueDecisions = await (from dec in _uow.Set<OfDecision>().AsNoTracking()
                                         join meeting in _uow.Set<OfMeeting>().AsNoTracking() on dec.MeetingId equals meeting.Id

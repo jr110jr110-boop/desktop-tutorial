@@ -227,10 +227,11 @@ namespace IocConfig
             services.AddScoped<Services.NasbNiro.GoLive.IPoCitationService, Services.NasbNiro.GoLive.PoCitationService>();
             services.AddScoped<Services.NasbNiro.GoLive.IGlPrintService, Services.NasbNiro.GoLive.GlPrintService>();
             services.AddHostedService<Services.NasbNiro.GoLive.GoLiveHostedService>();
-            services.AddHostedService<Services.NasbNiro.Engineering.EnHostedService>();   // ENG-E1: records the engineering cut-over instant once
             services.AddScoped<Services.NasbNiro.Engineering.IEnReferenceService, Services.NasbNiro.Engineering.EnReferenceService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnPlatformService, Services.NasbNiro.Engineering.EnPlatformService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnCaseService, Services.NasbNiro.Engineering.EnCaseService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnHandoverService, Services.NasbNiro.Engineering.EnHandoverService>();
+            services.AddScoped<Services.NasbNiro.Engineering.IEnOverviewService, Services.NasbNiro.Engineering.EnOverviewService>();
             services.AddScoped<Services.NasbNiro.Engineering.IEnClarificationService, Services.NasbNiro.Engineering.EnClarificationService>();
             services.AddScoped<Services.NasbNiro.Quality.INoDrawingService, Services.NasbNiro.Quality.NoDrawingService>();
             services.AddScoped<Services.NasbNiro.Quality.ISpecialProcessService, Services.NasbNiro.Quality.SpecialProcessService>();

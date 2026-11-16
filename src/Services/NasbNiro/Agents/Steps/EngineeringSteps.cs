@@ -116,6 +116,9 @@ namespace Services.NasbNiro.Agents.Steps
             int equipment = await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == item.TargetId && !w.Deleted).Select(w => w.EquipmentId).FirstOrDefaultAsync(ct);
             var product = await RepeatProducts(uow).Where(p => p.EquipmentId == equipment).OrderBy(p => p.Id).Select(p => new { p.Id, p.Code }).FirstOrDefaultAsync(ct);
             if (product == null) return AgentStepResult.Waiting("محصولی با BOM منتشرشده برای تجهیز این دستور کار نیست.");
+            int contractId = await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == item.TargetId).Select(w => w.ContractId).FirstOrDefaultAsync(ct);
+            string held = await global::Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(uow, contractId, ct);   // ENG-E1: waits for the handover accepted by the PMO
+            if (held != null) return AgentStepResult.Waiting(held);
             ResponseDto<PbBaselineDto> response = await services.GetRequiredService<IPbProductService>().InstantiateAsync(new PbInstantiateDto { WorkOrderId = item.TargetId, ProductId = product.Id }, ct);
             if (!response.Success) return ProcStepCommon.Refusal(response);
             return AgentStepResult.Done("PbProjectBaseline", response.Data.Id, item.TargetNumber, $"ایجنت مهندسی دستور کار {item.TargetNumber} را از BOM منتشرشدهٔ محصول {product.Code} پایه‌ریزی کرد (BOM پروژه، مسیرهای ساخت تاییدشده و WBS از بانک آمد).");

@@ -13180,7 +13180,7 @@ TOKEN=$ADMIN_TOKEN
 # ------------------------------------------------------------------------------------------ RESOURCES (priority 4, phases 4a and 4b): the pool, the standard rates, the resource plan and its baseline rows
 # The planning agent drafts the plan from the pool (covered by the unit tests, the scheduler does not run here); in this script people do what the agent would otherwise start with, and the gates are the real ones.
 as "$ADMIN_TOKEN" GET $AG/steps
-check "res: the catalogue has exactly 164 steps; fourteen of them are the resource steps (phases 4a to 4d), all in station 4 and of the planning agent" '.success and (.data|length) == 164 and ([.data[]|select(.code|startswith("RES."))]|length) == 14 and ([.data[]|select((.code|startswith("RES.")) and .station == 4 and .agentCode == "AG-PLAN")]|length) == 14'
+check "res: the catalogue has exactly 195 steps; fourteen of them are the resource steps (phases 4a to 4d), all in station 4 and of the planning agent" '.success and (.data|length) == 195 and ([.data[]|select(.code|startswith("RES."))]|length) == 14 and ([.data[]|select((.code|startswith("RES.")) and .station == 4 and .agentCode == "AG-PLAN")]|length) == 14'
 check "res: the agent steps are the draft, the load check, the levelling proposal and the cost proposal (kind 1); the review, the approvals, the levelling decision, its confirmation and the cost review are gates (kind 2); the pool, fix, rate and over-allocation steps are inputs (kind 4; 6 is a task state)" '([.data[]|select(.code == "RES.PLAN.DRAFT" or .code == "RES.LOAD.CHECK" or .code == "RES.LEVEL.PROPOSE" or .code == "RES.COST.PROPOSE")|.kind]|unique) == [1] and ([.data[]|select(.code == "RES.PLAN.REVIEW" or .code == "RES.PLAN.APPROVE" or .code == "RES.RATE.APPROVE" or .code == "RES.LEVEL.DECIDE" or .code == "RES.LEVEL.CONFIRM" or .code == "RES.COST.REVIEW")|.kind]|unique) == [2] and ([.data[]|select(.code == "RES.POOL.INPUT" or .code == "RES.PLAN.FIX" or .code == "RES.RATE.INPUT" or .code == "RES.LOAD.RESOLVE")|.kind]|unique) == [4]'
 RESNOT="شما مجوز این کار را ندارید."
 RESXRV="برای تایید یا برگشت طرح، نسخه ردیف (rowVersion) همان طرحی که دیده‌اید باید همراه درخواست باشد؛ صفحه را دوباره باز کنید."
@@ -13460,7 +13460,7 @@ as "$PLAN_TOKEN" GET "$PC/cost-lines?ContractId=$RESXB&PageSize=0"; check "resx:
 as "$ADMIN_TOKEN" POST $P7RG/weekly/generate "{\"contractId\":$RESXC}"; check "resx: the weekly report has the resources section with exactly this project's figures: no open over-allocation, none accepted or lapsed, and the machine among the top loads" '.success and .data.auto.resources.openOverloads == 0 and .data.auto.resources.acceptedOverloads == 0 and .data.auto.resources.lapsedOverloads == 0 and (.data.auto.resources.top|length) == 1 and .data.auto.resources.top[0].code == "RESX-MACH" and .data.auto.resources.top[0].load == 10'
 as "$CEO_TOKEN" GET finance/ceo-dashboard; check "resx: the CEO dashboard still counts no open over-allocation (this block added none)" '.success and .data.pcOverloadedResources == 0'
 reslsettle
-as "$ADMIN_TOKEN" GET $AG/steps; check "resx: the catalogue still has exactly 164 steps after the agents ran" '.success and (.data|length) == 164'
+as "$ADMIN_TOKEN" GET $AG/steps; check "resx: the catalogue still has exactly 195 steps after the agents ran" '.success and (.data|length) == 195'
 TOKEN=$ADMIN_TOKEN
 
 # ------------------------------------------------------------------------------------------ sp: transfer of single documents to Sepidar (connection preparation: no API, no sender)

@@ -60,6 +60,12 @@ namespace ViewModels.NasbNiro.FinanceDtos
         public int PcOverloadedResources { get; set; }
         public int PcOverloadsAccepted { get; set; }
 
+        // engineering control (ENG-E1): platforms whose documents are not complete («پلتفرم‌های ناقص») out of the active ones, and the document debts of emergency waivers («بدهی مدارک مهندسی»)
+        public int EnPlatformsIncomplete { get; set; }
+        public int EnPlatformsTotal { get; set; }
+        public int EnOpenDebts { get; set; }
+        public int EnOverdueDebts { get; set; }
+
         // office automation: decisions of approved meeting minutes that are open past their due date ("مصوبات معوق")
         public int OverdueDecisions { get; set; }
 

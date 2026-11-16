@@ -241,7 +241,11 @@ namespace Services.NasbNiro.Agents
                         || uow.Set<Entities.Model.NasbNiro.ProductBank.PbOpcRouting>().Any(r => !r.Deleted && r.ProductId == p.Id
                             && (r.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.UnderReview || (r.Status == Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved && r.PublishedToMesAt == null))))))
                 .Select(w => w.ContractId).Distinct().ToListAsync(ct);
-            return AgentStationProbes.Difference(started, waiting.Concat(inFlow));
+            // ENG-E1: an engineering case that is not yet released to execution keeps the station open
+            List<int> openCases = await uow.Set<Entities.Model.NasbNiro.Engineering.EnCase>().AsNoTracking().Where(c => !c.Deleted && c.ContractId != null && contractIds.Contains(c.ContractId.Value)
+                    && (c.Status == Entities.Model.NasbNiro.Engineering.EnCaseStatus.Awarded || c.Status == Entities.Model.NasbNiro.Engineering.EnCaseStatus.InEngineering || c.Status == Entities.Model.NasbNiro.Engineering.EnCaseStatus.HandedOver || c.Status == Entities.Model.NasbNiro.Engineering.EnCaseStatus.Accepted))
+                .Select(c => c.ContractId.Value).Distinct().ToListAsync(ct);
+            return AgentStationProbes.Difference(started, waiting.Concat(inFlow).Concat(openCases));
         }
     }
 

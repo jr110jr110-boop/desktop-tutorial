@@ -199,10 +199,6 @@ namespace MsTests
             int inquiry = Inquiry(host);
             Refused(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry), "قدیمی");
             Assert.IsTrue(Ok(await host.As(Sales1, p => p.GetRequiredService<IEnCaseService>().GetGateStateAsync(inquiry, null, Ct))).Legacy);
-            // the first start of the program records the instant once
-            Assert.IsTrue(await host.As(Seeder, async p => await EnControl.EnsureRecordedAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), null, Ct)));
-            Assert.IsFalse(await host.As(Seeder, async p => await EnControl.EnsureRecordedAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), null, Ct)));
-            Assert.AreEqual(1, host.Read(u => u.Set<EnActivation>().Count()));
         }
 
         [TestMethod]

@@ -33,17 +33,6 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnUnit { Qa = 1, Qc = 2, Production = 3, Procurement = 4, Warehouse = 5, Planning = 6 }
 
-    /// <summary>The instant the engineering control started, recorded once at the first start of the program after the update (one row ever). Work created before it is legacy.</summary>
-    public class EnActivation : BaseEntity
-    {
-        public DateTimeOffset StartAt { get; set; }
-        public int? RecordedByUserId { get; set; }
-        public string Note { get; set; }
-
-        /// <summary>Always 1. A unique index on it makes a second row impossible, even a soft-deleted one.</summary>
-        public int Slot { get; set; } = 1;
-    }
-
     // ------------------------------------------------------------------------------------------ the reference document list
 
     /// <summary>A revision of the reference list of engineering documents (VDDR) a platform needs to be complete. Based on API 611/612 and PMBOK; the system ships no content of its own.</summary>

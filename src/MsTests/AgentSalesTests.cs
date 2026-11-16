@@ -302,7 +302,7 @@ namespace MsTests
         public void The_Station_Has_The_Steps_Of_The_Spec_And_Gates_Use_The_Roles_Of_The_Services()
         {
             AppHost host = new AppHost("AgentSlCat_" + Guid.NewGuid().ToString("N"));
-            List<IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<IAgentStep>().Where(s => s.Station == 1).ToList())).GetAwaiter().GetResult();
+            List<IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<IAgentStep>().Where(s => s.Station == 1 && !(s is Services.NasbNiro.Agents.Steps.EnStep)).ToList())).GetAwaiter().GetResult();
             CollectionAssert.AreEquivalent(new[]
             {
                 "SL.BID.DRAFT", "SL.BID.SUBMIT", "SL.BID.DECIDE", "SL.ESTIMATE.FROM-EQUIPMENT", "SL.ESTIMATE.INPUT", "SL.ESTIMATE.FINALIZE", "SL.PROPOSAL.DRAFT", "SL.PROPOSAL.APPROVE", "SL.TENDER.REVIEW", "SL.PROPOSAL.SEND", "SL.PROPOSAL.RESULT",

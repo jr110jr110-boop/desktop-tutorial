@@ -45,7 +45,7 @@ namespace MsTests
         {
             host.Write(u =>
             {
-                AppHost.Add(u, new EnActivation { StartAt = DateTimeOffset.Now.AddDays(-daysAgo), Note = "test" });
+                AppHost.Add(u, new Entities.Model.NasbNiro.GoLive.GlActivation { StartAt = DateTimeOffset.Now.AddDays(-daysAgo), Note = "test" });
                 u.SaveChanges();
             }, Seeder);
         }

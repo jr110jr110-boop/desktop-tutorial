@@ -11,7 +11,6 @@ namespace DataLayer.Context
     {
         private static void AddEngineering()
         {
-            AuditPd(typeof(E.EnActivation), new[] { "StartAt", "RecordedByUserId", "Note", "Slot", "Deleted" }, "آغاز کنترل مهندسی");
             AuditPd(typeof(E.EnReferenceList), new[] { "Code", "Title", "StandardSource", "Revision", "Status", "PreparedByUserId", "EditorUserIds", "SubmittedAt", "ApprovedByUserId", "ApprovedAt", "ContentHash", "Note", "VoidReason", "Deleted" }, "فهرست مدارک مرجع مهندسی");
             AuditPd(typeof(E.EnReferenceLine), new[] { "ListId", "Seq", "DocumentType", "Discipline", "Title", "Required", "TenderStage", "ClientSubmittal", "StandardClause", "Note" }, "ردیف فهرست مدارک مرجع");
             AuditPd(typeof(E.EnPlatformDossier), new[] { "ProductId", "ReferenceListId", "ReferenceRevision", "Status", "AssessedAt", "LastEditedByUserId", "EditorUserIds", "ConfirmedByUserId", "ConfirmedAt", "ConfirmedHash", "Note", "Deleted" }, "پرونده مدارک پلتفرم");

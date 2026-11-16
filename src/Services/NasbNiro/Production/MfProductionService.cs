@@ -294,6 +294,11 @@ namespace Services.NasbNiro.Production
             result.Checks.Add(new ReleaseCheckDto { Code = "routing", Title = "مسیر ساخت تأییدشده", Passed = routingOk, Message = routingMessage });
             if (ecVerdict.Problem != null || ecVerdict.Orders.Count > 0)   // the check appears only when an engineering change order concerns this order
                 result.Checks.Add(new ReleaseCheckDto { Code = "engchange", Title = "تغییر مهندسی و نقطه اجرا (ECO)", Passed = ecVerdict.Problem == null, Message = ecVerdict.Problem ?? "دستور تغییر مهندسی تاییدشده‌ای که این دستور را مردود کند وجود ندارد." });
+            if (order.ContractId > 0)   // ENG-E1: the engineering documents of a controlled contract must be released by the PMO; a legacy contract adds no item
+            {
+                (bool controlled, bool passed, string message) = await global::Services.NasbNiro.Engineering.EnGates.ProductionReleaseAsync(_uow, order.ContractId, ct);
+                if (controlled) result.Checks.Add(new ReleaseCheckDto { Code = "engdocs", Title = "مدارک مهندسی ابلاغ‌شده به اجرا", Passed = passed, Message = message, Overridable = false });
+            }
 
             // 2. work centres exist, are active and not retired
             var problems = new List<string>();

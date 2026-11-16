@@ -345,6 +345,11 @@ namespace Services.NasbNiro.ProductBank
                 global::Services.NasbNiro.OpsData.ReadinessGateResult ready = await _readiness.GateForBaselineAsync(wo.Id, product.Id, ct);
                 if (ready.Refusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(ready.Refusal);
             }
+            if (adoptedBomId == null)   // ENG-E1: a controlled contract is instantiated only after the PMO accepted the engineering documents
+            {
+                string engineeringRefusal = await global::Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(Uow, wo.ContractId, ct);
+                if (engineeringRefusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(engineeringRefusal);
+            }
             PbWbsTemplate tpl = await Uow.Set<PbWbsTemplate>().AsNoTracking().Where(t => !t.Deleted && t.ProductId == product.Id && t.IsApproved).OrderByDescending(t => t.Version).FirstOrDefaultAsync(ct);
             List<PbOpcRouting> routings = await Uow.Set<PbOpcRouting>().AsNoTracking().Where(r => !r.Deleted && r.ProductId == product.Id && r.Status == PbRoutingStatus.Approved).ToListAsync(ct);
             routings = routings.GroupBy(r => r.PartNumber).Select(g => g.OrderByDescending(r => r.Revision).First()).ToList();

@@ -14,13 +14,6 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
 
         public static void AddEngineeringConfigurations(this ModelBuilder builder)
         {
-            builder.Entity<EnActivation>(b =>
-            {
-                b.ToTable("EnActivations");
-                b.Property(x => x.Note).HasMaxLength(500);
-                b.HasIndex(x => x.Slot).IsUnique().HasDatabaseName("UX_EnActivations_Slot");
-            });
-
             builder.Entity<EnReferenceList>(b =>
             {
                 b.ToTable("EnReferenceLists");

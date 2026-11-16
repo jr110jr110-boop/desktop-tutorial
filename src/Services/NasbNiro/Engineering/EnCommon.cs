@@ -69,9 +69,6 @@ namespace Services.NasbNiro.Engineering
 
     public static class EnSettingKeys
     {
-        /// <summary>The Shamsi number yyyyMMdd of the day the engineering control started; 0 = the instant recorded once by the first start of the program after the update (EnActivation). Moving it later makes more work legacy: a weakening.</summary>
-        public const string ControlStartDate = "Engineering.ControlStartDate";
-
         /// <summary>The farthest due date (days ahead) of the document debts of an emergency waiver.</summary>
         public const string WaiverMaxDebtDays = "Engineering.Waiver.MaxDebtDays";
 
@@ -79,7 +76,6 @@ namespace Services.NasbNiro.Engineering
 
         public static IEnumerable<QualitySetting> Defaults()
         {
-            yield return new QualitySetting { Key = ControlStartDate, Value = 0, Title = "روز آغاز کنترل مهندسی (تاریخ شمسی به‌صورت yyyyMMdd؛ ۰ = روز نخستین اجرای برنامه پس از به‌روزرسانی): استعلام و قراردادهای پیش از آن «قدیمی» شمرده می‌شوند", Source = Source };
             yield return new QualitySetting { Key = WaiverMaxDebtDays, Value = 90, Title = "حداکثر مهلت (روز) بدهی مدارک در معافیت اضطراری قفل تحویل مدارک مهندسی", Source = Source };
         }
 
@@ -88,7 +84,6 @@ namespace Services.NasbNiro.Engineering
             min = 0; max = 0;
             switch (key)
             {
-                case ControlStartDate: max = 99991231; return true;
                 case WaiverMaxDebtDays: min = 1; max = 365; return true;
                 default: return false;
             }
@@ -222,14 +217,11 @@ namespace Services.NasbNiro.Engineering
     /// <summary>The one place that says what is legacy for the engineering gates: work created before the cut-over instant. Nothing recorded and no day set: the control has not started, so nothing is controlled yet (only true before the first start of the program after the update).</summary>
     public static class EnControl
     {
-        /// <summary>The instant the control started, or null when it has not started.</summary>
+        /// <summary>The instant the control started: the one cut-over of Package G (<see cref="CutOver"/>), or null when it has not started.</summary>
         public static async Task<DateTimeOffset?> StartAsync(IUnitOfWork uow, CancellationToken ct)
         {
-            Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(uow, ct);
-            DateTime? day = DesignGate.ShamsiDay(settings[EnSettingKeys.ControlStartDate]);
-            if (day.HasValue) return new DateTimeOffset(DateTime.SpecifyKind(day.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(day.Value.Date));
-            DateTimeOffset? recorded = await uow.Set<EnActivation>().AsNoTracking().OrderBy(a => a.StartAt).Select(a => (DateTimeOffset?)a.StartAt).FirstOrDefaultAsync(ct);   // the earliest ever recorded, a soft-deleted row included
-            return recorded;
+            DateTimeOffset start = await CutOver.StartAsync(uow, ct);
+            return start <= DateTimeOffset.MinValue ? (DateTimeOffset?)null : start;
         }
 
         /// <summary>Legacy: created before the cut-over, or the control has not started.</summary>
@@ -239,16 +231,6 @@ namespace Services.NasbNiro.Engineering
 
         public static string LegacyNote(DateTimeOffset? start) =>
             "قدیمی، پیش از آغاز کنترل مهندسی (" + Text(start) + "): دروازه‌های پرونده مهندسی برای این مورد اعمال نمی‌شود.";
-
-        /// <summary>Records the start once (the first start of the program after the update). Returns true when a row was written. Safe to call again.</summary>
-        public static async Task<bool> EnsureRecordedAsync(IUnitOfWork uow, int? userId, CancellationToken ct)
-        {
-            if (await uow.Set<EnActivation>().AnyAsync(ct)) return false;
-            DateTimeOffset now = DateTimeOffset.Now;
-            uow.Set<EnActivation>().Add(new EnActivation { StartAt = now, RecordedByUserId = userId, Note = "ثبت خودکار در نخستین اجرای برنامه پس از به‌روزرسانی", CreateDate = now, ModifyDate = now, CreatorUserId = userId ?? 0, ModifierUserId = userId ?? 0 });
-            try { await uow.SaveChangesAsync(ct); return true; }
-            catch (DbUpdateException) { return false; }   // another instance recorded it at the same time
-        }
 
         public static async Task<bool> ContractIsLegacyAsync(IUnitOfWork uow, int contractId, CancellationToken ct)
         {
