@@ -500,6 +500,22 @@ namespace MsTests
         }
 
         [TestMethod]
+        public async Task M9_L8_A_Controlled_Contract_Is_Not_Instantiated_Before_The_Pmo_Accepted_The_Engineering_Documents_Also_Not_Through_The_Adopted_Path()
+        {
+            AppHost host = NewHost("engctl");
+            var (productId, bom) = await NewProductWithBomAsync(host);
+            MsTests.EnKit.StartControl(host);   // the control started yesterday: the contract made now is controlled and has no accepted engineering handover
+            var (contract, wo) = NewWorkOrder(host, 3);
+            host.Write(u => { u.Set<ContractEntity>().First(c => c.Id == contract).CreateDate = DateTimeOffset.Now; u.SaveChanges(); }, Pmo);
+            var res = await Run(host, Plan1, p => p.GetRequiredService<IPbProductService>().InstantiateAsync(new PbInstantiateDto { WorkOrderId = wo, ProductId = productId }, Ct));
+            Assert.IsFalse(res.Success);
+            StringAssert.Contains(res.Message, "PMO");
+            var adopted = await Run(host, Plan1, p => p.GetRequiredService<IPbProductService>().InstantiateAdoptedAsync(new PbInstantiateDto { WorkOrderId = wo, ProductId = productId }, bom.Id, null, Ct));
+            Assert.IsFalse(adopted.Success, "the adopted path runs the engineering gate too");
+            StringAssert.Contains(adopted.Message, "PMO");
+        }
+
+        [TestMethod]
         public async Task Instantiate_CopiesTheReleasedRevision_AndRecordsTheSource()
         {
             AppHost host = NewHost("copy");

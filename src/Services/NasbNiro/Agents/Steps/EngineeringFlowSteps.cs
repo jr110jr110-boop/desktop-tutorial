@@ -205,7 +205,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var current = await EnCurrentList.CurrentAsync(uow, ct);
-            if (current.Count == 0) return new List<AgentWorkItem>();
+            if (current.Count == 0 && !EnControl.Probe) return new List<AgentWorkItem>();
             var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted)
                     && uow.Set<EnReferenceList>().Any(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == d.ReferenceCode && l.Id != d.ReferenceListId))
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.ProductId, d.ReferenceCode, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() }).ToListAsync(ct);
@@ -274,7 +274,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var current = await EnCurrentList.CurrentAsync(uow, ct);
-            if (current.Count == 0) return new List<AgentWorkItem>();
+            if (current.Count == 0 && !EnControl.Probe) return new List<AgentWorkItem>();
             List<int> ids = current.Select(c => c.Value).ToList();
             var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDossierStatus.Incomplete && d.ReferenceListId != null && ids.Contains(d.ReferenceListId.Value) && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted))
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.ProductId, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() + "/" + d.ReferenceCode, Missing = d.Documents.Count(x => x.Required && x.State == EnLineState.Missing) }).ToListAsync(ct);

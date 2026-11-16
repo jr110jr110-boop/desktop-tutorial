@@ -58,6 +58,7 @@ namespace MsTests
             int before = Swallow.Swallowed;
             var problems = new List<string>();
             int steps = 0;
+            Services.NasbNiro.Engineering.EnControl.Probe = true;   // the engineering steps reach their main queries (M8): the empty probe database has no start day and no approved list
             using (IServiceScope scope = host.Provider.CreateScope())
             {
                 IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -73,6 +74,7 @@ namespace MsTests
                     }
                 }
             }
+            Services.NasbNiro.Engineering.EnControl.Probe = false;
             Assert.IsTrue(steps >= 100, "steps found: " + steps);
             Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
             Assert.IsTrue(Swallow.Swallowed - before >= 100, "queries that reached the command stage (so they were translated): " + (Swallow.Swallowed - before));
@@ -263,12 +265,14 @@ namespace MsTests
             {
                 IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var problems = new List<string>();
-                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN", "ENG.DIST.DRAFT", "ENG.DIST.NOTIFY", "ENG.DIST.ACK", "ENG.INFO.ANSWER", "ENG.PLATFORM.REGISTER", "ENG.PLATFORM.STANDARD" })
+                Services.NasbNiro.Engineering.EnControl.Probe = true;
+                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN", "ENG.DIST.DRAFT", "ENG.DIST.NOTIFY", "ENG.DIST.ACK", "ENG.INFO.ANSWER", "ENG.PLATFORM.REGISTER", "ENG.PLATFORM.STANDARD", "ENG.REF.DRAFT", "ENG.PLATFORM.ASSESS", "ENG.PLATFORM.COMPLETE", "ENG.PLATFORM.CONFIRM" })
                 {
                     IAgentStep step = scope.ServiceProvider.GetServices<IAgentStep>().Single(x => x.Code == code);
                     try { step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult(); }
                     catch (Exception ex) { string text = ex.ToString(); if (text.Contains("could not be translated") || text.Contains("cannot be translated") || text.Contains("LINQ expression")) problems.Add(code + ": " + ex.Message); }   // the swallowing reader has no columns: only a translation failure counts
                 }
+                Services.NasbNiro.Engineering.EnControl.Probe = false;
                 Assert.AreEqual(0, problems.Count, string.Join("\n", problems));
             }
         }

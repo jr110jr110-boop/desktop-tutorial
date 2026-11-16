@@ -294,8 +294,16 @@ namespace Services.NasbNiro.Engineering
     public static class EnControl
     {
         /// <summary>The instant the control started: the one cut-over of Package G (<see cref="CutOver"/>), or null when it has not started.</summary>
+        /// <summary>
+        /// Only for the SQL-translation probe of the tests (the probe database swallows every command, so no setting or list can be seeded): while set on the calling thread, the control counts as started and the steps do not return
+        /// before their main query on an empty list of approved lists, so that query is translated too. Never set by production code.
+        /// </summary>
+        private static readonly System.Threading.AsyncLocal<bool> probe = new System.Threading.AsyncLocal<bool>();
+        internal static bool Probe { get => probe.Value; set => probe.Value = value; }
+
         public static async Task<DateTimeOffset?> StartAsync(IUnitOfWork uow, CancellationToken ct)
         {
+            if (Probe) return DateTimeOffset.Now.AddDays(-1);
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(uow, ct);
             DateTime? day = DesignGate.ShamsiDay(settings[EnSettingKeys.ControlStartDate]);
             if (day.HasValue) return new DateTimeOffset(DateTime.SpecifyKind(day.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(day.Value.Date));   // a day set for the engineering control only

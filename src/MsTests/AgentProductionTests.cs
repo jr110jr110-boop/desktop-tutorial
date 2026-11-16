@@ -109,6 +109,26 @@ namespace MsTests
         // ------------------------------------------------------------------------------------------------ drafting, components and the failing check
 
         [TestMethod]
+        public async Task M9_The_Engineering_Documents_Check_Of_A_Controlled_Contract_Blocks_The_Release_And_Cannot_Be_Overridden()
+        {
+            Env e = await NewEnv("engdocs");
+            int contract = SeedContract(e, out int wo);
+            int order = SeedReadyOrder(e, contract, wo, "PO-ENG", out _);
+            ResponseDto<ReleaseCheckResultDto> before = await e.Host.As(Supervisor, s => s.GetRequiredService<IMfProductionService>().ReleaseCheckAsync(order, Ct));
+            Assert.IsFalse(before.Data.Checks.Any(c => c.Code == "engdocs"), "a legacy contract adds no item");
+            MsTests.EnKit.StartControl(e.Host);   // the control started yesterday: the contract (created now) is controlled and has no released engineering handover
+            e.Host.Write(u => { u.Set<ContractEntity>().First(c => c.Id == contract).CreateDate = DateTimeOffset.Now; u.SaveChanges(); }, Seeder);
+            ResponseDto<ReleaseCheckResultDto> after = await e.Host.As(Manager, s => s.GetRequiredService<IMfProductionService>().ReleaseCheckAsync(order, Ct));
+            ReleaseCheckDto check = after.Data.Checks.Single(c => c.Code == "engdocs");
+            Assert.IsFalse(check.Passed);
+            Assert.IsFalse(check.Overridable, "no override reason releases an order without the PMO-released engineering documents");
+            Assert.IsFalse(after.Data.CanRelease);
+            ResponseDto<OrderDto> refused = await e.Host.As(Manager, s => s.GetRequiredService<IMfProductionService>().ReleaseAsync(new ReleaseOrderDto { Id = order, OverrideReason = "دلیل کافی برای عبور از این بررسی نوشته شده است" }, Ct));
+            Assert.IsFalse(refused.Success);
+            Assert.AreNotEqual(MfOrderStatus.Released, Order(e, order).Status);
+        }
+
+        [TestMethod]
         public async Task The_Agent_Drafts_The_Orders_Takes_The_Components_And_Reports_The_Reasons_Of_A_Failing_Release_Check_On_The_Task()
         {
             Env e = await NewEnv("draft");
