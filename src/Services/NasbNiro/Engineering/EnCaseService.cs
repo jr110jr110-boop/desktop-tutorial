@@ -181,10 +181,11 @@ namespace Services.NasbNiro.Engineering
                 }
                 PcProjectCharter charter = c.ContractId.HasValue ? await EnCaseRules.CharterAsync(_uow, c.ContractId.Value, ct) : null;
                 bool platform = c.Classification == EnClassification.Platform && c.ProductId.HasValue;
-                int missing = 0; bool incomplete = false;
+                int missing = 0; bool incomplete = false; EnDossierWording dossierWord = null;
                 if (platform)
                 {
-                    incomplete = !await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
+                    dossierWord = await EnDossierWording.LoadAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
+                    incomplete = !dossierWord.Complete;
                     missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
                 }
                 string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
@@ -204,7 +205,7 @@ namespace Services.NasbNiro.Engineering
                     ProposalBasis = c.ProposalBasis, ProposedByUserId = c.ProposedByUserId, ProposedByName = names.Name(c.ProposedByUserId), ProposedByAgent = c.ProposedByUserId.HasValue && seats.Contains(c.ProposedByUserId.Value), ProposedAtText = EnText.Stamp(c.ProposedAt),
                     EngConfirmedByName = names.Name(c.EngConfirmedByUserId), EngConfirmedAtText = EnText.Stamp(c.EngConfirmedAt), CeoApprovedByName = names.Name(c.CeoApprovedByUserId), CeoApprovedAtText = EnText.Stamp(c.CeoApprovedAt), ReturnReason = c.ReturnReason,
                     PlatformIncomplete = platform && incomplete, PlatformMissingRequired = missing,
-                    PlatformWarning = platform && incomplete ? "مدارک این پلتفرم هنوز کامل و تایید نشده است (" + EnText.Num(missing) + " مدرک الزامی کم است)؛ این فقط هشدار است و بسته فنی مناقصه را متوقف نمی‌کند، اما تحویل مدارک به PMO بدون آن بسته می‌ماند." : null,
+                    PlatformWarning = platform && incomplete ? dossierWord.Warning(c.ReferenceCode) : null,
                     TenderPackageId = c.TenderPackageId, TenderPackageCode = packageCode, TenderDocumentCount = docs, TenderReleasedByName = names.Name(c.TenderReleasedByUserId), TenderReleasedAtText = EnText.Stamp(c.TenderReleasedAt), TenderStale = stale, ConceptNote = c.ConceptNote,
                     CharterReviewOutcome = (int)c.CharterReviewOutcome, CharterReviewOutcomeText = EnText.Charter(c.CharterReviewOutcome), CharterReviewedByName = names.Name(c.CharterReviewedByUserId), CharterReviewedAtText = EnText.Stamp(c.CharterReviewedAt),
                     CharterReviewNote = c.CharterReviewNote, CharterExists = charter != null, CharterStale = charter != null && c.CharterReviewOutcome != EnCharterOutcome.None && c.CharterHash != EnCaseRules.CharterHash(charter),

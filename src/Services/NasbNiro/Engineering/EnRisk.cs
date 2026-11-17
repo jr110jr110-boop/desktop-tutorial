@@ -32,6 +32,59 @@ namespace Services.NasbNiro.Engineering
         }
     }
 
+    /// <summary>The state of a platform dossier as the risk, the case warning and the CEO alert word it: the ONE place of these texts, so the three can never drift or say something untrue ("0 required documents missing" while the dossier is not even assessed).</summary>
+    internal enum EnDossierWord { Complete, NoDossier, NotAssessed, MissingDocuments, IncompleteNoMissing, AwaitingConfirmation, StaleConfirmation }
+
+    internal sealed class EnDossierWording
+    {
+        /// <summary>The CEO alert hint: the risk is any of the reasons of <see cref="EnRisk"/>, not only missing documents.</summary>
+        public const string CeoAlertHint = "(مدارک، تایید پرونده یا فهرست مرجع ناقص است)";
+
+        public EnDossierWord Word { get; private set; }
+        public int Missing { get; private set; }
+        public bool Complete => Word == EnDossierWord.Complete;
+
+        public static async Task<EnDossierWording> LoadAsync(IUnitOfWork uow, int productId, string code, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return new EnDossierWording { Word = EnDossierWord.NoDossier };
+            EnPlatformDossier d = await uow.Set<EnPlatformDossier>().AsNoTracking().Include(x => x.Documents).FirstOrDefaultAsync(x => x.ProductId == productId && x.ReferenceCode == code && !x.Deleted, ct);
+            if (d == null) return new EnDossierWording { Word = EnDossierWord.NoDossier };
+            if (await EnPlatformRules.IsCompleteAsync(uow, productId, code, ct)) return new EnDossierWording { Word = EnDossierWord.Complete };
+            return Of(d.Status, d.Documents.Count(x => x.Required && x.State == EnLineState.Missing));
+        }
+
+        /// <summary>The pure choice (unit-testable): the dossier is known NOT to be complete and confirmed.</summary>
+        public static EnDossierWording Of(EnDossierStatus status, int missing)
+        {
+            EnDossierWord w = status == EnDossierStatus.NotAssessed ? EnDossierWord.NotAssessed
+                : missing > 0 ? EnDossierWord.MissingDocuments
+                : status == EnDossierStatus.Incomplete ? EnDossierWord.IncompleteNoMissing
+                : status == EnDossierStatus.Completing ? EnDossierWord.AwaitingConfirmation
+                : EnDossierWord.StaleConfirmation;
+            return new EnDossierWording { Word = w, Missing = missing };
+        }
+
+        /// <summary>The reason sentence (no full stop) for the standard <paramref name="code"/>.</summary>
+        public string Reason(string code)
+        {
+            string std = string.IsNullOrWhiteSpace(code) ? "پلتفرم" : "استاندارد " + code;
+            switch (Word)
+            {
+                case EnDossierWord.NoDossier: return "برای " + std + " پروندهٔ مدارک پلتفرم ساخته نشده است";
+                case EnDossierWord.NotAssessed: return "پروندهٔ مدارک پلتفرم برای " + std + " هنوز ارزیابی نشده است";
+                case EnDossierWord.IncompleteNoMissing: return "مدارک الزامی پلتفرم برای " + std + " موجود است ولی پرونده هنوز کامل اعلام نشده است (کامل‌شدن باید اعلام شود)";
+                case EnDossierWord.AwaitingConfirmation: return "مدارک الزامی پلتفرم برای " + std + " موجود است و فقط تایید کامل‌بودن پرونده توسط مدیر مهندسی مانده است";
+                case EnDossierWord.StaleConfirmation: return "تایید پروندهٔ مدارک پلتفرم برای " + std + " دیگر معتبر نیست (فهرست مرجع یا مدارک تغییر کرده)؛ ارزیابی دوباره و تایید مدیر مهندسی لازم است";
+                default: return "مدارک پلتفرم برای " + std + " کامل و تایید نشده است";
+            }
+        }
+
+        /// <summary>The warning of the case page: the reason, the count only when documents are really missing, then the fixed advice.</summary>
+        public string Warning(string code) =>
+            Reason(code) + (Word == EnDossierWord.MissingDocuments ? " (" + EnText.Num(Missing) + " مدرک الزامی کم است)" : string.Empty)
+            + "؛ این فقط هشدار است و بسته فنی مناقصه را متوقف نمی‌کند، اما تحویل مدارک به PMO بدون آن بسته می‌ماند.";
+    }
+
     /// <summary>The document risk of the controlled cases, computed from the records (nothing is stored). A case is at risk while a platform dossier of its standard is not confirmed Complete, its draft handover misses required documents, or its standard has no Approved reference list. Legacy records have no case and so no risk.</summary>
     internal static class EnRisk
     {
@@ -55,13 +108,11 @@ namespace Services.NasbNiro.Engineering
                 int missing = 0;
                 if (c.Classification == EnClassification.Platform && c.ProductId.HasValue && !string.IsNullOrWhiteSpace(c.ReferenceCode))
                 {
-                    if (!await EnPlatformRules.IsCompleteAsync(uow, c.ProductId.Value, c.ReferenceCode, ct))
+                    EnDossierWording state = await EnDossierWording.LoadAsync(uow, c.ProductId.Value, c.ReferenceCode, ct);
+                    if (!state.Complete)
                     {
-                        int dossierMissing = await uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
-                        row.Reasons.Add(dossierMissing == 0
-                            ? "مدارک الزامی پلتفرم برای استاندارد " + c.ReferenceCode + " موجود است و فقط تایید کامل‌بودن پرونده توسط مدیر مهندسی مانده است"
-                            : "مدارک پلتفرم برای استاندارد " + c.ReferenceCode + " کامل و تایید نشده است");
-                        missing = Math.Max(missing, dossierMissing);
+                        row.Reasons.Add(state.Reason(c.ReferenceCode));
+                        missing = Math.Max(missing, state.Missing);
                     }
                 }
                 if (row.Awarded)

@@ -10,6 +10,7 @@ using Entities.Model.NasbNiro.Finance;
 using Entities.Model.NasbNiro.Inventory;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.Procurement;
+using EnDossierWording = Services.NasbNiro.Engineering.EnDossierWording;
 using Services.NasbNiro.Inventory;
 using Microsoft.EntityFrameworkCore;
 using ViewModels.NasbNiro.FinanceDtos;
@@ -230,7 +231,7 @@ namespace Services.NasbNiro.Finance
             Alert(d.EnDeviationsAwaiting > 0, "danger", $"{d.EnDeviationsAwaiting} انحراف از استاندارد منتظر تصمیم مدیر مهندسی یا مدیرعامل است", "/engineering/deviations");
             var enRisk = await global::Services.NasbNiro.Engineering.EnRisk.ComputeAsync(_uow, ct);
             d.EnCasesAtDocumentRisk = enRisk.Count; d.EnAwardedCasesAtDocumentRisk = enRisk.Count(r => r.Awarded); d.EnPlatformsAlarm = d.EnAwardedCasesAtDocumentRisk > 0;
-            Alert(d.EnAwardedCasesAtDocumentRisk > 0, "danger", $"{d.EnAwardedCasesAtDocumentRisk} پروندهٔ برنده‌شده با خطر مدارک مهندسی (مدرک الزامی کم است)", "/engineering/cases");
+            Alert(d.EnAwardedCasesAtDocumentRisk > 0, "danger", $"{d.EnAwardedCasesAtDocumentRisk} پروندهٔ برنده‌شده با خطر مدارک مهندسی {EnDossierWording.CeoAlertHint}", "/engineering/cases");
             Alert(d.EnOverdueDebts > 0, "danger", $"{d.EnOverdueDebts} بدهی مدارک مهندسی از سررسید گذشته است (مدرک مجوز اضطرار هنوز نیامده)", "/engineering/debts");
             Alert(d.EnOpenDebts > 0 && d.EnOverdueDebts == 0, "info", $"{d.EnOpenDebts} بدهی مدارک مهندسی باز است", "/engineering/debts");
             Alert(d.EnPlatformsIncomplete > 0, "info", $"{d.EnPlatformsIncomplete} پلتفرم از {d.EnPlatformsTotal} مدارک مهندسی کامل ندارد", "/engineering/platforms");
