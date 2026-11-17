@@ -4,8 +4,9 @@ import { useRoute, useRouter } from "vue-router";
 import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
-import { getEnReferenceList, postEnReferenceAction, saveEnReferenceList } from "@/api/EngineeringAPIs";
+import { getEnReferenceList, postEnReferenceAction, saveEnReferenceList, uploadEnReferenceLines, uploadEnReferenceNew } from "@/api/EngineeringAPIs";
 import { enPaths, EnRoles, enUnits, errText, faDigits, faNum, runEn, useEnDialog } from "@/composables/engineering";
+import { saveBlob } from "@/api/ApiClient";
 import { fail, ok } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -20,14 +21,12 @@ const form = ref<any>({ code: "", title: "", standardSource: "", note: "", lines
 const loading = ref(false);
 const saving = ref(false);
 const saveError = ref("");
-const unitNotice = ref("");
 
-const blank = () => ({ seq: 0, documentType: "", discipline: "", title: "", required: true, tenderStage: false, clientSubmittal: false, standardClause: "", note: "", units: "" });
 async function load() {
   saveError.value = "";
   if (isNew.value) {
     x.value = null;
-    form.value = { code: "", title: "", standardSource: "", note: "", lines: [blank()] };
+    form.value = { code: "", title: "", standardSource: "", note: "", lines: [] };
     return;
   }
   loading.value = true;
@@ -42,24 +41,32 @@ watch(id, load);
 const d = useEnDialog(load);
 const editable = computed(() => (isNew.value && hasRole(EnRoles.writers)) || !!x.value?.canEdit);
 const needsCheck = computed(() => !x.value || x.value.status <= 1);
-// Stored units are enum names; empty = all six. The tick boxes of an empty value start from all six codes, so unticking one keeps the other five.
-const unitsOf = (l: any): string[] => {
-  const raw = l.units ? String(l.units).split(/[,،;]/).map((s) => s.trim().toLowerCase()).filter(Boolean) : [];
-  return raw.length ? enUnits.filter((u) => raw.includes(u.code.toLowerCase())).map((u) => u.code) : enUnits.map((u) => u.code);
-};
-function toggleUnit(l: any, code: string, ev?: Event) {
-  const cur = unitsOf(l);
-  const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
-  if (!next.length) {
-    unitNotice.value = "هر سطر دست‌کم یک واحد دارد؛ برای رساندن به همهٔ واحدها همهٔ واحدها را انتخاب کنید.";
-    if (ev?.target) (ev.target as HTMLInputElement).checked = true;
-    return;
-  }
-  unitNotice.value = "";
-  l.units = next.length === enUnits.length ? "" : next.join(",");
+// The lines are never typed: they come from a CSV file (project instruction 6). Stored units are enum names; empty = all six.
+const unitText = (l: any) => (l.units ? String(l.units).split(",").map((c) => enUnits.find((u) => u.code.toLowerCase() === c.trim().toLowerCase())?.text || c).join("، ") : "همه واحدها");
+const flag = (v: boolean) => (v ? "بله" : "خیر");
+const sampleCsv = "\uFEFF" + [
+  "docType,title,discipline,required,tender,units",
+  "DWG,نقشه مونتاژ,مکانیک,بله,بله,",
+  "DATASHEET,برگه اطلاعات,مکانیک,بله,خیر,تضمین کیفیت;کنترل کیفیت",
+  '"NOTE","یادداشت محاسبات، نسخه نهایی",,خیر,خیر,تولید;برنامه‌ریزی',
+].join("\r\n") + "\r\n";
+const downloadSample = () => saveBlob(new Blob([sampleCsv], { type: "text/csv;charset=utf-8" }), "reference-list-sample.csv");
+function uploadFile() {
+  d.ask({
+    title: isNew.value ? "ساخت فهرست از فایل" : "بارگذاری فهرست از فایل",
+    hint: (isNew.value ? "کد و عنوان فهرست از همین صفحه برداشته می‌شود. " : "ردیف‌های پیش‌نویس با ردیف‌های فایل جایگزین می‌شود. ") + "فایل CSV با کدگذاری UTF-8 و سرستون docType,title,discipline,required,tender,units؛ واحدها با «;» جدا می‌شوند (فایل نمونه را از همین صفحه بگیرید).",
+    fields: [{ key: "file", label: "فایل CSV فهرست", type: "file", required: true }],
+    run: async (v) => {
+      if (isNew.value) {
+        const [res, e] = await uploadEnReferenceNew({ code: form.value.code, title: form.value.title, standardSource: form.value.standardSource, note: form.value.note }, v.file);
+        if (!e && res?.id) await router.replace(enPaths.reference(res.id));
+        return [res, e];
+      }
+      return uploadEnReferenceLines(id.value, x.value.rowVersion, v.file);
+    },
+    okText: "فهرست از فایل ساخته شد.",
+  });
 }
-const addLine = () => form.value.lines.push(blank());
-const removeLine = (i: number) => form.value.lines.splice(i, 1);
 
 async function save() {
   saving.value = true;
@@ -107,29 +114,29 @@ const reason = (title: string, action: string, okText: string) =>
 
       <div class="table-responsive">
         <table class="table table-sm" data-test="en-ref-grid">
-          <thead><tr><th>ردیف</th><th>نوع مدرک</th><th>رشته</th><th>عنوان</th><th>الزامی</th><th>مرحله مناقصه</th><th>ارائه به کارفرما</th><th>بند استاندارد</th><th>واحدها (خالی = همه)</th><th v-if="editable"></th></tr></thead>
+          <thead><tr><th>ردیف</th><th>نوع مدرک</th><th>رشته</th><th>عنوان</th><th>الزامی</th><th>مرحله مناقصه</th><th>ارائه به کارفرما</th><th>بند استاندارد</th><th>واحدها</th></tr></thead>
           <tbody>
             <tr v-for="(l, i) in form.lines" :key="l.id || 'n' + i">
               <td>{{ faNum(i + 1, 0) }}</td>
-              <td><input v-model="l.documentType" :disabled="!editable" class="form-control form-control-sm" maxlength="40" /></td>
-              <td><input v-model="l.discipline" :disabled="!editable" class="form-control form-control-sm" maxlength="80" /></td>
-              <td><input v-model="l.title" :disabled="!editable" class="form-control form-control-sm" maxlength="300" /></td>
-              <td><input v-model="l.required" :disabled="!editable" type="checkbox" /></td>
-              <td><input v-model="l.tenderStage" :disabled="!editable" type="checkbox" /></td>
-              <td><input v-model="l.clientSubmittal" :disabled="!editable" type="checkbox" /></td>
-              <td><input v-model="l.standardClause" :disabled="!editable" class="form-control form-control-sm" maxlength="100" /></td>
-              <td class="en-units"><label v-for="u in enUnits" :key="u.value"><input :checked="unitsOf(l).includes(u.code)" :disabled="!editable" type="checkbox" @change="toggleUnit(l, u.code, $event)" /> {{ u.text }}</label></td>
-              <td v-if="editable"><button class="btn btn-sm btn-outline-danger" type="button" @click="removeLine(i)">حذف</button></td>
+              <td class="inv-ltr">{{ l.documentType }}</td>
+              <td>{{ l.discipline }}</td>
+              <td>{{ l.title }}</td>
+              <td>{{ flag(l.required) }}</td>
+              <td>{{ flag(l.tenderStage) }}</td>
+              <td>{{ flag(l.clientSubmittal) }}</td>
+              <td>{{ l.standardClause }}</td>
+              <td>{{ unitText(l) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-if="unitNotice" class="alert alert-warning py-2 small" role="status">{{ unitNotice }}</div>
+      <p v-if="!form.lines.length" class="inv-muted small" data-test="en-ref-empty">هنوز ردیفی نیست؛ فهرست را از فایل بارگذاری کنید.</p>
       <div v-if="saveError" class="alert alert-danger py-2 small" role="alert">{{ saveError }}</div>
       <div v-if="x && !editable && x.editBlockedReason" class="small text-danger mb-2">{{ x.editBlockedReason }}</div>
       <div class="mt-2">
-        <button v-if="editable" class="btn btn-sm btn-outline-secondary ms-2" type="button" @click="addLine">افزودن سطر</button>
-        <button v-if="editable" :disabled="saving" class="btn btn-sm btn-primary ms-2" type="button" @click="save">ذخیره</button>
+        <button v-if="editable" class="btn btn-sm btn-outline-primary ms-2" type="button" data-test="en-ref-upload" @click="uploadFile">{{ isNew ? "ساخت فهرست از فایل" : "بارگذاری فهرست از فایل" }}</button>
+        <button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-test="en-ref-sample" @click="downloadSample">دریافت فایل نمونه</button>
+        <button v-if="editable && !isNew" :disabled="saving" class="btn btn-sm btn-primary ms-2" type="button" @click="save">ذخیره سربرگ</button>
         <template v-if="x">
           <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" :confirm="`فهرست ${x.code} برای تایید ارسال شود؟ تصمیم با تاییدکنندگان فهرست است.`" label="ارسال برای تایید" variant="outline-primary" @go="runEn(() => act('submit'), 'برای تایید ارسال شد.', load)" />
           <EnAction :can="x.canApprove" :reason="x.approveBlockedReason" :roles="EnRoles.refApprovers" :confirm="`فهرست ${x.code} (ویرایش ${faNum(x.revision, 0)}) تایید شود؟ از این پس ملاک پرونده‌های این استاندارد است.`" label="تایید فهرست" variant="success" @go="runEn(() => act('approve'), 'فهرست تایید شد.', load)" />

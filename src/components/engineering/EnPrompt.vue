@@ -91,7 +91,7 @@ function go() {
         </div>
         <div v-if="f.hint" class="inv-muted">{{ f.hint }}</div>
       </div>
-      <div v-if="local || error" class="alert alert-danger py-2 small" role="alert" data-test="en-dialog-error">{{ local || error }}</div>
+      <div v-if="local || error" class="alert alert-danger py-2 small" style="white-space: pre-line" role="alert" data-test="en-dialog-error">{{ local || error }}</div>
       <div class="d-flex gap-2 justify-content-end mt-3">
         <button class="btn btn-sm btn-outline-secondary" type="button" @click="emit('cancel')">انصراف</button>
         <button :disabled="busy" class="btn btn-sm btn-primary" type="button" @click="go">{{ confirmText || "تایید" }}</button>

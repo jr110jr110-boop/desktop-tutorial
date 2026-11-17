@@ -100,3 +100,11 @@ export const getEnInfoRequest = (id: number) => call("get", base + "info-request
 export const askEnInfo = (body: any) => call("post", base + "info-requests", body);
 /** body: { id, action: answer|close|void, answer, rowVersion } */
 export const postEnInfoAction = (body: any) => call("post", base + "info-requests/action", body);
+
+/** A NEW draft list from a CSV file: header = { code, title, standardSource, note }. */
+export const uploadEnReferenceNew = (header: { code: string; title: string; standardSource?: string; note?: string }, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  (["code", "title", "standardSource", "note"] as const).forEach((k) => form.append(k, header[k] || ""));
+  return call("post", base + "reference/lists/upload-new", form);
+};
