@@ -64,7 +64,7 @@ namespace Services.NasbNiro.Engineering
             void EndRecord()
             {
                 cells.Add(cell.ToString()); cell.Clear(); wasQuoted = false;
-                if (!(cells.Count == 1 && cells[0].Trim().Length == 0)) result.Add((start, cells));
+                if (!cells.All(x => x.Trim().Length == 0)) result.Add((start, cells));   // an empty line and a line of only separators (Excel writes them below the data) are skipped
                 cells = new List<string>();
             }
             for (int i = 0; i < text.Length; i++)

@@ -211,5 +211,60 @@ namespace MsTests
             string qa = rel.Distribution.Single(x => x.Unit == (int)EnUnit.Qa).ScopeNote;
             Assert.IsFalse(qa.Contains("هنوز نرسیده"), "the unedited text was rebuilt: both documents have arrived");
         }
+
+        // ------------------------------------------------------------------ M5 / M6
+
+        [TestMethod]
+        public async Task M5_A_Header_Save_Without_Lines_Keeps_The_Lines_And_A_New_List_Still_Needs_Them()
+        {
+            AppHost host = Started("e1cfix_m5");
+            EnReferenceListDto d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(Ref("VDDR-HDR", ("BOM", true, false), ("DWG", true, true)), Ct)));
+            EnSaveReferenceDto header = new EnSaveReferenceDto { Id = d.Id, RowVersion = d.RowVersion, Code = "VDDR-HDR", Title = "عنوان تازهٔ سربرگ", StandardSource = "API 617", Note = "یادداشت", Lines = null };
+            EnReferenceListDto r = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(header, Ct)));
+            Assert.AreEqual("عنوان تازهٔ سربرگ", r.Title);
+            Assert.AreEqual(2, r.Lines.Count, "the lines were not touched");
+            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(new EnSaveReferenceDto { Code = "VDDR-NOLINES", Title = "x" }, Ct)), "ردیف");
+            header.RowVersion = r.RowVersion; header.Lines = new List<EnReferenceLineDto>();
+            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(header, Ct)), "ردیف");   // an explicit empty list is still refused
+        }
+
+        [TestMethod]
+        public async Task M6_The_Seat_Is_Refused_On_Both_Upload_Paths_With_The_Ai_Text()
+        {
+            AppHost host = Started("e1cfix_m6seat");
+            EnReferenceListDto d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(Ref("VDDR-SEAT2", ("BOM", true, false)), Ct)));
+            var seat = await SeatAsync(host);
+            Refused(await Upload(host, seat, d, Csv(RevisionLines)), "هوش مصنوعی");
+            Refused(await host.As(seat, p => p.GetRequiredService<IEnReferenceService>().CreateFromFileAsync(new EnSaveReferenceDto { Code = "VDDR-SEAT3", Title = "x" }, Csv(RevisionLines), Ct)), "هوش مصنوعی");
+        }
+
+        [TestMethod]
+        public async Task M6_Crlf_Quoted_Line_Breaks_Upper_Case_Header_And_Lines_Of_Only_Commas_Are_Read()
+        {
+            AppHost host = Started("e1cfix_m6csv");
+            EnReferenceListDto d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(Ref("VDDR-CRLF", ("BOM", true, false)), Ct)));
+            string csv = "DOCTYPE,Title,Discipline,REQUIRED,Tender,Units\r\nDWG,\"نقشه\r\nدو خطی\",مکانیک,1,1,\r\n,,,,,\r\n   ,  ,,,,\r\nBOM,فهرست,,0,0,\r\n,,,,,";
+            EnReferenceListDto r = Ok(await Upload(host, Eng1, d, Csv(csv)));
+            Assert.AreEqual(2, r.Lines.Count);
+            StringAssert.Contains(r.Lines.Single(l => l.DocumentType == "DWG").Title, "دو خطی");
+        }
+
+        [TestMethod]
+        public async Task M6_Approved_Codes_List_Only_The_Approved_Revision_With_Its_Title()
+        {
+            AppHost host = Started("e1cfix_m6codes");
+            EnReferenceListDto v1 = await ApprovedList(host, "AC-1", ("PID", true, true));
+            EnReferenceListDto d2 = Ok(await RefAction(host, Eng1, v1.Id, "revise"));
+            EnSaveReferenceDto save = Ref("AC-1", ("PID", true, true)); save.Id = d2.Id; save.RowVersion = d2.RowVersion; save.Title = "عنوان بازنگری دو";
+            d2 = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(save, Ct)));
+            var before = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetApprovedCodesAsync(Ct)));
+            Assert.AreEqual("فهرست مدارک مرجع آزمون", before.Single(x => x.Code == "AC-1").Title, "a draft revision is not offered");
+            Ok(await RefAction(host, Eng1, d2.Id, "submit"));
+            Ok(await RefAction(host, Mgr1, d2.Id, "approve"));
+            Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(Ref("AC-DRAFT", ("PID", true, true)), Ct)));
+            var after = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetApprovedCodesAsync(Ct)));
+            Assert.AreEqual(1, after.Count, "the superseded revision and the draft list are not offered");
+            Assert.AreEqual("عنوان بازنگری دو", after.Single().Title);
+        }
     }
 }

@@ -165,12 +165,13 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- save
 
-        private static string Validate(EnSaveReferenceDto d)
+        private static string Validate(EnSaveReferenceDto d, bool headerOnly = false)
         {
             string code = EnText.Clean(d.Code), title = EnText.Clean(d.Title);
             if (code == null || title == null) return "کد و عنوان فهرست الزامی است.";
             string p = EnText.Over(code, 60, "کد") ?? EnText.Over(title, 300, "عنوان") ?? EnText.Over(d.StandardSource, 200, "منبع استاندارد") ?? EnText.Over(d.Note, 1000, "توضیح");
             if (p != null) return p;
+            if (headerOnly) return null;
             if (d.Lines == null || d.Lines.Count == 0) return "فهرست دست‌کم یک ردیف می‌خواهد.";
             if (d.Lines.Count > 300) return "فهرست بیش از ۳۰۰ ردیف نمی‌تواند باشد.";
             foreach (EnReferenceLineDto x in d.Lines)
@@ -219,7 +220,9 @@ namespace Services.NasbNiro.Engineering
         {
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
             if (dto == null) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
-            string problem = Validate(dto);
+            // a save of an existing list that sends no lines is a header save (code, title, source, note): the lines stay as they are, so the page never re-sends lines it did not type
+            bool headerOnly = dto.Id.HasValue && dto.Lines == null;
+            string problem = Validate(dto, headerOnly);
             if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
             DateTimeOffset now = DateTimeOffset.Now;
             EnReferenceList row;
@@ -244,7 +247,7 @@ namespace Services.NasbNiro.Engineering
                 _uow.Set<EnReferenceList>().Add(row);
             }
             row.Title = dto.Title.Trim(); row.StandardSource = EnText.Clean(dto.StandardSource); row.Note = EnText.Clean(dto.Note);
-            ApplyLines(_uow, row, dto.Lines);
+            if (!headerOnly) ApplyLines(_uow, row, dto.Lines);
             row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
             row.ModifyDate = now; row.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }

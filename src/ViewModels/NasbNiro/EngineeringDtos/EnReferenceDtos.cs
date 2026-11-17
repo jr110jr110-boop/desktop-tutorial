@@ -77,7 +77,8 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Title { get; set; }
         public string StandardSource { get; set; }
         public string Note { get; set; }
-        public List<EnReferenceLineDto> Lines { get; set; } = new List<EnReferenceLineDto>();
+        /// <summary>The lines (JSON API). Null on an existing list = a header save: the lines stay as they are. A new list needs at least one line.</summary>
+        public List<EnReferenceLineDto> Lines { get; set; }
         public string RowVersion { get; set; }
     }
 
