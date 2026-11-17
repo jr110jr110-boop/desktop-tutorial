@@ -51,10 +51,11 @@ export const enAskUnits: { value: number; text: string; code: string }[] = [...e
 export function unitsText(csv: string | null | undefined): string {
   const parts = String(csv ?? "").split(/[,،;]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
   if (!parts.length) return "همهٔ واحدها";
-  return parts.map((c) => enAskUnits.find((u) => u.code.toLowerCase() === c || String(u.value) === c)?.text ?? (/[\u0600-\u06FF]/.test(c) ? c : "واحد نامشخص")).join("، ");
+  return parts.map((c) => enUnits.find((u) => u.code.toLowerCase() === c || String(u.value) === c)?.text ?? (/[\u0600-\u06FF]/.test(c) ? c : "واحد نامشخص")).join("، ");
 }
 /** The unit of a single code (case-insensitive) or its number, as Persian text. */
-export const unitName = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "—" : unitsText(String(v)));
+export const unitName = (v: string | number | null | undefined) =>
+  v === null || v === undefined || v === "" ? "—" : String(v).trim().toLowerCase() === "7" || String(v).trim().toLowerCase() === "engineering" || v === engineeringUnit.text ? engineeringUnit.text : unitsText(String(v));
 /** The role names that make a user a member of a unit (EnUnits.UnitRoles). */
 export const unitRoles: Record<number, string[]> = {
   1: ["QA"], 2: ["QC"], 3: ["PRODUCTIONMANAGER", "SHOPSUPERVISOR", "CONSTRUCTION"], 4: ["COMMERCIAL"], 5: ["WAREHOUSE", "WHSUPERVISOR"], 6: ["PLANNING"], 7: ["ENGINEERING", "ENGINEER"],
@@ -217,16 +218,24 @@ export function useEnDialog(reload: () => Promise<any> | void) {
   return { dlg, error, busy, ask, confirm, close: () => (dlg.value = null) };
 }
 
+/** How many one-click writes are running right now; EnAction disables every button meanwhile so a second click (or a second «بله») cannot send the write again. */
+export const enWriting = ref(0);
+
 /** An action without a dialog: runs it, shows the server's refusal as a toast, reloads. */
 export async function runEn(run: () => Promise<any>, okText: string, reload: () => Promise<any> | void): Promise<boolean> {
-  const [, e] = await run();
-  if (e) {
-    fail(e);
-    return false;
+  enWriting.value++;
+  try {
+    const [, e] = await run();
+    if (e) {
+      fail(e);
+      return false;
+    }
+    ok(okText);
+    await reload();
+    return true;
+  } finally {
+    enWriting.value--;
   }
-  ok(okText);
-  await reload();
-  return true;
 }
 
 /** Persian names of the event kinds of a case (the server writes a code; an unknown code is shown as it is). */

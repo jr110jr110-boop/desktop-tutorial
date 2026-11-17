@@ -7,6 +7,7 @@
 import { computed, ref } from "vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import { hasRole } from "@/composables/roles";
+import { enWriting } from "@/composables/engineering";
 
 const props = defineProps<{ label: string; can?: boolean | null; reason?: string | null; roles?: readonly string[]; variant?: string; busy?: boolean; confirm?: string }>();
 const emit = defineEmits(["go"]);
@@ -25,7 +26,7 @@ function yes() {
 
 <template>
   <span v-if="shown" class="en-act">
-    <button :class="'btn btn-sm btn-' + (variant || 'primary')" :disabled="!can || busy" :title="!can ? reason || '' : ''" type="button" @click="click">{{ label }}</button>
+    <button :class="'btn btn-sm btn-' + (variant || 'primary')" :disabled="!can || busy || enWriting > 0" :title="!can ? reason || '' : ''" type="button" @click="click">{{ label }}</button>
     <span v-if="!can && reason" class="en-why">{{ reason }}</span>
     <EnPrompt v-if="asking" :fields="[]" :title="confirm || ''" confirm-text="بله" data-test="en-confirm" @cancel="asking = false" @confirm="yes" />
   </span>

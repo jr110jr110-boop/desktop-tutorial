@@ -9,7 +9,7 @@ import { askEnInfo, getEnInfoRequest, getEnInfoRequests, postEnInfoAction } from
 import { enAskUnits, enPaths, EnRoles, faDigits, infoStatuses, runEn, unitName, unitRoles, useEnDialog, useFocusItem } from "@/composables/engineering";
 import { hasRole } from "@/composables/roles";
 
-const props = defineProps<{ handoverId?: number | null; caseId?: number | null; highlightId?: number | null }>();
+const props = defineProps<{ handoverId?: number | null; caseId?: number | null; highlightId?: number | null; noAsk?: boolean }>();   // noAsk: the handover is void, the server refuses a question about it
 const listed = ref<any[]>([]);
 const one = useFocusItem(() => props.highlightId || null, getEnInfoRequest);
 const rows = computed(() => one.merge(listed.value));
@@ -66,7 +66,7 @@ const withdraw = (r: any) =>
       <EnAction :can="r.canClose" :reason="r.closeBlockedReason" :roles="EnRoles.infoReaders" :confirm="`پرسش ${faDigits(r.number)} بسته شود؟ پس از بستن، پاسخ PMO نهایی می‌ماند و پرسش دوباره باز نمی‌شود.`" label="بستن" variant="success" @go="runEn(() => act(r, 'close'), 'پرسش بسته شد.', load)" />
       <EnAction :can="r.canVoid" :reason="r.voidBlockedReason" :roles="EnRoles.infoReaders" label="پس‌گرفتن" variant="outline-secondary" @go="withdraw(r)" />
     </div>
-    <button v-if="myUnits.length && (handoverId || caseId)" class="btn btn-sm btn-outline-primary" type="button" @click="ask">پرسش از PMO</button>
+    <button v-if="!noAsk && myUnits.length && (handoverId || caseId)" class="btn btn-sm btn-outline-primary" type="button" @click="ask">پرسش از PMO</button>
     <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />
   </div>
 </template>

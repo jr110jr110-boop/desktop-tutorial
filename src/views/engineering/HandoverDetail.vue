@@ -186,7 +186,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
 
         <template v-if="canInfo">
           <h2 class="h6 mt-3">پرسش از PMO</h2>
-          <EnInfoList :handover-id="h.id" :case-id="h.caseId" />
+          <EnInfoList :handover-id="h.id" :case-id="h.caseId" :no-ask="h.status === 5" />
         </template>
 
         <h2 class="h6 mt-3">دورهای تحویل</h2>
