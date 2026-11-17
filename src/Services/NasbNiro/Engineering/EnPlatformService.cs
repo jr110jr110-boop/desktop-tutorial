@@ -308,11 +308,12 @@ namespace Services.NasbNiro.Engineering
             EnPlatformDossier d = code != null ? all.FirstOrDefault(x => x.ReferenceCode == code) : (all.Count == 1 ? all[0] : null);
             if (action == "native-standard")
             {
-                // a fact of the original data sheet of the project this platform was built for: humans only; the standard is the client's, any code is accepted
+                // a fact of the original data sheet of the project this platform was built for: humans only; the standard is the client's, chosen from the approved reference lists
                 string why = RecordStandardReason(writer, seat, product);
                 string basis = EnText.Clean(dto.StandardBasis);
                 if (why == null && code == null) why = "استاندارد دیتاشیت اصلی پلتفرم را بنویسید.";
                 why ??= EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد");
+                if (why == null) why = await EnReferenceRules.ApprovedCodeProblemAsync(_uow, code, ct);   // chosen from the approved lists, not typed
                 if (why == null && d != null) why = "برای این استاندارد پرونده‌ای از پیش وجود دارد.";
                 if (why == null && !await EnOrigin.HasDossierAsync(_uow, product.Id, ct) && await EnOrigin.IsUnregisteredNewDesignAsync(_uow, product.Id, ct)) why = EnOrigin.UnregisteredNew;
                 if (why != null) return EnText.Bad<EnDossierDto>(why);

@@ -53,6 +53,7 @@ namespace MsTests
         {
             AppHost host = Started("case2");
             int product = Product(host);
+            await ApprovedList(host);   // the standard of a platform dossier is chosen from the approved lists
             await NativeDossier(host, product);
             int inquiry = Inquiry(host);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));

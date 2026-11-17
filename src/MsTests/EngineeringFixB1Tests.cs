@@ -97,6 +97,8 @@ namespace MsTests
             Assert.IsFalse(Ok(await GetCase(host, Eng1, newCase)).CanProposeRegistration);
             Assert.IsFalse(Ok(await GetCase(host, Ceo, newCase)).CanProposeRegistration);
             Assert.IsFalse(Ok(await GetCase(host, await SeatAsync(host), newCase)).CanProposeRegistration);
+            Refused(await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-B1", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct)), "فهرست مدارک مرجع تاییدشده");   // M3: the standard is chosen from the approved lists
+            await ApprovedList(host, "REG-B1", ("PID", true, true));
             var propose = await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-B1", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct));
             Ok(propose);
             c = Ok(await GetCase(host, Mgr1, newCase));

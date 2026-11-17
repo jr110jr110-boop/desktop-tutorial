@@ -131,5 +131,21 @@ namespace MsTests
             string eventText = host.Read(u => u.Set<EnCaseEvent>().Where(e => e.CaseId == c.Id && e.Kind == "standard-changed").Select(e => e.Note).Single());
             StringAssert.Contains(eventText, "فایل دیتاشیت تغییر کرد");
         }
+
+        // ------------------------------------------------------------------ M3
+
+        [TestMethod]
+        public async Task M3_The_Platform_Standard_Must_Be_An_Approved_List_Code_While_The_Client_Standard_Of_A_Case_May_Have_No_List()
+        {
+            AppHost host = Started("e1cfix_m3");
+            int product = Product(host);
+            Func<string, Task<Common.Results.ResponseDto<EnDossierDto>>> record = code => host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت اصلی، بند ۴" }, Ct));
+            Refused(await record("NOLIST-1"), "فهرست مدارک مرجع تاییدشده");
+            await ApprovedList(host, "NOLIST-1", ("PID", true, true));
+            Assert.AreEqual("NOLIST-1", Ok(await record("nolist-1")).ReferenceCode);
+            // the client standard of a case is what the client wrote: a code without a list is recorded (the gap report exists for it)
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host)));
+            Assert.AreEqual("NOLIST-2", Ok(await SetStandard(host, Eng1, c.Id, "NOLIST-2")).ReferenceCode);
+        }
     }
 }

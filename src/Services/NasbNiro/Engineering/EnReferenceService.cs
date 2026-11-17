@@ -31,6 +31,11 @@ namespace Services.NasbNiro.Engineering
             return await q.Include(l => l.Lines).Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code).OrderByDescending(l => l.ApprovedAt).ThenByDescending(l => l.Id).FirstOrDefaultAsync(ct);
         }
 
+        /// <summary>The one check of "the standard is chosen, not typed" (platform native standard, registration): the code must be the Code of a list that is Approved right now; null when it is.</summary>
+        public static async Task<string> ApprovedCodeProblemAsync(IUnitOfWork uow, string code, CancellationToken ct) =>
+            !string.IsNullOrEmpty(code) && await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code, ct) ? null
+            : "استاندارد «" + code + "» فهرست مدارک مرجع تاییدشده ندارد؛ استاندارد را از فهرست استانداردهای تاییدشده انتخاب کنید (در صورت نبود، ابتدا فهرست آن ساخته و تایید شود).";
+
         /// <summary>The Codes (standard bases, e.g. API 611 and API 612) that have an approved list right now; one approved list per Code.</summary>
         public static Task<List<string>> ApprovedCodesAsync(IUnitOfWork uow, CancellationToken ct) =>
             uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => l.Code).Distinct().OrderBy(c => c).ToListAsync(ct);

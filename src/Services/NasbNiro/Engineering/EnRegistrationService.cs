@@ -139,6 +139,7 @@ namespace Services.NasbNiro.Engineering
             string code = EnDossierBuilder.NormCode(dto.ReferenceCode), basis = EnText.Clean(dto.StandardBasis), rationale = EnText.Clean(dto.Rationale);
             string why = code == null ? "کد استاندارد را بنویسید." : EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد") ?? EnText.ReasonShort(rationale, 30, "دلیل پلتفرم‌شدن") ?? EnText.Over(rationale, 2000, "دلیل");
             why ??= await ContentProblemAsync(dto.CaseId, dto.ProductId, code, null, ct);
+            why ??= await EnReferenceRules.ApprovedCodeProblemAsync(_uow, code, ct);
             if (why != null) return EnText.Bad<EnRegistrationDto>(why);
             DateTimeOffset now = DateTimeOffset.Now;
             EnPlatformRegistration r = new EnPlatformRegistration
