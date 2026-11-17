@@ -47,14 +47,14 @@ const flag = (v: boolean) => (v ? "بله" : "خیر");
 const sampleCsv = "\uFEFF" + [
   "docType,title,discipline,required,tender,units",
   "DWG,نقشه مونتاژ,مکانیک,بله,بله,",
-  "DATASHEET,برگه اطلاعات,مکانیک,بله,خیر,تضمین کیفیت;کنترل کیفیت",
-  '"NOTE","یادداشت محاسبات، نسخه نهایی",,خیر,خیر,تولید;برنامه‌ریزی',
+  "DATASHEET,برگه اطلاعات,مکانیک,بله,خیر,تضمین کیفیت|کنترل کیفیت",
+  '"NOTE","یادداشت محاسبات، نسخه نهایی",,خیر,خیر,تولید|برنامه‌ریزی',
 ].join("\r\n") + "\r\n";
 const downloadSample = () => saveBlob(new Blob([sampleCsv], { type: "text/csv;charset=utf-8" }), "reference-list-sample.csv");
 function uploadFile() {
   d.ask({
     title: isNew.value ? "ساخت فهرست از فایل" : "بارگذاری فهرست از فایل",
-    hint: (isNew.value ? "کد و عنوان فهرست از همین صفحه برداشته می‌شود. " : "ردیف‌های پیش‌نویس با ردیف‌های فایل جایگزین می‌شود. ") + "فایل CSV با کدگذاری UTF-8 و سرستون docType,title,discipline,required,tender,units؛ واحدها با «;» جدا می‌شوند (فایل نمونه را از همین صفحه بگیرید).",
+    hint: (isNew.value ? "کد و عنوان فهرست از همین صفحه برداشته می‌شود. " : "ردیف‌های پیش‌نویس با ردیف‌های فایل جایگزین می‌شود. ") + "فایل با پسوند csv و کدگذاری UTF-8 (در اکسل: Save As ← CSV UTF-8) و سرستون docType,title,discipline,required,tender,units؛ ستون‌های اختیاری بعد از آن: clientSubmittal,clause,note (اگر نباشند، مقدار ثبت‌شدهٔ ردیف‌های هم‌نام نگه داشته می‌شود). جداکنندهٔ ستون‌ها «,» یا «;» است و واحدها با «|» یا «،» جدا می‌شوند (فایل نمونه را از همین صفحه بگیرید).",
     fields: [{ key: "file", label: "فایل CSV فهرست", type: "file", required: true }],
     run: async (v) => {
       if (isNew.value) {
@@ -64,23 +64,23 @@ function uploadFile() {
       }
       return uploadEnReferenceLines(id.value, x.value.rowVersion, v.file);
     },
-    okText: "فهرست از فایل ساخته شد.",
+    okText: isNew.value ? "فهرست از فایل ساخته شد." : "ردیف‌های فهرست از فایل جایگزین شد.",
   });
 }
 
 async function save() {
   saving.value = true;
   saveError.value = "";
-  const body = { id: isNew.value ? null : id.value, ...form.value, lines: form.value.lines.map((l: any, i: number) => ({ ...l, seq: i + 1 })), rowVersion: x.value?.rowVersion };
-  const [res, e] = await saveEnReferenceList(body);
+  // a header save: code, title, source and note only; no lines are sent (the lines change only through the file), the server keeps them
+  const body = { id: id.value, code: form.value.code, title: form.value.title, standardSource: form.value.standardSource, note: form.value.note, rowVersion: x.value?.rowVersion };
+  const [, e] = await saveEnReferenceList(body);
   saving.value = false;
   if (e) {
     saveError.value = errText(e);
     return;
   }
-  ok("فهرست ذخیره شد.");
-  if (isNew.value && res?.id) router.replace(enPaths.reference(res.id));
-  else await load();
+  ok("سربرگ فهرست ذخیره شد.");
+  await load();
 }
 const act = (action: string, note?: string) => postEnReferenceAction({ id: id.value, action, note, rowVersion: x.value.rowVersion });
 const reason = (title: string, action: string, okText: string) =>
