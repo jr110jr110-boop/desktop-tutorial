@@ -46,6 +46,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string CaseNumber { get; set; }
         public int ContractId { get; set; }
         public string ContractCode { get; set; }
+        public string ContractTitle { get; set; }
         public int Unit { get; set; }
         public string UnitText { get; set; }
         public string Question { get; set; }

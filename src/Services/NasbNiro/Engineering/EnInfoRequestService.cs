@@ -64,14 +64,15 @@ namespace Services.NasbNiro.Engineering
             List<int> caseIds = rows.Select(r => r.CaseId).Distinct().ToList(), handoverIds = rows.Where(r => r.HandoverId.HasValue).Select(r => r.HandoverId.Value).Distinct().ToList(), contractIds = rows.Select(r => r.ContractId).Distinct().ToList();
             Dictionary<int, string> cases = await _uow.Set<EnCase>().AsNoTracking().Where(c => caseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Number, ct);
             Dictionary<int, string> handovers = await _uow.Set<EnHandover>().AsNoTracking().Where(h => handoverIds.Contains(h.Id)).ToDictionaryAsync(h => h.Id, h => h.Number, ct);
-            Dictionary<int, string> contracts = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Code, ct);
+            var contractRows = await _uow.Set<ContractEntity>().AsNoTracking().Where(c => contractIds.Contains(c.Id)).Select(c => new { c.Id, c.Code, c.Title }).ToListAsync(ct);
+            Dictionary<int, string> contracts = contractRows.ToDictionary(c => c.Id, c => c.Code), contractTitles = contractRows.ToDictionary(c => c.Id, c => c.Title);
             return rows.Select(r =>
             {
                 string answer = AnswerReason(r, seat), close = CloseReason(r, seat), voidR = VoidReason(r, seat);
                 return new EnInfoRequestDto
                 {
                     Id = r.Id, Number = r.Number, HandoverId = r.HandoverId, HandoverNumber = r.HandoverId.HasValue && handovers.TryGetValue(r.HandoverId.Value, out string hn) ? hn : null, CaseId = r.CaseId, CaseNumber = cases.TryGetValue(r.CaseId, out string cn) ? cn : null,
-                    ContractId = r.ContractId, ContractCode = contracts.TryGetValue(r.ContractId, out string kc) ? kc : null, Unit = (int)r.Unit, UnitText = EnText.Unit(r.Unit), Question = r.Question, AskedByName = names.Name(r.AskedByUserId), AskedAtText = EnText.Stamp(r.AskedAt),
+                    ContractId = r.ContractId, ContractCode = contracts.TryGetValue(r.ContractId, out string kc) ? kc : null, ContractTitle = contractTitles.TryGetValue(r.ContractId, out string kt) ? kt : null, Unit = (int)r.Unit, UnitText = EnText.Unit(r.Unit), Question = r.Question, AskedByName = names.Name(r.AskedByUserId), AskedAtText = EnText.Stamp(r.AskedAt),
                     Status = (int)r.Status, StatusText = StatusText(r.Status), Answer = r.Answer, AnsweredByName = names.Name(r.AnsweredByUserId), AnsweredAtText = EnText.Stamp(r.AnsweredAt), ClosedByName = names.Name(r.ClosedByUserId), ClosedAtText = EnText.Stamp(r.ClosedAt),
                     AnswerHint = Hint, RowVersion = EnConcurrency.Text(r.RowVersion), CanAnswer = answer == null, AnswerBlockedReason = answer, CanClose = close == null, CloseBlockedReason = close, CanVoid = voidR == null, VoidBlockedReason = voidR,
                 };
