@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnGapView from "@/components/engineering/EnGapView.vue";
+import EnInfoList from "@/components/engineering/EnInfoList.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
 import {
@@ -12,10 +13,13 @@ import {
 } from "@/api/EngineeringAPIs";
 import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, downloadDoc, handoverStatuses, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
+import { hasRole } from "@/composables/roles";
 
 // An engineering case laid out as the paths of the employer's diagram: (1) platform or new design, (2) the tender technical package, (3) clarification through commercial,
 // (4) charter review, (5) handover to the PMO. The agent prepares; the buttons are the gates. Every button takes its state and reason from the DTO.
 const route = useRoute();
+// Engineering asks the PMO (as the unit «مهندسی») about a case that has a contract; the server decides, the section only gives the engineers the list and the ask button.
+const canAskPmo = hasRole(EnRoles.writers);
 const id = computed(() => Number(route.params.id));
 const c = ref<any>(null);
 const gap = ref<any>(null);
@@ -386,6 +390,11 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
             <EnAction :can="c.canProposeRegistration" :reason="c.proposeRegistrationBlockedReason" :roles="EnRoles.manager" label="پیشنهاد ثبت این طراحی به‌عنوان پلتفرم" variant="outline-primary" @go="registerDialog" />
           </li>
         </ol>
+
+        <template v-if="canAskPmo && c.contractId">
+          <h2 class="h6 mt-3">پرسش از PMO</h2>
+          <EnInfoList :case-id="c.id" />
+        </template>
 
         <EnAction :can="c.canCancel" :reason="c.cancelBlockedReason" :roles="EnRoles.manager" label="لغو پرونده" variant="outline-danger" @go="reasonDialog('cancel', 'لغو پرونده', 'دلیل لغو', 'پرونده لغو شد.')" />
 

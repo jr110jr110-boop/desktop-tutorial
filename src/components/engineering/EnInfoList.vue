@@ -6,7 +6,7 @@ import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import { askEnInfo, getEnInfoRequest, getEnInfoRequests, postEnInfoAction } from "@/api/EngineeringAPIs";
-import { enPaths, EnRoles, enUnits, faDigits, infoStatuses, runEn, unitName, unitRoles, useEnDialog, useFocusItem } from "@/composables/engineering";
+import { enAskUnits, enPaths, EnRoles, faDigits, infoStatuses, runEn, unitName, unitRoles, useEnDialog, useFocusItem } from "@/composables/engineering";
 import { hasRole } from "@/composables/roles";
 
 const props = defineProps<{ handoverId?: number | null; caseId?: number | null; highlightId?: number | null }>();
@@ -25,14 +25,14 @@ onMounted(load);
 watch(() => [props.handoverId, props.caseId, props.highlightId], load);
 const d = useEnDialog(load);
 // The server accepts a question only from a member of the unit asked for: the form offers the user's own units only.
-const myUnits = enUnits.filter((u) => hasRole(unitRoles[u.value]));
+const myUnits = enAskUnits.filter((u) => hasRole(unitRoles[u.value]));
 const act = (r: any, action: string, answer?: string) => postEnInfoAction({ id: r.id, action, answer, rowVersion: r.rowVersion });
 function ask() {
   d.ask({
     title: "پرسش از PMO",
     fields: [
       { key: "unit", label: "واحد پرسنده", type: "select", required: true, options: myUnits.map((u) => ({ value: String(u.value), text: u.text })), value: myUnits.length === 1 ? String(myUnits[0].value) : "" },
-      { key: "q", label: "پرسش", type: "textarea", required: true, min: 10, max: 2000 },
+      { key: "q", label: "پرسش", type: "textarea", required: true, min: 15, max: 2000 },
     ],
     run: (v) => askEnInfo({ handoverId: props.handoverId, caseId: props.caseId, unit: Number(v.unit), question: v.q }),
     okText: "پرسش برای PMO ثبت شد.",

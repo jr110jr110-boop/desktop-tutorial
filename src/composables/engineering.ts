@@ -28,8 +28,8 @@ export const EnRoles = {
   pmoSide: list("PMO,PROJECTMANAGER"),
   /** Every list, detail and the overview of the module (EnRoles.Readers). */
   readers: list("ENGINEERING,ENGINEER,PMO,CEO,PROJECTMANAGER,PLANNING,SALES,COMMERCIAL,DCC,QA,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,WAREHOUSE,WHSUPERVISOR,AUDITOR"),
-  /** The questions of the units to the PMO: the six units (EnUnits.UnitRoles) and the PMO, the CEO and the auditor. */
-  infoReaders: list("QA,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,COMMERCIAL,WAREHOUSE,WHSUPERVISOR,PLANNING,PMO,CEO,AUDITOR"),
+  /** The questions to the PMO: the six units and engineering (EnUnits.UnitRoles) and the PMO, the CEO and the auditor. */
+  infoReaders: list("ENGINEERING,ENGINEER,QA,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,COMMERCIAL,WAREHOUSE,WHSUPERVISOR,PLANNING,PMO,CEO,AUDITOR"),
 } as const;
 
 /** EnUnit: the six units that receive the documents (value, Persian name). */
@@ -42,17 +42,22 @@ export const enUnits: { value: number; text: string; code: string }[] = [
   { value: 6, text: "برنامه‌ریزی", code: "Planning" },
 ];
 
+/** Engineering asks the PMO as a unit of its own (EnUnit.Engineering = 7). It only asks: it is never a distribution unit and never in a document's unit list, so it is not in enUnits. */
+export const engineeringUnit = { value: 7, text: "مهندسی", code: "Engineering" };
+/** The units that may ask the PMO: the six distribution units and engineering. */
+export const enAskUnits: { value: number; text: string; code: string }[] = [...enUnits, engineeringUnit];
+
 /** Persian names of units from a stored value: a code, a comma-separated list (any case, any separator) or empty (= all units). Never an English name. */
 export function unitsText(csv: string | null | undefined): string {
   const parts = String(csv ?? "").split(/[,،;]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
   if (!parts.length) return "همهٔ واحدها";
-  return parts.map((c) => enUnits.find((u) => u.code.toLowerCase() === c || String(u.value) === c)?.text ?? (/[\u0600-\u06FF]/.test(c) ? c : "واحد نامشخص")).join("، ");
+  return parts.map((c) => enAskUnits.find((u) => u.code.toLowerCase() === c || String(u.value) === c)?.text ?? (/[\u0600-\u06FF]/.test(c) ? c : "واحد نامشخص")).join("، ");
 }
 /** The unit of a single code (case-insensitive) or its number, as Persian text. */
 export const unitName = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "—" : unitsText(String(v)));
 /** The role names that make a user a member of a unit (EnUnits.UnitRoles). */
 export const unitRoles: Record<number, string[]> = {
-  1: ["QA"], 2: ["QC"], 3: ["PRODUCTIONMANAGER", "SHOPSUPERVISOR", "CONSTRUCTION"], 4: ["COMMERCIAL"], 5: ["WAREHOUSE", "WHSUPERVISOR"], 6: ["PLANNING"],
+  1: ["QA"], 2: ["QC"], 3: ["PRODUCTIONMANAGER", "SHOPSUPERVISOR", "CONSTRUCTION"], 4: ["COMMERCIAL"], 5: ["WAREHOUSE", "WHSUPERVISOR"], 6: ["PLANNING"], 7: ["ENGINEERING", "ENGINEER"],
 };
 
 export const caseKinds: Record<number, string> = { 1: "توربین", 2: "قطعه یدکی", 3: "خدمات" };
