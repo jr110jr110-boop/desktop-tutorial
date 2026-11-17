@@ -297,6 +297,23 @@ namespace Services.NasbNiro.Engineering
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
                 : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
 
+        /// <summary>The one check behind both the draft-distribution action and its button flag (PMO or the AG-INIT seat, accepted handover, no rows yet).</summary>
+        private async Task<string> DraftDistributionReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
+            !(w.Pmo && !w.Seat) && !w.InitSeat ? EnText.NotAllowed + " (یادداشت ابلاغ واحدها را PMO یا ایجنت سمت PMO می‌سازد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)"
+            : h.Status != EnHandoverStatus.Accepted ? "ردیف‌های توزیع فقط برای تحویل پذیرفته‌شده ساخته می‌شود."
+            : await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct) ? "ردیف‌های توزیع این تحویل قبلاً ساخته شده است." : null;
+
+        /// <summary>The one check behind both the distribute action and its button flag (PMO or the AG-INIT seat, released handover, rows drafted, not yet notified).</summary>
+        private async Task<string> DistributeReasonAsync(EnHandover h, Who w, CancellationToken ct)
+        {
+            if (!(w.Pmo && !w.Seat) && !w.InitSeat) return EnText.NotAllowed + " (اطلاع‌رسانی به واحدها را PMO یا ایجنت سمت PMO انجام می‌دهد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)";
+            if (h.Status != EnHandoverStatus.Released) return "فقط تحویل ابلاغ‌شده توزیع می‌شود.";
+            List<DateTimeOffset?> sent = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).Select(d => d.NoticeSentAt).ToListAsync(ct);
+            if (sent.Any(x => x.HasValue)) return "توزیع این تحویل قبلاً انجام شده است.";
+            if (sent.Count == 0) return "یادداشت ابلاغ واحدها برای این تحویل ساخته نشده است؛ بدون متن تأییدشدهٔ PMO به واحدها اطلاع داده نمی‌شود.";
+            return null;
+        }
+
         private static string VoidReasonOf(EnHandover h, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft && h.Status != EnHandoverStatus.Returned ? "فقط پیش‌نویس یا تحویل برگشت‌خورده ابطال می‌شود." : null;
 
@@ -374,7 +391,7 @@ namespace Services.NasbNiro.Engineering
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
                 string submit = SubmitReason(h, w, ls, live, now), request = WaiverRequestReason(h, w, ls, live != null && live.UsedAt == null ? live : null);
                 if (submit == null && h.Status == EnHandoverStatus.Draft) submit = await EnDecision.RefusalAsync(_uow, c, ct);
-                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w);
+                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w), draftDist = await DraftDistributionReasonAsync(h, w, ct), distribute = await DistributeReasonAsync(h, w, ct);
                 EnWaiver shown = waivers.Where(x => x.HandoverId == h.Id || x.Id == h.WaiverId).OrderByDescending(x => x.Id).FirstOrDefault();
                 EnWaiverDto waiverDto = shown == null ? null : (await WaiverDtosAsync(new List<EnWaiver> { shown }, ct))[0];
                 result.Add(new EnHandoverDto
@@ -393,6 +410,7 @@ namespace Services.NasbNiro.Engineering
                     Debts = debts.Where(d => waivers.Any(x => x.Id == d.WaiverId && x.HandoverId == h.Id)).Select(d => DebtDto(d, debtUsers, waiverNames, caseNames, cases.ToDictionary(k => k.Key, k => k.Value.ReferenceCode), today)).ToList(),
                     CanRefresh = RefreshReason(h, w) == null, RefreshBlockedReason = RefreshReason(h, w), CanSubmit = submit == null, SubmitBlockedReason = submit, CanRequestWaiver = request == null, RequestWaiverBlockedReason = request, CanAccept = accept == null, AcceptBlockedReason = accept,
                     CanReturn = ret == null, ReturnBlockedReason = ret, CanRelease = release == null, ReleaseBlockedReason = release, CanVoid = voidR == null, VoidBlockedReason = voidR,
+                    CanDraftDistribution = draftDist == null, DraftDistributionBlockedReason = draftDist, CanDistribute = distribute == null, DistributeBlockedReason = distribute,
                 });
             }
             return result;
@@ -685,9 +703,8 @@ namespace Services.NasbNiro.Engineering
                     break;
                 case "draft-distribution":
                 {
-                    if (!(w.Pmo && !w.Seat) && !w.InitSeat) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed + " (یادداشت ابلاغ واحدها را PMO یا ایجنت سمت PMO می‌سازد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)");
-                    if (h.Status != EnHandoverStatus.Accepted) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع فقط برای تحویل پذیرفته‌شده ساخته می‌شود.");
-                    if (await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct)) return EnText.Bad<EnHandoverDto>("ردیف‌های توزیع این تحویل قبلاً ساخته شده است.");
+                    why = await DraftDistributionReasonAsync(h, w, ct);
+                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
                     foreach ((EnUnit unit, string roles) in Units)
                     {
@@ -709,11 +726,9 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "distribute":
                 {
-                    if (!(w.Pmo && !w.Seat) && !w.InitSeat) return EnText.Bad<EnHandoverDto>(EnText.NotAllowed + " (اطلاع‌رسانی به واحدها را PMO یا ایجنت سمت PMO انجام می‌دهد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)");
-                    if (h.Status != EnHandoverStatus.Released) return EnText.Bad<EnHandoverDto>("فقط تحویل ابلاغ‌شده توزیع می‌شود.");
+                    why = await DistributeReasonAsync(h, w, ct);
+                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     List<EnDistribution> rows = await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
-                    if (rows.Any(d => d.NoticeSentAt.HasValue)) return EnText.Bad<EnHandoverDto>("توزیع این تحویل قبلاً انجام شده است.");
-                    if (rows.Count == 0) return EnText.Bad<EnHandoverDto>("یادداشت ابلاغ واحدها برای این تحویل ساخته نشده است؛ بدون متن تأییدشدهٔ PMO به واحدها اطلاع داده نمی‌شود.");
                     foreach (EnDistribution d in rows) { d.NoticeSentAt = now; d.ModifyDate = now; d.ModifierUserId = Me; }
                     break;
                 }

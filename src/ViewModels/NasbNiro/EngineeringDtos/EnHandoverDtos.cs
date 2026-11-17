@@ -226,6 +226,14 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string ReleaseBlockedReason { get; set; }
         public bool CanVoid { get; set; }
         public string VoidBlockedReason { get; set; }
+
+        /// <summary>Build the unit notice rows (PMO or the AG-INIT seat, accepted handover, no rows yet).</summary>
+        public bool CanDraftDistribution { get; set; }
+        public string DraftDistributionBlockedReason { get; set; }
+
+        /// <summary>Notify the units (PMO or the AG-INIT seat, released handover, rows drafted, not yet notified).</summary>
+        public bool CanDistribute { get; set; }
+        public string DistributeBlockedReason { get; set; }
     }
 
     /// <summary>Action: draft (CaseId: the next round), refresh, submit, accept, return, release, void, distribute (agent), acknowledge (DistributionId), settle (agent: settles the debts whose documents now exist).</summary>
