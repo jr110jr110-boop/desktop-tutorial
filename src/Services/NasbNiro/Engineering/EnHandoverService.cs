@@ -99,14 +99,23 @@ namespace Services.NasbNiro.Engineering
         }
 
         /// <summary>The notice text of one unit: what that unit needs from the handover (deterministic: contract, case, standard, count and titles of its own documents), cut with an ellipsis at the column length.</summary>
-        public static string ScopeNote(string contractCode, string caseNumber, string standard, EnUnit unit, IEnumerable<EnHandoverLine> lines, out int count)
+        public static string ScopeNote(string contractCode, string caseNumber, string standard, EnUnit unit, IEnumerable<EnHandoverLine> lines, out int count, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine = null)
         {
             List<EnHandoverLine> mine = lines.Where(l => EnUnits.Includes(l.Units, unit)).OrderBy(l => l.Seq).ThenBy(l => l.Id).ToList();
             count = mine.Count;
             string head = "مدارک مهندسی قرارداد " + (contractCode ?? "—") + " (پرونده " + caseNumber + "، استاندارد " + (string.IsNullOrWhiteSpace(standard) ? "—" : standard) + ") برای واحد " + EnText.Unit(unit) + ": ";
-            string body = count == 0 ? "برای این واحد مدرکی در این تحویل نیست." : EnText.Num(count) + " مدرک: " + string.Join("؛ ", mine.Select(l => l.Title));
+            string body = count == 0 ? "برای این واحد مدرکی در این تحویل نیست." : EnText.Num(count) + " مدرک: " + string.Join("؛ ", mine.Select(l => TitleWithState(l, debtDueByLine)));
             string text = head + body;
             return text.Length > 2000 ? text.Substring(0, 1999) + "…" : text;
+        }
+
+        /// <summary>A document that is not there yet is marked in the notice: with the deadline of its open debt when there is one.</summary>
+        private static string TitleWithState(EnHandoverLine l, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine)
+        {
+            if (l.State != EnLineState.Missing) return l.Title;
+            return debtDueByLine != null && debtDueByLine.TryGetValue(l.Id, out DateTimeOffset due)
+                ? l.Title + " (هنوز نرسیده، مهلت تا " + EnText.Stamp(due) + ")"
+                : l.Title + " (هنوز نرسیده)";
         }
 
         /// <summary>The keys of the required lines that are missing.</summary>
@@ -710,9 +719,12 @@ namespace Services.NasbNiro.Engineering
                     why = DraftDistributionReason(h, w, await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct));
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
+                    List<int> lineIds = h.Lines.Select(l => l.Id).ToList();
+                    Dictionary<int, DateTimeOffset> dueByLine = (await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnDebtStatus.Open && x.HandoverLineId.HasValue && lineIds.Contains(x.HandoverLineId.Value)).Select(x => new { Line = x.HandoverLineId.Value, x.DueAt }).ToListAsync(ct))
+                        .GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Min(x => x.DueAt));
                     foreach ((EnUnit unit, string roles) in Units)
                     {
-                        string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count);
+                        string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count, dueByLine);
                         _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Draft, ScopeNote = text, DocumentCount = count, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     EnEvents.Add(_uow, c, "distribution-drafted", Me, h.Number);

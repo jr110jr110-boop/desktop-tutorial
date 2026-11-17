@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using Entities.Model.NasbNiro.Engineering;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -9,7 +13,7 @@ using static MsTests.EnKit;
 
 namespace MsTests
 {
-    /// <summary>ENG-E1c: fixes from stage 2 of the real click test.</summary>
+    /// <summary>ENG-E1c: C2 info request.</summary>
     [TestClass]
     public class EngineeringE1cTests
     {
@@ -29,5 +33,6 @@ namespace MsTests
             Assert.IsFalse(string.IsNullOrWhiteSpace(listed.ContractCode));
             Assert.AreEqual("ساخت توربین", listed.ContractTitle);
         }
+
     }
 }
