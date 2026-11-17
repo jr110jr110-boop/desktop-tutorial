@@ -65,7 +65,7 @@ function reject() {
         </table>
       </dd>
       <dt v-if="waiver.dossierUnconfirmed">پرونده پلتفرم</dt><dd v-if="waiver.dossierUnconfirmed">تایید نشده</dd>
-      <dt>پوشش</dt><dd>{{ waiver.covers ? "همه کمبودها را می‌پوشاند" : "کمبودها را کامل نمی‌پوشاند" }}<span v-if="waiver.coverageNote"> — {{ waiver.coverageNote }}</span></dd>
+      <dt v-if="waiver.status !== 0">پوشش</dt><dd v-if="waiver.status !== 0">{{ waiver.covers ? "همه کمبودها را می‌پوشاند" : "کمبودها را کامل نمی‌پوشاند" }}<span v-if="waiver.coverageNote"> — {{ waiver.coverageNote }}</span></dd>
       <dt v-if="waiver.decidedByName">تصمیم</dt><dd v-if="waiver.decidedByName">{{ waiver.decidedByName }}، {{ faDigits(waiver.decidedAtText || "") }}<span v-if="waiver.decisionNote"> — {{ waiver.decisionNote }}</span></dd>
     </dl>
     <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="تایید مجوز اضطرار" variant="success" @go="approve" />

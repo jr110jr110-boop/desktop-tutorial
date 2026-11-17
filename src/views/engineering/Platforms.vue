@@ -59,7 +59,7 @@ onMounted(reload);
                 <span v-else class="inv-muted small">—</span>
               </td>
               <td>
-                <router-link v-if="p.nativeStandardMissing && !p.dossierId" :to="enPaths.platform(p.productId)" class="btn btn-sm btn-outline-primary">ثبت استاندارد از دیتاشیت اصلی</router-link>
+                <router-link v-if="p.nativeStandardMissing && !p.dossierId" :to="enPaths.platform(p.productId)" class="btn btn-sm btn-outline-primary">باز کردن پرونده</router-link>
                 <span v-if="p.tenderStageMissingCount" class="small text-danger">{{ faDigits(String(p.tenderStageMissingCount)) }} مدرک مرحله مناقصه کم است</span>
               </td>
             </tr>

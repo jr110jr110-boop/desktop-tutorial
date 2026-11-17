@@ -68,9 +68,11 @@ const withdraw = (r: any) =>
       </p>
       <p class="en-pre mb-1">{{ r.question }}</p>
       <p v-if="r.answer" class="en-pre small"><strong>پاسخ PMO:</strong> {{ r.answer }} <span class="inv-muted">({{ r.answeredByName }} {{ faDigits(r.answeredAtText || "") }})</span></p>
-      <EnAction :can="r.canAnswer" :reason="r.answerBlockedReason" :roles="EnRoles.pmo" label="پاسخ" variant="outline-primary" @go="answer(r)" />
-      <EnAction :can="r.canClose" :reason="r.closeBlockedReason" :roles="EnRoles.infoReaders" :confirm="`پرسش ${faDigits(r.number)} بسته شود؟ پس از بستن، پاسخ PMO نهایی می‌ماند و پرسش دوباره باز نمی‌شود.`" label="بستن" variant="success" @go="runEn(() => act(r, 'close'), 'پرسش بسته شد.', load)" />
-      <EnAction :can="r.canVoid" :reason="r.voidBlockedReason" :roles="EnRoles.infoReaders" label="پس‌گرفتن" variant="outline-secondary" @go="withdraw(r)" />
+      <template v-if="r.status < 2">
+        <EnAction :can="r.canAnswer" :reason="r.answerBlockedReason" :roles="EnRoles.pmo" label="پاسخ" variant="outline-primary" @go="answer(r)" />
+        <EnAction :can="r.canClose" :reason="r.closeBlockedReason" :roles="EnRoles.infoReaders" :confirm="`پرسش ${faDigits(r.number)} بسته شود؟ پس از بستن، پاسخ PMO نهایی می‌ماند و پرسش دوباره باز نمی‌شود.`" label="بستن" variant="success" @go="runEn(() => act(r, 'close'), 'پرسش بسته شد.', load)" />
+        <EnAction :can="r.canVoid" :reason="r.voidBlockedReason" :roles="EnRoles.infoReaders" label="پس‌گرفتن" variant="outline-secondary" @go="withdraw(r)" />
+      </template>
     </div>
     <button v-if="!noAsk && myUnits.length && (handoverId || caseId)" class="btn btn-sm btn-outline-primary" type="button" @click="ask">پرسش از PMO</button>
     <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />

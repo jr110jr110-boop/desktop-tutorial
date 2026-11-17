@@ -36,6 +36,8 @@ async function load() {
 onMounted(load);
 watch([productId, code], load);
 const d = useEnDialog(load);
+// a dossier that was never assessed (only its standard is recorded): it shows «ارزیابی نشده» and the first assessment reads «ارزیابی»
+const neverAssessed = computed(() => !!x.value && x.value.status === 0 && !x.value.assessedAtText);
 
 const groups = computed(() => {
   const m = new Map<string, any[]>();
@@ -91,7 +93,8 @@ async function standardDialog() {
           <span class="fw-bold">{{ x.productTitle }}</span>
           <EnChip :status="x.status" :text="x.statusText" group="dossier" />
           <span class="inv-ltr">{{ x.referenceCode }}</span>
-          <span v-if="x.stale" class="inv-badge warn">فهرست مرجع تغییر کرده؛ ارزیابی دوباره لازم است</span>
+          <span v-if="neverAssessed" class="inv-badge warn" data-test="en-never-assessed">ارزیابی نشده</span>
+          <span v-else-if="x.stale" class="inv-badge warn">فهرست مرجع تغییر کرده؛ ارزیابی دوباره لازم است</span>
         </div>
         <p v-if="x.standardBasis" class="small">مبنای استاندارد: {{ x.standardBasis }}</p>
         <p v-if="x.otherDossiers?.length" class="small">پرونده‌های دیگر این محصول:
@@ -107,7 +110,7 @@ async function standardDialog() {
 
         <div class="mb-3">
           <EnAction :can="x.canRecordStandard" :reason="x.recordStandardBlockedReason" :roles="EnRoles.writers" label="ثبت استاندارد از دیتاشیت اصلی" variant="outline-primary" @go="standardDialog" />
-          <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" :confirm="`پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) دوباره با فهرست مرجع جاری ارزیابی شود؟ اگر فهرست یا مدارک تغییر کرده باشد، اعلام کامل‌شدن و تایید مدیر مهندسی برداشته می‌شود و پرونده به ناقص برمی‌گردد.`" label="ارزیابی دوباره" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
+          <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" :confirm="neverAssessed ? `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) برای نخستین بار با فهرست مرجع جاری ارزیابی شود؟` : `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) دوباره با فهرست مرجع جاری ارزیابی شود؟ اگر فهرست یا مدارک تغییر کرده باشد، اعلام کامل‌شدن و تایید مدیر مهندسی برداشته می‌شود و پرونده به ناقص برمی‌گردد.`" :label="neverAssessed ? 'ارزیابی' : 'ارزیابی دوباره'" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
           <EnAction :can="x.canComplete" :reason="x.completeBlockedReason" :roles="EnRoles.writers" :confirm="`پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) کامل اعلام شود؟ پس از آن منتظر تایید مدیر مهندسی می‌ماند.`" label="اعلام کامل‌شدن" variant="outline-primary" @go="runEn(() => act('complete'), 'کامل‌شدن اعلام شد.', load)" />
           <EnAction :can="x.canConfirm" :reason="x.confirmBlockedReason" :roles="EnRoles.manager" :confirm="`کامل‌بودن پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) تایید شود؟ تحویل مدارک به PMO فقط با پروندهٔ تاییدشده بدون قفل می‌شود.`" label="تایید کامل بودن" variant="success" @go="runEn(() => act('confirm'), 'پرونده تایید شد.', load)" />
           <EnAction :can="x.canReturn" :reason="x.returnBlockedReason" :roles="EnRoles.manager" label="برگشت به ناقص" variant="outline-danger" @go="reason('برگشت به ناقص', 'return', 'دلیل برگشت', 'پرونده به ناقص برگشت.')" />
