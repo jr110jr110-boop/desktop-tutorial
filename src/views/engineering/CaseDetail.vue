@@ -101,11 +101,11 @@ async function standardDialog() {
   const standards = await loadStandardOptions(c.value.referenceCode);
   dlg.ask({
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
-    hint: "استاندارد را کارفرما تعیین می‌کند؛ اینجا فقط کد و شاهد آن از دیتاشیت ثبت می‌شود.",
+    hint: "استاندارد را کارفرما تعیین می‌کند؛ فایل دیتاشیت بارگذاری می‌شود و کد را از فهرست انتخاب می‌کنید. شاهد فقط اشاره‌ای کوتاه به همان فایل است (شماره سند و بند).",
     fields: [
       { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
-      { key: "evidence", label: "شاهد از دیتاشیت (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
-      { key: "file", label: "فایل دیتاشیت (اختیاری)", type: "file" as const },
+      { key: "evidence", label: "اشاره به فایل (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
+      { key: "file", label: "فایل دیتاشیت کارفرما", type: "file" as const, required: true },
       ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
     ],
     run: async (v) => {
