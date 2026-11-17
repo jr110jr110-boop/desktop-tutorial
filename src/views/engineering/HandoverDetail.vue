@@ -54,11 +54,6 @@ const reason = (title: string, action: string, okText: string) =>
 
 const lines = computed(() => [...(h.value?.lines || [])].sort((a: any, b: any) => Number(b.forMyUnit) - Number(a.forMyUnit) || a.seq - b.seq));
 const pct = computed(() => (h.value ? completeness(h.value.requiredCount, h.value.requiredCount - h.value.missingRequiredCount) : null));
-// The two distribution steps are the PMO side's (the server refuses anyone else); the DTO has no flag for them, so the state below only tells when each one can make sense and the server decides.
-const distDraftOk = computed(() => h.value?.status === 3 && !h.value?.distribution?.length);
-const distDraftWhy = computed(() => (h.value?.distribution?.length ? "یادداشت ابلاغ واحدها قبلاً ساخته شده است." : "یادداشت ابلاغ فقط برای تحویل پذیرفته‌شده ساخته می‌شود."));
-const distSendOk = computed(() => h.value?.status === 4 && !!h.value?.distribution?.length);
-const distSendWhy = computed(() => (h.value?.status !== 4 ? "فقط تحویل منتشرشده به واحدها ابلاغ می‌شود." : "یادداشت ابلاغ واحدها هنوز ساخته نشده است."));
 const isLink = (p: string) => typeof p === "string" && p.startsWith("/");
 
 function waiverDialog() {
@@ -158,8 +153,8 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         <h2 class="h6 mt-3">ابلاغ به واحدها</h2>
         <p class="small inv-muted">یادداشت ابلاغ هر واحد را PMO یا ایجنت سمت PMO می‌سازد و ابلاغ می‌کند؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند.</p>
         <div class="mb-2" data-test="en-dist-actions">
-          <EnAction :can="distDraftOk" :reason="distDraftWhy" :roles="EnRoles.pmo" label="ساخت یادداشت ابلاغ واحدها" variant="outline-primary" @go="runEn(() => act('draft-distribution'), 'یادداشت ابلاغ واحدها ساخته شد.', load)" />
-          <EnAction :can="distSendOk" :reason="distSendWhy" :roles="EnRoles.pmo" label="ابلاغ به واحدها" variant="primary" @go="runEn(() => act('distribute'), 'ابلاغ به واحدها انجام شد.', load)" />
+          <EnAction :can="h.canDraftDistribution" :reason="h.draftDistributionBlockedReason" :roles="EnRoles.pmo" label="ساخت یادداشت ابلاغ واحدها" variant="outline-primary" @go="runEn(() => act('draft-distribution'), 'یادداشت ابلاغ واحدها ساخته شد.', load)" />
+          <EnAction :can="h.canDistribute" :reason="h.distributeBlockedReason" :roles="EnRoles.pmo" label="ابلاغ به واحدها" variant="primary" @go="runEn(() => act('distribute'), 'ابلاغ به واحدها انجام شد.', load)" />
         </div>
         <p v-if="!h.distribution?.length" class="inv-muted">ابلاغی آماده نشده است؛ پس از پذیرش تحویل، PMO یا ایجنت سمت PMO یادداشت ابلاغ هر واحد را می‌سازد.</p>
         <div v-else class="table-responsive">

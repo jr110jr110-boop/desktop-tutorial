@@ -49,6 +49,7 @@ export const postEnReferenceAction = (body: any) => call("post", base + "referen
 
 // ---- handovers, waivers, debts, distribution
 export const getEnHandovers = (q: EnQuery) => call("get", base + "handovers", undefined, clean(q));
+/** The handover DTO carries canDraftDistribution / draftDistributionBlockedReason and canDistribute / distributeBlockedReason (the same checks as the two actions; the page only reads them). */
 export const getEnHandover = (id: number) => call("get", base + "handovers/" + id);
 /** body: { id | caseId | distributionId, action: draft|refresh|submit|accept|return|release|void|draft-distribution|edit-scope|distribute|acknowledge, note, scopeNote, rowVersion }
  *  draft-distribution and distribute are the PMO's only (the PMO user or the PMO-side agent). */
