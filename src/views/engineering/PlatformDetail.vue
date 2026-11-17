@@ -131,7 +131,7 @@ function standardDialog() {
                   </td>
                   <td>
                     <template v-if="l.systemProven">اثبات‌شده توسط سیستم</template>
-                    <template v-else-if="l.documentId"><a href="#" @click.prevent="downloadDoc(l.documentId, l.title)">دریافت فایل</a> — {{ l.revision }}</template>
+                    <template v-else-if="l.documentId"><a href="#" @click.prevent="downloadDoc(l.documentId, l.title)">دریافت فایل</a><span v-if="l.revision" class="small inv-muted"> — ویرایش مدرک {{ faDigits(String(l.revision)) }}</span></template>
                     <span v-else class="inv-muted">—</span>
                     <div v-if="l.suppliedByName" class="small inv-muted">{{ l.suppliedByName }} {{ faDigits(l.suppliedAtText || "") }}</div>
                   </td>

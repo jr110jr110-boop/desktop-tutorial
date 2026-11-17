@@ -127,7 +127,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
                 <td><EnChip :status="l.state" :text="l.stateText" group="line" /></td>
                 <td>
                   <router-link v-if="l.linkPath && isLink(l.linkPath)" :to="l.linkPath">باز کردن در سیستم</router-link>
-                  <a v-else-if="l.documentId" href="#" @click.prevent="downloadDoc(l.documentId, l.title)">دریافت فایل</a><span v-if="l.revision"> — {{ l.revision }}</span>
+                  <a v-else-if="l.documentId" href="#" @click.prevent="downloadDoc(l.documentId, l.title)">دریافت فایل</a><span v-if="l.revision" class="small inv-muted"> — ویرایش مدرک {{ faDigits(String(l.revision)) }}</span>
                   <span v-if="!l.linkPath && !l.documentId" class="inv-muted">—</span>
                 </td>
                 <td class="small">{{ unitsText(l.units) }}</td>
