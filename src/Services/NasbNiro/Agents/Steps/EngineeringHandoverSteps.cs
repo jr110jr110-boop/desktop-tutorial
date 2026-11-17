@@ -262,7 +262,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             var rows = await uow.Set<EnInfoRequest>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnInfoStatus.Open).OrderBy(x => x.Id).Take(ProcStepCommon.Cap).Select(x => new { x.Id, x.Number, x.ContractId, x.Unit }).ToListAsync(ct);
-            return rows.Select(r => Item("EnInfoRequest", r.Id, r.Number, r.ContractId, null, $"واحد {EnText.Unit(r.Unit)} دربارهٔ مدارک مهندسی پرسیده است ({r.Number}) و منتظر پاسخ PMO است (پاسخ بدون قیمت).", EnRoles.Pmo)).ToList();
+            return rows.Select(r => Item("EnInfoRequest", r.Id, r.Number, r.ContractId, null, (r.Unit == EnUnit.Engineering ? $"مهندسی از PMO پرسیده است ({r.Number}) و منتظر پاسخ PMO است (پاسخ بدون قیمت)." : $"واحد {EnText.Unit(r.Unit)} دربارهٔ مدارک مهندسی پرسیده است ({r.Number}) و منتظر پاسخ PMO است (پاسخ بدون قیمت)."), EnRoles.Pmo)).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = Root + "/info-requests/" + Id(item.TargetId), Title = "پاسخ به پرسش " + item.TargetNumber };

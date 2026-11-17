@@ -66,6 +66,7 @@ namespace MsTests
             AppHost host = Started("s9b");
             int caseId = Seed(host, EnClassification.Platform, EnCaseStatus.Released);
             int contract = host.Read(u => u.Set<EnCase>().Single(x => x.Id == caseId).ContractId.Value);
+            host.Write(u => { AppHost.Add(u, new EnHandover { Number = "EHO-INFO", CaseId = caseId, ContractId = contract, Round = 1, Status = EnHandoverStatus.Released, PreparedByUserId = 1001, CreateDate = DateTimeOffset.Now, ModifyDate = DateTimeOffset.Now }); u.SaveChanges(); }, Seeder);   // the units ask only about a released handover
             Func<System.Security.Claims.ClaimsPrincipal, Action<EnInfoAskDto>, Task<Common.Results.ResponseDto<EnInfoRequestDto>>> ask = (who, set) => host.As(who, p => { var d = new EnInfoAskDto { CaseId = caseId, Unit = (int)EnUnit.Qa, Question = "ضخامت ورق در نقشه مشخص نیست، لطفاً مشخص کنید" }; set?.Invoke(d); return p.GetRequiredService<IEnInfoRequestService>().AskAsync(d, Ct); });
             Refused(await ask(Prod1, null), "همان واحد");
             Refused(await ask(Qa1, d => d.Question = "کوتاه"), "15");

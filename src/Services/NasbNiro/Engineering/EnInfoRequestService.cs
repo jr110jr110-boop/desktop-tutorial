@@ -49,10 +49,10 @@ namespace Services.NasbNiro.Engineering
         internal static string StatusText(EnInfoStatus s) => s == EnInfoStatus.Open ? "منتظر پاسخ PMO" : s == EnInfoStatus.Answered ? "پاسخ‌داده‌شده" : s == EnInfoStatus.Closed ? "بسته‌شده" : "ابطال‌شده";
 
         private string AnswerReason(EnInfoRequest r, bool seat) =>
-            !_user.IsInRole(EnRoles.Pmo) ? EnText.NotAllowed + " (پاسخ با PMO است)" : seat ? EnText.AiNever : r.Status != EnInfoStatus.Open ? "فقط پرسش باز پاسخ داده می‌شود." : null;
+            !_user.IsInRole(EnRoles.Pmo) ? EnText.NotAllowed + " (پاسخ با PMO است)" : seat ? EnText.AiNever : r.AskedByUserId == Me ? EnText.SameUser + " (پرسنده به پرسش خود پاسخ نمی‌دهد)" : r.Status != EnInfoStatus.Open ? "فقط پرسش باز پاسخ داده می‌شود." : null;
 
         private string CloseReason(EnInfoRequest r, bool seat) =>
-            !OfUnit(r.Unit) ? EnText.NotAllowed + " (بستن با واحد پرسنده است)" : seat ? EnText.AiNever : r.Status != EnInfoStatus.Answered ? "فقط پرسش پاسخ‌داده‌شده بسته می‌شود." : null;
+            !OfUnit(r.Unit) ? EnText.NotAllowed + " (بستن با واحد پرسنده است)" : seat ? EnText.AiNever : r.AnsweredByUserId == Me ? EnText.SameUser + " (پاسخ‌دهنده پرسش را نمی‌بندد)" : r.Status != EnInfoStatus.Answered ? "فقط پرسش پاسخ‌داده‌شده بسته می‌شود." : null;
 
         private string VoidReason(EnInfoRequest r, bool seat) =>
             r.AskedByUserId != Me ? EnText.NotAllowed + " (فقط پرسنده پرسش خود را پس می‌گیرد)" : seat ? EnText.AiNever : r.Status != EnInfoStatus.Open ? "فقط پرسش باز پس گرفته می‌شود." : null;
@@ -101,9 +101,12 @@ namespace Services.NasbNiro.Engineering
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnInfoRequest> { r }, ct))[0]);
         }
 
+        internal static string InboxText(EnInfoRequest r) =>
+            (r.Unit == EnUnit.Engineering ? "پرسش مهندسی از PMO (" + r.Number + "): " : "پرسش واحد " + EnText.Unit(r.Unit) + " دربارهٔ مدارک مهندسی (" + r.Number + "): ") + EnText.Cut(r.Question, 150);
+
         private async Task SyncAsync(EnInfoRequest r, CancellationToken ct) =>
             await OfficeGates.SyncAsync(_notify, KeyPrefix + EnText.Num(r.Id), r.Status == EnInfoStatus.Open, "Engineering", nameof(EnInfoRequest), r.Id,
-                "پرسش واحد " + EnText.Unit(r.Unit) + " دربارهٔ مدارک مهندسی (" + r.Number + "): " + EnText.Cut(r.Question, 150), "/engineering/info-requests/" + EnText.Num(r.Id), EnRoles.Pmo, ct, null, OfInboxKind.Task);
+                InboxText(r), "/engineering/info-requests/" + EnText.Num(r.Id), EnRoles.Pmo, ct, null, OfInboxKind.Task);
 
         public async Task<ResponseDto<EnInfoRequestDto>> AskAsync(EnInfoAskDto dto, CancellationToken ct)
         {
@@ -128,6 +131,8 @@ namespace Services.NasbNiro.Engineering
                 EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.CaseId.Value && !x.Deleted, ct);
                 if (c == null) return EnText.NotFound<EnInfoRequestDto>(EnText.NotFoundCase);
                 if (!c.ContractId.HasValue) return EnText.Bad<EnInfoRequestDto>("این پرونده هنوز قرارداد ندارد.");
+                // the six units ask only about a released handover, also through the case; engineering asks about a case with a contract
+                if (unit != EnUnit.Engineering && !await _uow.Set<EnHandover>().AsNoTracking().AnyAsync(x => x.CaseId == c.Id && !x.Deleted && x.Status == EnHandoverStatus.Released, ct)) return EnText.Bad<EnInfoRequestDto>("پرسش دربارهٔ تحویلی ثبت می‌شود که به واحدها ابلاغ شده است.");
                 caseId = c.Id; contractId = c.ContractId.Value;
             }
             DateTimeOffset now = DateTimeOffset.Now;
