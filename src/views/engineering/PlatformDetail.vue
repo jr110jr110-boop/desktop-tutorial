@@ -59,7 +59,7 @@ function notApplicable(l: any) {
   d.ask({
     title: "کاربرد ندارد: " + l.title,
     hint: l.required ? "این مدرک در استاندارد الزامی است؛ این کار یک درخواست انحراف از استاندارد می‌سازد و بند تا تصمیم مدیر مهندسی و مدیرعامل تغییر نمی‌کند." : "این مدرک الزامی نیست؛ بند بلافاصله «کاربرد ندارد» ثبت می‌شود.",
-    fields: [{ key: "why", label: "دلیل", type: "textarea", required: true, min: 15, max: 2000 }],
+    fields: [{ key: "why", label: "دلیل", type: "textarea", required: true, min: l.required ? 30 : 15, max: 2000 }],
     run: (v) => postEnSupplyLine({ lineId: l.id, notApplicable: true, notApplicableReason: v.why, rowVersion: l.rowVersion }),
     okText: l.required ? "درخواست انحراف ثبت شد؛ بند تغییر نکرد." : "بند «کاربرد ندارد» ثبت شد.",
   });

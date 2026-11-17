@@ -89,8 +89,8 @@ async function classifyDialog(action: "propose" | "change" | "reclassify") {
       { key: "productId", label: "محصول پلتفرم (برای نوع پلتفرم)", type: "select", value: c.value.proposedProductId ? String(c.value.proposedProductId) : "", options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
       { key: "withChanges", label: "با تغییرات؟", type: "select", value: c.value.proposedWithChanges ? "1" : "0", options: [{ value: "0", text: "خیر" }, { value: "1", text: "بله" }] },
       { key: "changeNote", label: "شرح تغییرات", type: "textarea", max: 2000, value: c.value.proposedChangeNote || "" },
-      { key: "basis", label: "مبنای پیشنهاد", type: "textarea", required: action !== "reclassify", max: 2000, value: c.value.proposalBasis || "" },
-      ...(action === "reclassify" ? [{ key: "note", label: "دلیل تغییر", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
+      { key: "basis", label: "مبنای پیشنهاد", type: "textarea", required: action !== "reclassify", min: action === "reclassify" ? undefined : 10, max: 2000, value: c.value.proposalBasis || "" },
+      ...(action !== "propose" ? [{ key: "note", label: "دلیل تغییر", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
     ],
     run: (v) => act(action, { classification: Number(v.classification), productId: v.productId ? Number(v.productId) : null, withChanges: v.withChanges === "1", changeNote: v.changeNote, basis: v.basis, note: v.note }),
   });
@@ -143,7 +143,7 @@ async function confirmListDialog() {
 const tenderDocDialog = () =>
   dlg.ask({
     title: "افزودن مدرک به بسته فنی مناقصه",
-    fields: [{ key: "title", label: "عنوان مدرک", required: true, max: 200 }, { key: "file", label: "فایل", type: "file", required: true }],
+    fields: [{ key: "title", label: "عنوان مدرک", required: true, min: 3, max: 200 }, { key: "file", label: "فایل", type: "file", required: true }],
     run: async (v) => {
       const [fid, fe] = await uploadDoc(v.file);
       return fe ? [null, fe] : act("add-tender-document", { documentId: fid, title: v.title });
@@ -151,7 +151,7 @@ const tenderDocDialog = () =>
     okText: "مدرک به بسته افزوده شد.",
   });
 const conceptDialog = () =>
-  dlg.ask({ title: "یادداشت طرح مفهومی", fields: [{ key: "t", label: "یادداشت", type: "textarea", required: true, max: 4000, value: c.value.conceptNote || "" }], run: (v) => act("save-concept", { conceptNote: v.t }), okText: "یادداشت ذخیره شد." });
+  dlg.ask({ title: "یادداشت طرح مفهومی", fields: [{ key: "t", label: "یادداشت", type: "textarea", required: true, min: 10, max: 4000, value: c.value.conceptNote || "" }], run: (v) => act("save-concept", { conceptNote: v.t }), okText: "یادداشت ذخیره شد." });
 
 // clarifications
 const clarAct = (x: any, action: string, extra: any = {}) => postEnClarificationAction({ id: x.id, action, rowVersion: x.rowVersion, ...extra });
@@ -199,7 +199,7 @@ async function registerDialog() {
       { key: "productId", label: "محصول", type: "select", required: true, options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
       { key: "code", label: "کد استاندارد", required: true, max: 60, value: c.value.referenceCode || "" },
       { key: "basis", label: "مبنای استاندارد (دیتاشیت و بند)", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
-      { key: "why", label: "توجیه ثبت", type: "textarea", required: true, min: 15, max: 2000 },
+      { key: "why", label: "توجیه ثبت", type: "textarea", required: true, min: 30, max: 2000 },
     ],
     run: (v) => proposeEnRegistration({ caseId: id.value, productId: Number(v.productId), referenceCode: v.code, standardBasis: v.basis, rationale: v.why }),
     okText: "پیشنهاد ثبت پلتفرم ثبت شد.",
