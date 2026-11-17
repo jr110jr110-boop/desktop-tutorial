@@ -29,16 +29,20 @@ namespace Services.NasbNiro.Engineering
 
         public static string ListHash(EnReferenceList l) => EnHash.Of("LS|" + EnText.Num(l.Id) + "|" + l.ContentHash);
 
-        /// <summary>What a new revision removes or un-marks Required compared with the previous APPROVED revision of the same Code (empty for a first revision or one that only adds or tightens).</summary>
+        /// <summary>What a new revision removes, un-marks Required or un-marks ClientSubmittal compared with the previous APPROVED revision of the same Code (empty for a first revision or one that only adds or tightens).</summary>
         public static List<string> Loosened(EnReferenceList previous, EnReferenceList next)
         {
             List<string> result = new List<string>();
             if (previous == null) return result;
-            foreach (EnReferenceLine p in previous.Lines.Where(x => x.Required).OrderBy(x => x.Seq))
+            foreach (EnReferenceLine p in previous.Lines.Where(x => x.Required || x.ClientSubmittal).OrderBy(x => x.Seq))
             {
                 EnReferenceLine n = next.Lines.FirstOrDefault(x => EnDossierBuilder.TypeTitle(x.DocumentType, x.Title) == EnDossierBuilder.TypeTitle(p.DocumentType, p.Title));
                 if (n == null) result.Add("حذف «" + p.Title + "»");
-                else if (!n.Required) result.Add("غیرالزامی شدن «" + p.Title + "»");
+                else
+                {
+                    if (p.Required && !n.Required) result.Add("غیرالزامی شدن «" + p.Title + "»");
+                    if (p.ClientSubmittal && !n.ClientSubmittal) result.Add("حذف ارائه به کارفرما برای «" + p.Title + "»");
+                }
             }
             return result;
         }

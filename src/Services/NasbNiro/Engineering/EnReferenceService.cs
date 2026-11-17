@@ -183,7 +183,7 @@ namespace Services.NasbNiro.Engineering
         /// Updates the lines in place (by Id, else by type and title) and appends the new ones. A removed line is deleted physically only while the list was never submitted (a draft that is not a controlled record yet);
         /// once submitted it is kept and flagged Voided, so the audit trail keeps it. The list must be loaded with its voided lines (IgnoreQueryFilters) so the numbering stays unique.
         /// </summary>
-        private static void ApplyLines(IUnitOfWork uow, EnReferenceList l, List<EnReferenceLineDto> lines)
+        private static void ApplyLines(IUnitOfWork uow, EnReferenceList l, List<EnReferenceLineDto> lines, EnReferenceCsv.Columns fileColumns = null)
         {
             bool neverSubmitted = l.Status == EnRefStatus.Draft && !l.SubmittedAt.HasValue;
             List<EnReferenceLine> pool = l.Lines.Where(x => !x.Voided).ToList();
@@ -193,10 +193,15 @@ namespace Services.NasbNiro.Engineering
             {
                 string key = EnDossierBuilder.TypeTitle(x.DocumentType.Trim(), x.Title.Trim());
                 EnReferenceLine line = (x.Id > 0 ? pool.FirstOrDefault(p => p.Id == x.Id && !kept.Contains(p)) : null) ?? pool.FirstOrDefault(p => !kept.Contains(p) && EnDossierBuilder.TypeTitle(p.DocumentType, p.Title) == key);
-                if (line == null) { line = new EnReferenceLine(); l.Lines.Add(line); }
+                bool isNew = line == null;
+                if (isNew) { line = new EnReferenceLine(); l.Lines.Add(line); }
                 kept.Add(line);
-                line.Seq = ++seq; line.DocumentType = x.DocumentType.Trim(); line.Discipline = EnText.Clean(x.Discipline); line.Title = x.Title.Trim(); line.Required = x.Required; line.TenderStage = x.TenderStage; line.ClientSubmittal = x.ClientSubmittal;
-                line.StandardClause = EnText.Clean(x.StandardClause); line.Note = EnText.Clean(x.Note); line.Units = EnUnits.Normalize(x.Units, out _);
+                line.Seq = ++seq; line.DocumentType = x.DocumentType.Trim(); line.Discipline = EnText.Clean(x.Discipline); line.Title = x.Title.Trim(); line.Required = x.Required; line.TenderStage = x.TenderStage;
+                // a file without the optional columns never wipes what the matched line already holds (a revision draft copies them from the approved list)
+                if (isNew || fileColumns == null || fileColumns.ClientSubmittal) line.ClientSubmittal = x.ClientSubmittal;
+                if (isNew || fileColumns == null || fileColumns.Clause) line.StandardClause = EnText.Clean(x.StandardClause);
+                if (isNew || fileColumns == null || fileColumns.Note) line.Note = EnText.Clean(x.Note);
+                line.Units = EnUnits.Normalize(x.Units, out _);
             }
             foreach (EnReferenceLine gone in pool.Where(p => !kept.Contains(p)))
             {
@@ -257,9 +262,9 @@ namespace Services.NasbNiro.Engineering
             if (!EnConcurrency.Apply(_uow, row, rowVersion)) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
             why = EnEditors.Full(row.EditorUserIds, Me);
             if (why != null) return EnText.Bad<EnReferenceListDto>(why);
-            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines);
+            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines, out EnReferenceCsv.Columns columns);
             if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
-            ApplyLines(_uow, row, lines);
+            ApplyLines(_uow, row, lines, columns);
             DateTimeOffset now = DateTimeOffset.Now;
             row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
             row.ModifyDate = now; row.ModifierUserId = Me;
@@ -274,7 +279,7 @@ namespace Services.NasbNiro.Engineering
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
             if (header == null) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
             if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnReferenceListDto>(EnText.AiNever);
-            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines);
+            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines, out _);
             if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
             header.Id = null; header.RowVersion = null; header.Lines = lines;
             return await SaveListAsync(header, ct);
