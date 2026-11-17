@@ -285,8 +285,8 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
               </div>
               <EnAction :can="c.canPropose" :reason="c.proposeBlockedReason" :roles="EnRoles.writers" label="پیشنهاد طبقه‌بندی" variant="outline-primary" @go="classifyDialog('propose')" />
               <EnAction :can="c.canChange" :reason="c.changeBlockedReason" :roles="EnRoles.writers" label="اصلاح پیشنهاد" variant="outline-primary" @go="classifyDialog('change')" />
-              <EnAction :can="c.canConfirm" :reason="c.confirmBlockedReason" :roles="EnRoles.manager" label="تایید مدیر مهندسی" variant="success" @go="direct('confirm', 'تایید مدیر مهندسی ثبت شد.')" />
-              <EnAction :can="c.canApprove" :reason="c.approveBlockedReason" :roles="EnRoles.ceo" label="تایید مدیرعامل" variant="success" @go="direct('approve', 'تایید مدیرعامل ثبت شد.')" />
+              <EnAction :can="c.canConfirm" :reason="c.confirmBlockedReason" :roles="EnRoles.manager" :confirm="`پیشنهاد طبقه‌بندی پروندهٔ ${faDigits(c.number)} تایید شود؟ پس از آن پرونده منتظر تصمیم مدیرعامل می‌ماند.`" label="تایید مدیر مهندسی" variant="success" @go="direct('confirm', 'تایید مدیر مهندسی ثبت شد.')" />
+              <EnAction :can="c.canApprove" :reason="c.approveBlockedReason" :roles="EnRoles.ceo" :confirm="`طبقه‌بندی پروندهٔ ${faDigits(c.number)} تایید نهایی شود؟ پس از تایید مدیرعامل پرونده وارد مرحلهٔ بعد می‌شود.`" label="تایید مدیرعامل" variant="success" @go="direct('approve', 'تایید مدیرعامل ثبت شد.')" />
               <EnAction :can="c.canReturn" :reason="c.returnBlockedReason" :roles="[...EnRoles.manager, ...EnRoles.ceo]" label="برگشت با دلیل" variant="outline-danger" @go="reasonDialog('return', 'برگشت پیشنهاد', 'دلیل برگشت', 'پرونده برگشت داده شد.')" />
               <EnAction :can="c.canReclassify" :reason="c.reclassifyBlockedReason" :roles="EnRoles.manager" label="تغییر طبقه‌بندی" variant="outline-secondary" @go="classifyDialog('reclassify')" />
             </template>
@@ -321,7 +321,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
             </div>
             <EnAction :can="c.canSaveConcept" :reason="c.saveConceptBlockedReason" :roles="EnRoles.writers" label="ثبت یادداشت طرح مفهومی" variant="outline-primary" @go="conceptDialog" />
             <EnAction :can="c.canAddTenderDocument" :reason="c.addTenderDocumentBlockedReason" :roles="EnRoles.writers" label="افزودن مدرک طرح مفهومی یا بسته مناقصه" variant="outline-primary" @go="tenderDocDialog" />
-            <EnAction :can="c.canReleaseTender" :reason="c.releaseTenderBlockedReason" :roles="EnRoles.manager" label="انتشار بسته فنی" variant="success" @go="direct('release-tender', 'بسته فنی منتشر شد.')" />
+            <EnAction :can="c.canReleaseTender" :reason="c.releaseTenderBlockedReason" :roles="EnRoles.manager" :confirm="`بسته فنی پروندهٔ ${faDigits(c.number)} برای بازرگانی منتشر شود؟ پس از انتشار مانع مهندسی برای تایید پیشنهاد برداشته می‌شود.`" label="انتشار بسته فنی" variant="success" @go="direct('release-tender', 'بسته فنی منتشر شد.')" />
           </li>
 
           <!-- 3 -->
@@ -338,10 +338,10 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
                 <dt v-if="x.questionAttachments?.length">پیوست پرسش</dt><dd v-if="x.questionAttachments?.length"><a v-for="(a, i) in x.questionAttachments" :key="a" class="me-2" href="#" @click.prevent="downloadDoc(a, 'question-' + (i + 1))">فایل {{ faNum(i + 1, 0) }}</a></dd>
                 <dt v-if="x.answerAttachments?.length">پیوست پاسخ</dt><dd v-if="x.answerAttachments?.length"><a v-for="(a, i) in x.answerAttachments" :key="a" class="me-2" href="#" @click.prevent="downloadDoc(a, 'answer-' + (i + 1))">فایل {{ faNum(i + 1, 0) }}</a></dd>
               </dl>
-              <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" label="ارسال به بازرگانی" variant="outline-primary" @go="runEn(() => clarAct(x, 'submit'), 'به بازرگانی ارسال شد.', load)" />
+              <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" :confirm="`پرسش ${faDigits(x.number)} به بازرگانی ارسال شود؟ بازرگانی آن را برای کارفرما می‌فرستد.`" label="ارسال به بازرگانی" variant="outline-primary" @go="runEn(() => clarAct(x, 'submit'), 'به بازرگانی ارسال شد.', load)" />
               <EnAction :can="x.canSend" :reason="x.sendBlockedReason" :roles="EnRoles.commercial" label="ثبت ارسال به کارفرما" variant="outline-primary" @go="sendDialog(x)" />
               <EnAction :can="x.canAnswer" :reason="x.answerBlockedReason" :roles="EnRoles.commercial" label="ثبت پاسخ کارفرما" variant="outline-primary" @go="answerDialog(x)" />
-              <EnAction :can="x.canClose" :reason="x.closeBlockedReason" :roles="EnRoles.writers" label="بستن" variant="success" @go="runEn(() => clarAct(x, 'close'), 'شفاف‌سازی بسته شد.', load)" />
+              <EnAction :can="x.canClose" :reason="x.closeBlockedReason" :roles="EnRoles.writers" :confirm="`شفاف‌سازی ${faDigits(x.number)} بسته شود؟ پس از بستن پاسخ کارفرما نهایی می‌شود.`" label="بستن" variant="success" @go="runEn(() => clarAct(x, 'close'), 'شفاف‌سازی بسته شد.', load)" />
               <EnAction :can="x.canReask" :reason="x.reaskBlockedReason" :roles="EnRoles.writers" label="پرسش مجدد" variant="outline-secondary" @go="reaskDialog(x)" />
               <EnAction :can="x.canVoid" :reason="x.voidBlockedReason" :roles="EnRoles.writers" label="ابطال" variant="outline-danger" @go="voidClar(x)" />
             </div>
@@ -364,7 +364,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
                 <p v-if="charter.priceNotice" class="small inv-muted">{{ charter.priceNotice }}</p>
               </div>
             </div>
-            <EnAction :can="c.canCharterReview" :reason="c.charterReviewBlockedReason" :roles="EnRoles.manager" label="تایید منشور" variant="success" @go="direct('charter-confirm', 'منشور تایید شد.')" />
+            <EnAction :can="c.canCharterReview" :reason="c.charterReviewBlockedReason" :roles="EnRoles.manager" :confirm="`منشور پروژهٔ پروندهٔ ${faDigits(c.number)} تایید شود؟ تحویل مدارک به PMO بدون این تایید ساخته نمی‌شود.`" label="تایید منشور" variant="success" @go="direct('charter-confirm', 'منشور تایید شد.')" />
             <EnAction :can="c.canCharterReview" :reason="c.charterReviewBlockedReason" :roles="EnRoles.manager" label="برگشت منشور" variant="outline-danger" @go="reasonDialog('charter-return', 'برگشت منشور', 'دلیل برگشت منشور', 'منشور برگشت داده شد.')" />
           </li>
 

@@ -131,10 +131,10 @@ const reason = (title: string, action: string, okText: string) =>
         <button v-if="editable" class="btn btn-sm btn-outline-secondary ms-2" type="button" @click="addLine">افزودن سطر</button>
         <button v-if="editable" :disabled="saving" class="btn btn-sm btn-primary ms-2" type="button" @click="save">ذخیره</button>
         <template v-if="x">
-          <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" label="ارسال برای تایید" variant="outline-primary" @go="runEn(() => act('submit'), 'برای تایید ارسال شد.', load)" />
-          <EnAction :can="x.canApprove" :reason="x.approveBlockedReason" :roles="EnRoles.refApprovers" label="تایید فهرست" variant="success" @go="runEn(() => act('approve'), 'فهرست تایید شد.', load)" />
+          <EnAction :can="x.canSubmit" :reason="x.submitBlockedReason" :roles="EnRoles.writers" :confirm="`فهرست ${x.code} برای تایید ارسال شود؟ تصمیم با تاییدکنندگان فهرست است.`" label="ارسال برای تایید" variant="outline-primary" @go="runEn(() => act('submit'), 'برای تایید ارسال شد.', load)" />
+          <EnAction :can="x.canApprove" :reason="x.approveBlockedReason" :roles="EnRoles.refApprovers" :confirm="`فهرست ${x.code} (ویرایش ${faNum(x.revision, 0)}) تایید شود؟ از این پس ملاک پرونده‌های این استاندارد است.`" label="تایید فهرست" variant="success" @go="runEn(() => act('approve'), 'فهرست تایید شد.', load)" />
           <EnAction :can="x.canReturn" :reason="x.returnBlockedReason" :roles="EnRoles.refApprovers" label="برگشت" variant="outline-danger" @go="reason('برگشت فهرست', 'return', 'فهرست برگشت داده شد.')" />
-          <EnAction :can="x.canRevise" :reason="x.reviseBlockedReason" :roles="EnRoles.writers" label="ویرایش تازه" variant="outline-secondary" @go="runEn(() => act('revise'), 'ویرایش تازه ساخته شد؛ اگر فهرست را سهل‌تر کند مدیر مهندسی و مدیرعامل هر دو باید تایید کنند.', load)" />
+          <EnAction :can="x.canRevise" :reason="x.reviseBlockedReason" :roles="EnRoles.writers" :confirm="`ویرایش تازه‌ای از فهرست ${x.code} ساخته شود؟ ویرایش فعلی دست‌نخورده می‌ماند و ویرایش تازه باید دوباره تایید شود.`" label="ویرایش تازه" variant="outline-secondary" @go="runEn(() => act('revise'), 'ویرایش تازه ساخته شد؛ اگر فهرست را سهل‌تر کند مدیر مهندسی و مدیرعامل هر دو باید تایید کنند.', load)" />
           <EnAction :can="x.canVoid" :reason="x.voidBlockedReason" :roles="EnRoles.refApprovers" label="ابطال" variant="outline-danger" @go="reason('ابطال فهرست', 'void', 'فهرست باطل شد.')" />
         </template>
       </div>

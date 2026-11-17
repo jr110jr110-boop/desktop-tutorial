@@ -137,12 +137,12 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         </div>
 
         <div class="mb-3">
-          <EnAction :can="h.canSubmit" :reason="h.submitBlockedReason" :roles="EnRoles.writers" label="ارسال به PMO" variant="primary" @go="runEn(() => act('submit'), 'تحویل به PMO ارسال شد.', load)" />
+          <EnAction :can="h.canSubmit" :reason="h.submitBlockedReason" :roles="EnRoles.writers" :confirm="`تحویل ${faDigits(h.number)} به PMO ارسال شود؟ پس از ارسال تحویل منتظر تصمیم PMO می‌ماند.`" label="ارسال به PMO" variant="primary" @go="runEn(() => act('submit'), 'تحویل به PMO ارسال شد.', load)" />
           <EnAction :can="h.canRequestWaiver" :reason="h.requestWaiverBlockedReason" :roles="EnRoles.manager" label="درخواست مجوز اضطرار" variant="outline-danger" @go="waiverDialog" />
-          <EnAction :can="h.canRefresh" :reason="h.refreshBlockedReason" :roles="EnRoles.writers" label="بازخوانی مدارک از پرونده پلتفرم" variant="outline-secondary" @go="runEn(() => act('refresh'), 'مدارک بازخوانی شد.', load)" />
-          <EnAction :can="h.canAccept" :reason="h.acceptBlockedReason" :roles="EnRoles.pmoSide" label="پذیرش" variant="success" @go="runEn(() => act('accept'), 'تحویل پذیرفته شد.', load)" />
+          <EnAction :can="h.canRefresh" :reason="h.refreshBlockedReason" :roles="EnRoles.writers" :confirm="`مدارک تحویل ${faDigits(h.number)} دوباره از پروندهٔ پلتفرم خوانده شود؟ وضعیت ردیف‌ها با پرونده هم‌خوان می‌شود.`" label="بازخوانی مدارک از پرونده پلتفرم" variant="outline-secondary" @go="runEn(() => act('refresh'), 'مدارک بازخوانی شد.', load)" />
+          <EnAction :can="h.canAccept" :reason="h.acceptBlockedReason" :roles="EnRoles.pmoSide" :confirm="`تحویل ${faDigits(h.number)} پذیرفته شود؟ پس از پذیرش دیگر نمی‌توان آن را برگرداند و ساخت یادداشت ابلاغ واحدها آغاز می‌شود.`" label="پذیرش" variant="success" @go="runEn(() => act('accept'), 'تحویل پذیرفته شد.', load)" />
           <EnAction :can="h.canReturn" :reason="h.returnBlockedReason" :roles="EnRoles.pmoSide" label="برگشت" variant="outline-danger" @go="reason('برگشت تحویل', 'return', 'تحویل برگشت داده شد.')" />
-          <EnAction :can="h.canRelease" :reason="h.releaseBlockedReason" :roles="EnRoles.pmoSide" label="انتشار برای واحدها" variant="success" @go="runEn(() => act('release'), 'تحویل منتشر شد.', load)" />
+          <EnAction :can="h.canRelease" :reason="h.releaseBlockedReason" :roles="EnRoles.pmoSide" :confirm="`تحویل ${faDigits(h.number)} برای واحدها منتشر شود؟ متن یادداشت ابلاغ هر واحد ثابت می‌شود و این کار برگشت‌پذیر نیست.`" label="انتشار برای واحدها" variant="success" @go="runEn(() => act('release'), 'تحویل منتشر شد.', load)" />
           <EnAction :can="h.canVoid" :reason="h.voidBlockedReason" :roles="EnRoles.writers" label="ابطال" variant="outline-secondary" @go="reason('ابطال تحویل', 'void', 'تحویل باطل شد.')" />
         </div>
 
@@ -153,8 +153,8 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         <h2 class="h6 mt-3">ابلاغ به واحدها</h2>
         <p class="small inv-muted">یادداشت ابلاغ هر واحد را PMO یا ایجنت سمت PMO می‌سازد و ابلاغ می‌کند؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند.</p>
         <div class="mb-2" data-test="en-dist-actions">
-          <EnAction :can="h.canDraftDistribution" :reason="h.draftDistributionBlockedReason" :roles="EnRoles.pmo" label="ساخت یادداشت ابلاغ واحدها" variant="outline-primary" @go="runEn(() => act('draft-distribution'), 'یادداشت ابلاغ واحدها ساخته شد.', load)" />
-          <EnAction :can="h.canDistribute" :reason="h.distributeBlockedReason" :roles="EnRoles.pmo" label="ابلاغ به واحدها" variant="primary" @go="runEn(() => act('distribute'), 'ابلاغ به واحدها انجام شد.', load)" />
+          <EnAction :can="h.canDraftDistribution" :reason="h.draftDistributionBlockedReason" :roles="EnRoles.pmo" :confirm="`برای تحویل ${faDigits(h.number)} یادداشت ابلاغ هر واحد ساخته شود؟ تا پیش از انتشار می‌توانید متن هر واحد را ویرایش کنید.`" label="ساخت یادداشت ابلاغ واحدها" variant="outline-primary" @go="runEn(() => act('draft-distribution'), 'یادداشت ابلاغ واحدها ساخته شد.', load)" />
+          <EnAction :can="h.canDistribute" :reason="h.distributeBlockedReason" :roles="EnRoles.pmo" :confirm="`تحویل ${faDigits(h.number)} به واحدها ابلاغ شود؟ برای هر واحد کار دریافت مدارک ساخته می‌شود و این کار دوباره انجام نمی‌شود.`" label="ابلاغ به واحدها" variant="primary" @go="runEn(() => act('distribute'), 'ابلاغ به واحدها انجام شد.', load)" />
         </div>
         <p v-if="!h.distribution?.length" class="inv-muted">ابلاغی آماده نشده است؛ پس از پذیرش تحویل، PMO یا ایجنت سمت PMO یادداشت ابلاغ هر واحد را می‌سازد.</p>
         <div v-else class="table-responsive">
@@ -167,7 +167,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
                 <td>{{ faNum(x.documentCount, 0) }}</td>
                 <td class="small" style="max-width: 18rem">{{ x.scopeNote || "—" }}<EnAction :can="x.canEditScope" :reason="x.editScopeBlockedReason" :roles="EnRoles.pmo" label="ویرایش دامنه" variant="outline-secondary" @go="editScope(x)" /></td>
                 <td class="small">{{ x.acknowledged ? x.acknowledgedByName + "، " + faDigits(x.acknowledgedAtText || "") : "—" }}</td>
-                <td><EnAction v-if="!x.acknowledged" :can="x.canAcknowledge" :reason="x.acknowledgeBlockedReason" label="تایید دریافت" variant="primary" @go="ack(x)" /></td>
+                <td><EnAction v-if="!x.acknowledged" :can="x.canAcknowledge" :reason="x.acknowledgeBlockedReason" :confirm="`دریافت مدارک تحویل ${faDigits(h.number)} برای واحد ${unitName(x.unit ?? x.unitText)} تایید شود؟ این تایید برگشت‌پذیر نیست.`" label="تایید دریافت" variant="primary" @go="ack(x)" /></td>
               </tr>
             </tbody>
           </table>
