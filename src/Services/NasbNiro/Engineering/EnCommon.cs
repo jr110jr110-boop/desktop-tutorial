@@ -181,7 +181,7 @@ namespace Services.NasbNiro.Engineering
 
         public static string Unit(EnUnit u) => u switch
         {
-            EnUnit.Qa => "تضمین کیفیت", EnUnit.Qc => "کنترل کیفیت", EnUnit.Production => "تولید", EnUnit.Procurement => "تدارکات", EnUnit.Warehouse => "انبار", _ => "برنامه‌ریزی",
+            EnUnit.Qa => "تضمین کیفیت", EnUnit.Qc => "کنترل کیفیت", EnUnit.Production => "تولید", EnUnit.Procurement => "تدارکات", EnUnit.Warehouse => "انبار", EnUnit.Engineering => "مهندسی", _ => "برنامه‌ریزی",
         };
 
         public static string Charter(EnCharterOutcome o) => o switch { EnCharterOutcome.Confirmed => "تاییدشده توسط مهندسی", EnCharterOutcome.Returned => "برگشت‌خورده از مهندسی", _ => "بررسی‌نشده" };
@@ -190,7 +190,11 @@ namespace Services.NasbNiro.Engineering
     /// <summary>The units of a document line: comma-separated names of the distribution unit enum, empty = every unit.</summary>
     internal static class EnUnits
     {
+        /// <summary>The six distribution units (distribution rows, document unit lists, the parser).</summary>
         public static readonly EnUnit[] All = { EnUnit.Qa, EnUnit.Qc, EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning };
+
+        /// <summary>The units that may ask the PMO: the six distribution units and engineering.</summary>
+        public static readonly EnUnit[] Askers = { EnUnit.Qa, EnUnit.Qc, EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning, EnUnit.Engineering };
 
         /// <summary>The system-proven BOM line is for these units, the OPC line for those (the employer's rule).</summary>
         public static readonly string Bom = Join(new[] { EnUnit.Production, EnUnit.Procurement, EnUnit.Warehouse, EnUnit.Planning, EnUnit.Qc });
@@ -199,8 +203,11 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The roles of each unit (who receives the notice, asks the PMO and confirms the receipt).</summary>
         public static readonly (EnUnit Unit, string Roles)[] UnitRoles =
         {
-            (EnUnit.Qa, "QA"), (EnUnit.Qc, "QC"), (EnUnit.Production, "PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION"), (EnUnit.Procurement, "COMMERCIAL"), (EnUnit.Warehouse, "WAREHOUSE,WHSUPERVISOR"), (EnUnit.Planning, "PLANNING"),
+            (EnUnit.Qa, "QA"), (EnUnit.Qc, "QC"), (EnUnit.Production, "PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION"), (EnUnit.Procurement, "COMMERCIAL"), (EnUnit.Warehouse, "WAREHOUSE,WHSUPERVISOR"), (EnUnit.Planning, "PLANNING"), (EnUnit.Engineering, "ENGINEERING,ENGINEER"),
         };
+
+        /// <summary>The roles of the six distribution units only (what the distribution builds its rows from).</summary>
+        public static (EnUnit Unit, string Roles)[] DistributionRoles => UnitRoles.Where(x => All.Contains(x.Unit)).ToArray();
 
         public static string RolesOf(EnUnit unit) => UnitRoles.First(x => x.Unit == unit).Roles;
 
@@ -214,7 +221,8 @@ namespace Services.NasbNiro.Engineering
             List<EnUnit> units = new List<EnUnit>();
             foreach (string part in text.Split(new[] { ',', '،', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0))
             {
-                if (!Enum.TryParse(part, true, out EnUnit u) || !Enum.IsDefined(typeof(EnUnit), u)) { error = "واحد «" + part + "» شناخته‌شده نیست (" + string.Join("، ", All.Select(x => x.ToString())) + ")."; return null; }
+                if (Enum.TryParse(part, true, out EnUnit eng) && eng == EnUnit.Engineering) { error = "واحد «مهندسی» فقط از PMO می‌پرسد و گیرندهٔ مدرک یا ابلاغ نیست؛ آن را در فهرست واحدهای مدرک نیاورید."; return null; }
+                if (!Enum.TryParse(part, true, out EnUnit u) || !All.Contains(u)) { error = "واحد «" + part + "» شناخته‌شده نیست (" + string.Join("، ", All.Select(x => x.ToString())) + ")."; return null; }
                 units.Add(u);
             }
             if (units.Count == 0 || units.Distinct().Count() == All.Length) return null;

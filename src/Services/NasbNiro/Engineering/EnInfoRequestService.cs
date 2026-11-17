@@ -24,7 +24,7 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<EnInfoRequestDto>> ActionAsync(EnInfoActionDto dto, CancellationToken ct);
     }
 
-    /// <summary>A unit that needs more than its notice asks the PMO; the PMO answers (never with a price: engineering and the units do not see prices); the asking unit closes. Only the asking unit, the PMO, the CEO and the auditor read a question.</summary>
+    /// <summary>A unit that needs more than its notice asks the PMO (engineering asks too, before the release, about a case with a contract or a handover that is not void); the PMO answers (never with a price: engineering and the units do not see prices); the asking unit closes. Only the asking unit, the PMO, the CEO and the auditor read a question.</summary>
     public class EnInfoRequestService : IEnInfoRequestService
     {
         public const string KeyPrefix = "EN-INFO-";
@@ -80,7 +80,7 @@ namespace Services.NasbNiro.Engineering
 
         public async Task<ResponseDto<PagedList<EnInfoRequestDto>>> GetRequestsAsync(EnInfoQuery query, CancellationToken ct)
         {
-            List<EnUnit> mine = EnUnits.All.Where(OfUnit).ToList();
+            List<EnUnit> mine = EnUnits.Askers.Where(OfUnit).ToList();
             bool all = _user.IsInRole(PrivilegedReaders);
             if (!all && mine.Count == 0) return EnText.Bad<PagedList<EnInfoRequestDto>>(EnText.NotAllowed);
             query ??= new EnInfoQuery();
@@ -107,7 +107,7 @@ namespace Services.NasbNiro.Engineering
 
         public async Task<ResponseDto<EnInfoRequestDto>> AskAsync(EnInfoAskDto dto, CancellationToken ct)
         {
-            if (dto == null || !Enum.IsDefined(typeof(EnUnit), dto.Unit)) return EnText.Bad<EnInfoRequestDto>(EnText.InvalidData);
+            if (dto == null || !EnUnits.Askers.Contains((EnUnit)dto.Unit)) return EnText.Bad<EnInfoRequestDto>(EnText.InvalidData);
             EnUnit unit = (EnUnit)dto.Unit;
             if (!OfUnit(unit)) return EnText.Bad<EnInfoRequestDto>(EnText.NotAllowed + " (پرسش را کارکنان همان واحد ثبت می‌کنند)");
             if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnInfoRequestDto>(EnText.AiNever);
@@ -119,7 +119,7 @@ namespace Services.NasbNiro.Engineering
             {
                 EnHandover h = await _uow.Set<EnHandover>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == dto.HandoverId.Value && !x.Deleted, ct);
                 if (h == null) return EnText.NotFound<EnInfoRequestDto>(EnText.NotFoundHandover);
-                if (h.Status != EnHandoverStatus.Released) return EnText.Bad<EnInfoRequestDto>("پرسش دربارهٔ تحویلی ثبت می‌شود که به واحدها ابلاغ شده است.");
+                if (unit == EnUnit.Engineering ? h.Status == EnHandoverStatus.Void : h.Status != EnHandoverStatus.Released) return EnText.Bad<EnInfoRequestDto>(unit == EnUnit.Engineering ? "پرسش دربارهٔ تحویل ابطال‌شده ثبت نمی‌شود." : "پرسش دربارهٔ تحویلی ثبت می‌شود که به واحدها ابلاغ شده است.");
                 caseId = h.CaseId; contractId = h.ContractId; handoverId = h.Id;
             }
             else

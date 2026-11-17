@@ -34,7 +34,8 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnDebtStatus { Open = 0, Settled = 1, Void = 2 }
 
-    public enum EnUnit { Qa = 1, Qc = 2, Production = 3, Procurement = 4, Warehouse = 5, Planning = 6 }
+    /// <summary>Qa..Planning are the six distribution units; Engineering is an ASKING unit only (it asks the PMO, it never receives a distribution row and never appears in a document unit list).</summary>
+    public enum EnUnit { Qa = 1, Qc = 2, Production = 3, Procurement = 4, Warehouse = 5, Planning = 6, Engineering = 7 }
 
     /// <summary>Draft: the agent built the row with its notice text and the PMO may still edit it; Notified: the PMO released the handover (the notification is sent by ENG.DIST.NOTIFY).</summary>
     public enum EnDistStatus { Draft = 0, Notified = 1 }

@@ -13668,6 +13668,11 @@ call POST $EN/info-requests/action "{\"id\":$EIR,\"action\":\"answer\",\"answer\
 call POST $EN/info-requests/action "{\"id\":$EIR,\"action\":\"answer\",\"answer\":\"ویرایش آخرِ تاییدشده در تحویل ملاک است\"}"; check "enge1 A: the PMO answers" '.success and .data.status == 1 and .data.answeredByName != null'
 as "$QC_TOKEN" POST $EN/info-requests/action "{\"id\":$EIR,\"action\":\"close\"}"; nomsg "enge1 A: another unit cannot close it" "مجوز"
 as "$QA_TOKEN" POST $EN/info-requests/action "{\"id\":$EIR,\"action\":\"close\"}"; check "enge1 A: the asking unit closes the answered question" '.success and .data.status == 2 and .data.closedByName != null'
+# engineering is a unit that asks too (employer decision 1405/08/26): the engineer asks the PMO about the contract case; QA does not see it; the PMO answers
+as "$E_ENG" POST $EN/info-requests "{\"caseId\":$EAC,\"unit\":7,\"question\":\"کدام ویرایش داده‌برگ کارفرما برای طراحی نهایی ملاک است؟\"}"; check "enge1 A: the engineer asks the PMO about the contract case as the engineering unit (unit 7, status open)" '.success and .data.status == 0 and .data.unit == 7 and .data.unitText == "مهندسی" and .data.id > 0'
+EIR2=$(val .data.id)
+as "$QA_TOKEN" GET "$EN/info-requests?PageNumber=1&PageSize=0"; check "enge1 A: the QA unit does not see the question of engineering in its list" ".success and ([.data.data[]|select(.id == $EIR2)]|length) == 0"
+call POST $EN/info-requests/action "{\"id\":$EIR2,\"action\":\"answer\",\"answer\":\"ویرایش آخرِ تاییدشدهٔ داده‌برگ در پروندهٔ قرارداد ملاک است\"}"; check "enge1 A: the PMO answers the question of engineering (no question stays open)" '.success and .data.status == 1 and .data.answeredByName != null'
 
 # --- scenario B: a contract of an incomplete platform (platform two, standard B, 2 required documents missing; list B has no BOM or OPC line, so the handover gets the two system lines, both missing: no BOM is released here).
 # Arithmetic: required documents of the handover = drawing, piping drawing (dossier) + BOM + OPC (system lines) = 4 missing; the datasheet is not required in list B. Debts at the submission = 4.

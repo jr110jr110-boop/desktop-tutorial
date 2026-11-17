@@ -205,7 +205,7 @@ namespace Services.NasbNiro.Engineering
             Me = Me, Writer = _user.IsInRole(EnRoles.Writers), Manager = _user.IsInRole(EnRoles.Manager), Ceo = _user.IsInRole(EnRoles.Ceo), Pmo = _user.IsInRole(EnRoles.Pmo), PmoSide = _user.IsInRole(EnRoles.PmoSide), Seat = await EnActors.IsSeatAsync(_uow, Me, ct), InitSeat = await EnActors.IsInitSeatAsync(_uow, Me, ct),
         };
 
-        private static readonly (EnUnit Unit, string Roles)[] Units = EnUnits.UnitRoles;
+        private static readonly (EnUnit Unit, string Roles)[] Units = EnUnits.DistributionRoles;
 
         // ---------------------------------------------------------------- state
 
