@@ -52,6 +52,11 @@ namespace MsTests
             Assert.IsTrue((await GetAs(host, Pmo1, h.Id)).CanDraftDistribution);
             Assert.IsTrue((await GetAs(host, init, h.Id)).CanDraftDistribution);
             Assert.IsFalse((await GetAs(host, Pmo1, h.Id)).CanDistribute);   // not released yet
+            // the action agrees with the flag: refused for the same people, with the same PMO reason
+            Refused(await Act(host, Mgr1, "draft-distribution", d => d.Id = h.Id), "PMO");
+            Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = h.Id), "PMO");
+            Refused(await Act(host, await SeatAsync(host, "AG-ENG", "ENGINEER"), "draft-distribution", d => d.Id = h.Id), "PMO");
+            Refused(await Act(host, Pmo1, "distribute", d => d.Id = h.Id), "ابلاغ‌شده");
 
             Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
             EnHandoverDto afterDraft = await GetAs(host, Pmo1, h.Id);
@@ -64,6 +69,8 @@ namespace MsTests
             Assert.IsFalse((await GetAs(host, Ceo, h.Id)).CanDistribute);
             Assert.IsTrue((await GetAs(host, Pmo1, h.Id)).CanDistribute);
             Assert.IsTrue((await GetAs(host, init, h.Id)).CanDistribute);
+            Refused(await Act(host, Ceo, "distribute", d => d.Id = h.Id), "PMO");
+            Refused(await Act(host, Mgr1, "distribute", d => d.Id = h.Id), "PMO");
 
             Ok(await Act(host, Pmo1, "distribute", d => d.Id = h.Id));
             EnHandoverDto done = await GetAs(host, Pmo1, h.Id);
@@ -118,12 +125,12 @@ namespace MsTests
             Refused(await Ask(host, Eng1, EnUnit.Qa, caseId), "همان واحد");
             Refused(await Ask(host, Qa1, EnUnit.Engineering, caseId), "همان واحد");
             // a seat never asks
-            Refused(await Ask(host, await SeatAsync(host, "AG-ENG", "ENGINEER"), EnUnit.Engineering, caseId));
+            Refused(await Ask(host, await SeatAsync(host, "AG-ENG", "ENGINEER"), EnUnit.Engineering, caseId), EnText.AiNever);
             // a voided handover is not asked about
             SetStatus(host, h.Id, EnHandoverStatus.Void);
             Refused(await Ask(host, Eng1, EnUnit.Engineering, null, h.Id), "ابطال");
             // an unknown unit value is refused
-            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnInfoRequestService>().AskAsync(new EnInfoAskDto { CaseId = caseId, Unit = 8, Question = "پرسش با واحد ناشناخته برای آزمون" }, Ct)));
+            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnInfoRequestService>().AskAsync(new EnInfoAskDto { CaseId = caseId, Unit = 8, Question = "پرسش با واحد ناشناخته برای آزمون" }, Ct)), EnText.InvalidData);
         }
 
         [TestMethod]
@@ -146,7 +153,7 @@ namespace MsTests
 
             // the answer is the PMO's alone, never an engineer's or a seat's
             Refused(await InfoAct(host, Eng1, eng.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"));
-            Refused(await InfoAct(host, await SeatAsync(host, "AG-ENG", "PMO"), eng.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"));
+            Refused(await InfoAct(host, await SeatAsync(host, "AG-ENG", "PMO"), eng.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"), EnText.AiNever);
             Ok(await InfoAct(host, Pmo1, eng.Id, "answer", "ضخامت ورق ده میلی‌متر است و در نقشه اصلاح می‌شود"));
             // closing is the asking unit's: QA cannot close the engineering question, the PMO cannot either
             Refused(await InfoAct(host, Qa1, eng.Id, "close"));
@@ -178,6 +185,66 @@ namespace MsTests
             Assert.IsNull(message);
             Assert.AreEqual(6, Services.NasbNiro.Engineering.EnUnits.All.Length);
             Assert.AreEqual(7, Services.NasbNiro.Engineering.EnUnits.Askers.Length);
+            Assert.IsNull(Services.NasbNiro.Engineering.EnUnits.Normalize("7", out message));   // the numeric form is no unit either
+            Assert.IsNotNull(message);
+            Assert.IsNull(Services.NasbNiro.Engineering.EnUnits.Normalize("Nope", out message));
+            StringAssert.Contains(message, "تضمین کیفیت");   // Persian unit names in the message
+            Assert.IsFalse(message.Contains("Engineering"), message);
+
+            // the path a user hits: saving a reference list whose line names Engineering as a unit
+            EnSaveReferenceDto save = Ref("VDDR-UNITS");
+            save.Lines[0].Units = "Qa,Engineering";
+            Refused(await host.As(Mgr1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(save, Ct)), "مهندسی");
+        }
+
+        [TestMethod]
+        public void L1_An_Unknown_Unit_Value_Is_Never_Shown_As_Planning()
+        {
+            Assert.AreEqual("برنامه‌ریزی", EnText.Unit(EnUnit.Planning));
+            Assert.AreEqual("نامشخص", EnText.Unit((EnUnit)0));
+            Assert.AreEqual("نامشخص", EnText.Unit((EnUnit)8));
+            foreach (EnUnit u in Services.NasbNiro.Engineering.EnUnits.Askers) Assert.AreNotEqual("نامشخص", EnText.Unit(u));
+        }
+
+        // ------------------------------------------------------------------ fix round: maker is not checker (H1), released-only through the case (M1)
+
+        [TestMethod]
+        public async Task H1_The_Asker_Never_Answers_His_Own_Question_And_The_Answerer_Never_Closes_It()
+        {
+            AppHost host = Started("e1bmaker");
+            (int contract, int caseId) = await NewDesign(host);
+            ClaimsPrincipal both = AppHost.Principal(2171, "eng.and.pmo", "ENGINEERING", "PMO");
+            EnInfoRequestDto q = Ok(await Ask(host, both, EnUnit.Engineering, caseId));
+            EnInfoRequestDto seen = Ok(await host.As(both, p => p.GetRequiredService<IEnInfoRequestService>().GetRequestAsync(q.Id, Ct)));
+            Assert.IsFalse(seen.CanAnswer);
+            StringAssert.Contains(seen.AnswerBlockedReason, "پرسنده");
+            Refused(await InfoAct(host, both, q.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"), EnText.SameUser);
+
+            // another PMO answers; the asker (also engineering) may close, since he did not answer
+            EnInfoRequestDto answered = Ok(await InfoAct(host, Pmo1, q.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"));
+            Assert.IsTrue(Ok(await host.As(both, p => p.GetRequiredService<IEnInfoRequestService>().GetRequestAsync(q.Id, Ct))).CanClose);
+
+            // the other way round: the one who answered is also in the asking unit, he cannot close
+            EnInfoRequestDto q2 = Ok(await Ask(host, Eng1, EnUnit.Engineering, caseId));
+            Ok(await InfoAct(host, both, q2.Id, "answer", "پاسخ کامل بدون قیمت برای پرسش شما"));   // he did not ask this one
+            EnInfoRequestDto v2 = Ok(await host.As(both, p => p.GetRequiredService<IEnInfoRequestService>().GetRequestAsync(q2.Id, Ct)));
+            Assert.IsFalse(v2.CanClose);
+            StringAssert.Contains(v2.CloseBlockedReason, "پاسخ‌دهنده");
+            Refused(await InfoAct(host, both, q2.Id, "close"), EnText.SameUser);
+            Assert.AreEqual((int)EnInfoStatus.Closed, Ok(await InfoAct(host, Eng1, q2.Id, "close")).Status);
+        }
+
+        [TestMethod]
+        public async Task M1_The_Six_Units_Ask_Only_About_A_Released_Handover_Also_Through_The_Case()
+        {
+            AppHost host = Started("e1bm1");
+            (int contract, int caseId) = await NewDesign(host);
+            Refused(await Ask(host, Qa1, EnUnit.Qa, caseId), "ابلاغ شده");   // a contract case, no released handover
+            Ok(await Ask(host, Eng1, EnUnit.Engineering, caseId));           // engineering keeps "case with a contract"
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Refused(await Ask(host, Qa1, EnUnit.Qa, caseId), "ابلاغ شده");   // a draft is not released
+            SetStatus(host, h.Id, EnHandoverStatus.Released);
+            Assert.AreEqual((int)EnUnit.Qa, Ok(await Ask(host, Qa1, EnUnit.Qa, caseId)).Unit);
         }
     
         // ------------------------------------------------------------------ B3
@@ -252,6 +319,65 @@ namespace MsTests
             string text = rows[0].Summary();
             StringAssert.Contains(text, "فقط تایید کامل‌بودن");
             Assert.IsFalse(text.Contains("مدرک الزامی کم است"), text);
+        }
+
+        // ------------------------------------------------------------------ fix round: the dossier wording (M2, M3)
+
+        [TestMethod]
+        public void M2_The_Dossier_Wording_Is_Chosen_By_The_Real_State()
+        {
+            var noDossier = EnDossierWording.Of(EnDossierStatus.NotAssessed, 0);   // pure choice: NotAssessed
+            Assert.AreEqual(EnDossierWord.NotAssessed, noDossier.Word);
+            StringAssert.Contains(noDossier.Reason("API 611"), "ارزیابی نشده");
+            Assert.AreEqual(EnDossierWord.IncompleteNoMissing, EnDossierWording.Of(EnDossierStatus.Incomplete, 0).Word);
+            StringAssert.Contains(EnDossierWording.Of(EnDossierStatus.Incomplete, 0).Reason("X"), "کامل اعلام نشده");
+            Assert.AreEqual(EnDossierWord.AwaitingConfirmation, EnDossierWording.Of(EnDossierStatus.Completing, 0).Word);
+            StringAssert.Contains(EnDossierWording.Of(EnDossierStatus.Completing, 0).Reason("X"), "فقط تایید کامل‌بودن");
+            Assert.AreEqual(EnDossierWord.StaleConfirmation, EnDossierWording.Of(EnDossierStatus.Complete, 0).Word);
+            StringAssert.Contains(EnDossierWording.Of(EnDossierStatus.Complete, 0).Reason("X"), "دیگر معتبر نیست");
+            EnDossierWording some = EnDossierWording.Of(EnDossierStatus.Incomplete, 4);
+            Assert.AreEqual(EnDossierWord.MissingDocuments, some.Word);
+            StringAssert.Contains(some.Warning("X"), "4 مدرک الزامی کم است");
+            // the warning of the case page never counts zero missing documents
+            foreach (EnDossierWording w in new[] { noDossier, EnDossierWording.Of(EnDossierStatus.Incomplete, 0), EnDossierWording.Of(EnDossierStatus.Completing, 0), EnDossierWording.Of(EnDossierStatus.Complete, 0) })
+                Assert.IsFalse(w.Warning("X").Contains("مدرک الزامی کم است"), w.Warning("X"));
+            StringAssert.Contains(EnDossierWording.CeoAlertHint, "تایید پرونده");
+            Assert.IsFalse(EnDossierWording.CeoAlertHint.Contains("مدرک الزامی کم است"));
+        }
+
+        [TestMethod]
+        public async Task M2_No_Dossier_And_A_Not_Assessed_Or_An_Incomplete_Dossier_Do_Not_Read_As_A_Confirmation_Risk()
+        {
+            AppHost host = Started("e1bm2");
+            await ApprovedList(host);
+            int product = Product(host);
+            await NativeDossier(host, product);   // a dossier of the standard, not assessed yet
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, Std));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            var rows = await host.AsSystem(p => EnRisk.ComputeAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, new[] { c.Id }));
+            Assert.AreEqual(1, rows.Count);
+            string text = rows[0].Summary();
+            StringAssert.Contains(text, "ارزیابی نشده");   // not assessed
+            Assert.IsFalse(text.Contains("فقط تایید کامل‌بودن") || text.Contains("مدرک الزامی کم است"), text);
+            EnCaseDto page = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetCaseAsync(c.Id, Ct)));
+            StringAssert.Contains(page.PlatformWarning, "ارزیابی نشده");
+            Assert.IsFalse(page.PlatformWarning.Contains("مدرک الزامی کم است"), page.PlatformWarning);
+
+            // assessed: documents are missing, the count is shown
+            EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess"));
+            page = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetCaseAsync(c.Id, Ct)));
+            StringAssert.Contains(page.PlatformWarning, "مدرک الزامی کم است");
+
+            // all documents there but «complete» not declared (a dossier that went back to Incomplete): the text says it must be declared
+            foreach (EnDossierLineDto l in d.Lines.Where(x => x.Required && x.State == 0).ToList()) Ok(await Supply(host, Eng1, l.Id, File(host, 2111)));
+            rows = await host.AsSystem(p => EnRisk.ComputeAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, new[] { c.Id }));
+            text = rows[0].Summary();
+            StringAssert.Contains(text, "کامل اعلام نشده");
+            Assert.IsFalse(text.Contains("فقط تایید کامل‌بودن") || text.Contains("مدرک الزامی کم است"), text);
         }
     }
 }

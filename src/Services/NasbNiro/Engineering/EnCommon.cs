@@ -181,7 +181,7 @@ namespace Services.NasbNiro.Engineering
 
         public static string Unit(EnUnit u) => u switch
         {
-            EnUnit.Qa => "تضمین کیفیت", EnUnit.Qc => "کنترل کیفیت", EnUnit.Production => "تولید", EnUnit.Procurement => "تدارکات", EnUnit.Warehouse => "انبار", EnUnit.Engineering => "مهندسی", _ => "برنامه‌ریزی",
+            EnUnit.Qa => "تضمین کیفیت", EnUnit.Qc => "کنترل کیفیت", EnUnit.Production => "تولید", EnUnit.Procurement => "تدارکات", EnUnit.Warehouse => "انبار", EnUnit.Engineering => "مهندسی", EnUnit.Planning => "برنامه‌ریزی", _ => "نامشخص",
         };
 
         public static string Charter(EnCharterOutcome o) => o switch { EnCharterOutcome.Confirmed => "تاییدشده توسط مهندسی", EnCharterOutcome.Returned => "برگشت‌خورده از مهندسی", _ => "بررسی‌نشده" };
@@ -222,7 +222,7 @@ namespace Services.NasbNiro.Engineering
             foreach (string part in text.Split(new[] { ',', '،', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0))
             {
                 if (Enum.TryParse(part, true, out EnUnit eng) && eng == EnUnit.Engineering) { error = "واحد «مهندسی» فقط از PMO می‌پرسد و گیرندهٔ مدرک یا ابلاغ نیست؛ آن را در فهرست واحدهای مدرک نیاورید."; return null; }
-                if (!Enum.TryParse(part, true, out EnUnit u) || !All.Contains(u)) { error = "واحد «" + part + "» شناخته‌شده نیست (" + string.Join("، ", All.Select(x => x.ToString())) + ")."; return null; }
+                if (!Enum.TryParse(part, true, out EnUnit u) || !All.Contains(u)) { error = "واحد «" + part + "» شناخته‌شده نیست (" + string.Join("، ", All.Select(x => EnText.Unit(x) + " = " + x)) + ")."; return null; }
                 units.Add(u);
             }
             if (units.Count == 0 || units.Distinct().Count() == All.Length) return null;
