@@ -44,6 +44,8 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<List<EnReferenceCodeDto>>> GetApprovedCodesAsync(CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> ListActionAsync(EnReferenceActionDto dto, CancellationToken ct);
+        Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct);
+        Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct);
     }
 
     /// <summary>The reference list of engineering documents (what "complete" means for a platform). Drafted by an engineer or the agent, approved by the engineering manager or the CEO, never by someone who touched it.</summary>
@@ -238,6 +240,44 @@ namespace Services.NasbNiro.Engineering
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnReferenceListDto>(EnText.Concurrency); }
             return await GetListAsync(row.Id, ct);
+        }
+
+        /// <summary>
+        /// Replaces the lines of a DRAFT list with the lines of a CSV file (project instruction 6: a human enters input data by file in a test release). Same permission and status rules as saving a draft; an AI seat is refused;
+        /// nothing is changed when any row is refused.
+        /// </summary>
+        public async Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct)
+        {
+            if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
+            if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnReferenceListDto>(EnText.AiNever);
+            EnReferenceList row = await _uow.Set<EnReferenceList>().IgnoreQueryFilters().Include(l => l.Lines).FirstOrDefaultAsync(l => l.Id == id && !l.Deleted, ct);
+            if (row == null) return EnText.NotFound<EnReferenceListDto>(EnText.NotFoundList);
+            string why = EditReason(row, true);
+            if (why != null) return EnText.Bad<EnReferenceListDto>(why);
+            if (!EnConcurrency.Apply(_uow, row, rowVersion)) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
+            why = EnEditors.Full(row.EditorUserIds, Me);
+            if (why != null) return EnText.Bad<EnReferenceListDto>(why);
+            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines);
+            if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
+            ApplyLines(_uow, row, lines);
+            DateTimeOffset now = DateTimeOffset.Now;
+            row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
+            row.ModifyDate = now; row.ModifierUserId = Me;
+            try { await _uow.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return EnText.Bad<EnReferenceListDto>(EnText.Concurrency); }
+            return await GetListAsync(row.Id, ct);
+        }
+
+        /// <summary>A NEW draft list whose lines come from a CSV file (the header fields are typed, the lines are never typed). Same rules as saving a new draft; an AI seat is refused.</summary>
+        public async Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct)
+        {
+            if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
+            if (header == null) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
+            if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnReferenceListDto>(EnText.AiNever);
+            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines);
+            if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
+            header.Id = null; header.RowVersion = null; header.Lines = lines;
+            return await SaveListAsync(header, ct);
         }
 
         // ---------------------------------------------------------------- actions
