@@ -301,20 +301,19 @@ namespace Services.NasbNiro.Engineering
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
                 : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
 
-        /// <summary>The one check behind both the draft-distribution action and its button flag (PMO or the AG-INIT seat, accepted handover, no rows yet).</summary>
-        private async Task<string> DraftDistributionReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
+        /// <summary>The one check behind both the draft-distribution action and its button flag (PMO or the AG-INIT seat, accepted handover, no rows yet). It reads the rows it is given, so a list loads them for all its handovers in one query.</summary>
+        private static string DraftDistributionReason(EnHandover h, Who w, IReadOnlyCollection<EnDistribution> rows) =>
             !(w.Pmo && !w.Seat) && !w.InitSeat ? EnText.NotAllowed + " (یادداشت ابلاغ واحدها را PMO یا ایجنت سمت PMO می‌سازد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)"
             : h.Status != EnHandoverStatus.Accepted ? "ردیف‌های توزیع فقط برای تحویل پذیرفته‌شده ساخته می‌شود."
-            : await _uow.Set<EnDistribution>().AnyAsync(d => d.HandoverId == h.Id && !d.Deleted, ct) ? "ردیف‌های توزیع این تحویل قبلاً ساخته شده است." : null;
+            : rows.Count > 0 ? "ردیف‌های توزیع این تحویل قبلاً ساخته شده است." : null;
 
-        /// <summary>The one check behind both the distribute action and its button flag (PMO or the AG-INIT seat, released handover, rows drafted, not yet notified).</summary>
-        private async Task<string> DistributeReasonAsync(EnHandover h, Who w, CancellationToken ct)
+        /// <summary>The one check behind both the distribute action and its button flag (PMO or the AG-INIT seat, released handover, rows drafted, not yet notified); same rows rule as above.</summary>
+        private static string DistributeReason(EnHandover h, Who w, IReadOnlyCollection<EnDistribution> rows)
         {
             if (!(w.Pmo && !w.Seat) && !w.InitSeat) return EnText.NotAllowed + " (اطلاع‌رسانی به واحدها را PMO یا ایجنت سمت PMO انجام می‌دهد؛ مهندسی مستقیم به واحدها ابلاغ نمی‌کند)";
             if (h.Status != EnHandoverStatus.Released) return "فقط تحویل ابلاغ‌شده توزیع می‌شود.";
-            List<DateTimeOffset?> sent = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).Select(d => d.NoticeSentAt).ToListAsync(ct);
-            if (sent.Any(x => x.HasValue)) return "توزیع این تحویل قبلاً انجام شده است.";
-            if (sent.Count == 0) return "یادداشت ابلاغ واحدها برای این تحویل ساخته نشده است؛ بدون متن تأییدشدهٔ PMO به واحدها اطلاع داده نمی‌شود.";
+            if (rows.Any(x => x.NoticeSentAt.HasValue)) return "توزیع این تحویل قبلاً انجام شده است.";
+            if (rows.Count == 0) return "یادداشت ابلاغ واحدها برای این تحویل ساخته نشده است؛ بدون متن تأییدشدهٔ PMO به واحدها اطلاع داده نمی‌شود.";
             return null;
         }
 
@@ -391,11 +390,12 @@ namespace Services.NasbNiro.Engineering
             foreach (EnHandover h in rows)
             {
                 EnCase c = cases[h.CaseId];
+                List<EnDistribution> hRows = dist.Where(x => x.HandoverId == h.Id).ToList();   // already loaded for the whole page: the two flags cost no query per row
                 LockState ls = await LockAsync(h, c, ct);
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
                 string submit = SubmitReason(h, w, ls, live, now), request = WaiverRequestReason(h, w, ls, live != null && live.UsedAt == null ? live : null);
                 if (submit == null && h.Status == EnHandoverStatus.Draft) submit = await EnDecision.RefusalAsync(_uow, c, ct);
-                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w), draftDist = await DraftDistributionReasonAsync(h, w, ct), distribute = await DistributeReasonAsync(h, w, ct);
+                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w), draftDist = DraftDistributionReason(h, w, hRows), distribute = DistributeReason(h, w, hRows);
                 EnWaiver shown = waivers.Where(x => x.HandoverId == h.Id || x.Id == h.WaiverId).OrderByDescending(x => x.Id).FirstOrDefault();
                 EnWaiverDto waiverDto = shown == null ? null : (await WaiverDtosAsync(new List<EnWaiver> { shown }, ct))[0];
                 result.Add(new EnHandoverDto
@@ -707,7 +707,7 @@ namespace Services.NasbNiro.Engineering
                     break;
                 case "draft-distribution":
                 {
-                    why = await DraftDistributionReasonAsync(h, w, ct);
+                    why = DraftDistributionReason(h, w, await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct));
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
                     foreach ((EnUnit unit, string roles) in Units)
@@ -730,9 +730,9 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "distribute":
                 {
-                    why = await DistributeReasonAsync(h, w, ct);
-                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     List<EnDistribution> rows = await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
+                    why = DistributeReason(h, w, rows);
+                    if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     foreach (EnDistribution d in rows) { d.NoticeSentAt = now; d.ModifyDate = now; d.ModifierUserId = Me; }
                     break;
                 }
