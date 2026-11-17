@@ -13601,7 +13601,8 @@ as "$ADMIN_TOKEN" GET "$AG/tasks?StepCode=ENG.CASE.STANDARD&OpenOnly=true&PageNu
 as "$SL2_TOKEN" GET "$EN/cases/gate?inquiryId=$EAI"; check "enge1 A: the gate of the inquiry says it is controlled, not legacy, and not passed until the tender package is released" '.success and .data.controlled == true and .data.legacy == false and .data.passed == false and (.data.blockedReason|contains("بسته فنی مهندسی برای این استعلام هنوز به بازرگانی ابلاغ نشده است"))'
 as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"propose\",\"classification\":1,\"productId\":$EP1,\"basis\":\"توربین ساخته‌شده با همین مشخصات پیش‌تر تحویل شده است\"}"; check "enge1 A: the engineer proposes platform one as the platform of the case; it waits for the manager" ".success and .data.status == 2 and .data.proposedClassification == 1 and .data.proposedProductId == $EP1 and .data.proposedByAgent == false"
 as "$E_MG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"confirm\"}"; nomsg "enge1 A: the manager cannot confirm while the client standard of the project is empty" "استاندارد پروژه هنوز از دیتاشیت کارفرما ثبت نشده است"
-as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"set-standard\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۱۲ بند ۳\"}"; check "enge1 A: sales records the standard of the project from the client data sheet (standard A, with its evidence)" '.success and .data.referenceCode == "ENGE1-STD-A" and .data.standardEvidence == "دیتاشیت شماره ۱۲ بند ۳" and .data.standardMissing == false and .data.status == 2'
+upload_as "$SL_TOKEN" enge1-std-1; ESTD=$UPLOADED
+as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"set-standard\",\"standardAttachmentId\":\"$ESTD\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۱۲ بند ۳\"}"; check "enge1 A: sales records the standard of the project from the client data sheet (standard A, with its evidence)" '.success and .data.referenceCode == "ENGE1-STD-A" and .data.standardEvidence == "دیتاشیت شماره ۱۲ بند ۳" and .data.standardMissing == false and .data.status == 2'
 as "$E_ENG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"confirm\"}"; nomsg "enge1 A: the engineer cannot confirm the classification" "مجوز"
 as "$E_MG" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"confirm\"}"; check "enge1 A: an engineering manager confirms; the case waits for the CEO" '.success and .data.status == 3'
 as "$E_MG2" POST $EN/cases/action "{\"id\":$EAC,\"action\":\"approve\"}"; nomsg "enge1 A: an engineering manager cannot approve in the place of the CEO" "مجوز"
@@ -13687,7 +13688,8 @@ as "$E_ENG" GET "$EN/platforms/$EP2?code=ENGE1-STD-B"; check "enge1 B: platform 
 LBDW=$(jq -r '[.data.lines[]|select(.documentType == "DWG")][0].id' "$B"); LBPIPE=$(jq -r '[.data.lines[]|select(.documentType == "PIPING")][0].id' "$B")
 as "$E_ENG" POST $EN/cases/action "{\"action\":\"open\",\"contractId\":$EBK}"; check "enge1 B: the case of the contract is opened" '.success and .data.status == 1 and .data.classification == 0 and .data.kind == 1'
 EBC=$(val .data.id)
-as "$E_ENG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"set-standard\",\"referenceCode\":\"ENGE1-STD-B\",\"standardEvidence\":\"دیتاشیت شماره ۲۰ بند ۵\"}"; check "enge1 B: the client standard of the project is recorded (standard B)" '.success and .data.referenceCode == "ENGE1-STD-B" and .data.standardMissing == false'
+upload_as "$E_ENG" enge1-std-2; ESTD=$UPLOADED
+as "$E_ENG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"set-standard\",\"standardAttachmentId\":\"$ESTD\",\"referenceCode\":\"ENGE1-STD-B\",\"standardEvidence\":\"دیتاشیت شماره ۲۰ بند ۵\"}"; check "enge1 B: the client standard of the project is recorded (standard B)" '.success and .data.referenceCode == "ENGE1-STD-B" and .data.standardMissing == false'
 as "$E_ENG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"propose\",\"classification\":1,\"productId\":$EP2,\"basis\":\"توربین ساخته‌شده با مشخصات نزدیک و مدارک ناقص\"}"; check "enge1 B: platform two is proposed" '.success and .data.status == 2'
 as "$E_MG" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"confirm\"}"; check "enge1 B: the manager confirms" '.success and .data.status == 3'
 as "$CEO_TOKEN" POST $EN/cases/action "{\"id\":$EBC,\"action\":\"approve\"}"; check "enge1 B: the CEO approves; a case of a contract is awarded at once, and it carries the warning of the incomplete platform (2 required documents)" '.success and .data.status == 6 and .data.platformIncomplete == true and .data.platformMissingRequired == 2'
@@ -13762,7 +13764,8 @@ ECI=$(val .data.id)
 enrun
 as "$E_ENG" GET "$EN/cases?InquiryId=$ECI"; check "enge1 C: the agent opened exactly one case for the inquiry" '.success and (.data.data|length) == 1 and .data.data[0].status == 1'
 ECC=$(jq -r '.data.data[0].id' "$B")
-as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"set-standard\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۳۰ بند ۱\"}"; check "enge1 C: the client standard is recorded (standard A)" '.success and .data.referenceCode == "ENGE1-STD-A"'
+upload_as "$SL_TOKEN" enge1-std-3; ESTD=$UPLOADED
+as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"set-standard\",\"standardAttachmentId\":\"$ESTD\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۳۰ بند ۱\"}"; check "enge1 C: the client standard is recorded (standard A)" '.success and .data.referenceCode == "ENGE1-STD-A"'
 as "$E_ENG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"propose\",\"classification\":2,\"basis\":\"هیچ پلتفرم موجودی با این مشخصات مطابقت ندارد\"}"; check "enge1 C: a new design is proposed" '.success and .data.status == 2 and .data.proposedClassification == 2'
 as "$E_MG" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"confirm\"}"; check "enge1 C: the manager confirms" '.success and .data.status == 3'
 as "$CEO_TOKEN" POST $EN/cases/action "{\"id\":$ECC,\"action\":\"approve\"}"; check "enge1 C: the CEO approves: new design, the tender package is being prepared" '.success and .data.status == 4 and .data.classification == 2'
@@ -13837,7 +13840,8 @@ EDI=$(val .data.id)
 enrun
 as "$E_ENG" GET "$EN/cases?InquiryId=$EDI"; check "enge1 D: the agent opened the case" '.success and (.data.data|length) == 1 and .data.data[0].status == 1'
 EDC=$(jq -r '.data.data[0].id' "$B")
-as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EDC,\"action\":\"set-standard\",\"referenceCode\":\"ENGE1-STD-B\",\"standardEvidence\":\"دیتاشیت شماره ۴۰ بند ۲\"}"; check "enge1 D: the client standard of this order is B" '.success and .data.referenceCode == "ENGE1-STD-B"'
+upload_as "$SL_TOKEN" enge1-std-4; ESTD=$UPLOADED
+as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EDC,\"action\":\"set-standard\",\"standardAttachmentId\":\"$ESTD\",\"referenceCode\":\"ENGE1-STD-B\",\"standardEvidence\":\"دیتاشیت شماره ۴۰ بند ۲\"}"; check "enge1 D: the client standard of this order is B" '.success and .data.referenceCode == "ENGE1-STD-B"'
 as "$E_ENG" POST $EN/cases/action "{\"id\":$EDC,\"action\":\"propose\",\"classification\":1,\"productId\":$EP1,\"basis\":\"همان توربین با استاندارد دیگر سفارش شده است\"}"; check "enge1 D: the engineer proposes platform one under the other standard" '.success and .data.status == 2'
 enrun
 as "$E_MG" GET "$EN/standard-gaps?CaseId=$EDC"; check "enge1 D: the agent built exactly one gap report: from A to B, draft, Added 1, Removed 3, RequiredChanged 1, Reusable 2" '.success and (.data.data|length) == 1 and .data.data[0].status == 0 and .data.data[0].baseCode == "ENGE1-STD-A" and .data.data[0].targetCode == "ENGE1-STD-B" and .data.data[0].addedCount == 1 and .data.data[0].removedCount == 3 and .data.data[0].requiredChangedCount == 1 and .data.data[0].reusableCount == 2'
@@ -13860,7 +13864,8 @@ EEC=$(jq -r '.data.data[0].id' "$B")
 as "$E_ENG" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"propose\",\"basis\":\"قطعه یدکی از پلتفرم موجود و با نقشه موجود ساخته می‌شود\"}"; check "enge1 E: the engineer records the evidence; there is no classification, the technical opinion is still missing" '.success and .data.status == 1 and .data.proposedClassification == 0'
 as "$E_MG2" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"save-opinion\",\"opinionText\":\"رای فنی: قطعه یدکی با نقشه مو\"}"; nomsg "enge1 E: a technical opinion of 29 characters is refused (30 are needed)" "رای فنی"
 as "$E_MG2" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"save-opinion\",\"opinionText\":\"رای فنی: قطعه یدکی با نقشه موجود قابل ساخت است و نیاز به طراحی تازه ندارد\"}"; check "enge1 E: a manager writes the technical opinion; the case waits for the confirmation of another manager" '.success and .data.status == 2 and .data.opinionByName != null'
-as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"set-standard\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۵۰ بند ۴\"}"; check "enge1 E: the client standard is recorded" '.success and .data.referenceCode == "ENGE1-STD-A"'
+upload_as "$SL_TOKEN" enge1-std-5; ESTD=$UPLOADED
+as "$SL_TOKEN" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"set-standard\",\"standardAttachmentId\":\"$ESTD\",\"referenceCode\":\"ENGE1-STD-A\",\"standardEvidence\":\"دیتاشیت شماره ۵۰ بند ۴\"}"; check "enge1 E: the client standard is recorded" '.success and .data.referenceCode == "ENGE1-STD-A"'
 as "$E_MG2" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"confirm\"}"; nomsg "enge1 E: the writer of the opinion cannot confirm it" "شخص دیگری"
 as "$E_MG" POST $EN/cases/action "{\"id\":$EEC,\"action\":\"confirm\"}"; check "enge1 E: another manager confirms; there is no CEO gate: the tender package is being prepared, the classification stays empty" '.success and .data.status == 4 and .data.classification == 0'
 slbid "$EEI" "ENGE1-E" 60

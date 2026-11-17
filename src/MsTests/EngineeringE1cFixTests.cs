@@ -95,5 +95,41 @@ namespace MsTests
             Refused(await Upload(host, Eng1, r, Csv("docType;title;discipline;required;tender;units\nDWG;نقشه;;1;1\n")), "ردیف 2");
             Refused(await Upload(host, Eng1, r, Csv("docType;title;discipline;required;tender;units;other\nDWG;نقشه;;1;1;;x\n")), "سرستون");
         }
+
+        // ------------------------------------------------------------------ H2
+
+        [TestMethod]
+        public async Task H2_Set_Standard_Without_The_Datasheet_File_Is_Refused()
+        {
+            AppHost host = Started("e1cfix_h2a");
+            int inquiry = Inquiry(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
+            Refused(await SetStandard(host, Eng1, c.Id, "API-611", withoutFile: true), "فایل دیتاشیت");
+            Assert.IsTrue(string.IsNullOrEmpty(Ok(await GetCase(host, Eng1, c.Id)).ReferenceCode), "nothing was recorded");
+            Refused(await SetStandard(host, Eng1, c.Id, "API-611", file: File(host, 2112)), "خود شما");   // somebody else's file
+            c = Ok(await SetStandard(host, Eng1, c.Id, "API-611"));
+            Assert.IsNotNull(c.StandardAttachmentId);
+        }
+
+        [TestMethod]
+        public async Task H2_A_Different_Datasheet_File_Is_A_Change_With_A_Reason_And_A_New_Decision_Round_The_Same_File_Is_Not()
+        {
+            AppHost host = Started("e1cfix_h2b");
+            EnCaseDto c = await ApprovedCase(host, Inquiry(host), false);
+            Assert.AreEqual((int)EnCaseStatus.TenderPreparation, c.Status);
+            Guid stored = c.StandardAttachmentId.Value;
+            // the same code, evidence and file again: nothing changes, no reason needed
+            c = Ok(await SetStandard(host, Eng1, c.Id, Std, file: stored));
+            Assert.AreEqual((int)EnCaseStatus.TenderPreparation, c.Status);
+            // the same code and evidence with another file: a change
+            Refused(await SetStandard(host, Eng1, c.Id, Std), "دلیل تغییر استاندارد");
+            Refused(await SetStandard(host, Eng1, c.Id, Std, withoutFile: true), "فایل دیتاشیت");
+            c = Ok(await SetStandard(host, Eng1, c.Id, Std, note: "فایل دیتاشیت اصلاح‌شدهٔ کارفرما جایگزین شد"));
+            Assert.AreNotEqual(stored, c.StandardAttachmentId.Value);
+            Assert.AreEqual((int)EnCaseStatus.AwaitingEngConfirm, c.Status, "the approval bound to the old file is void");
+            Assert.IsNull(c.CeoApprovedByName);
+            string eventText = host.Read(u => u.Set<EnCaseEvent>().Where(e => e.CaseId == c.Id && e.Kind == "standard-changed").Select(e => e.Note).Single());
+            StringAssert.Contains(eventText, "فایل دیتاشیت تغییر کرد");
+        }
     }
 }

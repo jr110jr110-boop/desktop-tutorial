@@ -189,7 +189,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         /// <summary>For set-standard: the standard of the project from the client data sheet (any code is accepted; trimmed, upper-cased, at most 40 characters).</summary>
         public string ReferenceCode { get; set; }
 
-        /// <summary>For set-standard: the data sheet number and clause the standard is known from (at least 5 characters), and an optional uploaded attachment of the data sheet.</summary>
+        /// <summary>For set-standard: the data sheet number and clause the standard is known from (at least 5 characters), and the uploaded data sheet file (REQUIRED: a different file than the stored one is a change like a changed code).</summary>
         public string StandardEvidence { get; set; }
         public Guid? StandardAttachmentId { get; set; }
         public string RowVersion { get; set; }

@@ -402,7 +402,11 @@ namespace Services.NasbNiro.Engineering
                     why = StandardReason(c, w);
                     string code = EnDossierBuilder.NormCode(dto.ReferenceCode), evidence = EnText.Clean(dto.StandardEvidence);
                     if (why == null) why = code == null ? "استاندارد پروژه را از دیتاشیت کارفرما بنویسید." : EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(evidence, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(evidence, 500, "مبنای استاندارد");
-                    bool change = c.ReferenceCode != null && (c.ReferenceCode != code || EnHash.Norm(c.StandardEvidence) != EnHash.Norm(evidence));   // an evidence change alone is a change too: the class hash binds it
+                    // project instruction 6: the client standard is entered by uploading the data sheet file, never by typing alone
+                    if (why == null && !dto.StandardAttachmentId.HasValue) why = "فایل دیتاشیت کارفرما الزامی است؛ ابتدا فایل را بارگذاری کنید و شناسهٔ آن را بفرستید (ثبت استاندارد فقط با بارگذاری فایل انجام می‌شود).";
+                    // a change of the evidence text or of the data sheet FILE is a change too: the approval was given for that content (the file is protected here, not in the class hash, so approvals already stored stay valid)
+                    bool fileChanged = c.ReferenceCode != null && c.StandardDocumentId != dto.StandardAttachmentId;
+                    bool change = c.ReferenceCode != null && (c.ReferenceCode != code || EnHash.Norm(c.StandardEvidence) != EnHash.Norm(evidence) || fileChanged);
                     if (why == null && change) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل تغییر استاندارد");
                     if (why == null && dto.StandardAttachmentId.HasValue) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
@@ -416,7 +420,7 @@ namespace Services.NasbNiro.Engineering
                         if (decided) await EnDecision.VoidOpenHandoversAsync(_uow, _notify, c, Me, now, ct);   // the decision the handover was drafted under is gone
                         if (decided) { c.ProposedClassification = c.Classification == EnClassification.None ? c.ProposedClassification : c.Classification; if (c.Classification != EnClassification.None) { c.ProposedProductId = c.ProductId; c.ProposedWithChanges = c.PlatformWithChanges; c.ProposedChangeNote = c.ChangeNote; } }
                     }
-                    EnEvents.Add(_uow, c, change ? "standard-changed" : "standard-set", Me, code + " — " + evidence + (change ? " — " + note : string.Empty));
+                    EnEvents.Add(_uow, c, change ? "standard-changed" : "standard-set", Me, code + " — " + evidence + (fileChanged ? " — فایل دیتاشیت تغییر کرد" : string.Empty) + (change ? " — " + note : string.Empty));
                     break;
                 }
                 case "return":

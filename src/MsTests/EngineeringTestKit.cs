@@ -172,8 +172,12 @@ namespace MsTests
 
         public static Task<ResponseDto<EnCaseDto>> GetCase(AppHost host, ClaimsPrincipal who, int id) => host.As(who, p => p.GetRequiredService<IEnCaseService>().GetCaseAsync(id, Ct));
 
-        public static Task<ResponseDto<EnCaseDto>> SetStandard(AppHost host, ClaimsPrincipal who, int caseId, string code, string evidence = "دیتاشیت کارفرما، بند ۲٫۱", string note = null) =>
-            CaseAct(host, who, caseId, "set-standard", d => { d.ReferenceCode = code; d.StandardEvidence = evidence; d.Note = note; });
+        /// <summary>Records the client standard of a case; the data sheet file is required (uploaded by the caller), so one is created for the caller unless <paramref name="file"/> is given or <paramref name="withoutFile"/> is true.</summary>
+        public static Task<ResponseDto<EnCaseDto>> SetStandard(AppHost host, ClaimsPrincipal who, int caseId, string code, string evidence = "دیتاشیت کارفرما، بند ۲٫۱", string note = null, Guid? file = null, bool withoutFile = false)
+        {
+            Guid? attachment = withoutFile ? (Guid?)null : file ?? File(host, int.Parse(who.FindFirst(ClaimTypes.NameIdentifier).Value));
+            return CaseAct(host, who, caseId, "set-standard", d => { d.ReferenceCode = code; d.StandardEvidence = evidence; d.Note = note; d.StandardAttachmentId = attachment; });
+        }
 
         /// <summary>An inquiry case that the engineer proposed, the manager confirmed and the CEO approved (status TenderPreparation for a bidding inquiry).</summary>
         public static async Task<EnCaseDto> ApprovedCase(AppHost host, int inquiry, bool platform, int? productId = null, string code = Std)
