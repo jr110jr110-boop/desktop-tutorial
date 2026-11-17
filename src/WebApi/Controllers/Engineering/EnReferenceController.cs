@@ -27,6 +27,9 @@ namespace WebApi.Controllers
         [HttpGet("lists")]
         public async Task<IActionResult> ListsAsync([FromQuery] EnReferenceQuery query, CancellationToken ct) => Ok((await _service.GetListsAsync(query, ct)).ToPaginatedResultSafe());
 
+        [HttpGet("approved-codes")]
+        public async Task<IActionResult> ApprovedCodesAsync(CancellationToken ct) => Ok(await _service.GetApprovedCodesAsync(ct));
+
         [HttpGet("lists/{id:int}")]
         public async Task<IActionResult> ListAsync(int id, CancellationToken ct) => Ok(await _service.GetListAsync(id, ct));
 

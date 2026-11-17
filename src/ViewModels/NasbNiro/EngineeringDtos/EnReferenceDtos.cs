@@ -89,4 +89,11 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string Note { get; set; }
         public string RowVersion { get; set; }
     }
+
+    /// <summary>The code and title of a standard that has an approved reference list.</summary>
+    public class EnReferenceCodeDto
+    {
+        public string Code { get; set; }
+        public string Title { get; set; }
+    }
 }

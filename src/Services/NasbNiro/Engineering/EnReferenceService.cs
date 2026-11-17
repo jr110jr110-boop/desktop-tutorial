@@ -41,6 +41,7 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<PagedList<EnReferenceListDto>>> GetListsAsync(EnReferenceQuery query, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> GetListAsync(int id, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> GetCurrentAsync(string code, CancellationToken ct);
+        Task<ResponseDto<List<EnReferenceCodeDto>>> GetApprovedCodesAsync(CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> ListActionAsync(EnReferenceActionDto dto, CancellationToken ct);
     }
@@ -122,6 +123,15 @@ namespace Services.NasbNiro.Engineering
             string text = EnText.Clean(query.Contains);
             if (text != null) q = q.Where(l => l.Code.Contains(text) || l.Title.Contains(text));
             return ResponseDtoHelper.Ok(await EnPaging.CutAsync(q.OrderByDescending(l => l.Id), query.PageNumber, query.PageSize, rows => DtosAsync(rows, false, ct), ct));
+        }
+
+        /// <summary>The code and title of every standard that has an approved list (the choice of the standard in a dialog); the latest approval of a code gives the title.</summary>
+        public async Task<ResponseDto<List<EnReferenceCodeDto>>> GetApprovedCodesAsync(CancellationToken ct)
+        {
+            if (!_user.IsInRole(EnRoles.Readers)) return EnText.Bad<List<EnReferenceCodeDto>>(EnText.NotAllowed);
+            var rows = await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => new { l.Code, l.Title, l.ApprovedAt, l.Id }).ToListAsync(ct);
+            return ResponseDtoHelper.Ok(rows.GroupBy(r => r.Code).Select(g => g.OrderByDescending(r => r.ApprovedAt).ThenByDescending(r => r.Id).First())
+                .OrderBy(r => r.Code, StringComparer.Ordinal).Select(r => new EnReferenceCodeDto { Code = r.Code, Title = r.Title }).ToList());
         }
 
         public async Task<ResponseDto<EnReferenceListDto>> GetListAsync(int id, CancellationToken ct)
