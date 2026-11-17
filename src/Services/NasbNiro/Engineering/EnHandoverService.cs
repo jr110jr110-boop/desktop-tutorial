@@ -99,20 +99,20 @@ namespace Services.NasbNiro.Engineering
         }
 
         /// <summary>The notice text of one unit: what that unit needs from the handover (deterministic: contract, case, standard, count and titles of its own documents), cut with an ellipsis at the column length.</summary>
-        public static string ScopeNote(string contractCode, string caseNumber, string standard, EnUnit unit, IEnumerable<EnHandoverLine> lines, out int count, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine = null)
+        public static string ScopeNote(string contractCode, string caseNumber, string standard, EnUnit unit, IEnumerable<EnHandoverLine> lines, out int count, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine = null, ISet<int> arrivedLineIds = null)
         {
             List<EnHandoverLine> mine = lines.Where(l => EnUnits.Includes(l.Units, unit)).OrderBy(l => l.Seq).ThenBy(l => l.Id).ToList();
             count = mine.Count;
             string head = "مدارک مهندسی قرارداد " + (contractCode ?? "—") + " (پرونده " + caseNumber + "، استاندارد " + (string.IsNullOrWhiteSpace(standard) ? "—" : standard) + ") برای واحد " + EnText.Unit(unit) + ": ";
-            string body = count == 0 ? "برای این واحد مدرکی در این تحویل نیست." : EnText.Num(count) + " مدرک: " + string.Join("؛ ", mine.Select(l => TitleWithState(l, debtDueByLine)));
+            string body = count == 0 ? "برای این واحد مدرکی در این تحویل نیست." : EnText.Num(count) + " مدرک: " + string.Join("؛ ", mine.Select(l => TitleWithState(l, debtDueByLine, arrivedLineIds)));
             string text = head + body;
             return text.Length > 2000 ? text.Substring(0, 1999) + "…" : text;
         }
 
-        /// <summary>A document that is not there yet is marked in the notice: with the deadline of its open debt when there is one.</summary>
-        private static string TitleWithState(EnHandoverLine l, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine)
+        /// <summary>A document that is not there yet is marked in the notice: with the deadline of its open debt when there is one. A line whose debt is already settled has arrived (the line flag is a snapshot of the handover and is not updated when the debt settles).</summary>
+        private static string TitleWithState(EnHandoverLine l, IReadOnlyDictionary<int, DateTimeOffset> debtDueByLine, ISet<int> arrivedLineIds)
         {
-            if (l.State != EnLineState.Missing) return l.Title;
+            if (l.State != EnLineState.Missing || (arrivedLineIds != null && arrivedLineIds.Contains(l.Id))) return l.Title;
             return debtDueByLine != null && debtDueByLine.TryGetValue(l.Id, out DateTimeOffset due)
                 ? l.Title + " (هنوز نرسیده، مهلت تا " + EnText.Stamp(due) + ")"
                 : l.Title + " (هنوز نرسیده)";
@@ -298,6 +298,26 @@ namespace Services.NasbNiro.Engineering
             await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده برگشت می‌خورد." : null);
 
         private async Task<string> ReleaseReasonAsync(EnHandover h, Who w, CancellationToken ct) => await ReleaseBaseReasonAsync(h, w, ct) ?? await DistributionNotReadyAsync(h, ct);
+
+        /// <summary>
+        /// The notice text of every unit from the CURRENT state of the documents: a line with an open debt shows the earliest deadline, a line whose debt is settled counts as arrived (even when the line flag still says missing),
+        /// a line whose debts are all void or that never had one is plainly «not arrived».
+        /// </summary>
+        private async Task<Dictionary<EnUnit, (string Text, int Count)>> ScopeNotesAsync(EnHandover h, EnCase c, CancellationToken ct)
+        {
+            string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
+            List<int> lineIds = h.Lines.Select(l => l.Id).ToList();
+            var debts = (await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(x => !x.Deleted && x.HandoverLineId.HasValue && lineIds.Contains(x.HandoverLineId.Value)).Select(x => new { Line = x.HandoverLineId.Value, x.Status, x.DueAt }).ToListAsync(ct));
+            Dictionary<int, DateTimeOffset> dueByLine = debts.Where(x => x.Status == EnDebtStatus.Open).GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Min(x => x.DueAt));
+            HashSet<int> arrived = new HashSet<int>(debts.Where(x => x.Status == EnDebtStatus.Settled).Select(x => x.Line).Except(dueByLine.Keys));
+            Dictionary<EnUnit, (string, int)> result = new Dictionary<EnUnit, (string, int)>();
+            foreach ((EnUnit unit, string _) in Units)
+            {
+                string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count, dueByLine, arrived);
+                result[unit] = (text, count);
+            }
+            return result;
+        }
 
         /// <summary>The release is refused while the distribution rows are missing or any unit's notice text is empty.</summary>
         private async Task<string> DistributionNotReadyAsync(EnHandover h, CancellationToken ct)
@@ -704,6 +724,14 @@ namespace Services.NasbNiro.Engineering
                     why = await ReleaseReasonAsync(h, w, ct);
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     h.Status = EnHandoverStatus.Released; h.ReleasedByUserId = Me; h.ReleasedAt = now; c.Status = EnCaseStatus.Released;
+                    {
+                        // the last moment the draft texts can change: a text the PMO did not edit is rebuilt from the documents as they are now (the debts may have settled since the draft); an edited text is never touched
+                        List<EnDistribution> drafts = await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted && d.Status == EnDistStatus.Draft).ToListAsync(ct);
+                        List<(string Note, DateTimeOffset At)> edits = (await _uow.Set<EnCaseEvent>().AsNoTracking().Where(e => e.CaseId == c.Id && e.Kind == "distribution-note-edited").Select(e => new { e.Note, e.At }).ToListAsync(ct)).Select(e => (e.Note, e.At)).ToList();
+                        Dictionary<EnUnit, (string Text, int Count)> fresh = drafts.Count == 0 ? null : await ScopeNotesAsync(h, c, ct);
+                        foreach (EnDistribution row in drafts)
+                            if (!edits.Any(e => e.Note == EnText.Unit(row.Unit) && e.At >= row.CreateDate) && fresh.TryGetValue(row.Unit, out var f)) { row.ScopeNote = f.Text; row.DocumentCount = f.Count; }
+                    }
                     foreach (EnDistribution row in await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct)) { row.Status = EnDistStatus.Notified; row.NotifiedAt = now; row.ModifyDate = now; row.ModifierUserId = Me; }   // the notice texts are frozen; ENG.DIST.NOTIFY sends them
                     EnEvents.Add(_uow, c, "handover-released", Me, h.Number);
                     break;
@@ -719,14 +747,9 @@ namespace Services.NasbNiro.Engineering
                     why = DraftDistributionReason(h, w, await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct));
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
-                    List<int> lineIds = h.Lines.Select(l => l.Id).ToList();
-                    Dictionary<int, DateTimeOffset> dueByLine = (await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnDebtStatus.Open && x.HandoverLineId.HasValue && lineIds.Contains(x.HandoverLineId.Value)).Select(x => new { Line = x.HandoverLineId.Value, x.DueAt }).ToListAsync(ct))
-                        .GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Min(x => x.DueAt));
+                    Dictionary<EnUnit, (string Text, int Count)> notes = await ScopeNotesAsync(h, c, ct);
                     foreach ((EnUnit unit, string roles) in Units)
-                    {
-                        string text = EnHandoverRules.ScopeNote(contractCode, c.Number, c.ReferenceCode, unit, h.Lines, out int count, dueByLine);
-                        _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Draft, ScopeNote = text, DocumentCount = count, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                    }
+                        _uow.Set<EnDistribution>().Add(new EnDistribution { HandoverId = h.Id, CaseId = h.CaseId, ContractId = h.ContractId, Unit = unit, Roles = roles, Status = EnDistStatus.Draft, ScopeNote = notes[unit].Text, DocumentCount = notes[unit].Count, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     EnEvents.Add(_uow, c, "distribution-drafted", Me, h.Number);
                     break;
                 }

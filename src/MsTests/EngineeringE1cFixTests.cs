@@ -9,6 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Services.NasbNiro.Engineering;
 using ViewModels.NasbNiro.EngineeringDtos;
 using static MsTests.EnKit;
+using static MsTests.EngineeringHandoverTests;
 
 namespace MsTests
 {
@@ -146,6 +147,69 @@ namespace MsTests
             // the client standard of a case is what the client wrote: a code without a list is recorded (the gap report exists for it)
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host)));
             Assert.AreEqual("NOLIST-2", Ok(await SetStandard(host, Eng1, c.Id, "NOLIST-2")).ReferenceCode);
+        }
+
+        // ------------------------------------------------------------------ M1
+
+        /// <summary>A draft handover (lines DWG and DATASHEET, both missing), accepted; the debt of DWG is settled, the debt of DATASHEET is open.</summary>
+        private static async Task<(EnHandoverDto H, int Case)> AcceptedWithDebtsAsync(AppHost host)
+        {
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            host.Write(u =>
+            {
+                u.Set<EnHandover>().First(x => x.Id == h.Id).Status = EnHandoverStatus.Accepted;
+                EnWaiver w = AppHost.Add(u, new EnWaiver { Number = "EWV-T1", HandoverId = h.Id, CaseId = caseId, Reason = "آزمون", DebtHours = 24, Status = EnWaiverStatus.Approved, RequestedByUserId = 2121, RequestedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                foreach (EnHandoverLine l in u.Set<EnHandoverLine>().Where(x => x.HandoverId == h.Id).ToList())
+                    AppHost.Add(u, new EnDocumentDebt { WaiverId = w.Id, HandoverLineId = l.Id, CaseId = caseId, ContractId = contract, DocumentType = l.DocumentType, Title = l.Title, DueAt = DateTimeOffset.Now.AddHours(20), Status = l.DocumentType == "DWG" ? EnDebtStatus.Settled : EnDebtStatus.Open });
+                u.SaveChanges();
+            }, Seeder);
+            return (h, caseId);
+        }
+
+        [TestMethod]
+        public async Task M1_The_Unit_Notice_Treats_A_Settled_Debt_As_Arrived_And_An_Open_Debt_As_Not_Yet_Arrived()
+        {
+            AppHost host = Started("e1cfix_m1a");
+            (EnHandoverDto h, int caseId) = await AcceptedWithDebtsAsync(host);
+            EnHandoverDto drafted = Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            string note = drafted.Distribution.Single(x => x.Unit == (int)EnUnit.Qc).ScopeNote;
+            StringAssert.Contains(note, "مدرک DWG؛");
+            Assert.IsFalse(note.Contains("مدرک DWG ("), "the line flag says missing but its debt is settled: it has arrived");
+            StringAssert.Contains(note, "مدرک DATASHEET (هنوز نرسیده، مهلت تا ");
+        }
+
+        [TestMethod]
+        public void M1_A_Line_With_A_Settled_Debt_Reads_As_Arrived_And_A_Void_Debt_Does_Not()
+        {
+            List<EnHandoverLine> lines = new List<EnHandoverLine>
+            {
+                new EnHandoverLine { Id = 1, Seq = 1, Title = "الف", State = EnLineState.Missing, Units = "Qc" },
+                new EnHandoverLine { Id = 2, Seq = 2, Title = "ب", State = EnLineState.Missing, Units = "Qc" },
+                new EnHandoverLine { Id = 3, Seq = 3, Title = "سند-ویژهٔ-تولید", State = EnLineState.Missing, Units = "Production" },
+            };
+            string note = EnHandoverRules.ScopeNote("K", "E-1", "API", EnUnit.Qc, lines, out int count, new Dictionary<int, DateTimeOffset>(), new HashSet<int> { 1 });
+            Assert.AreEqual(2, count);
+            StringAssert.Contains(note, "الف؛");
+            StringAssert.Contains(note, "ب (هنوز نرسیده)");
+            Assert.IsFalse(note.Contains("سند-ویژهٔ-تولید"), "a document of another unit is not in the note");
+        }
+
+        [TestMethod]
+        public async Task M1_At_The_Release_A_Draft_Text_The_PMO_Did_Not_Edit_Is_Rebuilt_And_An_Edited_One_Is_Kept()
+        {
+            AppHost host = Started("e1cfix_m1b");
+            (EnHandoverDto h, int caseId) = await AcceptedWithDebtsAsync(host);
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            // the datasheet arrives after the draft: its debt settles
+            host.Write(u => { u.Set<EnDocumentDebt>().First(x => x.CaseId == caseId && x.Status == EnDebtStatus.Open).Status = EnDebtStatus.Settled; u.SaveChanges(); }, Seeder);
+            EnHandoverDto cur = Ok(await host.As(Pmo1, p => p.GetRequiredService<IEnHandoverService>().GetHandoverAsync(h.Id, Ct)));
+            Ok(await Act(host, Pmo1, "edit-scope", d => { d.Id = h.Id; d.DistributionId = cur.Distribution.Single(x => x.Unit == (int)EnUnit.Qc).Id; d.ScopeNote = "متن ویرایش‌شدهٔ PMO برای کنترل کیفیت"; }));
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            Assert.AreEqual("متن ویرایش‌شدهٔ PMO برای کنترل کیفیت", rel.Distribution.Single(x => x.Unit == (int)EnUnit.Qc).ScopeNote, "an edited text is never touched");
+            string qa = rel.Distribution.Single(x => x.Unit == (int)EnUnit.Qa).ScopeNote;
+            Assert.IsFalse(qa.Contains("هنوز نرسیده"), "the unedited text was rebuilt: both documents have arrived");
         }
     }
 }
