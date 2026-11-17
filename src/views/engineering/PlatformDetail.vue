@@ -5,7 +5,7 @@ import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import { getEnDeviations, getEnDossier, postEnDossierAction, postEnSupplyLine } from "@/api/EngineeringAPIs";
-import { completeness, downloadDoc, enPaths, EnRoles, faDigits, faNum, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
+import { completeness, downloadDoc, enPaths, EnRoles, faDigits, faNum, loadStandardOptions, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 
 // One dossier of a platform (product and standard; the standard is in ?code=). Lines are grouped by discipline. Supplying a file or marking a line «کاربرد ندارد» is a request:
@@ -66,10 +66,11 @@ function notApplicable(l: any) {
 }
 const reason = (title: string, action: string, label: string, okText: string) =>
   d.ask({ title, fields: [{ key: "n", label, type: "textarea", required: true, min: 15, max: 2000 }], run: (v) => act(action, v.n), okText });
-function standardDialog() {
+async function standardDialog() {
+  const standards = await loadStandardOptions();
   d.ask({
     title: "ثبت استاندارد از دیتاشیت اصلی",
-    fields: [{ key: "c", label: "کد استاندارد", required: true, max: 40 }, { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 }],
+    fields: [{ key: "c", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards }, { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 }],
     run: (v) => postEnDossierAction({ productId: productId.value, action: "native-standard", referenceCode: v.c, standardBasis: v.b }),
     okText: "استاندارد از دیتاشیت اصلی ثبت شد.",
   });

@@ -44,6 +44,15 @@ export const getEnReferenceLists = (q: EnQuery) => call("get", base + "reference
 export const getEnReferenceList = (id: number) => call("get", base + "reference/lists/" + id);
 export const getEnReferenceCurrent = (code: string) => call("get", base + "reference/current", undefined, { code });
 export const saveEnReferenceList = (body: any) => call("post", base + "reference/lists", body);
+/** The code and title of every standard that has an approved list: [{ code, title }] (the choice of the standard in a dialog). */
+export const getEnApprovedCodes = () => call("get", base + "reference/approved-codes");
+/** Replaces the lines of a DRAFT list with a CSV file (UTF-8; header docType,title,discipline,required,tender,units). */
+export const uploadEnReferenceLines = (id: number, rowVersion: string, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("rowVersion", rowVersion || "");
+  return call("post", base + "reference/lists/" + id + "/upload-lines", form);
+};
 /** body: { id, action: submit|approve|return|void|revise, note, rowVersion } */
 export const postEnReferenceAction = (body: any) => call("post", base + "reference/lists/action", body);
 

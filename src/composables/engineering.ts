@@ -3,6 +3,7 @@ import "@/views/engineering/engineering.scss";
 import { faDigits, faNum } from "@/composables/ceo";
 import { ref } from "vue";
 import { saveBlob } from "@/api/ApiClient";
+import { getEnApprovedCodes } from "@/api/EngineeringAPIs";
 import { addDocument } from "@/api/Document";
 import { getDocument } from "@/api/DocumentAPIs";
 import type { EnField } from "@/components/engineering/EnPrompt.vue";
@@ -300,4 +301,13 @@ export function useFocusItem(getId: () => number | null, fetchOne: (id: number) 
   /** The loaded rows with the focused item first (and not twice). */
   const merge = (rows: any[]) => (item.value ? [item.value, ...rows.filter((r) => r.id !== item.value.id)] : rows);
   return { item, load, merge };
+}
+
+/** The standards to choose from (every approved reference list: code and title); `keep` is a code already stored that stays selectable. */
+export async function loadStandardOptions(keep?: string | null): Promise<{ value: string; text: string }[]> {
+  const [d, e] = await getEnApprovedCodes();
+  if (e) fail(e);
+  const options = ((d as any[]) || []).map((x) => ({ value: x.code as string, text: `${x.code} — ${x.title}` }));
+  if (keep && !options.some((o) => o.value === keep)) options.unshift({ value: keep, text: keep });
+  return options;
 }

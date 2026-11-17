@@ -11,7 +11,7 @@ import {
   decideEnRegistration, getEnCase, getEnCharterView, getEnClarifications, getEnGap, getEnHandovers, getEnPlatforms, getEnReferenceLists, getEnRegistrations, postEnCaseAction, postEnClarificationAction,
   proposeEnRegistration, saveEnClarification,
 } from "@/api/EngineeringAPIs";
-import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, downloadDoc, handoverStatuses, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
+import { caseKinds, clarStatuses, enPaths, EnRoles, eventKinds, faDigits, faNum, downloadDoc, handoverStatuses, loadStandardOptions, runEn, uploadDoc, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -97,12 +97,13 @@ async function classifyDialog(action: "propose" | "change" | "reclassify") {
 }
 const reasonDialog = (action: string, title: string, label: string, okText: string) =>
   dlg.ask({ title, fields: [{ key: "note", label, type: "textarea", required: true, min: 15, max: 2000 }], run: (v) => act(action, { note: v.note }), okText });
-const standardDialog = () =>
+async function standardDialog() {
+  const standards = await loadStandardOptions(c.value.referenceCode);
   dlg.ask({
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
     hint: "استاندارد را کارفرما تعیین می‌کند؛ اینجا فقط کد و شاهد آن از دیتاشیت ثبت می‌شود.",
     fields: [
-      { key: "code", label: "کد استاندارد (مطابق دیتاشیت)", required: true, max: 60, value: c.value.referenceCode || "" },
+      { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
       { key: "evidence", label: "شاهد از دیتاشیت (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "file", label: "فایل دیتاشیت (اختیاری)", type: "file" as const },
       ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
@@ -118,6 +119,7 @@ const standardDialog = () =>
     },
     okText: "استاندارد از دیتاشیت ثبت شد.",
   });
+}
 const opinionDialog = () =>
   dlg.ask({
     title: "نظر فنی مهندسی",
