@@ -79,8 +79,18 @@ async function loadProducts() {
   products.value = [...seen.entries()].map(([value, text]) => ({ value, text }));
 }
 async function classifyDialog(action: "propose" | "change" | "reclassify") {
-  await loadProducts();
   const titles = { propose: "پیشنهاد طبقه‌بندی (پلتفرم یا طراحی جدید)", change: "اصلاح پیشنهاد طبقه‌بندی", reclassify: "تغییر طبقه‌بندی" };
+  // reclassify: the server reads only the reason (the proposal goes back to the manager with the old content and a new proposal is made afterwards)
+  if (action === "reclassify") {
+    dlg.ask({
+      title: titles.reclassify,
+      hint: "این کار پرونده را به مرحلهٔ تایید مدیر مهندسی برمی‌گرداند و تصمیم‌های پس از آن باطل می‌شود؛ نوع تازه را پس از آن مهندس یا ایجنت پیشنهاد می‌دهد.",
+      fields: [{ key: "note", label: "دلیل تغییر", type: "textarea", required: true, min: 15, max: 1000 }],
+      run: (v) => act("reclassify", { note: v.note }),
+    });
+    return;
+  }
+  await loadProducts();
   dlg.ask({
     title: titles[action],
     hint: "ایجنت مهندسی پیشنهاد را با مبنای آن آماده می‌کند؛ این فرم فقط برای وقتی است که مهندس خودش پیشنهاد می‌دهد یا اصلاح می‌کند.",
@@ -88,9 +98,9 @@ async function classifyDialog(action: "propose" | "change" | "reclassify") {
       { key: "classification", label: "نوع", type: "select", required: true, value: String(c.value.proposedClassification || ""), options: [{ value: "1", text: "پلتفرم (توربین ساخته‌شده)" }, { value: "2", text: "طراحی جدید" }] },
       { key: "productId", label: "محصول پلتفرم (برای نوع پلتفرم)", type: "select", value: c.value.proposedProductId ? String(c.value.proposedProductId) : "", options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
       { key: "withChanges", label: "با تغییرات؟", type: "select", value: c.value.proposedWithChanges ? "1" : "0", options: [{ value: "0", text: "خیر" }, { value: "1", text: "بله" }] },
-      { key: "changeNote", label: "شرح تغییرات", type: "textarea", max: 2000, value: c.value.proposedChangeNote || "" },
-      { key: "basis", label: "مبنای پیشنهاد", type: "textarea", required: action !== "reclassify", min: action === "reclassify" ? undefined : 10, max: 2000, value: c.value.proposalBasis || "" },
-      ...(action !== "propose" ? [{ key: "note", label: "دلیل تغییر", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
+      { key: "changeNote", label: "شرح تغییرات", type: "textarea", max: 1000, value: c.value.proposedChangeNote || "" },
+      // the basis is read only by «propose»; «change» keeps the stored basis and appends its reason to it
+      ...(action === "propose" ? [{ key: "basis", label: "مبنای پیشنهاد", type: "textarea" as const, required: true, min: 10, max: 2000, value: c.value.proposalBasis || "" }] : [{ key: "note", label: "دلیل تغییر", type: "textarea" as const, required: true, min: 15, max: 1000 }]),
     ],
     run: (v) => act(action, { classification: Number(v.classification), productId: v.productId ? Number(v.productId) : null, withChanges: v.withChanges === "1", changeNote: v.changeNote, basis: v.basis, note: v.note }),
   });
@@ -101,12 +111,12 @@ async function standardDialog() {
   const standards = await loadStandardOptions(c.value.referenceCode);
   dlg.ask({
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
-    hint: "استاندارد را کارفرما تعیین می‌کند؛ فایل دیتاشیت بارگذاری می‌شود و کد را از فهرست انتخاب می‌کنید. شاهد فقط اشاره‌ای کوتاه به همان فایل است (شماره سند و بند).",
+    hint: "استاندارد را کارفرما تعیین می‌کند؛ فایل دیتاشیت بارگذاری می‌شود و کد را از فهرست انتخاب می‌کنید. شاهد فقط اشاره‌ای کوتاه به همان فایل است (شماره سند و بند). ثبت دوباره با فایل دیگر، تغییر استاندارد حساب می‌شود و دلیل می‌خواهد.",
     fields: [
       { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
       { key: "evidence", label: "اشاره به فایل (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "file", label: "فایل دیتاشیت کارفرما", type: "file" as const, required: true },
-      ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 2000 }] : []),
+      ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 1000 }] : []),
     ],
     run: async (v) => {
       let att = c.value.standardAttachmentId || null;
@@ -194,12 +204,13 @@ const voidClar = (x: any) =>
 // Whether the registration may be proposed is the server's decision (canProposeRegistration / proposeRegistrationBlockedReason on the case); without the flag nothing is shown.
 async function registerDialog() {
   await loadProducts();
+  const standards = await loadStandardOptions(c.value.referenceCode);
   dlg.ask({
     title: "پیشنهاد ثبت به‌عنوان پلتفرم",
     hint: "مدیر مهندسی پیشنهاد می‌دهد و مدیرعامل تصمیم می‌گیرد.",
     fields: [
       { key: "productId", label: "محصول", type: "select", required: true, options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
-      { key: "code", label: "کد استاندارد", required: true, max: 60, value: c.value.referenceCode || "" },
+      { key: "code", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
       { key: "basis", label: "مبنای استاندارد (دیتاشیت و بند)", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "why", label: "توجیه ثبت", type: "textarea", required: true, min: 30, max: 2000 },
     ],
