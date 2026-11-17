@@ -103,6 +103,12 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int PageSize { get; set; } = 25;
     }
 
+    public class EnWaiverMissingLineDto
+    {
+        public string DocType { get; set; }
+        public string Title { get; set; }
+    }
+
     public class EnWaiverDto
     {
         public int Id { get; set; }
@@ -112,7 +118,11 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int CaseId { get; set; }
         public string CaseNumber { get; set; }
         public string Reason { get; set; }
-        public List<string> MissingLines { get; set; } = new List<string>();
+        /// <summary>The missing documents the waiver covers, parsed from the stored snapshot (type and title).</summary>
+        public List<EnWaiverMissingLineDto> MissingLines { get; set; } = new List<EnWaiverMissingLineDto>();
+
+        /// <summary>The same lines as stored in the snapshot («TYPE|title»), kept for readers that still use the raw keys.</summary>
+        public List<string> MissingSnapshot { get; set; } = new List<string>();
         public bool DossierUnconfirmed { get; set; }
         /// <summary>The deadline in hours that was asked (and, after the approval, the one that counts).</summary>
         public int DebtHours { get; set; }

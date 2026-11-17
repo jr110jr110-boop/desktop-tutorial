@@ -118,6 +118,10 @@ namespace Services.NasbNiro.Engineering
             public bool DossierUnconfirmed { get; set; }
         }
 
+        /// <summary>The snapshot keys («TYPE|TITLE») as lines with a type and a title; the stored format is not changed.</summary>
+        public static List<EnWaiverMissingLineDto> MissingLines(Snapshot s) =>
+            s.Lines.Select(k => { int i = k.IndexOf('|'); return i < 0 ? new EnWaiverMissingLineDto { DocType = string.Empty, Title = k } : new EnWaiverMissingLineDto { DocType = k.Substring(0, i), Title = k.Substring(i + 1) }; }).ToList();
+
         public static Snapshot Parse(string json)
         {
             try { return string.IsNullOrWhiteSpace(json) ? new Snapshot() : JsonSerializer.Deserialize<Snapshot>(json) ?? new Snapshot(); }
@@ -357,7 +361,7 @@ namespace Services.NasbNiro.Engineering
                 result.Add(new EnWaiverDto
                 {
                     Id = w.Id, Number = w.Number, HandoverId = w.HandoverId, HandoverNumber = hn.TryGetValue(w.HandoverId, out string hnum) ? hnum : null, CaseId = w.CaseId, CaseNumber = cn.TryGetValue(w.CaseId, out string cnum) ? cnum : null,
-                    Reason = w.Reason, MissingLines = snap.Lines, DossierUnconfirmed = snap.DossierUnconfirmed, DebtHours = w.DebtHours, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
+                    Reason = w.Reason, MissingLines = EnHandoverRules.MissingLines(snap), MissingSnapshot = snap.Lines.ToList(), DossierUnconfirmed = snap.DossierUnconfirmed, DebtHours = w.DebtHours, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
                     RequestedByName = names.Name(w.RequestedByUserId), RequestedAtText = EnText.Stamp(w.RequestedAt), WaitingHours = w.Status == EnWaiverStatus.Requested ? (int)Math.Floor((now - w.RequestedAt).TotalHours) : 0,
                     DecidedByName = names.Name(w.DecidedByUserId), DecidedAtText = EnText.Stamp(w.DecidedAt), DecisionNote = w.DecisionNote, Used = w.UsedAt.HasValue, Covers = w.Status == EnWaiverStatus.Approved && coverage == null, CoverageNote = coverage,
                     RowVersion = EnConcurrency.Text(w.RowVersion), CanDecide = decide == null, DecideBlockedReason = decide,

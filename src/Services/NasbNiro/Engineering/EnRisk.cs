@@ -28,7 +28,7 @@ namespace Services.NasbNiro.Engineering
         public string Summary()
         {
             string days = DaysLeft.HasValue ? (DaysLeft.Value >= 0 ? EnText.Num(DaysLeft.Value) + " روز تا موعد تحویل" : "موعد تحویل " + EnText.Num(-DaysLeft.Value) + " روز گذشته") : "موعد تحویل مشخص نیست";
-            return "پرونده " + Number + ": " + string.Join("؛ ", Reasons) + " (" + EnText.Num(Missing) + " مدرک الزامی کم است، " + days + ").";
+            return "پرونده " + Number + ": " + string.Join("؛ ", Reasons) + " (" + (Missing > 0 ? EnText.Num(Missing) + " مدرک الزامی کم است، " : string.Empty) + days + ").";   // no "0 required documents are missing": a reason of its own says what is left
         }
     }
 
@@ -57,8 +57,11 @@ namespace Services.NasbNiro.Engineering
                 {
                     if (!await EnPlatformRules.IsCompleteAsync(uow, c.ProductId.Value, c.ReferenceCode, ct))
                     {
-                        row.Reasons.Add("مدارک پلتفرم برای استاندارد " + c.ReferenceCode + " کامل و تایید نشده است");
-                        missing = Math.Max(missing, await uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct));
+                        int dossierMissing = await uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
+                        row.Reasons.Add(dossierMissing == 0
+                            ? "مدارک الزامی پلتفرم برای استاندارد " + c.ReferenceCode + " موجود است و فقط تایید کامل‌بودن پرونده توسط مدیر مهندسی مانده است"
+                            : "مدارک پلتفرم برای استاندارد " + c.ReferenceCode + " کامل و تایید نشده است");
+                        missing = Math.Max(missing, dossierMissing);
                     }
                 }
                 if (row.Awarded)

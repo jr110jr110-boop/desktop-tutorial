@@ -179,5 +179,79 @@ namespace MsTests
             Assert.AreEqual(6, Services.NasbNiro.Engineering.EnUnits.All.Length);
             Assert.AreEqual(7, Services.NasbNiro.Engineering.EnUnits.Askers.Length);
         }
+    
+        // ------------------------------------------------------------------ B3
+
+        [TestMethod]
+        public void B3_The_Waiver_Snapshot_Keys_Become_Lines_With_A_Type_And_A_Title()
+        {
+            var snap = new EnHandoverRules.Snapshot { Lines = new System.Collections.Generic.List<string> { "DWG|نقشه مونتاژ", "NOPIPE", "DOC|عنوان|با خط" } };
+            var lines = EnHandoverRules.MissingLines(snap);
+            Assert.AreEqual(3, lines.Count);
+            Assert.AreEqual("DWG", lines[0].DocType); Assert.AreEqual("نقشه مونتاژ", lines[0].Title);
+            Assert.AreEqual(string.Empty, lines[1].DocType); Assert.AreEqual("NOPIPE", lines[1].Title);
+            Assert.AreEqual("DOC", lines[2].DocType); Assert.AreEqual("عنوان|با خط", lines[2].Title);
+            Assert.AreEqual(0, EnHandoverRules.MissingLines(EnHandoverRules.Parse(null)).Count);
+        }
+
+        [TestMethod]
+        public async Task B3_The_Waiver_Dto_Carries_The_Parsed_Lines_And_Still_The_Raw_Keys()
+        {
+            AppHost host = Started("e1bwaiver");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            EnWaiverDto w = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, DebtHours = 48, Reason = "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده" }, Ct)));
+            Assert.IsTrue(w.MissingLines.Count > 0);
+            Assert.AreEqual(w.MissingSnapshot.Count, w.MissingLines.Count);
+            for (int i = 0; i < w.MissingLines.Count; i++)
+            {
+                Assert.AreEqual(w.MissingSnapshot[i], w.MissingLines[i].DocType + "|" + w.MissingLines[i].Title);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(w.MissingLines[i].DocType));
+                Assert.IsFalse(string.IsNullOrWhiteSpace(w.MissingLines[i].Title));
+            }
+        }
+
+        [TestMethod]
+        public void B3_The_Risk_Text_Says_What_Is_Left_And_Never_Zero_Missing_Documents()
+        {
+            var some = new EnRiskRow { Number = "EC-1", Missing = 3, DaysLeft = 10 };
+            some.Reasons.Add("مدارک پلتفرم برای استاندارد X کامل و تایید نشده است");
+            StringAssert.Contains(some.Summary(), "مدرک الزامی کم است");
+            var none = new EnRiskRow { Number = "EC-1", Missing = 0, DaysLeft = 10 };
+            none.Reasons.Add("مدارک الزامی پلتفرم برای استاندارد X موجود است و فقط تایید کامل‌بودن پرونده توسط مدیر مهندسی مانده است");
+            string text = none.Summary();
+            StringAssert.Contains(text, "فقط تایید کامل‌بودن");
+            Assert.IsFalse(text.Contains("مدرک الزامی کم است"), text);
+            Assert.IsFalse(text.Contains("۰ مدرک") || text.Contains("0 مدرک"), text);
+        }
+
+        [TestMethod]
+        public async Task B3_A_Dossier_With_All_Required_Documents_But_No_Confirmation_Reads_As_A_Confirmation_Risk()
+        {
+            AppHost host = Started("e1brisk");
+            await ApprovedList(host);
+            int product = Product(host);
+            await NativeDossier(host, product);
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 1; d.ProductId = product; d.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, Std));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess"));
+            var rows = await host.AsSystem(p => EnRisk.ComputeAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, new[] { c.Id }));
+            Assert.AreEqual(1, rows.Count);
+            Assert.IsTrue(rows[0].Missing > 0);
+            StringAssert.Contains(rows[0].Summary(), "مدرک الزامی کم است");
+
+            foreach (EnDossierLineDto l in d.Lines.Where(x => x.Required && x.State == 0).ToList()) Ok(await Supply(host, Eng1, l.Id, File(host, 2111)));
+            Ok(await Dossier(host, Eng1, product, "complete"));   // all required documents are there; nobody has confirmed yet
+            rows = await host.AsSystem(p => EnRisk.ComputeAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, new[] { c.Id }));
+            Assert.AreEqual(1, rows.Count);
+            Assert.AreEqual(0, rows[0].Missing);
+            string text = rows[0].Summary();
+            StringAssert.Contains(text, "فقط تایید کامل‌بودن");
+            Assert.IsFalse(text.Contains("مدرک الزامی کم است"), text);
+        }
     }
 }
