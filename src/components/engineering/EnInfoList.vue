@@ -25,6 +25,8 @@ onMounted(load);
 watch(() => [props.handoverId, props.caseId, props.highlightId], load);
 const d = useEnDialog(load);
 // The server accepts a question only from a member of the unit asked for: the form offers the user's own units only.
+// the case page is open to the engineering readers only; the others see the case number as text
+const canOpenCase = hasRole(EnRoles.readers);
 const myUnits = enAskUnits.filter((u) => hasRole(unitRoles[u.value]));
 const act = (r: any, action: string, answer?: string) => postEnInfoAction({ id: r.id, action, answer, rowVersion: r.rowVersion });
 function ask() {
@@ -60,6 +62,10 @@ const withdraw = (r: any) =>
         <span class="small">واحد {{ unitName(r.unit ?? r.unitText) }} — {{ r.askedByName }} {{ faDigits(r.askedAtText || "") }}</span>
         <router-link v-if="r.handoverId" :to="enPaths.handover(r.handoverId)" class="small">تحویل {{ faDigits(r.handoverNumber || "") }}</router-link>
       </div>
+      <p class="small mb-1" data-test="en-info-project">
+        <template v-if="r.caseId"><router-link v-if="canOpenCase" :to="enPaths.case(r.caseId)">پرونده {{ faDigits(r.caseNumber || "") }}</router-link><span v-else>پرونده {{ faDigits(r.caseNumber || "") }}</span></template>
+        <span v-if="r.contractCode"> — قرارداد {{ faDigits(r.contractCode) }}<template v-if="r.contractTitle"> ({{ r.contractTitle }})</template></span>
+      </p>
       <p class="en-pre mb-1">{{ r.question }}</p>
       <p v-if="r.answer" class="en-pre small"><strong>پاسخ PMO:</strong> {{ r.answer }} <span class="inv-muted">({{ r.answeredByName }} {{ faDigits(r.answeredAtText || "") }})</span></p>
       <EnAction :can="r.canAnswer" :reason="r.answerBlockedReason" :roles="EnRoles.pmo" label="پاسخ" variant="outline-primary" @go="answer(r)" />
