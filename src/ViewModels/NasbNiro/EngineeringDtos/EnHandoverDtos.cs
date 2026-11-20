@@ -160,7 +160,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int HandoverId { get; set; }
         public string Reason { get; set; }
 
-        /// <summary>The time allowed for the missing documents, in hours (1..Engineering.Waiver.MaxDebtHours, ceiling 72), counted from the CEO's approval.</summary>
+        /// <summary>The time allowed for the missing documents, in OFFICE hours (1..Engineering.Waiver.MaxDebtHours, ceiling 72), counted from the CEO's approval.</summary>
         public int DebtHours { get; set; }
     }
 

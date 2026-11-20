@@ -555,8 +555,8 @@ namespace Services.NasbNiro.Engineering
             int maxHours = Math.Min(72, (int)settings[EnSettingKeys.WaiverMaxDebtHours]);   // the ceiling of the employer is 72 hours, whatever the setting says
             DateTimeOffset now = DateTimeOffset.Now;
             int hours = dto.DebtHours;   // the deadline counts from the CEO's approval, so a request that waits long never comes out already overdue
-            if (hours < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک را به ساعت (دست‌کم ۱ ساعت) بنویسید.");
-            if (hours > maxHours) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت نمی‌شود (سقف ۷۲ ساعت).");
+            if (hours < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک را به ساعت اداری (دست‌کم ۱ ساعت اداری؛ ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه) بنویسید.");
+            if (hours > maxHours) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت اداری نمی‌شود (سقف ۷۲ ساعت اداری).");
             EnWaiver waiver = new EnWaiver
             {
                 HandoverId = h.Id, CaseId = h.CaseId, Reason = reason, DebtHours = hours, DebtDueAt = null, Status = EnWaiverStatus.Requested, RequestedByUserId = Me, RequestedAt = now,
@@ -593,11 +593,11 @@ namespace Services.NasbNiro.Engineering
                 int hours = waiver.DebtHours;
                 if (dto.DebtHours.HasValue)
                 {
-                    if (dto.DebtHours.Value > waiver.DebtHours) return EnText.Bad<EnWaiverDto>("مدیرعامل فقط می‌تواند مهلت را کوتاه‌تر کند، نه بیشتر از مهلت درخواست‌شده.");
-                    if (dto.DebtHours.Value < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک دست‌کم ۱ ساعت است.");
+                    if (dto.DebtHours.Value > waiver.DebtHours) return EnText.Bad<EnWaiverDto>("مدیرعامل فقط می‌تواند مهلت را کوتاه‌تر کند (ساعت اداری)، نه بیشتر از مهلت درخواست‌شده.");
+                    if (dto.DebtHours.Value < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک دست‌کم ۱ ساعت اداری است.");
                     hours = dto.DebtHours.Value;
                 }
-                waiver.DebtHours = hours; waiver.DebtDueAt = now.AddHours(hours);   // counted from the approval
+                waiver.DebtHours = hours; waiver.DebtDueAt = OfficeClock.Add(now, hours);   // counted from the approval, in OFFICE hours (employer rule 14)
             }
             waiver.ModifyDate = now; waiver.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
@@ -699,9 +699,9 @@ namespace Services.NasbNiro.Engineering
                     {
                         h.WaiverId = waiver.Id; waiver.UsedAt = now; waiver.ModifyDate = now; waiver.ModifierUserId = Me;
                         foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? OfficeClock.Add(now, waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                         if (ls.DossierUnconfirmed)   // the waiver also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? now.AddHours(waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? OfficeClock.Add(now, waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     c.Status = EnCaseStatus.HandedOver;
                     EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با مجوز اضطرار " + waiver.Number : string.Empty));

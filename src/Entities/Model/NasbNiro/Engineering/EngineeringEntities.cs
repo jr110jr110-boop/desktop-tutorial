@@ -362,7 +362,7 @@ namespace Entities.Model.NasbNiro.Engineering
         /// <summary>JSON: the missing lines at the request.</summary>
         public string MissingSnapshot { get; set; }
 
-        /// <summary>The deadline in hours (1..Engineering.Waiver.MaxDebtHours, ceiling 72) asked by the manager; the CEO may only lower it at approval. It counts from the CEO's approval.</summary>
+        /// <summary>The deadline in OFFICE hours (OfficeClock: 08-19, Saturday to Thursday) (1..Engineering.Waiver.MaxDebtHours, ceiling 72) asked by the manager; the CEO may only lower it at approval. It counts from the CEO's approval.</summary>
         public int DebtHours { get; set; }
 
         /// <summary>Approval time + <see cref="DebtHours"/>; null until the CEO approves.</summary>

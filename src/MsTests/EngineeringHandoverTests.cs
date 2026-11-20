@@ -157,7 +157,7 @@ namespace MsTests
             Assert.AreEqual((int)EnHandoverStatus.Submitted, s.Status);
             Assert.IsFalse(s.Complete);
             Assert.AreEqual(2, s.Debts.Count);
-            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt > DateTimeOffset.Now.AddHours(71) && d.DueAt <= DateTimeOffset.Now.AddHours(72)));   // 72 hours counted from the approval
+            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now.AddMinutes(-10), 72) && d.DueAt <= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 72)));   // 72 OFFICE hours counted from the approval
             Assert.AreEqual((int)EnCaseStatus.HandedOver, Ok(await GetCase(host, Mgr1, caseId)).Status);
             // the waiver is spent: a new handover round needs a new one
             Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
@@ -597,7 +597,9 @@ namespace MsTests
             Refused(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 73 }, Ct)), "کوتاه‌تر");   // raising is refused
             EnWaiverDto done = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 24 }, Ct)));
             Assert.AreEqual(24, done.DebtHours);
-            Assert.IsTrue(done.DebtDueAt > DateTimeOffset.Now.AddHours(23) && done.DebtDueAt <= DateTimeOffset.Now.AddHours(24), "approval time + 24 hours, never already in the past");
+            Assert.IsTrue(done.DebtDueAt >= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now.AddMinutes(-10), 24) && done.DebtDueAt <= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 24), "approval time + 24 OFFICE hours, never already in the past");
+            Assert.IsTrue(done.DebtDueAt > DateTimeOffset.Now, "never already in the past");
+            Assert.IsTrue(Math.Abs((done.DebtDueAt.Value - Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 24)).TotalSeconds) < 30, "DebtDueAt == OfficeClock.Add(approvedAt, hours) within seconds");
         }
 
         [TestMethod]
