@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import QPager from "@/components/quality/QPager.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import { getEnDebts } from "@/api/EngineeringAPIs";
-import { debtStatuses, enPaths, faDigits, faNum, hoursUntil, stamp } from "@/composables/engineering";
+import { debtStatuses, enPaths, faDigits, faNum, officeHoursUntil, stamp } from "@/composables/engineering";
 import { usePagedList } from "@/composables/fn";
 
 // The document debts of the emergency waivers: due date and time, overdue in red, hours left. A debt is settled by the system when the document exists.
@@ -18,8 +18,8 @@ watch(() => route.query.overdue, (v) => {
   list.search();
 });
 const left = (iso: string) => {
-  const h = hoursUntil(iso);
-  return h === null ? "" : h >= 0 ? `${faNum(h, 0)} ساعت مانده` : `${faNum(-h, 0)} ساعت گذشته`;
+  const h = officeHoursUntil(iso);
+  return h === null ? "" : h >= 0 ? `${faNum(h, 0)} ساعت اداری مانده` : `${faNum(-h, 0)} ساعت اداری گذشته`;
 };
 </script>
 
@@ -27,6 +27,7 @@ const left = (iso: string) => {
   <div class="inv-page">
     <div class="inv-card">
       <div class="inv-toolbar"><h1 class="inv-title">بدهی مدارک مهندسی</h1></div>
+      <p class="small inv-muted" data-test="en-office-hint">مهلت‌ها به ساعت اداری است. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است.</p>
       <div class="inv-filters mb-3">
         <select v-model="filters.Status" class="form-select form-select-sm" aria-label="وضعیت">
           <option :value="null">همه وضعیت‌ها</option>

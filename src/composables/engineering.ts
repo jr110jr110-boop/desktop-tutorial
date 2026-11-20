@@ -146,6 +146,40 @@ export function hoursUntil(iso: string | null | undefined): number | null {
   return Number.isFinite(t) ? Math.round((t - Date.now()) / 3600000) : null;
 }
 
+/** Office hours between two instants (employer rule 14: 08:00-19:00 Iran time UTC+03:30, Saturday to Thursday; same math as the server OfficeClock.Between). */
+export function officeHoursBetween(fromMs: number, toMs: number): number {
+  if (toMs <= fromMs) return 0;
+  const OFF = 3.5 * 3600000, H = 3600000, DAY = 24 * H;
+  const isWork = (localMs: number) => new Date(localMs).getUTCDay() !== 5;   // Friday only is outside
+  const norm = (t: number): number => {
+    let day = Math.floor(t / DAY) * DAY;
+    if (isWork(day)) {
+      if (t < day + 8 * H) return day + 8 * H;
+      if (t < day + 19 * H) return t;
+    }
+    day += DAY;
+    while (!isWork(day)) day += DAY;
+    return day + 8 * H;
+  };
+  const b = toMs + OFF;
+  let t = norm(fromMs + OFF), total = 0;
+  while (t < b) {
+    const close = Math.floor(t / DAY) * DAY + 19 * H;
+    total += (Math.min(b, close) - t) / H;
+    t = norm(close);
+  }
+  return total;
+}
+
+/** Office hours from now to an ISO date-time (negative = past, rounded); null when there is no date. */
+export function officeHoursUntil(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const now = Date.now();
+  return Math.round(t >= now ? officeHoursBetween(now, t) : -officeHoursBetween(t, now));
+}
+
 /** Shamsi date and time of an ISO date-time. */
 export const stamp = (iso: string | null | undefined) => faDigits(jalali(iso, true));
 

@@ -8,7 +8,7 @@ import EnInfoList from "@/components/engineering/EnInfoList.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWaiverCard from "@/components/engineering/EnWaiverCard.vue";
 import { getEnGap, getEnHandover, getEnHandovers, postEnHandoverAction, requestEnWaiver } from "@/api/EngineeringAPIs";
-import { completeness, downloadDoc, enPaths, EnRoles, faDigits, faNum, handoverStatuses, hoursUntil, runEn, stamp, unitName, unitsText, useEnDialog } from "@/composables/engineering";
+import { completeness, downloadDoc, enPaths, EnRoles, faDigits, faNum, handoverStatuses, officeHoursUntil, runEn, stamp, unitName, unitsText, useEnDialog } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -59,10 +59,10 @@ const isLink = (p: string) => typeof p === "string" && p.startsWith("/");
 function waiverDialog() {
   d.ask({
     title: "درخواست مجوز اضطرار",
-    hint: "مدیرعامل تصمیم می‌گیرد. مدیرعامل فقط می‌تواند ساعت‌ها را کمتر کند.",
+    hint: "مدیرعامل تصمیم می‌گیرد. مدیرعامل فقط می‌تواند ساعت‌ها را کمتر کند. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است.",
     fields: [
       { key: "reason", label: "دلیل اضطرار", type: "textarea", required: true, min: 50, max: 2000 },
-      { key: "hours", label: "مهلت تأمین مدرک (ساعت)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت" },
+      { key: "hours", label: "مهلت تأمین مدرک (ساعت اداری)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت اداری" },
     ],
     run: (v) => requestEnWaiver({ handoverId: id.value, reason: v.reason, debtHours: v.hours }),
     okText: "درخواست مجوز اضطرار برای مدیرعامل ثبت شد.",
@@ -178,7 +178,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         <ul v-else class="small" data-test="en-debts">
           <li v-for="b in h.debts" :key="b.id" :class="b.overdue && b.status === 0 ? 'text-danger' : ''">
             {{ b.handoverLineId ? b.documentType + " — " + b.title : "تایید کامل بودن پرونده پلتفرم" }} — مهلت {{ stamp(b.dueAt) }} <EnChip :status="b.status" :text="b.statusText" group="debt" />
-            <span v-if="b.status === 0 && hoursUntil(b.dueAt) !== null"> ({{ (hoursUntil(b.dueAt) as number) >= 0 ? faNum(hoursUntil(b.dueAt), 0) + " ساعت مانده" : "گذشته از موعد" }})</span>
+            <span v-if="b.status === 0 && officeHoursUntil(b.dueAt) !== null"> ({{ (officeHoursUntil(b.dueAt) as number) >= 0 ? faNum(officeHoursUntil(b.dueAt), 0) + " ساعت اداری مانده" : "گذشته از موعد" }})</span>
             <router-link v-if="b.referenceCode && b.productId" class="ms-2" :to="enPaths.platform(b.productId, b.referenceCode)">پرونده استاندارد {{ b.referenceCode }}</router-link>
             <div v-if="b.status === 2 && b.voidReason" class="inv-muted">ابطال: {{ b.voidReason }}</div>
           </li>
