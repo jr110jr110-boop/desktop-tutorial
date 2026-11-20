@@ -107,13 +107,16 @@ async function classifyDialog(action: "propose" | "change" | "reclassify") {
 }
 const reasonDialog = (action: string, title: string, label: string, okText: string) =>
   dlg.ask({ title, fields: [{ key: "note", label, type: "textarea", required: true, min: 15, max: 2000 }], run: (v) => act(action, { note: v.note }), okText });
+const OTHER_STANDARD = "__OTHER_STANDARD__";   // the select option «another standard»: the code is typed (the server accepts any code for a case)
 async function standardDialog() {
   const standards = await loadStandardOptions(c.value.referenceCode);
   dlg.ask({
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
     hint: "استاندارد را کارفرما تعیین می‌کند؛ فایل دیتاشیت بارگذاری می‌شود و کد را از فهرست انتخاب می‌کنید. شاهد فقط اشاره‌ای کوتاه به همان فایل است (شماره سند و بند). ثبت دوباره با فایل دیگر، تغییر استاندارد حساب می‌شود و دلیل می‌خواهد.",
     fields: [
-      { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
+      { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: [...standards, { value: OTHER_STANDARD, text: "استاندارد دیگر (هنوز فهرست MDL تاییدشده ندارد)" }], value: c.value.referenceCode || "" },
+      { key: "customCode", label: "کد استاندارد طبق دیتاشیت", type: "text", required: true, max: 60, showWhen: { key: "code", value: OTHER_STANDARD } },
+      { key: "otherNotice", type: "notice", label: "", hint: "برای این استاندارد فهرست MDL تاییدشده‌ای نیست. ایجنت مهندسی پیش‌نویس فهرست را می‌سازد و گزارش تفاوت دو استاندارد لازم می‌شود؛ تا تایید فهرست، خطر مدارک برای این پرونده باز می‌ماند.", showWhen: { key: "code", value: OTHER_STANDARD } },
       { key: "evidence", label: "اشاره به فایل (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "file", label: "فایل دیتاشیت کارفرما", type: "file" as const, required: true },
       ...(c.value.referenceCode ? [{ key: "note", label: "دلیل تغییر استاندارد", type: "textarea" as const, required: true, min: 15, max: 1000 }] : []),
@@ -125,7 +128,7 @@ async function standardDialog() {
         if (fe) return [null, fe];
         att = fid;
       }
-      return act("set-standard", { referenceCode: v.code, standardEvidence: v.evidence, standardAttachmentId: att, note: v.note });
+      return act("set-standard", { referenceCode: v.code === OTHER_STANDARD ? String(v.customCode || "").trim() : v.code, standardEvidence: v.evidence, standardAttachmentId: att, note: v.note });
     },
     okText: "استاندارد از دیتاشیت ثبت شد.",
   });

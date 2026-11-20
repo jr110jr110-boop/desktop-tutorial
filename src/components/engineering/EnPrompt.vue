@@ -8,7 +8,7 @@ import { faNum, hourOptions, joinDue, splitDue } from "@/composables/engineering
 export interface EnField {
   key: string;
   label: string;
-  type?: "text" | "textarea" | "datetime" | "multi" | "select" | "number" | "file";
+  type?: "text" | "textarea" | "datetime" | "multi" | "select" | "number" | "file" | "notice";
   required?: boolean;
   min?: number;
   max?: number;
@@ -18,6 +18,8 @@ export interface EnField {
   hi?: number;
   hint?: string;
   options?: { value: any; text: string }[];
+  /** The field is shown (and checked) only while another field of the dialog has this value. A "notice" field shows its `hint` as a warning box. */
+  showWhen?: { key: string; value: any };
 }
 
 const props = defineProps<{ title: string; fields: EnField[]; confirmText?: string; hint?: string; error?: string | null; busy?: boolean }>();
@@ -28,11 +30,14 @@ const parts = ref<Record<string, { date: string | null; hour: number }>>(
   Object.fromEntries(props.fields.filter((f) => f.type === "datetime").map((f) => [f.key, splitDue(f.value || null)]))
 );
 const local = ref("");
+const visible = (f: EnField) => !f.showWhen || values.value[f.showWhen.key] === f.showWhen.value;
 
 function go() {
   local.value = "";
   const out: Record<string, any> = { ...values.value };
   for (const f of props.fields) {
+    if (f.type === "notice") { delete out[f.key]; continue; }
+    if (!visible(f)) { delete out[f.key]; continue; }
     if (f.type === "datetime") {
       const p = parts.value[f.key];
       const iso = joinDue(p?.date, p?.hour);
@@ -68,7 +73,9 @@ function go() {
     <div class="inv-modal" role="dialog" :aria-label="title">
       <h2 class="inv-title mb-2">{{ title }}</h2>
       <p v-if="hint" class="inv-muted">{{ hint }}</p>
-      <div v-for="f in fields" :key="f.key" class="mb-2">
+      <template v-for="f in fields" :key="f.key">
+      <div v-if="visible(f) && f.type === 'notice'" class="en-banner amber mb-2" role="note" data-test="en-notice">{{ f.hint }}</div>
+      <div v-else-if="visible(f)" class="mb-2">
         <label class="form-label small mb-0">{{ f.label }}<span v-if="f.required"> *</span></label>
         <textarea v-if="f.type === 'textarea'" v-model="values[f.key]" :maxlength="f.max" class="form-control form-control-sm" rows="3"></textarea>
         <input v-else-if="f.type === 'file'" class="form-control form-control-sm" type="file" @change="values[f.key] = ($event.target as HTMLInputElement).files?.[0] || null" />
@@ -91,6 +98,7 @@ function go() {
         </div>
         <div v-if="f.hint" class="inv-muted">{{ f.hint }}</div>
       </div>
+      </template>
       <div v-if="local || error" class="alert alert-danger py-2 small" style="white-space: pre-line" role="alert" data-test="en-dialog-error">{{ local || error }}</div>
       <div class="d-flex gap-2 justify-content-end mt-3">
         <button class="btn btn-sm btn-outline-secondary" type="button" @click="emit('cancel')">انصراف</button>
