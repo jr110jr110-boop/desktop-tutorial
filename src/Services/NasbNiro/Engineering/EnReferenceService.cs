@@ -36,7 +36,7 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The one check of "the standard is chosen, not typed" (platform native standard, registration): the code must be the Code of a list that is Approved right now; null when it is.</summary>
         public static async Task<string> ApprovedCodeProblemAsync(IUnitOfWork uow, string code, CancellationToken ct) =>
             !string.IsNullOrEmpty(code) && await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code, ct) ? null
-            : "استاندارد «" + code + "» فهرست مدارک مرجع تاییدشده ندارد؛ استاندارد را از فهرست استانداردهای تاییدشده انتخاب کنید (در صورت نبود، ابتدا فهرست آن ساخته و تایید شود).";
+            : "استاندارد «" + code + "» فهرست MDL تاییدشده ندارد؛ استاندارد را از فهرست استانداردهای تاییدشده انتخاب کنید (در صورت نبود، ابتدا فهرست آن ساخته و تایید شود).";
 
         /// <summary>The Codes (standard bases, e.g. API 611 and API 612) that have an approved list right now; one approved list per Code.</summary>
         public static Task<List<string>> ApprovedCodesAsync(IUnitOfWork uow, CancellationToken ct) =>
@@ -177,7 +177,7 @@ namespace Services.NasbNiro.Engineering
                 if (codes.Count == 1) code = codes[0];
             }
             EnReferenceList l = await EnReferenceRules.CurrentAsync(_uow, false, ct, code);
-            if (l == null) return EnText.NotFound<EnReferenceListDto>("فهرست مدارک مرجع تاییدشده‌ای وجود ندارد؛ ابتدا فهرست را تهیه و تایید کنید.");
+            if (l == null) return EnText.NotFound<EnReferenceListDto>("فهرست MDL تاییدشده‌ای وجود ندارد؛ ابتدا فهرست را تهیه و تایید کنید.");
             return ResponseDtoHelper.Ok((await DtosAsync(new List<EnReferenceList> { l }, true, ct))[0]);
         }
 
@@ -354,7 +354,7 @@ namespace Services.NasbNiro.Engineering
                             EnDeviation dev = new EnDeviation
                             {
                                 Kind = EnDeviationKind.ReferenceLoosening, TargetType = EnDeviations.ListType, TargetId = row.Id, StandardCode = row.Code, Requirement = EnText.Cut(string.Join("، ", loosened), 300),
-                                Instruction = EnText.Cut("بازنگری " + EnText.Num(row.Revision) + " فهرست مرجع " + row.Code + " نسبت به بازنگری تاییدشدهٔ " + EnText.Num(previous.Revision) + " این بندها را سبک می‌کند: " + string.Join("، ", loosened) + (EnText.Clean(row.Note) == null ? string.Empty : ". " + row.Note), 2000),
+                                Instruction = EnText.Cut("بازنگری " + EnText.Num(row.Revision) + " فهرست MDL " + row.Code + " نسبت به بازنگری تاییدشدهٔ " + EnText.Num(previous.Revision) + " این بندها را سبک می‌کند: " + string.Join("، ", loosened) + (EnText.Clean(row.Note) == null ? string.Empty : ". " + row.Note), 2000),
                                 RequestedByUserId = Me, RequestedAt = now, Status = EnDeviationStatus.Requested, ContentHash = EnDeviations.ListHash(row), CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
                             };
                             dev.Number = await EnNumbers.NextAsync(_uow, EnNumbers.Deviation, "EDV", now.DateTime, ct);

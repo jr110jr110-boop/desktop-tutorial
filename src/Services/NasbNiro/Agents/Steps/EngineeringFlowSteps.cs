@@ -89,7 +89,7 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnRefDraftStep : EnStep
     {
         public override string Code => "ENG.REF.DRAFT";
-        public override string Title => "ایجنت مهندسی: پیش‌نویس فهرست مدارک مرجع از الگوی MDR";
+        public override string Title => "ایجنت مهندسی: پیش‌نویس فهرست مدارک مرجع (MDL) از الگوی MDR";
         public override AgentStepKind Kind => AgentStepKind.Agent;
         public override string FallbackRoles => EnRoles.Writers;
 
@@ -101,11 +101,11 @@ namespace Services.NasbNiro.Agents.Steps
             if (!any)
             {
                 var t = await uow.Set<PcMdrTemplate>().AsNoTracking().Where(x => !x.Deleted && x.IsActive && x.Lines.Any()).OrderBy(x => x.Id).Select(x => new { x.Id, x.Code, x.Title }).FirstOrDefaultAsync(ct);
-                if (t != null) items.Add(Item("PcMdrTemplate", t.Id, t.Code, null, null, "فهرست مدارک مرجع وجود ندارد؛ الگوی MDR «" + t.Title + "» آمادهٔ تبدیل به پیش‌نویس است."));
+                if (t != null) items.Add(Item("PcMdrTemplate", t.Id, t.Code, null, null, "فهرست MDL وجود ندارد؛ الگوی MDR «" + t.Title + "» آمادهٔ تبدیل به پیش‌نویس است."));
             }
             // a case under a standard that has no list in any status: the standard-gap report cannot compare; the agent drafts that list as a copy of the platform's base list for the engineers to adapt
             foreach (var (c, p) in await EnGaps.TargetListMissingAsync(uow, ProcStepCommon.Cap, ct))
-                items.Add(Item("EnCase", c.Id, c.Number, null, null, "فهرست مدارک مرجع استاندارد " + c.ReferenceCode + " در هیچ وضعیتی وجود ندارد؛ پیش‌نویس آن از فهرست استاندارد " + p.BaseCode + " ساخته می‌شود."));
+                items.Add(Item("EnCase", c.Id, c.Number, null, null, "فهرست MDL استاندارد " + c.ReferenceCode + " در هیچ وضعیتی وجود ندارد؛ پیش‌نویس آن از فهرست استاندارد " + p.BaseCode + " ساخته می‌شود."));
             return items.Take(ProcStepCommon.Cap).ToList();
         }
 
@@ -117,13 +117,13 @@ namespace Services.NasbNiro.Agents.Steps
             if (t == null || t.Lines.Count == 0) return AgentStepResult.Waiting("الگوی MDR پیدا نشد یا ردیفی ندارد.");
             EnSaveReferenceDto dto = new EnSaveReferenceDto
             {
-                Code = EnText2.Cut("VDDR-" + t.Code, 60), Title = EnText2.Cut("فهرست مدارک مرجع — " + t.Title, 300), StandardSource = EnText2.Cut(t.StandardSource, 200),
+                Code = EnText2.Cut("VDDR-" + t.Code, 60), Title = EnText2.Cut("فهرست مدارک مرجع (MDL) — " + t.Title, 300), StandardSource = EnText2.Cut(t.StandardSource, 200),
                 Note = "پیش‌نویس خودکار از الگوی MDR؛ مدارک لازم در مرحلهٔ مناقصه را مهندسی علامت بزند.",
                 Lines = t.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, ClientSubmittal = l.ClientSubmittal, StandardClause = EnText2.Cut(l.StandardSource, 300) }).ToList(),
             };
             ResponseDto<EnReferenceListDto> response = await services.GetRequiredService<IEnReferenceService>().SaveListAsync(dto, ct);
             if (!response.Success) return ProcStepCommon.Refusal(response);
-            return AgentStepResult.Done("EnReferenceList", response.Data.Id, response.Data.Code, $"ایجنت مهندسی پیش‌نویس فهرست مدارک مرجع ({response.Data.LineCount} ردیف) را از الگوی MDR ساخت؛ مهندسی آن را بررسی و ارسال می‌کند.");
+            return AgentStepResult.Done("EnReferenceList", response.Data.Id, response.Data.Code, $"ایجنت مهندسی پیش‌نویس فهرست MDL ({response.Data.LineCount} ردیف) را از الگوی MDR ساخت؛ مهندسی آن را بررسی و ارسال می‌کند.");
         }
 
         private static async Task<AgentStepResult> DraftForGapAsync(AgentWorkItem item, IUnitOfWork uow, IServiceProvider services, CancellationToken ct)
@@ -136,7 +136,7 @@ namespace Services.NasbNiro.Agents.Steps
             if (baseList == null) return AgentStepResult.Waiting("فهرست تاییدشدهٔ استاندارد پایه پیدا نشد.");
             EnSaveReferenceDto dto = new EnSaveReferenceDto
             {
-                Code = EnText2.Cut(c.ReferenceCode, 60), Title = EnText2.Cut("فهرست مدارک مرجع — " + c.ReferenceCode, 300), StandardSource = EnText2.Cut(baseList.StandardSource, 200),
+                Code = EnText2.Cut(c.ReferenceCode, 60), Title = EnText2.Cut("فهرست مدارک مرجع (MDL) — " + c.ReferenceCode, 300), StandardSource = EnText2.Cut(baseList.StandardSource, 200),
                 Note = EnText2.Cut("نسخهٔ بررسی‌نشده از " + p.BaseCode + " که باید با متن استاندارد " + c.ReferenceCode + " تطبیق داده شود.", 1000),
                 Lines = baseList.Lines.OrderBy(l => l.Seq).Select(l => new EnReferenceLineDto { DocumentType = l.DocumentType, Discipline = l.Discipline, Title = l.Title, Required = l.Required, TenderStage = l.TenderStage, ClientSubmittal = l.ClientSubmittal, StandardClause = l.StandardClause, Note = l.Note, Units = l.Units }).ToList(),
             };
@@ -145,14 +145,14 @@ namespace Services.NasbNiro.Agents.Steps
             return AgentStepResult.Done("EnReferenceList", response.Data.Id, response.Data.Code, $"ایجنت مهندسی پیش‌نویس فهرست استاندارد {response.Data.Code} را (کپی بررسی‌نشدهٔ {p.BaseCode}) ساخت تا مهندسی آن را با متن استاندارد تطبیق دهد.");
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/reference", Title = "تهیهٔ فهرست مدارک مرجع" };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/reference", Title = "تهیهٔ فهرست مدارک مرجع (MDL)" };
     }
 
     /// <summary>ENG.REF.INPUT (Input): a draft list that nobody has sent for approval (the engineers correct it, mark the tender stage documents and send it).</summary>
     internal sealed class EnRefInputStep : EnStep
     {
         public override string Code => "ENG.REF.INPUT";
-        public override string Title => "بازبینی و ارسال فهرست مدارک مرجع (محتوای مهندسی)";
+        public override string Title => "بازبینی و ارسال فهرست مدارک مرجع (MDL) (محتوای مهندسی)";
         public override AgentStepKind Kind => AgentStepKind.Input;
         public override string FallbackRoles => EnRoles.Writers;
 
@@ -160,17 +160,17 @@ namespace Services.NasbNiro.Agents.Steps
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Draft).OrderBy(l => l.Id).Take(ProcStepCommon.Cap).Select(l => new { l.Id, l.Code, l.Revision, Lines = l.Lines.Count }).ToListAsync(ct);
-            return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست مدارک مرجع {r.Code} (بازنگری {r.Revision}، {r.Lines} ردیف) پیش‌نویس است و برای تایید ارسال نشده است.")).ToList();
+            return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست MDL {r.Code} (بازنگری {r.Revision}، {r.Lines} ردیف) پیش‌نویس است و برای تایید ارسال نشده است.")).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/reference/" + Id(item.TargetId), Title = "بازبینی و ارسال فهرست مدارک مرجع " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/reference/" + Id(item.TargetId), Title = "بازبینی و ارسال فهرست مدارک مرجع (MDL) " + item.TargetNumber };
     }
 
     /// <summary>ENG.REF.APPROVE (HumanGate): the engineering manager or the CEO, who did not touch the list, approves it.</summary>
     internal sealed class EnRefApproveStep : EnStep
     {
         public override string Code => "ENG.REF.APPROVE";
-        public override string Title => "تایید فهرست مدارک مرجع";
+        public override string Title => "تایید فهرست مدارک مرجع (MDL)";
         public override AgentStepKind Kind => AgentStepKind.HumanGate;
         public override string FallbackRoles => null;
 
@@ -178,10 +178,10 @@ namespace Services.NasbNiro.Agents.Steps
         {
             if (!await EnControl.ActiveAsync(uow, ct)) return new List<AgentWorkItem>();   // the engineering control has not started (or starts later): nothing to do yet
             var rows = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.UnderReview).OrderBy(l => l.Id).Take(ProcStepCommon.Cap).Select(l => new { l.Id, l.Code, l.Revision }).ToListAsync(ct);
-            return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست مدارک مرجع {r.Code} (بازنگری {r.Revision}) منتظر تایید است.", EnRoles.RefApprovers)).ToList();
+            return rows.Select(r => Item("EnReferenceList", r.Id, r.Code, null, null, $"فهرست MDL {r.Code} (بازنگری {r.Revision}) منتظر تایید است.", EnRoles.RefApprovers)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.RefApprovers, Link = Root + "/reference/" + Id(item.TargetId), Title = "تایید فهرست مدارک مرجع " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.RefApprovers, Link = Root + "/reference/" + Id(item.TargetId), Title = "تایید فهرست مدارک مرجع (MDL) " + item.TargetNumber };
     }
 
     // ------------------------------------------------------------------------------------------ the platform dossiers
@@ -200,7 +200,7 @@ namespace Services.NasbNiro.Agents.Steps
     internal sealed class EnPlatformAssessStep : EnStep
     {
         public override string Code => "ENG.PLATFORM.ASSESS";
-        public override string Title => "ایجنت مهندسی: ارزیابی مدارک پلتفرم نسبت به فهرست مرجع";
+        public override string Title => "ایجنت مهندسی: ارزیابی مدارک پلتفرم نسبت به فهرست MDL";
         public override AgentStepKind Kind => AgentStepKind.Agent;
         public override string FallbackRoles => EnRoles.Writers;
 
@@ -212,7 +212,7 @@ namespace Services.NasbNiro.Agents.Steps
             var rows = await uow.Set<EnPlatformDossier>().AsNoTracking().Where(d => !d.Deleted && uow.Set<PbProduct>().Any(p => p.Id == d.ProductId && p.IsActive && !p.Deleted)
                     && uow.Set<EnReferenceList>().Any(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == d.ReferenceCode && l.Id != d.ReferenceListId))
                 .OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.ProductId, d.ReferenceCode, Code = uow.Set<PbProduct>().Where(p => p.Id == d.ProductId).Select(p => p.Code).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code + "/" + r.ReferenceCode, null, null, $"پرونده مدارک پلتفرم {r.Code} برای استاندارد {r.ReferenceCode} نسبت به فهرست مرجع جاری ارزیابی نشده است.")).ToList();
+            return rows.Select(r => Item("EnPlatformDossier", r.Id, r.Code + "/" + r.ReferenceCode, null, null, $"پرونده مدارک پلتفرم {r.Code} برای استاندارد {r.ReferenceCode} نسبت به فهرست MDL جاری ارزیابی نشده است.")).ToList();
         }
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)

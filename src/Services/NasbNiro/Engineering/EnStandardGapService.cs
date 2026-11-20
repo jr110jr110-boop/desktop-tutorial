@@ -103,7 +103,7 @@ namespace Services.NasbNiro.Engineering
             {
                 if (!PreApproval(c.Status)) continue;
                 old.Status = EnGapStatus.Void; old.ModifyDate = now; old.ModifierUserId = me; lives.Remove(old);
-                message = "گزارش " + old.Number + " باطل شد (استاندارد یا فهرست مرجع تغییر کرده است).";
+                message = "گزارش " + old.Number + " باطل شد (استاندارد یا فهرست MDL تغییر کرده است).";
             }
             await uow.SaveChangesAsync(ct);
             foreach (EnStandardGap v in await uow.Set<EnStandardGap>().AsNoTracking().Where(g => !g.Deleted && g.CaseId == c.Id && g.Status == EnGapStatus.Void).ToListAsync(ct)) await SyncAsync(notify, v, ct);
@@ -249,7 +249,7 @@ namespace Services.NasbNiro.Engineering
             if (why != null) return EnText.Bad<EnGapDto>(why);
             EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(x => x.Id == g.CaseId, ct);
             EnGaps.Plan plan = c == null ? new EnGaps.Plan() : await EnGaps.PlanOfAsync(_uow, c, ct);
-            if (c == null || !plan.Needed || !EnGaps.Same(g, plan, c.ReferenceCode)) return EnText.Bad<EnGapDto>("گزارش کهنه شده است (استاندارد یا فهرست مرجع تغییر کرده)؛ ایجنت مهندسی گزارش تازه می‌سازد.");
+            if (c == null || !plan.Needed || !EnGaps.Same(g, plan, c.ReferenceCode)) return EnText.Bad<EnGapDto>("گزارش کهنه شده است (استاندارد یا فهرست MDL تغییر کرده)؛ ایجنت مهندسی گزارش تازه می‌سازد.");
             DateTimeOffset now = DateTimeOffset.Now;
             g.EngineeringImpactNote = note; g.Status = EnGapStatus.Confirmed; g.ConfirmedByUserId = Me; g.ConfirmedAt = now; g.ContentHash = EnGaps.GapHash(g, g.Lines, note); g.ModifyDate = now; g.ModifierUserId = Me;
             EnEvents.Add(_uow, c, "standard-gap-confirmed", Me, g.Number);

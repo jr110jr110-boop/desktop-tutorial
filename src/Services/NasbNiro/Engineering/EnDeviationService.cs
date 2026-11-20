@@ -117,7 +117,7 @@ namespace Services.NasbNiro.Engineering
                 string why = DecideReason(d, manager, ceo, seat, Me, toucher);
                 result.Add(new EnDeviationDto
                 {
-                    Id = d.Id, Number = d.Number, Kind = (int)d.Kind, KindText = d.Kind == EnDeviationKind.NotApplicable ? "غیرقابل‌اجرا اعلام‌کردن بند الزامی" : d.Kind == EnDeviationKind.ReferenceLoosening ? "حذف یا سبک‌کردن بند الزامی در بازنگری فهرست مرجع" : "مجوز اضطرار",
+                    Id = d.Id, Number = d.Number, Kind = (int)d.Kind, KindText = d.Kind == EnDeviationKind.NotApplicable ? "غیرقابل‌اجرا اعلام‌کردن بند الزامی" : d.Kind == EnDeviationKind.ReferenceLoosening ? "حذف یا سبک‌کردن بند الزامی در بازنگری فهرست MDL" : "مجوز اضطرار",
                     TargetType = d.TargetType, TargetId = d.TargetId, CaseId = d.CaseId, CaseNumber = d.CaseId.HasValue && cases.TryGetValue(d.CaseId.Value, out string cn) ? cn : null, ProductId = d.ProductId, ProductCode = d.ProductId.HasValue && products.TryGetValue(d.ProductId.Value, out string pc) ? pc : null,
                     StandardCode = d.StandardCode, StandardClause = d.StandardClause, Requirement = d.Requirement, Instruction = d.Instruction, RequestedByName = names.Name(d.RequestedByUserId), RequestedAtText = EnText.Stamp(d.RequestedAt),
                     ManagerApprovedByName = names.Name(d.ManagerApprovedByUserId), ManagerApprovedAtText = EnText.Stamp(d.ManagerApprovedAt), CeoApprovedByName = names.Name(d.CeoApprovedByUserId), CeoApprovedAtText = EnText.Stamp(d.CeoApprovedAt),

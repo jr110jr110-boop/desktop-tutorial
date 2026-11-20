@@ -142,7 +142,7 @@ namespace MsTests
             int product = Product(host);
             Guid ds = File(host, 2111);
             Func<string, Task<Common.Results.ResponseDto<EnDossierDto>>> record = code => host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت اصلی، بند ۴" }, Ct));
-            Refused(await record("NOLIST-1"), "فهرست مدارک مرجع تاییدشده");
+            Refused(await record("NOLIST-1"), "فهرست MDL تاییدشده");
             await ApprovedList(host, "NOLIST-1", ("PID", true, true));
             Assert.AreEqual("NOLIST-1", Ok(await record("nolist-1")).ReferenceCode);
             // the client standard of a case is what the client wrote: a code without a list is recorded (the gap report exists for it)

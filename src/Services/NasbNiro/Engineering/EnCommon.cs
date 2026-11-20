@@ -122,7 +122,7 @@ namespace Services.NasbNiro.Engineering
         public const string AiNever = "این کار با انسان است؛ صندلی هوش مصنوعی آن را انجام نمی‌دهد.";
         public const string NotFoundCase = "پرونده مهندسی پیدا نشد.";
         public const string NotFoundHandover = "تحویل مدارک پیدا نشد.";
-        public const string NotFoundList = "فهرست مدارک مرجع پیدا نشد.";
+        public const string NotFoundList = "فهرست MDL پیدا نشد.";
         public const string NotFoundDossier = "پرونده مدارک پلتفرم پیدا نشد.";
 
         public static string Clean(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

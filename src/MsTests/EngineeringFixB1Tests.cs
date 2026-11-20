@@ -72,7 +72,7 @@ namespace MsTests
             EnCaseDto risky = await ApprovedCase(host, Inquiry(host, number: "INQ-B1-B"), false, code: "RISK-NONE");
             Assert.IsNull(Ok(await GetCase(host, Eng1, ok.Id)).DocumentRisk);
             EnCaseDto r = Ok(await GetCase(host, Eng1, risky.Id));
-            StringAssert.Contains(r.DocumentRisk, "فهرست مدارک مرجع تاییدشده");
+            StringAssert.Contains(r.DocumentRisk, "فهرست MDL تاییدشده");
             Assert.IsFalse(r.DocumentRiskAwarded);                                        // not awarded yet: the CEO is not told
             var page = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetCasesAsync(new EnCaseQuery(), Ct)));
             Assert.IsNull(page.Single(x => x.Id == ok.Id).DocumentRisk);
@@ -97,7 +97,7 @@ namespace MsTests
             Assert.IsFalse(Ok(await GetCase(host, Eng1, newCase)).CanProposeRegistration);
             Assert.IsFalse(Ok(await GetCase(host, Ceo, newCase)).CanProposeRegistration);
             Assert.IsFalse(Ok(await GetCase(host, await SeatAsync(host), newCase)).CanProposeRegistration);
-            Refused(await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-B1", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct)), "فهرست مدارک مرجع تاییدشده");   // M3: the standard is chosen from the approved lists
+            Refused(await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-B1", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct)), "فهرست MDL تاییدشده");   // M3: the standard is chosen from the approved lists
             await ApprovedList(host, "REG-B1", ("PID", true, true));
             var propose = await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-B1", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct));
             Ok(propose);

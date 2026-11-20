@@ -63,7 +63,7 @@ namespace Services.NasbNiro.Agents.Steps
         }
 
         public override Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct) =>
-            CallAsync(services, new EnHandoverActionDto { Action = "draft", CaseId = item.TargetId }, "ایجنت مهندسی پیش‌نویس تحویل مدارک {n} را از فهرست مرجع و منابع ساخت.", ct);
+            CallAsync(services, new EnHandoverActionDto { Action = "draft", CaseId = item.TargetId }, "ایجنت مهندسی پیش‌نویس تحویل مدارک {n} را از فهرست MDL و منابع ساخت.", ct);
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/cases/" + Id(item.TargetId), Title = "پیش‌نویس تحویل مدارک پروندهٔ " + item.TargetNumber };
     }

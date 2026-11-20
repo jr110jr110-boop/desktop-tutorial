@@ -148,7 +148,7 @@ namespace Services.NasbNiro.Engineering
         }
 
         private static string AssessReason(bool writer, bool hasReference) =>
-            !writer ? EnText.NotAllowed : !hasReference ? "فهرست مدارک مرجع تاییدشده‌ای وجود ندارد؛ ابتدا فهرست مرجع تایید شود." : null;
+            !writer ? EnText.NotAllowed : !hasReference ? "فهرست MDL تاییدشده‌ای وجود ندارد؛ ابتدا فهرست MDL تایید شود." : null;
 
         private static string CompleteReason(EnPlatformDossier d, bool writer, bool seat) =>
             !writer ? EnText.NotAllowed : seat ? EnText.AiNever : d.Status == EnDossierStatus.NotAssessed ? "ابتدا ارزیابی انجام شود."
@@ -355,7 +355,7 @@ namespace Services.NasbNiro.Engineering
                 problem = ConfirmReason(d, approver, seat, Me);
                 if (problem != null) return EnText.Bad<EnDossierDto>(problem);
                 EnReferenceList current = await EnReferenceRules.CurrentAsync(_uow, false, ct, d.ReferenceCode);
-                if (current == null || d.ReferenceListId != current.Id) return EnText.Bad<EnDossierDto>("فهرست مرجع تغییر کرده است؛ ابتدا ارزیابی دوباره انجام شود.");
+                if (current == null || d.ReferenceListId != current.Id) return EnText.Bad<EnDossierDto>("فهرست MDL تغییر کرده است؛ ابتدا ارزیابی دوباره انجام شود.");
                 d.Status = EnDossierStatus.Complete; d.ConfirmedByUserId = Me; d.ConfirmedAt = now; d.ConfirmedHash = EnPlatformRules.Hash(d.ProductId, d.ReferenceRevision, d.Documents);
             }
             else

@@ -42,7 +42,7 @@ namespace Services.NasbNiro.Engineering
     internal sealed class EnDossierWording
     {
         /// <summary>The CEO alert hint: the risk is any of the reasons of <see cref="EnRisk"/>, not only missing documents.</summary>
-        public const string CeoAlertHint = "(مدارک، تایید پرونده یا فهرست مرجع ناقص است)";
+        public const string CeoAlertHint = "(مدارک، تایید پرونده یا فهرست MDL ناقص است)";
 
         public EnDossierWord Word { get; private set; }
         public int Missing { get; private set; }
@@ -78,7 +78,7 @@ namespace Services.NasbNiro.Engineering
                 case EnDossierWord.NotAssessed: return "پروندهٔ مدارک پلتفرم برای " + std + " هنوز ارزیابی نشده است";
                 case EnDossierWord.IncompleteNoMissing: return "مدارک الزامی پلتفرم برای " + std + " موجود است ولی پرونده هنوز کامل اعلام نشده است (کامل‌شدن باید اعلام شود)";
                 case EnDossierWord.AwaitingConfirmation: return "مدارک الزامی پلتفرم برای " + std + " موجود است و فقط تایید کامل‌بودن پرونده توسط مدیر مهندسی مانده است";
-                case EnDossierWord.StaleConfirmation: return "تایید پروندهٔ مدارک پلتفرم برای " + std + " دیگر معتبر نیست (فهرست مرجع یا مدارک تغییر کرده)؛ ارزیابی دوباره و تایید مدیر مهندسی لازم است";
+                case EnDossierWord.StaleConfirmation: return "تایید پروندهٔ مدارک پلتفرم برای " + std + " دیگر معتبر نیست (فهرست MDL یا مدارک تغییر کرده)؛ ارزیابی دوباره و تایید مدیر مهندسی لازم است";
                 default: return "مدارک پلتفرم برای " + std + " کامل و تایید نشده است";
             }
         }
@@ -190,7 +190,7 @@ namespace Services.NasbNiro.Engineering
                     int draft = await uow.Set<EnHandoverLine>().AsNoTracking().CountAsync(l => l.Handover.CaseId == c.Id && !l.Handover.Deleted && l.Handover.Status == EnHandoverStatus.Draft && l.Required && l.State == EnLineState.Missing, ct);
                     if (draft > 0) { row.Reasons.Add("تحویل مدارک پیش‌نویس مدرک الزامی کم دارد"); missing = Math.Max(missing, draft); }
                 }
-                if (!string.IsNullOrWhiteSpace(c.ReferenceCode) && !approved.Contains(c.ReferenceCode)) row.Reasons.Add("برای استاندارد " + c.ReferenceCode + " فهرست مدارک مرجع تاییدشده‌ای نیست");
+                if (!string.IsNullOrWhiteSpace(c.ReferenceCode) && !approved.Contains(c.ReferenceCode)) row.Reasons.Add("برای استاندارد " + c.ReferenceCode + " فهرست MDL تاییدشده‌ای نیست");
                 if (row.Reasons.Count == 0) continue;
                 row.Missing = missing;
                 if (c.ContractId.HasValue && delivery.TryGetValue(c.ContractId.Value, out DateTime? due) && due.HasValue) row.DaysLeft = (int)Math.Floor((due.Value.Date - DateTime.Today).TotalDays);

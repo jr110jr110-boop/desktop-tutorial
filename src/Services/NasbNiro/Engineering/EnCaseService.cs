@@ -381,7 +381,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     why = ConfirmReason(c, w);
                     string list = EnDossierBuilder.NormCode(dto.HandoverListCode);
-                    if (why == null && list != null) why = EnText.Over(list, 60, "کد فهرست مدارک") ?? (await EnReferenceRules.CurrentAsync(_uow, false, ct, list) == null ? "فهرست مدارک مرجع تاییدشده‌ای با این کد وجود ندارد." : null);
+                    if (why == null && list != null) why = EnText.Over(list, 60, "کد فهرست مدارک") ?? (await EnReferenceRules.CurrentAsync(_uow, false, ct, list) == null ? "فهرست MDL تاییدشده‌ای با این کد وجود ندارد." : null);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.HandoverListCode = list; c.Classification = EnClassification.None; c.ProductId = c.ProposedProductId; c.PlatformWithChanges = false; c.ChangeNote = null;
                     c.ClassificationHash = EnCaseRules.ClassHash(c); c.EngConfirmedByUserId = Me; c.EngConfirmedAt = now; c.ReturnReason = null;

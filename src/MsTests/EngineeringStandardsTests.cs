@@ -61,7 +61,7 @@ namespace MsTests
             Assert.AreEqual(AgentStepOutcome.Done, (await Run(host, seat, "ENG.PLATFORM.ASSESS", item)).Outcome);
             d = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().GetDossierAsync(product, "API-611", Ct)));
             Assert.AreEqual(2, d.Lines.Count, "the lines of the Approved list of its own standard only");
-            Refused(await Native(host, Eng1, product, "ANY-CODE-1", "دیتاشیت پروژهٔ دوم"), "فهرست مدارک مرجع تاییدشده");   // chosen from the approved lists, not typed
+            Refused(await Native(host, Eng1, product, "ANY-CODE-1", "دیتاشیت پروژهٔ دوم"), "فهرست MDL تاییدشده");   // chosen from the approved lists, not typed
             await ApprovedList(host, "ANY-CODE-1", ("PID", true, true));
             Ok(await Native(host, Eng1, product, "ANY-CODE-1", "دیتاشیت پروژهٔ دوم"));
             Assert.AreEqual(2, host.Read(u => u.Set<EnPlatformDossier>().Count(x => x.ProductId == product)));
