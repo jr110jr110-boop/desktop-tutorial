@@ -256,7 +256,7 @@ onBeforeUnmount(() => stop && stop());
               <tr><td class="ag-station-head" colspan="7">{{ fa(g.station) }}. {{ g.title }}</td></tr>
               <tr v-for="s in g.steps" :key="s.code">
                 <td class="inv-ltr d-none d-md-table-cell">{{ s.code }}</td>
-                <td>{{ s.title }}<div class="inv-ltr small inv-muted d-md-none">{{ s.code }}</div></td>
+                <td>{{ s.title }}<div class="inv-ltr small inv-muted d-md-none">{{ s.code }}</div><div v-if="s.officeDeadlineHours > 0" class="small inv-muted" data-test="ag-office-rule">مهلت کار انسان: {{ fa(s.officeDeadlineHours) }} ساعت اداری (قاعدهٔ ثابت)</div></td>
                 <td>{{ stepKinds[s.kind] }}</td>
                 <td class="d-none d-md-table-cell">{{ agentTitleOf(s.agentCode) }}</td>
                 <td>
