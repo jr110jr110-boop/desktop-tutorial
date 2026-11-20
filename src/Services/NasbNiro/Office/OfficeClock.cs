@@ -15,6 +15,8 @@ namespace Services.NasbNiro.Office
         public const int OpenHour = 8;
         public const int CloseHour = 19;
         public const int HoursPerDay = CloseHour - OpenHour;
+        public const int HoursPerWeek = HoursPerDay * 6;   // Saturday to Thursday
+        public const int MaxHours = 100000;
 
         /// <summary>Iran time is a fixed UTC+03:30 (daylight saving was abolished); a constant on purpose, so the math never depends on the server time zone.</summary>
         public static readonly TimeSpan IranOffset = new TimeSpan(3, 30, 0);
@@ -41,8 +43,12 @@ namespace Services.NasbNiro.Office
         public static DateTimeOffset Add(DateTimeOffset start, int officeHours)
         {
             if (officeHours <= 0) return start;
+            if (officeHours > MaxHours) throw new ArgumentOutOfRangeException(nameof(officeHours), "Office hours above " + MaxHours + " are refused.");
             DateTime t = Normalize(ToLocal(start));
-            double left = officeHours;
+            // a whole week from an office instant holds exactly 66 office hours: jump whole weeks first (keep at least 1 hour for the day loop, so a result exactly at closing time stays on that day)
+            int weeks = (officeHours - 1) / HoursPerWeek;
+            t = t.AddDays(7 * weeks);
+            double left = officeHours - weeks * HoursPerWeek;
             while (true)
             {
                 DateTime close = t.Date.AddHours(CloseHour);

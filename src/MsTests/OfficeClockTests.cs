@@ -77,5 +77,38 @@ namespace MsTests
             Assert.AreEqual(0, OfficeClock.Between(At(21, 10), At(21, 9)));
             Assert.AreEqual(0, OfficeClock.Between(At(27, 9), At(27, 15)), "Friday only");
         }
+
+        [TestMethod]
+        public void Exact_Boundaries_Of_The_Day_And_The_Week()
+        {
+            Assert.AreEqual(At(22, 9), OfficeClock.Add(At(21, 19), 1), "starting exactly at closing time begins at the next opening");
+            Assert.AreEqual(At(26, 19), OfficeClock.Add(At(26, 17), 2), "a result exactly at closing time stays on that day");
+            Assert.AreEqual(At(28, 9), OfficeClock.Add(At(27, 7, 59), 1), "Friday 07:59");
+            Assert.AreEqual(At(28, 9), OfficeClock.Add(At(27, 8), 1), "Friday 08:00");
+            Assert.AreEqual(At(21, 9).AddSeconds(30), OfficeClock.Add(At(21, 8).AddSeconds(30), 1), "seconds are kept");
+            Assert.AreEqual(At(26, 19), OfficeClock.Add(At(21, 8), 66), "a whole working week ends Thursday at closing time");
+            Assert.AreEqual(At(28, 9), OfficeClock.Add(At(21, 8), 67));
+        }
+
+        [TestMethod]
+        public void Between_Partial_Values()
+        {
+            Assert.AreEqual(1.5, OfficeClock.Between(At(26, 18), At(28, 8, 30)), 1e-9, "Thursday 18:00 to Saturday 08:30");
+            Assert.AreEqual(1.0, OfficeClock.Between(At(26, 18), At(27, 10)), 1e-9, "ending inside a Friday");
+            Assert.AreEqual(2.0, OfficeClock.Between(At(21, 18), At(22, 9)), 1e-9, "straddling midnight: 1 h before closing and 1 h after opening");
+            Assert.AreEqual(0.0, OfficeClock.Between(At(21, 23), At(22, 1)), 1e-9, "only the night between");
+            Assert.AreEqual(11.0, OfficeClock.Between(At(21, 0), At(21, 23)), 1e-9, "a whole day");
+        }
+
+        [TestMethod]
+        public void Large_Inputs_Jump_Whole_Weeks_And_Stay_Consistent_With_Between()
+        {
+            foreach (int h in new[] { 66, 67, 132, 133, 5000, 66 * 100 })
+                Assert.AreEqual(h, OfficeClock.Between(At(21, 8), OfficeClock.Add(At(21, 8), h)), 1e-6, "h=" + h);
+            Assert.AreEqual(At(26, 19).AddDays(7), OfficeClock.Add(At(21, 8), 132));
+            Assert.AreEqual(Iran, OfficeClock.Add(At(21, 8), OfficeClock.MaxHours).Offset);   // finishes and keeps the offset
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => OfficeClock.Add(At(21, 8), OfficeClock.MaxHours + 1));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => OfficeClock.Add(At(21, 8), int.MaxValue));
+        }
     }
 }
