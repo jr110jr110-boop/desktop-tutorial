@@ -75,6 +75,12 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset? oldestRegistration = await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed).OrderBy(x => x.ProposedAt).Select(x => (DateTimeOffset?)x.ProposedAt).FirstOrDefaultAsync(ct);
             o.OldestRegistrationWaitingHours = oldestRegistration.HasValue ? Math.Max(0, (int)Math.Floor((now - oldestRegistration.Value).TotalHours)) : 0;
             o.RegistrationsOpen = await _uow.Set<EnPlatformRegistration>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed, ct);
+            if (_user.IsInRole(EnRoles.Manager + "," + EnRoles.Ceo))
+            {
+                List<EnStalledTask> stalled = await EnRisk.StalledTasksAsync(_uow, ct);
+                o.StalledTasksCount = stalled.Count;
+                o.StalledTasks = stalled.OrderBy(t => t.DueAt).Select(t => new EnStalledTaskDto { TaskId = t.TaskId, Title = t.Title, WaitingRolesText = t.Failed ? "ایجنت (ناموفق)" : t.RolesText, Failed = t.Failed, DueAt = t.DueAt, DueAtText = EnText.Stamp(t.DueAt), Link = t.Link }).Take(50).ToList();
+            }
             return ResponseDtoHelper.Ok(o);
         }
     }

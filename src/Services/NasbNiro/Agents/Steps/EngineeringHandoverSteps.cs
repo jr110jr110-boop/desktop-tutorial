@@ -158,6 +158,7 @@ namespace Services.NasbNiro.Agents.Steps
     {
         public override string Code => "ENG.DEBT.SUPPLY";
         public override string Title => "تهیهٔ مدرک بدهی مجوز اضطرار (مدارک را مهندسی دارد)";
+        public override int OfficeDeadlineHours => 0;   // the debt has its own deadline (DueAt of the debt)
         public override AgentStepKind Kind => AgentStepKind.Input;
         public override string FallbackRoles => EnRoles.Writers;
 

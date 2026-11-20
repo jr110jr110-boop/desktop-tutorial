@@ -126,7 +126,30 @@ namespace Services.NasbNiro.Agents
         /// <summary>Hours until the task is late; empty takes the setting of the step.</summary>
         public int? DueHours { get; set; }
 
+        /// <summary>An exact due instant chosen by the step (wins over <see cref="DueHours"/> and over the office-hours rule); empty = decided by the reconciler.</summary>
+        public DateTimeOffset? DueAt { get; set; }
+
         /// <summary>The gate already has an item in the office inbox (the procurement gates do): the reconciler does not mirror it.</summary>
         public bool HasOfficeInboxItem { get; set; }
+    }
+
+    /// <summary>
+    /// A step whose human gates count their time in OFFICE hours (employer rule 14: 08:00-19:00 Iran time, Saturday to Thursday) instead of the calendar hours of the setting.
+    /// 0 = not under the rule. Steps that do not implement it keep <c>now + GateDueHours</c> exactly.
+    /// </summary>
+    public interface IOfficeDeadlineStep
+    {
+        int OfficeDeadlineHours { get; }
+    }
+
+    /// <summary>The ONE place that decides the due instant of a waiting task, for the reconciler and the executor.</summary>
+    internal static class AgentDeadlines
+    {
+        public static DateTimeOffset Due(IAgentStep step, AgentGateInfo info, int settingHours, DateTimeOffset now)
+        {
+            if (info?.DueAt != null) return info.DueAt.Value;
+            if (step is IOfficeDeadlineStep o && o.OfficeDeadlineHours > 0) return global::Services.NasbNiro.Office.OfficeClock.Add(now, o.OfficeDeadlineHours);
+            return now.AddHours(info?.DueHours ?? settingHours);
+        }
     }
 }

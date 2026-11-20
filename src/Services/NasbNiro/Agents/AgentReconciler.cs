@@ -346,24 +346,24 @@ namespace Services.NasbNiro.Agents
                     else ApplyFallback(task, step, setting, now);
                     break;
                 case AgentStepKind.HumanGate:
-                    MakeWaiting(task, AgentTaskState.WaitingHumanGate, info, setting, now);
+                    MakeWaiting(task, AgentTaskState.WaitingHumanGate, step, info, setting, now);
                     break;
                 case AgentStepKind.Physical:
-                    MakeWaiting(task, AgentTaskState.WaitingPhysical, info, setting, now);
+                    MakeWaiting(task, AgentTaskState.WaitingPhysical, step, info, setting, now);
                     break;
                 default:
-                    MakeWaiting(task, AgentTaskState.WaitingInput, info, setting, now);
+                    MakeWaiting(task, AgentTaskState.WaitingInput, step, info, setting, now);
                     break;
             }
             return task;
         }
 
-        private static void MakeWaiting(AgentTask task, AgentTaskState state, AgentGateInfo info, AgentStepSetting setting, DateTimeOffset now)
+        private static void MakeWaiting(AgentTask task, AgentTaskState state, IAgentStep step, AgentGateInfo info, AgentStepSetting setting, DateTimeOffset now)
         {
             task.State = state;
             task.GateRoles = AgentText.Cut(AgentText.NormalizeRoles(info.Roles), 300);
             task.GateUserId = info.UserId;
-            task.DueAt = now.AddHours(info.DueHours ?? setting.GateDueHours);
+            task.DueAt = AgentDeadlines.Due(step, info, setting.GateDueHours, now);
         }
 
         private static void ApplyFallback(AgentTask task, IAgentStep step, AgentStepSetting setting, DateTimeOffset now)
@@ -371,7 +371,7 @@ namespace Services.NasbNiro.Agents
             task.State = AgentTaskState.WaitingInput;
             task.IsFallback = true;
             task.GateRoles = AgentText.Cut(AgentText.NormalizeRoles(step.FallbackRoles), 300);
-            task.DueAt = now.AddHours(setting.GateDueHours);
+            task.DueAt = AgentDeadlines.Due(step, null, setting.GateDueHours, now);
             task.NextAttemptAt = null;
         }
 

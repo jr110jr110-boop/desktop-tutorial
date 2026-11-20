@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DataLayer.Context;
+using Entities.Model.NasbNiro.Agents;
 using Entities.Model.NasbNiro.Engineering;
 using Entities.Model.NasbNiro.Office;
 using Entities.Model.NasbNiro.ProjectControl;
 using Microsoft.EntityFrameworkCore;
+using Services.NasbNiro.Agents;
+using Services.NasbNiro.Office;
 
 namespace Services.NasbNiro.Engineering
 {
@@ -86,10 +90,76 @@ namespace Services.NasbNiro.Engineering
     }
 
     /// <summary>The document risk of the controlled cases, computed from the records (nothing is stored). A case is at risk while a platform dossier of its standard is not confirmed Complete, its draft handover misses required documents, or its standard has no Approved reference list. Legacy records have no case and so no risk.</summary>
+    /// <summary>A human gate (or input, physical or failed agent task) of engineering that has waited more than 72 OFFICE hours (employer rule 14).</summary>
+    internal sealed class EnStalledTask
+    {
+        public int TaskId { get; set; }
+        public string StepCode { get; set; }
+        public string Title { get; set; }
+        public string Roles { get; set; }
+        public string RolesText { get; set; }
+        public string Link { get; set; }
+        public bool Failed { get; set; }
+        public DateTimeOffset? DueAt { get; set; }
+    }
+
     internal static class EnRisk
     {
         public const string RiskKeyPrefix = "EN-RISK-";
         public const string DebtKeyPrefix = "EN-DEBT-";
+
+        /// <summary>A task that has waited (or failed) more than 72 office hours: a permanent alarm of the CEO until the task leaves that state. Nothing is decided by the alarm.</summary>
+        public const string StallKeyPrefix = "EN-STALL-";
+
+        private static IReadOnlyList<string> _ruleCodes;
+
+        /// <summary>The codes of the registered engineering steps that are under the office-hours rule (they implement <see cref="IOfficeDeadlineStep"/> with hours above 0). Steps are stateless, so one instance of each type is enough.</summary>
+        public static IReadOnlyList<string> RuleStepCodes()
+        {
+            if (_ruleCodes != null) return _ruleCodes;
+            List<string> codes = new List<string>();
+            foreach (Type t in typeof(EnRisk).Assembly.GetTypes())
+            {
+                if (t.IsAbstract || !typeof(IAgentStep).IsAssignableFrom(t) || !typeof(IOfficeDeadlineStep).IsAssignableFrom(t)) continue;
+                if (t.GetConstructor(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic, null, Type.EmptyTypes, null) == null) continue;
+                if (!(Activator.CreateInstance(t, true) is IAgentStep step) || !(step is IOfficeDeadlineStep rule) || rule.OfficeDeadlineHours <= 0) continue;
+                if (!step.Code.StartsWith("ENG.", StringComparison.Ordinal)) continue;
+                codes.Add(step.Code);
+            }
+            _ruleCodes = codes.Distinct().OrderBy(c => c, StringComparer.Ordinal).ToList();
+            return _ruleCodes;
+        }
+
+        private static string RoleText(string roles)
+        {
+            if (string.IsNullOrWhiteSpace(roles)) return "مسئول کار";
+            return string.Join("، ", roles.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim().ToUpperInvariant() switch
+            {
+                "ENGINEERING" => "مدیر مهندسی", "ENGINEER" => "مهندس", "CEO" => "مدیرعامل", "PMO" => "PMO", "PROJECTMANAGER" => "مدیر پروژه", "SALES" => "فروش", "COMMERCIAL" => "بازرگانی",
+                "QA" => "تضمین کیفیت", "QC" => "کنترل کیفیت", "PLANNING" => "برنامه‌ریزی", "DCC" => "کنترل مدارک", "PRODUCTIONMANAGER" => "مدیر تولید", _ => r.Trim(),
+            }).Distinct());
+        }
+
+        /// <summary>Open tasks of the engineering steps under the rule that wait for a person past their due instant, or that failed and were not touched for 72 office hours.</summary>
+        public static async Task<List<EnStalledTask>> StalledTasksAsync(IUnitOfWork uow, CancellationToken ct, IReadOnlyCollection<string> ruleCodes = null)
+        {
+            string[] codes = (ruleCodes ?? RuleStepCodes()).ToArray();
+            if (codes.Length == 0) return new List<EnStalledTask>();
+            DateTimeOffset now = DateTimeOffset.Now;
+            DateTimeOffset failedBefore = now.AddHours(-OfficeClock.StopLimitHours);   // 72 office hours are never fewer than 72 calendar hours: a safe pre-filter for the query
+            List<AgentTask> rows = await uow.Set<AgentTask>().AsNoTracking().Where(t => !t.Deleted && codes.Contains(t.StepCode)
+                && (((t.State == AgentTaskState.WaitingHumanGate || t.State == AgentTaskState.WaitingInput || t.State == AgentTaskState.WaitingPhysical) && t.DueAt != null && t.DueAt < now)
+                    || (t.State == AgentTaskState.Failed && (t.EscalatedAt ?? t.ModifyDate) < failedBefore)))
+                .OrderBy(t => t.Id).Take(500).ToListAsync(ct);
+            List<EnStalledTask> result = new List<EnStalledTask>();
+            foreach (AgentTask t in rows)
+            {
+                bool failed = t.State == AgentTaskState.Failed;
+                if (failed && OfficeClock.Add(t.EscalatedAt ?? t.ModifyDate, OfficeClock.StopLimitHours) >= now) continue;
+                result.Add(new EnStalledTask { TaskId = t.Id, StepCode = t.StepCode, Title = t.Title, Roles = t.GateRoles, RolesText = RoleText(t.GateRoles), Link = t.Link, Failed = failed, DueAt = failed ? OfficeClock.Add(t.EscalatedAt ?? t.ModifyDate, OfficeClock.StopLimitHours) : t.DueAt });
+            }
+            return result;
+        }
 
         public static async Task<List<EnRiskRow>> ComputeAsync(IUnitOfWork uow, CancellationToken ct, IReadOnlyCollection<int> onlyCaseIds = null)
         {
@@ -138,10 +208,11 @@ namespace Services.NasbNiro.Engineering
             HashSet<string> keys = new HashSet<string>();
             foreach (EnRiskRow r in (await ComputeAsync(uow, ct)).Where(r => r.Awarded)) keys.Add(RiskKeyPrefix + r.CaseId.ToString());
             foreach ((int id, string _) in await OverdueDebtsAsync(uow, ct)) keys.Add(DebtKeyPrefix + id.ToString());
+            foreach (EnStalledTask t in await StalledTasksAsync(uow, ct)) keys.Add(StallKeyPrefix + t.TaskId.ToString(CultureInfo.InvariantCulture));
             return keys;
         }
 
         public static async Task<List<string>> OpenKeysAsync(IUnitOfWork uow, CancellationToken ct) =>
-            await uow.Set<OfInboxItem>().AsNoTracking().Where(i => (i.SourceKey.StartsWith(RiskKeyPrefix) || i.SourceKey.StartsWith(DebtKeyPrefix)) && i.Status < OfInboxStatus.Done).Select(i => i.SourceKey).Distinct().ToListAsync(ct);
+            await uow.Set<OfInboxItem>().AsNoTracking().Where(i => (i.SourceKey.StartsWith(RiskKeyPrefix) || i.SourceKey.StartsWith(DebtKeyPrefix) || i.SourceKey.StartsWith(StallKeyPrefix)) && i.Status < OfInboxStatus.Done).Select(i => i.SourceKey).Distinct().ToListAsync(ct);
     }
 }

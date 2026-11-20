@@ -71,8 +71,11 @@ namespace Services.NasbNiro.Agents.Steps
         }
     }
 
-    internal abstract class EnStep : ProcStep
+    internal abstract class EnStep : ProcStep, IOfficeDeadlineStep
     {
+        /// <summary>Employer rule 14: a human gate of engineering that waits longer than this many OFFICE hours is a permanent alarm of the CEO (ENG.RISK.ESCALATE). 0 = the step has its own deadline.</summary>
+        public virtual int OfficeDeadlineHours => global::Services.NasbNiro.Office.OfficeClock.StopLimitHours;
+
         public override int Station => 5;
         public override string AgentCode => AgentCodes.Eng;
 
@@ -312,6 +315,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override string Title => "هشدار زودهنگام: خطر مدارک پرونده مهندسی (باید دیده و پیگیری شود)";
         public override AgentStepKind Kind => AgentStepKind.Input;
         public override string FallbackRoles => EnRoles.Manager;
+        public override int OfficeDeadlineHours => 0;   // the early warning has its own escalation (ENG.RISK.ESCALATE)
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
@@ -332,9 +336,14 @@ namespace Services.NasbNiro.Agents.Steps
 
         private static AgentWorkItem ItemOf(string key, bool open, Func<string, string, int, string, AgentWorkItem> make)
         {
+            // three key kinds: the risk of a case, an overdue document debt, an engineering task that waited more than 72 office hours
             bool risk = key.StartsWith(EnRisk.RiskKeyPrefix, StringComparison.Ordinal);
-            int id = int.Parse(key.Substring((risk ? EnRisk.RiskKeyPrefix : EnRisk.DebtKeyPrefix).Length), CultureInfo.InvariantCulture);
-            return make(risk ? "EnCase" : "EnDocumentDebt", key, id, open ? "هشدار مدارک برای مدیرعامل در کارتابل باز می‌شود." : "خطر یا بدهی برطرف شده؛ هشدار کارتابل مدیرعامل بسته می‌شود.");
+            bool stall = key.StartsWith(EnRisk.StallKeyPrefix, StringComparison.Ordinal);
+            string prefix = risk ? EnRisk.RiskKeyPrefix : stall ? EnRisk.StallKeyPrefix : EnRisk.DebtKeyPrefix;
+            int id = int.Parse(key.Substring(prefix.Length), CultureInfo.InvariantCulture);
+            return make(risk ? "EnCase" : stall ? "AgentTask" : "EnDocumentDebt", key, id, open
+                ? (stall ? "کار منتظرمانده بیش از ۷۲ ساعت اداری برای مدیرعامل در کارتابل اعلام می‌شود." : "هشدار مدارک برای مدیرعامل در کارتابل باز می‌شود.")
+                : (stall ? "کار دیگر منتظر یا ناموفق نیست؛ هشدار کارتابل مدیرعامل بسته می‌شود." : "خطر یا بدهی برطرف شده؛ هشدار کارتابل مدیرعامل بسته می‌شود."));
         }
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
@@ -352,14 +361,27 @@ namespace Services.NasbNiro.Agents.Steps
             IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
             string key = item.TargetNumber;
             bool risk = key.StartsWith(EnRisk.RiskKeyPrefix, StringComparison.Ordinal);
+            bool stall = key.StartsWith(EnRisk.StallKeyPrefix, StringComparison.Ordinal);
+            string targetType = risk ? nameof(EnCase) : stall ? nameof(AgentTask) : nameof(EnDocumentDebt);
             // the risk of this one case only (no run over all cases per task): the same rule as the full computation
             EnRiskRow row = risk ? (await EnRisk.ComputeAsync(uow, ct, new[] { item.TargetId })).FirstOrDefault() : null;
-            bool waiting = risk ? row != null && row.Awarded : (await EnRisk.OverdueDebtsAsync(uow, ct)).Any(d => d.Id == item.TargetId);
+            EnStalledTask stalled = stall ? (await EnRisk.StalledTasksAsync(uow, ct)).FirstOrDefault(x => x.TaskId == item.TargetId) : null;
+            bool waiting = risk ? row != null && row.Awarded : stall ? stalled != null : (await EnRisk.OverdueDebtsAsync(uow, ct)).Any(d => d.Id == item.TargetId);
             string title; string link;
             if (risk)
             {
                 title = row != null ? "خطر مدارک: " + row.Summary() : "خطر مدارک پرونده مهندسی " + Id(item.TargetId);
                 link = Root + "/cases/" + Id(item.TargetId);
+            }
+            else if (stall)
+            {
+                // the title and link come from the task itself (also when it just left the state: the closing needs no text)
+                AgentTask task = stalled == null ? await uow.Set<AgentTask>().AsNoTracking().Where(t => t.Id == item.TargetId).FirstOrDefaultAsync(ct) : null;
+                string taskTitle = stalled?.Title ?? task?.Title ?? "کار " + Id(item.TargetId);
+                title = stalled != null && stalled.Failed
+                    ? "کار ایجنت «" + taskTitle + "» بیش از ۷۲ ساعت اداری ناموفق مانده است"
+                    : "کار «" + taskTitle + "» بیش از ۷۲ ساعت اداری منتظر " + (stalled?.RolesText ?? "مسئول کار") + " مانده است؛ تصمیم یا پیگیری مدیرعامل لازم است";
+                link = string.IsNullOrWhiteSpace(stalled?.Link ?? task?.Link) ? Root : (stalled?.Link ?? task?.Link);
             }
             else
             {
@@ -367,8 +389,8 @@ namespace Services.NasbNiro.Agents.Steps
                 title = "بدهی مدرک «" + debt + "» از سررسید گذشته و تسویه نشده است";
                 link = Root + "/debts";
             }
-            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(services.GetService<global::Services.NasbNiro.Office.INotificationService>(), key, waiting, "Engineering", risk ? nameof(EnCase) : nameof(EnDocumentDebt), item.TargetId, title, link, EnRoles.Ceo, ct, null, global::Entities.Model.NasbNiro.Office.OfInboxKind.Task, global::Entities.Model.NasbNiro.Office.OfUrgency.Urgent);
-            return AgentStepResult.Done(risk ? "EnCase" : "EnDocumentDebt", item.TargetId, key, waiting ? "ایجنت مهندسی هشدار دائمی را در کارتابل مدیرعامل باز کرد." : "ایجنت مهندسی هشدار را بست؛ خطر برطرف شده است.");
+            await global::Services.NasbNiro.Office.OfficeGates.SyncAsync(services.GetService<global::Services.NasbNiro.Office.INotificationService>(), key, waiting, "Engineering", targetType, item.TargetId, title, link, EnRoles.Ceo, ct, null, global::Entities.Model.NasbNiro.Office.OfInboxKind.Task, global::Entities.Model.NasbNiro.Office.OfUrgency.Urgent);
+            return AgentStepResult.Done(targetType, item.TargetId, key, waiting ? "ایجنت مهندسی هشدار دائمی را در کارتابل مدیرعامل باز کرد." : "ایجنت مهندسی هشدار را بست؛ خطر برطرف شده است.");
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases", Title = "هشدار مدارک " + item.TargetNumber };

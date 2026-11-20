@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace ViewModels.NasbNiro.EngineeringDtos
@@ -60,5 +61,24 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
         /// <summary>New designs proposed as platforms that wait for the CEO.</summary>
         public int RegistrationsOpen { get; set; }
+
+        /// <summary>Engineering tasks that wait for a person (or failed) more than 72 OFFICE hours; filled for the engineering manager and the CEO only (employer rule 14). The CEO is told in the inbox; nothing is decided by it.</summary>
+        public int StalledTasksCount { get; set; }
+        public List<EnStalledTaskDto> StalledTasks { get; set; } = new List<EnStalledTaskDto>();
+    }
+
+    public class EnStalledTaskDto
+    {
+        public int TaskId { get; set; }
+        public string Title { get; set; }
+
+        /// <summary>The roles the task waits for, in Persian.</summary>
+        public string WaitingRolesText { get; set; }
+        public bool Failed { get; set; }
+
+        /// <summary>The due instant of the task (for a failed agent task: failure time + 72 office hours).</summary>
+        public DateTimeOffset? DueAt { get; set; }
+        public string DueAtText { get; set; }
+        public string Link { get; set; }
     }
 }

@@ -171,7 +171,7 @@ namespace Services.NasbNiro.Agents
             AgentStepSetting setting = settings[step.Code];
             if (!setting.Enabled || !await SeatOnAsync(acting, ct))
             {
-                task.State = AgentTaskState.WaitingInput; task.IsFallback = true; task.GateRoles = AgentText.NormalizeRoles(step.FallbackRoles); task.DueAt = now.AddHours(setting.GateDueHours); task.NextAttemptAt = null;
+                task.State = AgentTaskState.WaitingInput; task.IsFallback = true; task.GateRoles = AgentText.NormalizeRoles(step.FallbackRoles); task.DueAt = AgentDeadlines.Due(step, null, setting.GateDueHours, now); task.NextAttemptAt = null;
                 AddEvent(task, from, task.State, AgentText.StepSwitchedOff, now);
                 _audit.Add(AiAuditKinds.Agent, $"step {task.StepCode} task {task.Id} -> handed to a person; {AgentText.StepSwitchedOff}", seatCode: acting);
                 if (!await SaveQuietlyAsync(ct)) return AgentRunOutcome.Skipped;
