@@ -79,7 +79,7 @@ namespace Services.NasbNiro.Engineering
         private async Task<(Guid? Id, string Name)> StoreSourceAsync(byte[] file, string fileName, string code)
         {
             if (_documents == null || file == null || file.Length == 0) return (null, null);
-            string name = EnText.Cut(EnText.Clean(System.IO.Path.GetFileName(fileName ?? string.Empty)) ?? "reference-list.csv", 260);
+            string name = EnText.Cut(EnText.Clean(System.IO.Path.GetFileName((fileName ?? string.Empty).Replace('\\', '/'))) ?? "reference-list.csv", 260);
             IFormFile form = new FormFile(new System.IO.MemoryStream(file), 0, file.Length, "file", name);
             Guid id = await _documents.UploadDocumentAsync(new ViewModels.NasbNiro.DocumentDtos.UploadFileDto { File = form, Name = name, Description = EnText.Cut("فایل منبع فهرست مدارک مرجع (MDL) " + code, 300), Code = "engineering" });
             return (id, name);

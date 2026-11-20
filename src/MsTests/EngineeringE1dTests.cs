@@ -286,5 +286,13 @@ namespace MsTests
             Assert.AreEqual(ids[1], one.Single().TaskId);
             Assert.AreEqual(0, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, 987654))).Count);
         }
+        [TestMethod]
+        public async Task A_Windows_Path_File_Name_Is_Reduced_To_The_Name()
+        {
+            AppHost host = Started("e1dfl5");
+            byte[] csv = CsvBytes(CsvHead + "DWG,نقشه,,1,1,\n");
+            EnReferenceListDto made = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().CreateFromFileAsync(new EnSaveReferenceDto { Code = "VDDR-WIN", Title = "فهرست ویندوز" }, csv, Ct, @"C:\Users\x\mdl.csv")));
+            Assert.AreEqual("mdl.csv", made.SourceFileName);
+        }
     }
 }
