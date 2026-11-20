@@ -6,7 +6,9 @@ using System.Threading.Tasks;
 using Common.Results;
 using DataLayer.Context;
 using Entities.Model.NasbNiro.Engineering;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Services.Contracts;
 using Services.NasbNiro.Inventory;
 using ViewModels.NasbNiro.EngineeringDtos;
 using ViewModels.NasbNiro.Pagination;
@@ -49,8 +51,9 @@ namespace Services.NasbNiro.Engineering
         Task<ResponseDto<List<EnReferenceCodeDto>>> GetApprovedCodesAsync(CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct);
         Task<ResponseDto<EnReferenceListDto>> ListActionAsync(EnReferenceActionDto dto, CancellationToken ct);
-        Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct);
-        Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct);
+        /// <summary>The uploaded bytes are kept as evidence (SourceDocumentId, SourceFileName of the list) through the document store; <paramref name="fileName"/> is the original file name.</summary>
+        Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct, string fileName = null);
+        Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct, string fileName = null);
     }
 
     /// <summary>The reference list of engineering documents (what "complete" means for a platform). Drafted by an engineer or the agent, approved by the engineering manager or the CEO, never by someone who touched it.</summary>
@@ -59,12 +62,27 @@ namespace Services.NasbNiro.Engineering
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
         private readonly global::Services.NasbNiro.Office.INotificationService _notify;
+        private readonly IDocumentService _documents;
 
-        public EnReferenceService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify = null)
+        public EnReferenceService(IUnitOfWork uow, IInventoryUserContext user, global::Services.NasbNiro.Office.INotificationService notify = null, IDocumentService documents = null)
         {
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _user = user ?? throw new ArgumentNullException(nameof(user));
             _notify = notify;
+            _documents = documents;
+        }
+
+        /// <summary>
+        /// Keeps the uploaded CSV as evidence in the SAME document store as every other upload (the Documents endpoint's service); returns the id and the cut file name.
+        /// Called only after every refusal of the upload is behind us, so a refused file leaves no orphan document. The store saves the unit of work: nothing of the list may be pending half-done when this runs.
+        /// </summary>
+        private async Task<(Guid? Id, string Name)> StoreSourceAsync(byte[] file, string fileName, string code)
+        {
+            if (_documents == null || file == null || file.Length == 0) return (null, null);
+            string name = EnText.Cut(EnText.Clean(System.IO.Path.GetFileName(fileName ?? string.Empty)) ?? "reference-list.csv", 260);
+            IFormFile form = new FormFile(new System.IO.MemoryStream(file), 0, file.Length, "file", name);
+            Guid id = await _documents.UploadDocumentAsync(new ViewModels.NasbNiro.DocumentDtos.UploadFileDto { File = form, Name = name, Description = EnText.Cut("فایل منبع فهرست مدارک مرجع (MDL) " + code, 300), Code = "engineering" });
+            return (id, name);
         }
 
         private int Me => _user.UserId;
@@ -111,7 +129,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     Id = l.Id, Code = l.Code, Title = l.Title, StandardSource = l.StandardSource, Revision = l.Revision, Status = (int)l.Status, StatusText = EnText.RefStatus(l.Status), IsCurrent = l.Status == EnRefStatus.Approved,   // one approved list per Code
                     PreparedByUserId = l.PreparedByUserId, PreparedByName = names.Name(l.PreparedByUserId), SubmittedAt = l.SubmittedAt, SubmittedAtText = EnText.Stamp(l.SubmittedAt),
-                    ApprovedByUserId = l.ApprovedByUserId, ApprovedByName = names.Name(l.ApprovedByUserId), ApprovedAt = l.ApprovedAt, ApprovedAtText = EnText.Stamp(l.ApprovedAt), Note = l.Note, VoidReason = l.VoidReason,
+                    ApprovedByUserId = l.ApprovedByUserId, ApprovedByName = names.Name(l.ApprovedByUserId), ApprovedAt = l.ApprovedAt, ApprovedAtText = EnText.Stamp(l.ApprovedAt), Note = l.Note, VoidReason = l.VoidReason, SourceDocumentId = l.SourceDocumentId, SourceFileName = l.SourceFileName,
                     LineCount = l.Lines.Count, RequiredCount = l.Lines.Count(x => x.Required), TenderStageCount = l.Lines.Count(x => x.TenderStage), TouchedByMe = EnEditors.Touched(l.PreparedByUserId, l.EditorUserIds, Me),
                     Lines = withLines ? l.Lines.OrderBy(x => x.Seq).Select(x => new EnReferenceLineDto { Id = x.Id, Seq = x.Seq, DocumentType = x.DocumentType, Discipline = x.Discipline, Title = x.Title, Required = x.Required, TenderStage = x.TenderStage, ClientSubmittal = x.ClientSubmittal, StandardClause = x.StandardClause, Note = x.Note, Units = x.Units }).ToList() : new List<EnReferenceLineDto>(),
                     RowVersion = EnConcurrency.Text(l.RowVersion),
@@ -216,7 +234,10 @@ namespace Services.NasbNiro.Engineering
             }
         }
 
-        public async Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct)
+        public Task<ResponseDto<EnReferenceListDto>> SaveListAsync(EnSaveReferenceDto dto, CancellationToken ct) => SaveListCoreAsync(dto, null, null, ct);
+
+        /// <summary>The save of a list; <paramref name="sourceFile"/> (a CSV upload) is stored and pointed at only after every refusal, and a save through the JSON API (no file) never clears the pointer.</summary>
+        private async Task<ResponseDto<EnReferenceListDto>> SaveListCoreAsync(EnSaveReferenceDto dto, byte[] sourceFile, string sourceName, CancellationToken ct)
         {
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
             if (dto == null) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
@@ -244,8 +265,13 @@ namespace Services.NasbNiro.Engineering
                     return EnText.Bad<EnReferenceListDto>("برای این کد، فهرست باز (پیش‌نویس یا در انتظار تایید) وجود دارد؛ همان را ویرایش کنید.");
                 int revision = (await _uow.Set<EnReferenceList>().Where(l => l.Code == code).Select(l => (int?)l.Revision).MaxAsync(ct) ?? 0) + 1;
                 row = new EnReferenceList { Code = code, Revision = revision, Status = EnRefStatus.Draft, PreparedByUserId = Me, CreateDate = now, CreatorUserId = Me };
-                _uow.Set<EnReferenceList>().Add(row);
             }
+            if (sourceFile != null)
+            {
+                (Guid? docId, string docName) = await StoreSourceAsync(sourceFile, sourceName, row.Code);   // the new row is not attached yet, so nothing half-done is saved with the file
+                row.SourceDocumentId = docId; row.SourceFileName = docName;
+            }
+            if (row.Id == 0) _uow.Set<EnReferenceList>().Add(row);
             row.Title = dto.Title.Trim(); row.StandardSource = EnText.Clean(dto.StandardSource); row.Note = EnText.Clean(dto.Note);
             if (!headerOnly) ApplyLines(_uow, row, dto.Lines);
             row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
@@ -259,7 +285,7 @@ namespace Services.NasbNiro.Engineering
         /// Replaces the lines of a DRAFT list with the lines of a CSV file (project instruction 6: a human enters input data by file in a test release). Same permission and status rules as saving a draft; an AI seat is refused;
         /// nothing is changed when any row is refused.
         /// </summary>
-        public async Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct)
+        public async Task<ResponseDto<EnReferenceListDto>> UploadLinesAsync(int id, string rowVersion, byte[] file, CancellationToken ct, string fileName = null)
         {
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
             if (await EnActors.IsSeatAsync(_uow, Me, ct)) return EnText.Bad<EnReferenceListDto>(EnText.AiNever);
@@ -272,6 +298,8 @@ namespace Services.NasbNiro.Engineering
             if (why != null) return EnText.Bad<EnReferenceListDto>(why);
             string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines, out EnReferenceCsv.Columns columns);
             if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
+            (Guid? docId, string docName) = await StoreSourceAsync(file, fileName, row.Code);   // the file is parsed: keep it as evidence (a later upload replaces the pointer, the old document stays)
+            if (docId.HasValue) { row.SourceDocumentId = docId; row.SourceFileName = docName; }
             ApplyLines(_uow, row, lines, columns);
             DateTimeOffset now = DateTimeOffset.Now;
             row.EditorUserIds = EnEditors.With(row.EditorUserIds, Me);
@@ -282,7 +310,7 @@ namespace Services.NasbNiro.Engineering
         }
 
         /// <summary>A NEW draft list whose lines come from a CSV file (the header fields are typed, the lines are never typed). Same rules as saving a new draft; an AI seat is refused.</summary>
-        public async Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct)
+        public async Task<ResponseDto<EnReferenceListDto>> CreateFromFileAsync(EnSaveReferenceDto header, byte[] file, CancellationToken ct, string fileName = null)
         {
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<EnReferenceListDto>(EnText.NotAllowed);
             if (header == null) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
@@ -290,7 +318,7 @@ namespace Services.NasbNiro.Engineering
             string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines, out _);
             if (problem != null) return EnText.Bad<EnReferenceListDto>(problem);
             header.Id = null; header.RowVersion = null; header.Lines = lines;
-            return await SaveListAsync(header, ct);
+            return await SaveListCoreAsync(header, file, fileName, ct);
         }
 
         // ---------------------------------------------------------------- actions

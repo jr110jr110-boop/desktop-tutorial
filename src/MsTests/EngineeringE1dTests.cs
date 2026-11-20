@@ -164,5 +164,47 @@ namespace MsTests
             Assert.AreEqual(file, host.Read(u => u.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().Single().StandardDocumentId));
             Assert.AreEqual(file, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().GetDossierAsync(product, "API-611", Ct))).StandardAttachmentId);
         }
+
+        // ------------------------------------------------------------------------------------------ D6
+
+        private const string CsvHead = "docType,title,discipline,required,tender,units\n";
+        private static byte[] CsvBytes(string text) => new byte[] { 0xEF, 0xBB, 0xBF }.Concat(System.Text.Encoding.UTF8.GetBytes(text)).ToArray();
+        private static async Task<byte[]> StoredAsync(AppHost host, Guid id)
+        {
+            var doc = await host.As(Eng1, p => p.GetRequiredService<Services.Contracts.IDocumentService>().DownloadDocumentAsync(id));
+            using System.IO.MemoryStream ms = new System.IO.MemoryStream();
+            await doc.FileStream.CopyToAsync(ms);
+            return ms.ToArray();
+        }
+
+        [TestMethod]
+        public async Task An_Uploaded_Csv_Is_Kept_As_Evidence_On_A_New_List_And_A_Later_Upload_Replaces_The_Pointer()
+        {
+            AppHost host = Started("e1d6");
+            byte[] first = CsvBytes(CsvHead + "DWG,نقشه,,1,1,\nBOM,فهرست قطعات,,1,0,تولید\n");
+            EnReferenceListDto made = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().CreateFromFileAsync(new EnSaveReferenceDto { Code = "VDDR-SRC", Title = "فهرست از فایل" }, first, Ct, "mdl-first.csv")));
+            Assert.IsNotNull(made.SourceDocumentId);
+            Assert.AreEqual("mdl-first.csv", made.SourceFileName);
+            CollectionAssert.AreEqual(first, await StoredAsync(host, made.SourceDocumentId.Value), "the stored bytes equal the upload");
+            Guid firstDoc = made.SourceDocumentId.Value;
+
+            // saving through the JSON API does not clear the pointer
+            EnReferenceListDto saved = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().SaveListAsync(new EnSaveReferenceDto { Id = made.Id, Code = made.Code, Title = "عنوان تازه", RowVersion = made.RowVersion, Lines = made.Lines }, Ct)));
+            Assert.AreEqual(firstDoc, saved.SourceDocumentId);
+            Assert.AreEqual("mdl-first.csv", saved.SourceFileName);
+
+            // a later upload replaces the pointer; the old document is not deleted
+            byte[] second = CsvBytes(CsvHead + "DWG,نقشه تازه,,1,1,\n");
+            EnReferenceListDto again = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().UploadLinesAsync(saved.Id, saved.RowVersion, second, Ct, "mdl-second.csv")));
+            Assert.AreNotEqual(firstDoc, again.SourceDocumentId);
+            Assert.AreEqual("mdl-second.csv", again.SourceFileName);
+            CollectionAssert.AreEqual(second, await StoredAsync(host, again.SourceDocumentId.Value));
+            CollectionAssert.AreEqual(first, await StoredAsync(host, firstDoc), "the first file stays");
+            Assert.AreEqual(1, again.Lines.Count);
+
+            // a refused file leaves the pointer as it was
+            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().UploadLinesAsync(again.Id, again.RowVersion, CsvBytes("a,b\n1,2\n"), Ct, "bad.csv")), "سرستون");
+            Assert.AreEqual(again.SourceDocumentId, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetListAsync(again.Id, Ct))).SourceDocumentId);
+        }
     }
 }

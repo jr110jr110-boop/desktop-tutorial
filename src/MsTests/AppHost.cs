@@ -40,7 +40,18 @@ namespace MsTests
         private sealed class FakeDocuments : IDocumentService
         {
             public Task<Document> GetDocumentByIdAsync(Guid documentId) => throw new NotSupportedException();
-            public Task<Guid> UploadDocumentAsync(UploadFileDto uploadFileDto) => Task.FromResult(Guid.NewGuid());
+            public async Task<Guid> UploadDocumentAsync(UploadFileDto uploadFileDto)
+            {
+                // the bytes are kept under the new id so that a test can read back what a service stored (ENG-E1d: the CSV of a reference list)
+                Guid id = Guid.NewGuid();
+                if (uploadFileDto?.File != null)
+                {
+                    using System.IO.MemoryStream ms = new System.IO.MemoryStream();
+                    await uploadFileDto.File.CopyToAsync(ms);
+                    Files[id] = ms.ToArray();
+                }
+                return id;
+            }
             public Task<ResponseDocumentDto> DownloadDocumentAsync(Guid documentId)
             {
                 if (!Files.TryGetValue(documentId, out byte[] bytes)) throw new NotSupportedException();

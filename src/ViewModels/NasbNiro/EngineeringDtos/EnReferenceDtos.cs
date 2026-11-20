@@ -48,6 +48,10 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string ApprovedAtText { get; set; }
         public string Note { get; set; }
         public string VoidReason { get; set; }
+
+        /// <summary>The uploaded CSV the lines came from (kept as evidence in the document store); null for a list typed through the page. A later upload replaces it.</summary>
+        public Guid? SourceDocumentId { get; set; }
+        public string SourceFileName { get; set; }
         public int LineCount { get; set; }
         public int RequiredCount { get; set; }
         public int TenderStageCount { get; set; }

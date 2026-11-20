@@ -49,7 +49,7 @@ namespace WebApi.Controllers
             if (refusal != null) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnReferenceListDto>(refusal));
             using System.IO.MemoryStream ms = new System.IO.MemoryStream();
             await file.CopyToAsync(ms, ct);
-            return Ok(await _service.UploadLinesAsync(id, rowVersion, ms.ToArray(), ct));
+            return Ok(await _service.UploadLinesAsync(id, rowVersion, ms.ToArray(), ct, file.FileName));
         }
 
         /// <summary>A new draft list from a CSV file (multipart: code, title, standardSource, note, file).</summary>
@@ -61,7 +61,7 @@ namespace WebApi.Controllers
             if (refusal != null) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnReferenceListDto>(refusal));
             using System.IO.MemoryStream ms = new System.IO.MemoryStream();
             await file.CopyToAsync(ms, ct);
-            return Ok(await _service.CreateFromFileAsync(new EnSaveReferenceDto { Code = code, Title = title, StandardSource = standardSource, Note = note }, ms.ToArray(), ct));
+            return Ok(await _service.CreateFromFileAsync(new EnSaveReferenceDto { Code = code, Title = title, StandardSource = standardSource, Note = note }, ms.ToArray(), ct, file.FileName));
         }
 
         /// <summary>The file of a reference list is a CSV (UTF-8) file of at most <see cref="Services.NasbNiro.Engineering.EnReferenceCsv.MaxBytes"/> bytes; an Excel workbook is refused with the way to save it as CSV.</summary>
