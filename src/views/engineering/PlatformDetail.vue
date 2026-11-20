@@ -74,7 +74,7 @@ async function standardDialog() {
     title: "ثبت استاندارد از دیتاشیت اصلی",
     hint: "فایل دیتاشیت اصلی پروژه‌ای که این پلتفرم برای آن ساخته شد بارگذاری می‌شود؛ مبنا فقط اشاره‌ای کوتاه به همان فایل است.",
     fields: [
-      { key: "c", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards },
+      { key: "c", label: "استاندارد (از فهرست‌های MDL تاییدشده)", type: "select", required: true, options: standards },
       { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 },
       { key: "file", label: "فایل دیتاشیت اصلی پلتفرم", type: "file" as const, required: true },
     ],
@@ -103,7 +103,7 @@ async function standardDialog() {
           <EnChip :status="x.status" :text="x.statusText" group="dossier" />
           <span class="inv-ltr">{{ x.referenceCode }}</span>
           <span v-if="neverAssessed" class="inv-badge warn" data-test="en-never-assessed">ارزیابی نشده</span>
-          <span v-else-if="x.stale" class="inv-badge warn">فهرست مرجع تغییر کرده؛ ارزیابی دوباره لازم است</span>
+          <span v-else-if="x.stale" class="inv-badge warn">فهرست MDL تغییر کرده؛ ارزیابی دوباره لازم است</span>
         </div>
         <p v-if="x.standardBasis" class="small">مبنای استاندارد: {{ x.standardBasis }}<a v-if="x.standardAttachmentId" href="#" class="ms-2" data-test="en-dossier-datasheet" @click.prevent="downloadDoc(x.standardAttachmentId, 'datasheet')">دیدن دیتاشیت اصلی</a><span v-else class="inv-muted ms-2">(بدون فایل دیتاشیت)</span></p>
         <p v-if="x.otherDossiers?.length" class="small">پرونده‌های دیگر این محصول:
@@ -119,7 +119,7 @@ async function standardDialog() {
 
         <div class="mb-3">
           <EnAction :can="x.canRecordStandard" :reason="x.recordStandardBlockedReason" :roles="EnRoles.writers" label="ثبت استاندارد از دیتاشیت اصلی" variant="outline-primary" @go="standardDialog" />
-          <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" :confirm="neverAssessed ? `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) برای نخستین بار با فهرست مرجع جاری ارزیابی شود؟` : `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) دوباره با فهرست مرجع جاری ارزیابی شود؟ اگر فهرست یا مدارک تغییر کرده باشد، اعلام کامل‌شدن و تایید مدیر مهندسی برداشته می‌شود و پرونده به ناقص برمی‌گردد.`" :label="neverAssessed ? 'ارزیابی' : 'ارزیابی دوباره'" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
+          <EnAction :can="x.canAssess" :reason="x.assessBlockedReason" :roles="EnRoles.writers" :confirm="neverAssessed ? `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) برای نخستین بار با فهرست MDL جاری ارزیابی شود؟` : `پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) دوباره با فهرست MDL جاری ارزیابی شود؟ اگر فهرست یا مدارک تغییر کرده باشد، اعلام کامل‌شدن و تایید مدیر مهندسی برداشته می‌شود و پرونده به ناقص برمی‌گردد.`" :label="neverAssessed ? 'ارزیابی' : 'ارزیابی دوباره'" variant="outline-primary" @go="runEn(() => act('assess'), 'ارزیابی انجام شد.', load)" />
           <EnAction :can="x.canComplete" :reason="x.completeBlockedReason" :roles="EnRoles.writers" :confirm="`پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) کامل اعلام شود؟ پس از آن منتظر تایید مدیر مهندسی می‌ماند.`" label="اعلام کامل‌شدن" variant="outline-primary" @go="runEn(() => act('complete'), 'کامل‌شدن اعلام شد.', load)" />
           <EnAction :can="x.canConfirm" :reason="x.confirmBlockedReason" :roles="EnRoles.manager" :confirm="`کامل‌بودن پروندهٔ مدارک ${x.productCode} (استاندارد ${x.referenceCode}) تایید شود؟ تحویل مدارک به PMO فقط با پروندهٔ تاییدشده بدون قفل می‌شود.`" label="تایید کامل بودن" variant="success" @go="runEn(() => act('confirm'), 'پرونده تایید شد.', load)" />
           <EnAction :can="x.canReturn" :reason="x.returnBlockedReason" :roles="EnRoles.manager" label="برگشت به ناقص" variant="outline-danger" @go="reason('برگشت به ناقص', 'return', 'دلیل برگشت', 'پرونده به ناقص برگشت.')" />

@@ -769,7 +769,7 @@ const enLinks = computed<Links[]>(() => {
     { title: "نمای کلی مهندسی", routeName: "EnOverview", disabled: !r, hidden: !r },
     { title: "پرونده‌های مهندسی", routeName: "EnCases", disabled: !r, hidden: !r },
     { title: "پرونده مدارک پلتفرم‌ها", routeName: "EnPlatforms", disabled: !r, hidden: !r },
-    { title: "فهرست مدارک مرجع", routeName: "EnReferenceLists", disabled: !r, hidden: !r },
+    { title: "فهرست مدارک مرجع (MDL)", routeName: "EnReferenceLists", disabled: !r, hidden: !r },
     { title: "تحویل مدارک به PMO", routeName: "EnHandovers", disabled: !r, hidden: !r },
     { title: "بدهی مدارک", routeName: "EnDebts", disabled: !r, hidden: !r },
     { title: "مجوزهای اضطرار", routeName: "EnWaivers", disabled: !r, hidden: !r },

@@ -32,7 +32,7 @@ onMounted(reload);
         <div class="en-tile ok"><div class="t">کامل</div><div class="v">{{ faNum(summary.complete, 0) }}</div></div>
         <div :class="['en-tile', summary.stale ? 'warn' : '']"><div class="t">نیازمند ارزیابی دوباره</div><div class="v">{{ faNum(summary.stale, 0) }}</div></div>
       </div>
-      <div v-if="summary && !summary.hasApprovedReference" class="en-banner amber">هنوز فهرست مدارک مرجع تاییدشده‌ای نیست؛ ارزیابی پلتفرم‌ها پس از تایید آن ممکن است. <router-link :to="enPaths.references">فهرست‌های مرجع</router-link></div>
+      <div v-if="summary && !summary.hasApprovedReference" class="en-banner amber">هنوز فهرست MDL تاییدشده‌ای نیست؛ ارزیابی پلتفرم‌ها پس از تایید آن ممکن است. <router-link :to="enPaths.references">فهرست‌های MDL</router-link></div>
       <div class="inv-filters mb-3">
         <select v-model="filters.Status" class="form-select form-select-sm" aria-label="وضعیت">
           <option :value="null">همه وضعیت‌ها</option>

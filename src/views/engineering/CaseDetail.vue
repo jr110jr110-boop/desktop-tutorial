@@ -114,7 +114,7 @@ async function standardDialog() {
     title: "ثبت استاندارد پروژه از دیتاشیت کارفرما",
     hint: "استاندارد را کارفرما تعیین می‌کند؛ فایل دیتاشیت بارگذاری می‌شود و کد را از فهرست انتخاب می‌کنید. شاهد فقط اشاره‌ای کوتاه به همان فایل است (شماره سند و بند). ثبت دوباره با فایل دیگر، تغییر استاندارد حساب می‌شود و دلیل می‌خواهد.",
     fields: [
-      { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: [...standards, { value: OTHER_STANDARD, text: "استاندارد دیگر (هنوز فهرست MDL تاییدشده ندارد)" }], value: c.value.referenceCode || "" },
+      { key: "code", label: "استاندارد (مطابق دیتاشیت؛ از فهرست‌های MDL تاییدشده)", type: "select", required: true, options: [...standards, { value: OTHER_STANDARD, text: "استاندارد دیگر (هنوز فهرست MDL تاییدشده ندارد)" }], value: c.value.referenceCode || "" },
       { key: "customCode", label: "کد استاندارد طبق دیتاشیت", type: "text", required: true, max: 60, showWhen: { key: "code", value: OTHER_STANDARD } },
       { key: "otherNotice", type: "notice", label: "", hint: "برای این استاندارد فهرست MDL تاییدشده‌ای نیست. ایجنت مهندسی پیش‌نویس فهرست را می‌سازد و گزارش تفاوت دو استاندارد لازم می‌شود؛ تا تایید فهرست، خطر مدارک برای این پرونده باز می‌ماند.", showWhen: { key: "code", value: OTHER_STANDARD } },
       { key: "evidence", label: "اشاره به فایل (شماره سند و بند)", type: "textarea", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
@@ -213,7 +213,7 @@ async function registerDialog() {
     hint: "مدیر مهندسی پیشنهاد می‌دهد و مدیرعامل تصمیم می‌گیرد.",
     fields: [
       { key: "productId", label: "محصول", type: "select", required: true, options: products.value.map((p) => ({ value: String(p.value), text: p.text })) },
-      { key: "code", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
+      { key: "code", label: "استاندارد (از فهرست‌های MDL تاییدشده)", type: "select", required: true, options: standards, value: c.value.referenceCode || "" },
       { key: "basis", label: "مبنای استاندارد (دیتاشیت و بند)", required: true, min: 5, max: 500, value: c.value.standardEvidence || "" },
       { key: "why", label: "توجیه ثبت", type: "textarea", required: true, min: 30, max: 2000 },
     ],

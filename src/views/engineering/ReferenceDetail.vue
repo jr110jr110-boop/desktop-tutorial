@@ -91,7 +91,7 @@ const reason = (title: string, action: string, okText: string) =>
   <div class="inv-page">
     <div class="inv-card">
       <div class="inv-toolbar">
-        <h1 class="inv-title">فهرست مدارک مرجع <span v-if="x" class="inv-ltr">{{ x.code }}</span><span v-if="isNew">— فهرست تازه</span></h1>
+        <h1 class="inv-title">فهرست مدارک مرجع (MDL) <span v-if="x" class="inv-ltr">{{ x.code }}</span><span v-if="isNew">— فهرست تازه</span></h1>
         <router-link :to="enPaths.references" class="btn btn-sm btn-outline-secondary">فهرست‌ها</router-link>
       </div>
       <p v-if="loading" class="inv-muted">در حال خواندن…</p>

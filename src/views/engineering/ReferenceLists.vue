@@ -19,7 +19,7 @@ const canNew = hasRole(EnRoles.writers);
   <div class="inv-page">
     <div class="inv-card">
       <div class="inv-toolbar">
-        <h1 class="inv-title">فهرست مدارک مرجع</h1>
+        <h1 class="inv-title">فهرست مدارک مرجع (MDL)</h1>
         <router-link v-if="canNew" :to="enPaths.reference(0)" class="btn btn-sm btn-primary">فهرست تازه</router-link>
       </div>
       <h2 v-if="current.length" class="h6">فهرست‌های تاییدشده و جاری</h2>
@@ -38,7 +38,7 @@ const canNew = hasRole(EnRoles.writers);
         <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
       </div>
       <p v-if="list.loading.value" class="inv-muted">در حال خواندن…</p>
-      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">هنوز فهرست مرجعی نیست؛ سیستم محتوای خودش را ندارد و مهندسی باید آن را بنویسد و تایید کند.</p>
+      <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">هنوز هیچ فهرست MDL ساخته نشده است؛ سیستم محتوای خودش را ندارد و مهندسی باید آن را بنویسد و تایید کند.</p>
       <div v-else class="table-responsive">
         <table class="table table-sm table-hover">
           <thead><tr><th>کد</th><th>عنوان</th><th>ویرایش</th><th>وضعیت</th><th>سطرها</th><th>الزامی</th><th>مرحله مناقصه</th><th>تهیه‌کننده</th></tr></thead>
