@@ -77,6 +77,7 @@ const waiting = computed(() => {
                 </tr>
               </tbody>
             </table>
+            <div v-if="o.stalledTasksCount > (o.stalledTasks?.length || 0)" class="small mt-1" data-test="en-stalled-more">و {{ n(o.stalledTasksCount - (o.stalledTasks?.length || 0)) }} مورد دیگر</div>
           </div>
         </div>
 

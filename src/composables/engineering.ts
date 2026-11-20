@@ -129,14 +129,11 @@ export function chipOf(group: string, status: number | null | undefined): string
   }
 }
 
-/** Hours of waiting as text: «۳ روز و ۴ ساعت». The waiting never expires; the text only says how long. */
+/** Waiting time as text in OFFICE hours: «۱۴ ساعت اداری» (no days: a day of office time is 11 hours and the limit is 72 office hours). The waiting never expires; the text only says how long. */
 export function waitText(hours: number | null | undefined): string {
   const h = Math.max(0, Math.floor(Number(hours) || 0));
-  if (h < 1) return "کمتر از یک ساعت";
-  const d = Math.floor(h / 24);
-  const r = h % 24;
-  if (d === 0) return `${faNum(r, 0)} ساعت`;
-  return r ? `${faNum(d, 0)} روز و ${faNum(r, 0)} ساعت` : `${faNum(d, 0)} روز`;
+  if (h < 1) return "کمتر از یک ساعت اداری";
+  return `${faNum(h, 0)} ساعت اداری`;
 }
 
 /** Hours from now to an ISO date-time (negative = past). */
