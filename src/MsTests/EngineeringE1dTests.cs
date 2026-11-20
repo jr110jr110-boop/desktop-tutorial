@@ -206,5 +206,17 @@ namespace MsTests
             Refused(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().UploadLinesAsync(again.Id, again.RowVersion, CsvBytes("a,b\n1,2\n"), Ct, "bad.csv")), "سرستون");
             Assert.AreEqual(again.SourceDocumentId, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().GetListAsync(again.Id, Ct))).SourceDocumentId);
         }
+
+        // ------------------------------------------------------------------------------------------ fix round
+        [TestMethod]
+        public async Task The_Escalate_Step_Is_Never_Under_The_Stall_Rule_Itself()
+        {
+            AppHost host = Started("e1dfh1");
+            Assert.IsFalse(EnRisk.RuleStepCodes().Contains("ENG.RISK.ESCALATE"));
+            int failed = AddTask(host, "ENG.RISK.ESCALATE", AgentTaskState.Failed, null, DateTimeOffset.Now.AddDays(-30));
+            int fallback = AddTask(host, "ENG.RISK.ESCALATE", AgentTaskState.WaitingInput, DateTimeOffset.Now.AddDays(-30));
+            HashSet<string> keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+            Assert.AreEqual(0, keys.Count(k => k.StartsWith("EN-STALL-")), "tasks " + failed + "," + fallback);
+        }
     }
 }

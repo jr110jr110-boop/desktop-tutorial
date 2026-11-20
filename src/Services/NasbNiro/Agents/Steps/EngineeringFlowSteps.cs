@@ -333,6 +333,7 @@ namespace Services.NasbNiro.Agents.Steps
         public override string Title => "ایجنت مهندسی: اعلام دائمی خطر مدارک و بدهی سررسیدشده به مدیرعامل";
         public override AgentStepKind Kind => AgentStepKind.Agent;
         public override string FallbackRoles => EnRoles.Manager;
+        public override int OfficeDeadlineHours => 0;   // the alarm never alarms about itself: its own failure is already told to the PMO by AgentReconciler.EscalateAsync
 
         private static AgentWorkItem ItemOf(string key, bool open, Func<string, string, int, string, AgentWorkItem> make)
         {
