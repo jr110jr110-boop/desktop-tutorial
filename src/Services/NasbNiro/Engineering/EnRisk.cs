@@ -140,23 +140,64 @@ namespace Services.NasbNiro.Engineering
             }).Distinct());
         }
 
-        /// <summary>Open tasks of the engineering steps under the rule that wait for a person past their due instant, or that failed and were not touched for 72 office hours.</summary>
-        public static async Task<List<EnStalledTask>> StalledTasksAsync(IUnitOfWork uow, CancellationToken ct, IReadOnlyCollection<string> ruleCodes = null)
+        private sealed class StallCandidate
+        {
+            public int Id { get; set; }
+            public string StepCode { get; set; }
+            public string Title { get; set; }
+            public string GateRoles { get; set; }
+            public string Link { get; set; }
+            public AgentTaskState State { get; set; }
+            public DateTimeOffset? EscalatedAt { get; set; }
+            public DateTimeOffset ModifyDate { get; set; }
+            public DateTimeOffset CreateDate { get; set; }
+        }
+
+        /// <summary>
+        /// Open tasks of the engineering steps under the rule that waited for a person more than 72 OFFICE hours, or that failed and were not touched for 72 office hours.
+        /// SQL only selects the candidates (a stored DueAt in the past, or Failed); the decision is made in memory from the office clock, because tasks opened before the rule carry a 48 calendar hour DueAt.
+        /// The wait starts at the latest event that moved the task INTO its current state (fallback: its creation). No cap: every stalled task is returned; <paramref name="onlyTaskId"/> checks one task.
+        /// </summary>
+        public static async Task<List<EnStalledTask>> StalledTasksAsync(IUnitOfWork uow, CancellationToken ct, int? onlyTaskId = null, IReadOnlyCollection<string> ruleCodes = null)
         {
             string[] codes = (ruleCodes ?? RuleStepCodes()).ToArray();
-            if (codes.Length == 0) return new List<EnStalledTask>();
+            List<EnStalledTask> result = new List<EnStalledTask>();
+            if (codes.Length == 0) return result;
             DateTimeOffset now = DateTimeOffset.Now;
             DateTimeOffset failedBefore = now.AddHours(-OfficeClock.StopLimitHours);   // 72 office hours are never fewer than 72 calendar hours: a safe pre-filter for the query
-            List<AgentTask> rows = await uow.Set<AgentTask>().AsNoTracking().Where(t => !t.Deleted && codes.Contains(t.StepCode)
-                && (((t.State == AgentTaskState.WaitingHumanGate || t.State == AgentTaskState.WaitingInput || t.State == AgentTaskState.WaitingPhysical) && t.DueAt != null && t.DueAt < now)
-                    || (t.State == AgentTaskState.Failed && (t.EscalatedAt ?? t.ModifyDate) < failedBefore)))
-                .OrderBy(t => t.Id).Take(500).ToListAsync(ct);
-            List<EnStalledTask> result = new List<EnStalledTask>();
-            foreach (AgentTask t in rows)
+            int lastId = 0;
+            while (true)
             {
-                bool failed = t.State == AgentTaskState.Failed;
-                if (failed && OfficeClock.Add(t.EscalatedAt ?? t.ModifyDate, OfficeClock.StopLimitHours) >= now) continue;
-                result.Add(new EnStalledTask { TaskId = t.Id, StepCode = t.StepCode, Title = t.Title, Roles = t.GateRoles, RolesText = RoleText(t.GateRoles), Link = t.Link, Failed = failed, DueAt = failed ? OfficeClock.Add(t.EscalatedAt ?? t.ModifyDate, OfficeClock.StopLimitHours) : t.DueAt });
+                int after = lastId;
+                List<StallCandidate> rows = await uow.Set<AgentTask>().AsNoTracking().Where(t => !t.Deleted && t.Id > after && (onlyTaskId == null || t.Id == onlyTaskId) && codes.Contains(t.StepCode)
+                    && (((t.State == AgentTaskState.WaitingHumanGate || t.State == AgentTaskState.WaitingInput || t.State == AgentTaskState.WaitingPhysical) && t.DueAt != null && t.DueAt < now)
+                        || (t.State == AgentTaskState.Failed && (t.EscalatedAt ?? t.ModifyDate) < failedBefore)))
+                    .OrderBy(t => t.Id).Take(500)
+                    .Select(t => new StallCandidate { Id = t.Id, StepCode = t.StepCode, Title = t.Title, GateRoles = t.GateRoles, Link = t.Link, State = t.State, EscalatedAt = t.EscalatedAt, ModifyDate = t.ModifyDate, CreateDate = t.CreateDate }).ToListAsync(ct);
+                if (rows.Count == 0) break;
+                lastId = rows[rows.Count - 1].Id;
+                int[] ids = rows.Where(r => r.State != AgentTaskState.Failed).Select(r => r.Id).ToArray();
+                // ONE query for the events of all waiting candidates of this page
+                List<(int TaskId, DateTimeOffset At, AgentTaskState? From, AgentTaskState To)> events = ids.Length == 0 ? new List<(int TaskId, DateTimeOffset At, AgentTaskState? From, AgentTaskState To)>()
+                    : (await uow.Set<AgentTaskEvent>().AsNoTracking().Where(e => ids.Contains(e.TaskId)).Select(e => new { e.TaskId, e.At, e.FromState, e.ToState }).ToListAsync(ct)).Select(e => (e.TaskId, e.At, e.FromState, e.ToState)).ToList();
+                foreach (StallCandidate t in rows)
+                {
+                    bool failed = t.State == AgentTaskState.Failed;
+                    DateTimeOffset due;
+                    if (failed)
+                    {
+                        due = OfficeClock.Add(t.EscalatedAt ?? t.ModifyDate, OfficeClock.StopLimitHours);
+                        if (due >= now) continue;
+                    }
+                    else
+                    {
+                        DateTimeOffset waitStart = events.Where(e => e.TaskId == t.Id && e.To == t.State && e.From != t.State).Select(e => (DateTimeOffset?)e.At).DefaultIfEmpty(null).Max() ?? t.CreateDate;
+                        if (OfficeClock.Between(waitStart, now) < OfficeClock.StopLimitHours) continue;
+                        due = OfficeClock.Add(waitStart, OfficeClock.StopLimitHours);
+                    }
+                    result.Add(new EnStalledTask { TaskId = t.Id, StepCode = t.StepCode, Title = t.Title, Roles = t.GateRoles, RolesText = RoleText(t.GateRoles), Link = t.Link, Failed = failed, DueAt = due });
+                }
+                if (onlyTaskId != null || rows.Count < 500) break;
             }
             return result;
         }

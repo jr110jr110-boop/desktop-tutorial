@@ -242,5 +242,49 @@ namespace MsTests
 
         private static void Events(AppHost host, int task, AgentTaskState state, DateTimeOffset at) =>
             host.Write(u => { AppHost.Add(u, new AgentTaskEvent { TaskId = task, At = at, FromState = AgentTaskState.Running, ToState = state }); u.SaveChanges(); }, Seeder);
+        [TestMethod]
+        public async Task An_Old_Style_Calendar_Due_Does_Not_Make_A_Stall_Before_72_Office_Hours()
+        {
+            AppHost host = Started("e1dfm1");
+            // a Friday noon in the recent past: the wait began 50 calendar hours earlier (Wednesday), over a Friday
+            DateTimeOffset now = DateTimeOffset.Now;
+            DateTimeOffset start = now.AddHours(-50);
+            int id = AddTask(host, "ENG.PLATFORM.STANDARD", AgentTaskState.WaitingInput, now.AddHours(-2));   // old-style DueAt: created + 48 calendar hours, already past
+            host.Write(u => { u.Set<AgentTask>().Single(t => t.Id == id).CreateDate = start; u.SaveChanges(); }, Seeder);
+            Events(host, id, AgentTaskState.WaitingInput, start);
+            double office = OfficeClock.Between(start, now);
+            HashSet<string> keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+            Assert.IsFalse(keys.Contains("EN-STALL-" + id), "only " + office + " office hours have passed");   // 50 calendar hours can never be 72 office hours
+
+            // the same task after 72 office hours is stalled
+            DateTimeOffset longAgo = OfficeClock.Add(now, 0).AddDays(-14);
+            host.Write(u => { u.Set<AgentTaskEvent>().Single(e => e.TaskId == id).At = longAgo; u.SaveChanges(); }, Seeder);
+            keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+            Assert.IsTrue(keys.Contains("EN-STALL-" + id));
+        }
+        [TestMethod]
+        public async Task The_Wait_Starts_At_The_Latest_Event_Into_The_Current_State()
+        {
+            AppHost host = Started("e1dfm1b");
+            DateTimeOffset now = DateTimeOffset.Now;
+            int id = AddTask(host, "ENG.PLATFORM.STANDARD", AgentTaskState.WaitingInput, now.AddHours(-1));   // created 20 days ago (AddTask)
+            Events(host, id, AgentTaskState.WaitingInput, now.AddDays(-20));
+            host.Write(u => { AppHost.Add(u, new AgentTaskEvent { TaskId = id, At = now.AddHours(-3), FromState = AgentTaskState.WaitingInput, ToState = AgentTaskState.WaitingInput }); u.SaveChanges(); }, Seeder);   // same state: ignored
+            Assert.AreEqual(1, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, id))).Count);
+            Events(host, id, AgentTaskState.WaitingInput, now.AddHours(-3));   // moved into the state again 3 hours ago (for example a returned task): the clock restarts
+            Assert.AreEqual(0, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, id))).Count);
+        }
+        [TestMethod]
+        public async Task The_Stall_List_Has_No_Cap_And_One_Task_Can_Be_Checked_Alone()
+        {
+            AppHost host = Started("e1dfm2");
+            List<int> ids = new List<int>();
+            for (int i = 0; i < 3; i++) ids.Add(AddTask(host, "ENG.PLATFORM.STANDARD", AgentTaskState.WaitingInput, DateTimeOffset.Now.AddHours(-1)));
+            List<EnStalledTask> all = await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+            Assert.AreEqual(3, all.Count);
+            List<EnStalledTask> one = await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, ids[1]));
+            Assert.AreEqual(ids[1], one.Single().TaskId);
+            Assert.AreEqual(0, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, 987654))).Count);
+        }
     }
 }

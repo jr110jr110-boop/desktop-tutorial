@@ -366,7 +366,7 @@ namespace Services.NasbNiro.Agents.Steps
             string targetType = risk ? nameof(EnCase) : stall ? nameof(AgentTask) : nameof(EnDocumentDebt);
             // the risk of this one case only (no run over all cases per task): the same rule as the full computation
             EnRiskRow row = risk ? (await EnRisk.ComputeAsync(uow, ct, new[] { item.TargetId })).FirstOrDefault() : null;
-            EnStalledTask stalled = stall ? (await EnRisk.StalledTasksAsync(uow, ct)).FirstOrDefault(x => x.TaskId == item.TargetId) : null;
+            EnStalledTask stalled = stall ? (await EnRisk.StalledTasksAsync(uow, ct, item.TargetId)).FirstOrDefault() : null;
             bool waiting = risk ? row != null && row.Awarded : stall ? stalled != null : (await EnRisk.OverdueDebtsAsync(uow, ct)).Any(d => d.Id == item.TargetId);
             string title; string link;
             if (risk)
