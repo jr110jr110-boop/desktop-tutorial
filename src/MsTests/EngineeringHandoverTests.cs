@@ -234,7 +234,9 @@ namespace MsTests
             Assert.AreEqual(1, gate.Count, "thirty days later the gate is still open");
             EnOverviewDto o = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnOverviewService>().GetOverviewAsync(Ct)));
             Assert.AreEqual(1, o.WaiversAwaitingCeo);
-            Assert.IsTrue(o.OldestWaiverWaitingHours >= 719 && o.OldestWaiverWaitingHours <= 721);
+            DateTimeOffset nowHo9 = DateTimeOffset.Now;
+            Assert.AreEqual(Math.Floor(Services.NasbNiro.Office.OfficeClock.Between(nowHo9.AddDays(-30), nowHo9)), o.OldestWaiverWaitingHours, 1, "office hours, not calendar hours");
+            Assert.IsTrue(o.OldestWaiverWaitingHours < 719);
             EnWaiverDto w1 = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().GetWaiversAsync(new EnWaiverQuery(), Ct))).Single();
             Assert.AreEqual(0, w1.Status, "still requested, never expired");
             Ok(await Decide(host, Ceo, w1.Id, "approve", null));

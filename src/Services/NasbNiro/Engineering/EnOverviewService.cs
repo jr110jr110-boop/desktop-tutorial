@@ -60,7 +60,7 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset now = DateTimeOffset.Now;
             o.WaiversAwaitingCeo = await _uow.Set<EnWaiver>().AsNoTracking().CountAsync(w => !w.Deleted && w.Status == EnWaiverStatus.Requested, ct);
             DateTimeOffset? oldest = await _uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested).OrderBy(w => w.RequestedAt).Select(w => (DateTimeOffset?)w.RequestedAt).FirstOrDefaultAsync(ct);
-            o.OldestWaiverWaitingHours = oldest.HasValue ? Math.Max(0, (int)Math.Floor((now - oldest.Value).TotalHours)) : 0;   // a request never expires: it is an alarm until the CEO decides
+            o.OldestWaiverWaitingHours = oldest.HasValue ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(oldest.Value, now)) : 0;   // a request never expires: it is an alarm until the CEO decides
             o.DistributionsUnacknowledged = await _uow.Set<EnDistribution>().AsNoTracking().CountAsync(d => !d.Deleted && d.AcknowledgedAt == null && d.Status == EnDistStatus.Notified, ct);
             List<EnRiskRow> risk = await EnRisk.ComputeAsync(_uow, ct);
             o.CasesAtDocumentRisk = risk.Count; o.AwardedCasesAtDocumentRisk = risk.Count(r => r.Awarded);
@@ -68,12 +68,12 @@ namespace Services.NasbNiro.Engineering
             o.DeviationsAwaitingCeo = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnDeviationStatus.ManagerApproved, ct);
             o.DeviationsAwaitingManager = await _uow.Set<EnDeviation>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnDeviationStatus.Requested, ct);
             DateTimeOffset? oldestDeviation = await _uow.Set<EnDeviation>().AsNoTracking().Where(x => !x.Deleted && (x.Status == EnDeviationStatus.Requested || x.Status == EnDeviationStatus.ManagerApproved)).OrderBy(x => x.RequestedAt).Select(x => (DateTimeOffset?)x.RequestedAt).FirstOrDefaultAsync(ct);
-            o.OldestDeviationWaitingHours = oldestDeviation.HasValue ? Math.Max(0, (int)Math.Floor((now - oldestDeviation.Value).TotalHours)) : 0;
+            o.OldestDeviationWaitingHours = oldestDeviation.HasValue ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(oldestDeviation.Value, now)) : 0;
             o.StandardsDeviationsOpen = o.DeviationsAwaiting + o.WaiversAwaitingCeo;
             o.StandardGapsOpen = await _uow.Set<EnStandardGap>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnGapStatus.Draft, ct);
             o.InfoRequestsOpen = await _uow.Set<EnInfoRequest>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnInfoStatus.Open, ct);
             DateTimeOffset? oldestRegistration = await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed).OrderBy(x => x.ProposedAt).Select(x => (DateTimeOffset?)x.ProposedAt).FirstOrDefaultAsync(ct);
-            o.OldestRegistrationWaitingHours = oldestRegistration.HasValue ? Math.Max(0, (int)Math.Floor((now - oldestRegistration.Value).TotalHours)) : 0;
+            o.OldestRegistrationWaitingHours = oldestRegistration.HasValue ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(oldestRegistration.Value, now)) : 0;
             o.RegistrationsOpen = await _uow.Set<EnPlatformRegistration>().AsNoTracking().CountAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed, ct);
             if (_user.IsInRole(EnRoles.Manager + "," + EnRoles.Ceo))
             {

@@ -68,7 +68,7 @@ namespace Services.NasbNiro.Engineering
                     Id = r.Id, Number = r.Number, CaseId = r.CaseId, CaseNumber = cases.TryGetValue(r.CaseId, out string cn) ? cn : null, ProductId = r.ProductId, ProductCode = products.TryGetValue(r.ProductId, out string pc) ? pc : null,
                     ReferenceCode = r.ReferenceCode, StandardBasis = r.StandardBasis, Rationale = r.Rationale, Status = (int)r.Status, StatusText = StatusText(r.Status), ProposedByName = names.Name(r.ProposedByUserId), ProposedAtText = EnText.Stamp(r.ProposedAt),
                     DecidedByName = names.Name(r.ApprovedByUserId ?? r.RejectedByUserId), DecidedAtText = EnText.Stamp(r.ApprovedAt ?? r.RejectedAt), DecisionNote = r.DecisionNote, DossierId = r.DossierId,
-                    WaitingHours = r.Status == EnRegStatus.Proposed ? Math.Max(0, (int)Math.Floor((now - r.ProposedAt).TotalHours)) : 0, RowVersion = EnConcurrency.Text(r.RowVersion),
+                    WaitingHours = r.Status == EnRegStatus.Proposed ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(r.ProposedAt, now)) : 0, RowVersion = EnConcurrency.Text(r.RowVersion),
                     CanDecide = decide == null, DecideBlockedReason = decide, CanWithdraw = withdraw == null, WithdrawBlockedReason = withdraw,
                 };
             }).ToList();

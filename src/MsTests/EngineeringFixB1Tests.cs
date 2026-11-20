@@ -151,8 +151,10 @@ namespace MsTests
             Assert.AreEqual(1, o.DeviationsAwaitingManager);
             Assert.AreEqual(1, o.DeviationsAwaitingCeo);
             Assert.AreEqual(2, o.DeviationsAwaiting);
-            Assert.AreEqual(5, o.OldestDeviationWaitingHours);
-            Assert.AreEqual(7, o.OldestRegistrationWaitingHours);
+            // the waiting clocks are OFFICE hours (employer rule 14): compare with the office clock, not with calendar hours (one hour of tolerance for the time the test takes)
+            DateTimeOffset nowB1 = DateTimeOffset.Now;
+            Assert.AreEqual(Math.Floor(Services.NasbNiro.Office.OfficeClock.Between(nowB1.AddHours(-5), nowB1)), o.OldestDeviationWaitingHours, 1);
+            Assert.AreEqual(Math.Floor(Services.NasbNiro.Office.OfficeClock.Between(nowB1.AddHours(-7), nowB1)), o.OldestRegistrationWaitingHours, 1);
         }
     }
 }

@@ -390,7 +390,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     Id = w.Id, Number = w.Number, HandoverId = w.HandoverId, HandoverNumber = hn.TryGetValue(w.HandoverId, out string hnum) ? hnum : null, CaseId = w.CaseId, CaseNumber = cn.TryGetValue(w.CaseId, out string cnum) ? cnum : null,
                     Reason = w.Reason, MissingLines = EnHandoverRules.MissingLines(snap), MissingSnapshot = snap.Lines.ToList(), DossierUnconfirmed = snap.DossierUnconfirmed, DebtHours = w.DebtHours, DebtDueAt = w.DebtDueAt, DebtDueAtText = EnText.Stamp(w.DebtDueAt), Status = (int)w.Status, StatusText = EnText.Waiver(w.Status),
-                    RequestedByName = names.Name(w.RequestedByUserId), RequestedAtText = EnText.Stamp(w.RequestedAt), WaitingHours = w.Status == EnWaiverStatus.Requested ? (int)Math.Floor((now - w.RequestedAt).TotalHours) : 0,
+                    RequestedByName = names.Name(w.RequestedByUserId), RequestedAtText = EnText.Stamp(w.RequestedAt), WaitingHours = w.Status == EnWaiverStatus.Requested ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(w.RequestedAt, now)) : 0,
                     DecidedByName = names.Name(w.DecidedByUserId), DecidedAtText = EnText.Stamp(w.DecidedAt), DecisionNote = w.DecisionNote, Used = w.UsedAt.HasValue, Covers = w.Status == EnWaiverStatus.Approved && coverage == null, CoverageNote = coverage,
                     RowVersion = EnConcurrency.Text(w.RowVersion), CanDecide = decide == null, DecideBlockedReason = decide,
                 });

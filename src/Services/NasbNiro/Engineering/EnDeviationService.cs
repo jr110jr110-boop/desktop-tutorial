@@ -122,7 +122,7 @@ namespace Services.NasbNiro.Engineering
                     StandardCode = d.StandardCode, StandardClause = d.StandardClause, Requirement = d.Requirement, Instruction = d.Instruction, RequestedByName = names.Name(d.RequestedByUserId), RequestedAtText = EnText.Stamp(d.RequestedAt),
                     ManagerApprovedByName = names.Name(d.ManagerApprovedByUserId), ManagerApprovedAtText = EnText.Stamp(d.ManagerApprovedAt), CeoApprovedByName = names.Name(d.CeoApprovedByUserId), CeoApprovedAtText = EnText.Stamp(d.CeoApprovedAt),
                     RejectedByName = names.Name(d.RejectedByUserId), Status = (int)d.Status, StatusText = d.Status switch { EnDeviationStatus.Requested => "منتظر مدیر مهندسی", EnDeviationStatus.ManagerApproved => "منتظر مدیرعامل", EnDeviationStatus.Approved => "تاییدشده", EnDeviationStatus.Rejected => "ردشده", _ => "باطل" },
-                    DecisionNote = d.DecisionNote, WaitingHours = EnDeviations.Open(d) ? Math.Max(0, (int)Math.Floor((now - d.RequestedAt).TotalHours)) : 0, RowVersion = EnConcurrency.Text(d.RowVersion), CanDecide = why == null, DecideBlockedReason = why,
+                    DecisionNote = d.DecisionNote, WaitingHours = EnDeviations.Open(d) ? (int)Math.Floor(global::Services.NasbNiro.Office.OfficeClock.Between(d.RequestedAt, now)) : 0, RowVersion = EnConcurrency.Text(d.RowVersion), CanDecide = why == null, DecideBlockedReason = why,
                 });
             }
             return result;
