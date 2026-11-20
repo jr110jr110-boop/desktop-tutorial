@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { getEnOverview } from "@/api/EngineeringAPIs";
 import EnWait from "@/components/engineering/EnWait.vue";
-import { completeness, enPaths, EnRoles, faNum } from "@/composables/engineering";
+import { completeness, enPaths, EnRoles, faDigits, faNum, stamp } from "@/composables/engineering";
 import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
@@ -61,6 +61,23 @@ const waiting = computed(() => {
         <div v-if="o.casesAtDocumentRisk > 0" :class="['en-banner', o.awardedCasesAtDocumentRisk > 0 ? 'red' : 'amber']" data-test="en-risk">
           {{ n(o.casesAtDocumentRisk) }} پرونده در معرض خطر تحویل مدارک است<span v-if="o.awardedCasesAtDocumentRisk > 0"> که {{ n(o.awardedCasesAtDocumentRisk) }} مورد آن برنده شده و در مهندسی است</span>.
           <router-link :to="enPaths.cases">دیدن پرونده‌ها</router-link>
+        </div>
+
+        <div v-if="o.stalledTasksCount > 0" class="en-banner red" data-test="en-stalled">
+          <div class="fw-bold">کارهای منتظر بیش از ۷۲ ساعت اداری: {{ n(o.stalledTasksCount) }}</div>
+          <div class="small">ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه. این هشدار در کارتابل مدیرعامل هم هست و خودکار هیچ تصمیمی نمی‌گیرد.</div>
+          <div class="table-responsive mt-2">
+            <table class="table table-sm mb-0">
+              <thead><tr><th>کار</th><th>منتظر</th><th>مهلت</th></tr></thead>
+              <tbody>
+                <tr v-for="t in o.stalledTasks" :key="t.taskId" data-test="en-stalled-row">
+                  <td><router-link v-if="t.link" :to="t.link">{{ faDigits(t.title) }}</router-link><span v-else>{{ faDigits(t.title) }}</span></td>
+                  <td>{{ t.waitingRolesText }}</td>
+                  <td>{{ stamp(t.dueAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <h2 class="h6 mt-3">پرونده‌ها بر اساس مرحله</h2>

@@ -34,10 +34,10 @@ const page = (rows) => ({ data: rows, totalItems: rows.length, currentPage: 1, i
 const NO = "شما مجوز این کار را ندارید.";
 const flags = (names, on = false, why = NO) => Object.fromEntries(names.flatMap((n) => [["can" + n, on], [n[0].toLowerCase() + n.slice(1) + "BlockedReason", on ? null : why]]));
 
-const overviewEmpty = { controlStarted: true, controlStartText: "", casesByStatus: [], casesByClassification: [], platformsByDossierStatus: [], platformsTotal: 0, platformsIncomplete: 0, openClarifications: 0, handoversWaiting: [],
+const overviewEmpty = { stalledTasksCount: 0, stalledTasks: [], controlStarted: true, controlStartText: "", casesByStatus: [], casesByClassification: [], platformsByDossierStatus: [], platformsTotal: 0, platformsIncomplete: 0, openClarifications: 0, handoversWaiting: [],
   openDebts: 0, overdueDebts: 0, waiversAwaitingCeo: 0, oldestWaiverWaitingHours: 0, distributionsUnacknowledged: 0, casesAtDocumentRisk: 0, awardedCasesAtDocumentRisk: 0, deviationsAwaiting: 0,
   standardsDeviationsOpen: 0, deviationsAwaitingCeo: 0, deviationsAwaitingManager: 0, oldestDeviationWaitingHours: 0, oldestRegistrationWaitingHours: 0, standardGapsOpen: 0, infoRequestsOpen: 0, registrationsOpen: 0 };
-const overviewAlarm = { ...overviewEmpty, casesByStatus: [{ key: 2, text: "منتظر تایید مدیر مهندسی", count: 2 }, { key: 4, text: "تهیه بسته فنی مناقصه", count: 3 }, { key: 7, text: "در مهندسی", count: 4 }],
+const overviewAlarm = { ...overviewEmpty, stalledTasksCount: 1, stalledTasks: [{ taskId: 5, title: "ثبت استاندارد دیتاشیت اصلی پلتفرم 99.11", waitingRolesText: "مدیر مهندسی، مهندس", failed: false, dueAt: "2026-11-20T09:00:00+03:30", dueAtText: "", link: "/engineering/platforms/1" }], casesByStatus: [{ key: 2, text: "منتظر تایید مدیر مهندسی", count: 2 }, { key: 4, text: "تهیه بسته فنی مناقصه", count: 3 }, { key: 7, text: "در مهندسی", count: 4 }],
   casesByClassification: [{ key: 1, text: "پلتفرم (توربین ساخته‌شده)", count: 6 }, { key: 2, text: "طراحی جدید", count: 3 }],
   platformsByDossierStatus: [{ status: 0, statusText: "ارزیابی‌نشده", count: 3, missingRequired: 0 }, { status: 1, statusText: "ناقص", count: 4, missingRequired: 27 }, { status: 2, statusText: "کامل‌شده، منتظر تایید مدیر مهندسی", count: 1, missingRequired: 0 }, { status: 3, statusText: "کامل", count: 5, missingRequired: 0 }],
   platformsTotal: 13, platformsIncomplete: 4, openClarifications: 3, handoversWaiting: [{ key: 1, text: "ارسال‌شده به PMO", count: 2 }, { key: 2, text: "برگشت‌خورده", count: 1 }], openDebts: 5, overdueDebts: 2,
