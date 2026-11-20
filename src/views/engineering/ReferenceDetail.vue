@@ -5,7 +5,7 @@ import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import { getEnReferenceList, postEnReferenceAction, saveEnReferenceList, uploadEnReferenceLines, uploadEnReferenceNew } from "@/api/EngineeringAPIs";
-import { enPaths, EnRoles, enUnits, errText, faDigits, faNum, runEn, useEnDialog } from "@/composables/engineering";
+import { downloadDoc, enPaths, EnRoles, enUnits, errText, faDigits, faNum, runEn, useEnDialog } from "@/composables/engineering";
 import { saveBlob } from "@/api/ApiClient";
 import { fail, ok } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
@@ -98,6 +98,7 @@ const reason = (title: string, action: string, okText: string) =>
       <div v-if="needsCheck" class="en-banner amber" data-test="en-ref-check">این فهرست هنوز تاییدشده نیست؛ پیش از تایید باید با متن استاندارد {{ form.code || x?.code || "مربوط" }} و PMBOK تطبیق داده شود. محتوای فهرست را سیستم نمی‌سازد و بر عهده مهندسی است.</div>
       <div v-if="x?.status === 1" class="en-banner amber">منتظر تایید است؛ درخواست منقضی نمی‌شود.</div>
       <div v-if="x?.voidReason" class="en-banner red">ابطال‌شده: {{ x.voidReason }}</div>
+      <p v-if="x?.sourceDocumentId" class="small" data-test="en-ref-source">فایل منبع: <span class="inv-ltr">{{ x.sourceFileName || "فایل" }}</span> <a href="#" class="ms-2" @click.prevent="downloadDoc(x.sourceDocumentId, x.sourceFileName || 'mdl.csv')">دریافت فایل</a></p>
       <template v-if="x">
         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
           <EnChip :status="x.status" :text="x.statusText" group="ref" /> <span v-if="x.isCurrent" class="inv-badge ok">جاری</span>
