@@ -34,7 +34,7 @@ export const postEnClarificationAction = (body: any) => call("post", base + "cla
 export const getEnPlatforms = (q: EnQuery) => call("get", base + "platforms", undefined, clean(q));
 export const getEnPlatformSummary = () => call("get", base + "platforms/summary");
 export const getEnDossier = (productId: number, code?: string | null) => call("get", base + "platforms/" + productId, undefined, clean({ code }));
-/** body: { productId, referenceCode, standardBasis, action: native-standard|assess|complete|confirm|return, note, rowVersion } */
+/** body: { productId, referenceCode, standardBasis, standardAttachmentId (the uploaded data sheet, required for native-standard), action: native-standard|assess|complete|confirm|return, note, rowVersion } */
 export const postEnDossierAction = (body: any) => call("post", base + "platforms/action", body);
 /** body: { lineId, documentId, controlledDocumentId, revision, notApplicable, notApplicableReason, rowVersion } */
 export const postEnSupplyLine = (body: any) => call("post", base + "platforms/supply", body);

@@ -72,8 +72,17 @@ async function standardDialog() {
   const standards = await loadStandardOptions();
   d.ask({
     title: "ثبت استاندارد از دیتاشیت اصلی",
-    fields: [{ key: "c", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards }, { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 }],
-    run: (v) => postEnDossierAction({ productId: productId.value, action: "native-standard", referenceCode: v.c, standardBasis: v.b }),
+    hint: "فایل دیتاشیت اصلی پروژه‌ای که این پلتفرم برای آن ساخته شد بارگذاری می‌شود؛ مبنا فقط اشاره‌ای کوتاه به همان فایل است.",
+    fields: [
+      { key: "c", label: "استاندارد (از فهرست‌های مرجع تاییدشده)", type: "select", required: true, options: standards },
+      { key: "b", label: "مبنا (دیتاشیت و بند)", required: true, min: 5, max: 500 },
+      { key: "file", label: "فایل دیتاشیت اصلی پلتفرم", type: "file" as const, required: true },
+    ],
+    run: async (v) => {
+      const [fid, fe] = await uploadDoc(v.file);
+      if (fe) return [null, fe];
+      return postEnDossierAction({ productId: productId.value, action: "native-standard", referenceCode: v.c, standardBasis: v.b, standardAttachmentId: fid });
+    },
     okText: "استاندارد از دیتاشیت اصلی ثبت شد.",
   });
 }
@@ -96,7 +105,7 @@ async function standardDialog() {
           <span v-if="neverAssessed" class="inv-badge warn" data-test="en-never-assessed">ارزیابی نشده</span>
           <span v-else-if="x.stale" class="inv-badge warn">فهرست مرجع تغییر کرده؛ ارزیابی دوباره لازم است</span>
         </div>
-        <p v-if="x.standardBasis" class="small">مبنای استاندارد: {{ x.standardBasis }}</p>
+        <p v-if="x.standardBasis" class="small">مبنای استاندارد: {{ x.standardBasis }}<a v-if="x.standardAttachmentId" href="#" class="ms-2" data-test="en-dossier-datasheet" @click.prevent="downloadDoc(x.standardAttachmentId, 'datasheet')">دیدن دیتاشیت اصلی</a><span v-else class="inv-muted ms-2">(بدون فایل دیتاشیت)</span></p>
         <p v-if="x.otherDossiers?.length" class="small">پرونده‌های دیگر این محصول:
           <router-link v-for="o in x.otherDossiers" :key="o.id" :to="enPaths.platform(x.productId, o.referenceCode)" class="ms-2">{{ o.referenceCode }} ({{ o.statusText }})</router-link>
         </p>
