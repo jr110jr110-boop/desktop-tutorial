@@ -208,6 +208,7 @@ namespace MsTests
         }
 
         // ------------------------------------------------------------------------------------------ fix round
+
         [TestMethod]
         public async Task The_Escalate_Step_Is_Never_Under_The_Stall_Rule_Itself()
         {
@@ -218,6 +219,7 @@ namespace MsTests
             HashSet<string> keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
             Assert.AreEqual(0, keys.Count(k => k.StartsWith("EN-STALL-")), "tasks " + failed + "," + fallback);
         }
+
         [TestMethod]
         public async Task The_Older_Engineering_Steps_Are_Under_The_Office_Rule_Too()
         {
@@ -242,6 +244,7 @@ namespace MsTests
 
         private static void Events(AppHost host, int task, AgentTaskState state, DateTimeOffset at) =>
             host.Write(u => { AppHost.Add(u, new AgentTaskEvent { TaskId = task, At = at, FromState = AgentTaskState.Running, ToState = state }); u.SaveChanges(); }, Seeder);
+
         [TestMethod]
         public async Task An_Old_Style_Calendar_Due_Does_Not_Make_A_Stall_Before_72_Office_Hours()
         {
@@ -262,6 +265,7 @@ namespace MsTests
             keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
             Assert.IsTrue(keys.Contains("EN-STALL-" + id));
         }
+
         [TestMethod]
         public async Task The_Wait_Starts_At_The_Latest_Event_Into_The_Current_State()
         {
@@ -274,6 +278,7 @@ namespace MsTests
             Events(host, id, AgentTaskState.WaitingInput, now.AddHours(-3));   // moved into the state again 3 hours ago (for example a returned task): the clock restarts
             Assert.AreEqual(0, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, id))).Count);
         }
+
         [TestMethod]
         public async Task The_Stall_List_Has_No_Cap_And_One_Task_Can_Be_Checked_Alone()
         {
@@ -286,6 +291,7 @@ namespace MsTests
             Assert.AreEqual(ids[1], one.Single().TaskId);
             Assert.AreEqual(0, (await host.As(Ceo, p => EnRisk.StalledTasksAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct, 987654))).Count);
         }
+
         [TestMethod]
         public async Task A_Windows_Path_File_Name_Is_Reduced_To_The_Name()
         {
@@ -293,6 +299,18 @@ namespace MsTests
             byte[] csv = CsvBytes(CsvHead + "DWG,نقشه,,1,1,\n");
             EnReferenceListDto made = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnReferenceService>().CreateFromFileAsync(new EnSaveReferenceDto { Code = "VDDR-WIN", Title = "فهرست ویندوز" }, csv, Ct, @"C:\Users\x\mdl.csv")));
             Assert.AreEqual("mdl.csv", made.SourceFileName);
+        }
+
+        [TestMethod]
+        public async Task The_Agent_Board_Flags_The_Steps_Under_The_Office_Rule()
+        {
+            AppHost host = Started("e1dfl3");
+            var steps = Ok(await host.As(Ceo, p => p.GetRequiredService<IAgentBoardService>().GetStepsAsync(Ct)));
+            Assert.AreEqual(72, steps.Single(s => s.Code == "ENG.BOM.SIGN").OfficeDeadlineHours);
+            Assert.AreEqual(72, steps.Single(s => s.Code == "ENG.PLATFORM.STANDARD").OfficeDeadlineHours);
+            Assert.AreEqual(0, steps.Single(s => s.Code == "ENG.RISK.ESCALATE").OfficeDeadlineHours);
+            Assert.AreEqual(0, steps.Single(s => s.Code == "ENG.RISK.WATCH").OfficeDeadlineHours);
+            Assert.IsTrue(steps.Where(s => !s.Code.StartsWith("ENG.", StringComparison.Ordinal)).All(s => s.OfficeDeadlineHours == 0));
         }
     }
 }

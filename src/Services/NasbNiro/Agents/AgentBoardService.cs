@@ -238,7 +238,7 @@ namespace Services.NasbNiro.Agents
             new AgentStepDto
             {
                 Code = s.Code, Station = s.Station, StationTitle = AgentStations.Title(s.Station), AgentCode = s.AgentCode.ToUpperInvariant(), Title = s.Title, Kind = s.Kind, FallbackRoles = s.FallbackRoles,
-                Enabled = setting.Enabled, SeatEnabled = seatOn, MaxAttempts = setting.MaxAttempts, GateDueHours = setting.GateDueHours, OpenTasks = open,
+                Enabled = setting.Enabled, SeatEnabled = seatOn, MaxAttempts = setting.MaxAttempts, GateDueHours = setting.GateDueHours, OfficeDeadlineHours = s is IOfficeDeadlineStep rule ? Math.Max(0, rule.OfficeDeadlineHours) : 0, OpenTasks = open,
             };
 
         public async Task<ResponseDto<List<AgentStepDto>>> GetStepsAsync(CancellationToken ct)

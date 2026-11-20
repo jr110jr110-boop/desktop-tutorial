@@ -228,6 +228,9 @@ namespace ViewModels.NasbNiro.AgentDtos
         public bool SeatEnabled { get; set; }
         public int MaxAttempts { get; set; }
         public int GateDueHours { get; set; }
+
+        /// <summary>Above 0: the human wait of this step is a FIXED rule in office hours (employer rule 14) and the editable GateDueHours does not apply to it.</summary>
+        public int OfficeDeadlineHours { get; set; }
         public int OpenTasks { get; set; }
     }
 
