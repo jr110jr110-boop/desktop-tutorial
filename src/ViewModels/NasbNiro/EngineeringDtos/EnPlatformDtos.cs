@@ -63,6 +63,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string ReferenceCode { get; set; }
         public string StandardBasis { get; set; }
 
+        /// <summary>The data sheet file of the original project the standard was recorded from; null for a dossier made without a file (by the case flow or before E1d).</summary>
+        public Guid? StandardAttachmentId { get; set; }
+
         /// <summary>The other dossiers of the same product (one per standard).</summary>
         public List<EnDossierRefDto> OtherDossiers { get; set; } = new List<EnDossierRefDto>();
         public bool NativeStandardMissing { get; set; }
@@ -131,6 +134,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
         /// <summary>For native-standard: where the standard is known from (data sheet number and clause), at least 5 characters.</summary>
         public string StandardBasis { get; set; }
+
+        /// <summary>For native-standard: the uploaded data sheet file of the original project (REQUIRED from a person; same name as the case DTO).</summary>
+        public Guid? StandardAttachmentId { get; set; }
         public string Action { get; set; }
         public int? LineId { get; set; }
         public string Note { get; set; }

@@ -116,13 +116,16 @@ namespace MsTests
         public static async Task<ResponseDto<EnDossierDto>> Dossier(AppHost host, ClaimsPrincipal who, int productId, string action, string note = null, int? lineId = null, string code = Std)
         {
             if (action == "assess" && !host.Read(u => u.Set<EnPlatformDossier>().Any(d => d.ProductId == productId && d.ReferenceCode == code && !d.Deleted)))
-                Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)));
+                { Guid ds = File(host, 2111); Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct))); }
             return await host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = action, Note = note, LineId = lineId, ReferenceCode = code }, Ct));
         }
 
         /// <summary>A product becomes a platform only with a dossier: the engineers record the standard of its original data sheet.</summary>
-        public static async Task NativeDossier(AppHost host, int productId, string code = Std) =>
-            Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)));
+        public static async Task NativeDossier(AppHost host, int productId, string code = Std)
+        {
+            Guid ds = File(host, 2111);
+            Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)));
+        }
 
         public static Task<ResponseDto<EnDossierDto>> Supply(AppHost host, ClaimsPrincipal who, int lineId, Guid? file, bool na = false, string reason = null) =>
             host.As(who, p => p.GetRequiredService<IEnPlatformService>().SupplyLineAsync(new EnSupplyLineDto { LineId = lineId, DocumentId = file, NotApplicable = na, NotApplicableReason = reason, Revision = "A" }, Ct));
@@ -183,7 +186,7 @@ namespace MsTests
         public static async Task<EnCaseDto> ApprovedCase(AppHost host, int inquiry, bool platform, int? productId = null, string code = Std)
         {
             if (platform && productId.HasValue && !host.Read(u => u.Set<EnPlatformDossier>().Any(d => d.ProductId == productId.Value && !d.Deleted)))   // a product is a platform only with a dossier: the engineers record the standard of its original data sheet
-                Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId.Value, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)));
+                { Guid ds = File(host, 2111); Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId.Value, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct))); }
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = platform ? 1 : 2; d.ProductId = productId; d.Basis = "مبنای آزمون برای تعیین نوع پرونده"; }));
             Ok(await SetStandard(host, Eng1, c.Id, code));

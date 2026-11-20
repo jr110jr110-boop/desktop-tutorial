@@ -118,7 +118,7 @@ namespace MsTests
             int newCase = EngineeringPart3Tests.Seed(host, EnClassification.New, EnCaseStatus.InEngineering);
             EngineeringPart3Tests.ReleaseHandover(host, newCase, product, "REG-A");
             Assert.AreEqual(0, (await EngineeringStandardsTests.Discover(host, await SeatAsync(host), "ENG.PLATFORM.STANDARD")).Count(i => i.TargetId == product), "no task for an unregistered New design");
-            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = "REG-A", StandardBasis = "دیتاشیت پروژه، بند ۴" }, Ct)), "پلتفرم نشده");
+            { Guid ds = File(host, 2111); Refused(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = "REG-A", StandardBasis = "دیتاشیت پروژه، بند ۴" }, Ct)), "پلتفرم نشده"); }
             Assert.AreEqual(0, host.Read(u => u.Set<EnPlatformDossier>().Count()));
             // an ordinary product still gets the task
             int ordinary = Product(host, "99.88.00.000.2");
@@ -261,7 +261,7 @@ namespace MsTests
         {
             AppHost host = await EngineeringStandardsTests.TwoStandardsAsync("fixgap");
             int product = Product(host);
-            Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = "API-611", StandardBasis = "دیتاشیت پروژهٔ اول، بند ۳" }, Ct)));
+            { Guid ds = File(host, 2111); Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = "API-611", StandardBasis = "دیتاشیت پروژهٔ اول، بند ۳" }, Ct))); }
             EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess", code: "API-611"));
             Ok(await Supply(host, Eng1, d.Lines.First(l => l.Required).Id, File(host, 2111)));
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", x => x.InquiryId = Inquiry(host)));

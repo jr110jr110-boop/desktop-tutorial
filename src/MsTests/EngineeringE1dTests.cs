@@ -141,5 +141,28 @@ namespace MsTests
             await Run(host, seat, "ENG.RISK.ESCALATE", (await Discover(host, seat, "ENG.RISK.ESCALATE")).Single(i => i.TargetNumber == key));
             StringAssert.Contains(host.Read(u => u.Set<OfInboxItem>().AsNoTracking().First(i => i.SourceKey == key)).Title, "بیش از ۷۲ ساعت اداری ناموفق مانده است");
         }
+
+        // ------------------------------------------------------------------------------------------ D5
+
+        private static Task<Common.Results.ResponseDto<EnDossierDto>> NativeWith(AppHost host, System.Security.Claims.ClaimsPrincipal who, int product, Guid? file, string code = "API-611") =>
+            host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ اول، بند ۳", StandardAttachmentId = file }, Ct));
+
+        [TestMethod]
+        public async Task The_Native_Standard_Of_A_Platform_Needs_The_Data_Sheet_File_From_A_Person_And_The_Seat_Is_Still_Refused()
+        {
+            AppHost host = await TwoStandardsAsync("e1d5");
+            int product = Product(host);
+            var seat = await SeatAsync(host);
+            Refused(await NativeWith(host, Eng1, product, null), "فایل دیتاشیت اصلی پلتفرم را بارگذاری کنید.");
+            Refused(await NativeWith(host, Eng1, product, Guid.NewGuid()), "فایل");                           // not a stored file
+            Refused(await NativeWith(host, Eng1, product, File(host, 2112)), "خود شما");                       // somebody else's file
+            Refused(await NativeWith(host, seat, product, File(host, 2111)), "هوش مصنوعی");                      // the seat path is unchanged
+            Assert.AreEqual(0, host.Read(u => u.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().Count()));
+            Guid file = File(host, 2111);
+            EnDossierDto d = Ok(await NativeWith(host, Eng1, product, file));
+            Assert.AreEqual(file, d.StandardAttachmentId);
+            Assert.AreEqual(file, host.Read(u => u.Set<Entities.Model.NasbNiro.Engineering.EnPlatformDossier>().Single().StandardDocumentId));
+            Assert.AreEqual(file, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().GetDossierAsync(product, "API-611", Ct))).StandardAttachmentId);
+        }
     }
 }

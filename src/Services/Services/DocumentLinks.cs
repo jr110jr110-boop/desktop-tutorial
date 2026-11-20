@@ -129,6 +129,8 @@ namespace Services.Services
             ["EnDocumentDebt"] = "بدهی مدرک مهندسی",
             ["EnHandoverLine"] = "ردیف تحویل مدارک مهندسی",
             ["EnPlatformDocument"] = "مدرک پرونده پلتفرم",
+            ["EnPlatformDossier"] = "پروندهٔ مدارک پلتفرم (دیتاشیت اصلی)",
+            ["EnReferenceList"] = "فهرست مدارک مرجع (MDL) (فایل منبع)",
             ["Inquiry"] = "استعلام",
             ["InventoryDocument"] = "سند انبار",
             ["InventoryLot"] = "محموله انبار",

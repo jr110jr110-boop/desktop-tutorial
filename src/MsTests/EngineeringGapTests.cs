@@ -21,7 +21,7 @@ namespace MsTests
         {
             AppHost host = await EngineeringStandardsTests.TwoStandardsAsync(name);
             int product = Product(host);
-            Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = "API-611", StandardBasis = "دیتاشیت پروژهٔ اول، بند ۳" }, Ct)));
+            { Guid ds = File(host, 2111); Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = "API-611", StandardBasis = "دیتاشیت پروژهٔ اول، بند ۳" }, Ct))); }
             EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess", code: "API-611"));
             Ok(await Supply(host, Eng1, d.Lines.Single(l => l.DocumentType == "PID").Id, File(host, 2111)));
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", x => x.InquiryId = Inquiry(host)));

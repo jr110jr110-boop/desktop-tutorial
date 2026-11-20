@@ -34,7 +34,10 @@ namespace MsTests
             await p.GetServices<IAgentStep>().Single(x => x.Code == code).RunAsync(item, p, Ct));
 
         private static Task<ResponseDto<EnDossierDto>> Native(AppHost host, ClaimsPrincipal who, int product, string code, string basis = "دیتاشیت پروژهٔ اول، بند ۳") =>
-            host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = code, StandardBasis = basis }, Ct));
+            NativeWith(host, who, product, code, basis, File(host, 2111));
+
+        private static Task<ResponseDto<EnDossierDto>> NativeWith(AppHost host, ClaimsPrincipal who, int product, string code, string basis, Guid? file) =>
+            host.As(who, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = file, ReferenceCode = code, StandardBasis = basis }, Ct));
 
         [TestMethod]
         public async Task A_Product_Without_A_Dossier_Gets_A_Native_Standard_Task_Only_People_Can_Close()

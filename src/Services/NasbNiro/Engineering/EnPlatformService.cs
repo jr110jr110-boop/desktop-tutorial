@@ -239,7 +239,7 @@ namespace Services.NasbNiro.Engineering
             string complete = CompleteReason(d, writer, seat), confirm = ConfirmReason(d, approver, seat, Me), ret = ReturnReasonOf(d, approver), supply = SupplyReason(d, writer);
             dto.Id = d.Id; dto.ReferenceListId = d.ReferenceListId; dto.ReferenceRevision = d.ReferenceRevision; dto.Status = (int)d.Status; dto.StatusText = EnText.Dossier(d.Status);
             dto.ReferenceTitle = d.ReferenceListId.HasValue ? await _uow.Set<EnReferenceList>().AsNoTracking().Where(l => l.Id == d.ReferenceListId.Value).Select(l => l.Title).FirstOrDefaultAsync(ct) : null;
-            dto.Stale = current != null && d.ReferenceListId != current.Id; dto.ReferenceCode = d.ReferenceCode; dto.StandardBasis = d.StandardBasis;
+            dto.Stale = current != null && d.ReferenceListId != current.Id; dto.ReferenceCode = d.ReferenceCode; dto.StandardBasis = d.StandardBasis; dto.StandardAttachmentId = d.StandardDocumentId;
             dto.RequiredCount = r; dto.AvailableCount = a; dto.MissingCount = m; dto.TenderStageMissingCount = t;
             dto.AssessedAtText = EnText.Stamp(d.AssessedAt); dto.ConfirmedByName = names.Name(d.ConfirmedByUserId); dto.ConfirmedAtText = EnText.Stamp(d.ConfirmedAt); dto.Note = d.Note;
             dto.TouchedByMe = EnEditors.Has(d.EditorUserIds, Me); dto.RowVersion = EnConcurrency.Text(d.RowVersion);
@@ -313,11 +313,14 @@ namespace Services.NasbNiro.Engineering
                 string basis = EnText.Clean(dto.StandardBasis);
                 if (why == null && code == null) why = "استاندارد دیتاشیت اصلی پلتفرم را بنویسید.";
                 why ??= EnText.Over(code, 60, "کد استاندارد") ?? EnText.ReasonShort(basis, 5, "مبنای استاندارد (شمارهٔ دیتاشیت و بند)") ?? EnText.Over(basis, 500, "مبنای استاندارد");
+                // project instruction 6: the standard of the original data sheet is recorded by uploading the data sheet file (a person must send it; the dossiers the system makes itself have none)
+                if (why == null && !dto.StandardAttachmentId.HasValue) why = "فایل دیتاشیت اصلی پلتفرم را بارگذاری کنید.";
                 if (why == null) why = await EnReferenceRules.ApprovedCodeProblemAsync(_uow, code, ct);   // chosen from the approved lists, not typed
                 if (why == null && d != null) why = "برای این استاندارد پرونده‌ای از پیش وجود دارد.";
+                if (why == null) why = await EnFiles.CheckOwnAsync(_uow, dto.StandardAttachmentId.Value, Me, ct);
                 if (why == null && !await EnOrigin.HasDossierAsync(_uow, product.Id, ct) && await EnOrigin.IsUnregisteredNewDesignAsync(_uow, product.Id, ct)) why = EnOrigin.UnregisteredNew;
                 if (why != null) return EnText.Bad<EnDossierDto>(why);
-                d = new EnPlatformDossier { ProductId = product.Id, ReferenceCode = code, StandardBasis = basis, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
+                d = new EnPlatformDossier { ProductId = product.Id, ReferenceCode = code, StandardBasis = basis, StandardDocumentId = dto.StandardAttachmentId, Status = EnDossierStatus.NotAssessed, CreateDate = now, CreatorUserId = Me };
                 _uow.Set<EnPlatformDossier>().Add(d);
                 try { await _uow.SaveChangesAsync(ct); }
                 catch (DbUpdateException) { return EnText.Bad<EnDossierDto>("برای این استاندارد هم‌زمان پرونده ساخته شد."); }

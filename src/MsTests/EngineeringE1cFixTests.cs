@@ -140,7 +140,8 @@ namespace MsTests
         {
             AppHost host = Started("e1cfix_m3");
             int product = Product(host);
-            Func<string, Task<Common.Results.ResponseDto<EnDossierDto>>> record = code => host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = code, StandardBasis = "دیتاشیت اصلی، بند ۴" }, Ct));
+            Guid ds = File(host, 2111);
+            Func<string, Task<Common.Results.ResponseDto<EnDossierDto>>> record = code => host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت اصلی، بند ۴" }, Ct));
             Refused(await record("NOLIST-1"), "فهرست مدارک مرجع تاییدشده");
             await ApprovedList(host, "NOLIST-1", ("PID", true, true));
             Assert.AreEqual("NOLIST-1", Ok(await record("nolist-1")).ReferenceCode);

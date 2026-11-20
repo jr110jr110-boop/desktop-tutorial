@@ -63,7 +63,7 @@ namespace Services.NasbNiro.Files
             ["SvServiceOrder"] = AfterSales.SvRoles.OrderReaders,
 
             // engineering (ENG-E1)
-            ["EnPlatformDocument"] = Engineering.EnRoles.Readers, ["EnCase"] = Engineering.EnRoles.Readers, ["EnHandoverLine"] = Engineering.EnRoles.Readers, ["EnDocumentDebt"] = Engineering.EnRoles.Readers, ["EnClarification"] = Engineering.EnRoles.Readers,
+            ["EnPlatformDocument"] = Engineering.EnRoles.Readers, ["EnCase"] = Engineering.EnRoles.Readers, ["EnHandoverLine"] = Engineering.EnRoles.Readers, ["EnDocumentDebt"] = Engineering.EnRoles.Readers, ["EnClarification"] = Engineering.EnRoles.Readers, ["EnPlatformDossier"] = Engineering.EnRoles.Readers, ["EnReferenceList"] = Engineering.EnRoles.Readers,
         };
 
         /// <summary>The read roles for a link, or false when the record type is not in the map (the caller then fails closed).</summary>

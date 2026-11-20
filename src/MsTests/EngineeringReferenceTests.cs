@@ -90,7 +90,7 @@ namespace MsTests
         {
             AppHost host = NewHost("plat1");
             int product = Product(host);
-            Refused(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", ReferenceCode = Std, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)), "فهرست مدارک مرجع");   // no approved list: no dossier either
+            { Guid ds = File(host, 2111); Refused(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = product, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = Std, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct)), "فهرست مدارک مرجع"); }   // no approved list: no dossier either
             await ApprovedList(host);
             EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess"));
             Assert.AreEqual((int)EnDossierStatus.Incomplete, d.Status);
