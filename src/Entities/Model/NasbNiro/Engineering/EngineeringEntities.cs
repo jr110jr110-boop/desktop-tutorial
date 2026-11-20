@@ -68,6 +68,10 @@ namespace Entities.Model.NasbNiro.Engineering
         public string Note { get; set; }
         public string VoidReason { get; set; }
 
+        /// <summary>The uploaded file (CSV) the lines of this revision were last taken from: kept as the evidence of the input (input data enters by a file, never typed).</summary>
+        public Guid? SourceDocumentId { get; set; }
+        public string SourceFileName { get; set; }
+
         public ICollection<EnReferenceLine> Lines { get; set; } = new List<EnReferenceLine>();
 
         [Timestamp]
@@ -112,6 +116,9 @@ namespace Entities.Model.NasbNiro.Engineering
 
         /// <summary>Where the standard of this dossier is known from (the data sheet of the project the platform was built for, or the client data sheet of the case that created it).</summary>
         public string StandardBasis { get; set; }
+
+        /// <summary>The uploaded data sheet that proves the standard of this dossier (required for a dossier opened by a person from now on; older dossiers have none).</summary>
+        public Guid? StandardDocumentId { get; set; }
         public int ReferenceRevision { get; set; }
         public EnDossierStatus Status { get; set; }
         public DateTimeOffset? AssessedAt { get; set; }

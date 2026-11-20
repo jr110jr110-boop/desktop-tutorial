@@ -24,6 +24,7 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.Property(x => x.ContentHash).HasMaxLength(64);
                 b.Property(x => x.Note).HasMaxLength(1000);
                 b.Property(x => x.VoidReason).HasMaxLength(1000);
+                b.Property(x => x.SourceFileName).HasMaxLength(260);
                 b.HasIndex(x => new { x.Code, x.Revision }).IsUnique().HasFilter(NotDeleted);
                 // one Approved list per code
                 b.HasIndex(x => x.Code).IsUnique().HasFilter("[Status] = 2 AND [Deleted] = 0").HasDatabaseName("UX_EnReferenceLists_OneApproved");
