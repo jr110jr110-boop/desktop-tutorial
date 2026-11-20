@@ -218,5 +218,29 @@ namespace MsTests
             HashSet<string> keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
             Assert.AreEqual(0, keys.Count(k => k.StartsWith("EN-STALL-")), "tasks " + failed + "," + fallback);
         }
+        [TestMethod]
+        public async Task The_Older_Engineering_Steps_Are_Under_The_Office_Rule_Too()
+        {
+            AppHost host = Started("e1dfh2");
+            await host.As(Pmo1, p =>
+            {
+                DateTimeOffset now = DateTimeOffset.Now;
+                foreach (string code in new[] { "ENG.BOM.INPUT", "ENG.BOM.SIGN", "ENG.BOM.RELEASE", "ENG.OPC.INPUT", "ENG.OPC.CHECK", "ENG.OPC.APPROVE", "ENG.OPC.PUBLISH", "ENG.INSTANTIATE" })
+                {
+                    IAgentStep s = p.GetServices<IAgentStep>().Single(x => x.Code == code);
+                    Assert.IsTrue(s is IOfficeDeadlineStep o && o.OfficeDeadlineHours == 72, code);
+                    Assert.AreEqual(OfficeClock.Add(now, 72), AgentDeadlines.Due(s, null, 48, now), code);
+                    Assert.IsTrue(EnRisk.RuleStepCodes().Contains(code), code);
+                }
+                return Task.FromResult(true);
+            });
+            int bom = AddTask(host, "ENG.BOM.SIGN", AgentTaskState.WaitingHumanGate, DateTimeOffset.Now.AddHours(-1));
+            int opc = AddTask(host, "ENG.OPC.INPUT", AgentTaskState.WaitingInput, DateTimeOffset.Now.AddHours(-1));
+            HashSet<string> keys = await host.As(Ceo, p => EnRisk.DesiredKeysAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+            CollectionAssert.IsSubsetOf(new[] { "EN-STALL-" + bom, "EN-STALL-" + opc }, keys.ToArray());
+        }
+
+        private static void Events(AppHost host, int task, AgentTaskState state, DateTimeOffset at) =>
+            host.Write(u => { AppHost.Add(u, new AgentTaskEvent { TaskId = task, At = at, FromState = AgentTaskState.Running, ToState = state }); u.SaveChanges(); }, Seeder);
     }
 }

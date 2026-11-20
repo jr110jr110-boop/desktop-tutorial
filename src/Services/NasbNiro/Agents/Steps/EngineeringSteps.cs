@@ -49,8 +49,11 @@ namespace Services.NasbNiro.Agents.Steps
         public const string Publish = PbRoutingService.PublishRoles;
     }
 
-    internal abstract class EngStep : ProcStep
+    internal abstract class EngStep : ProcStep, IOfficeDeadlineStep
     {
+        /// <summary>The older engineering steps are engineering work too: a waiting or failed task of them is under the 72 office hour rule (a pure agent step is not affected while it runs).</summary>
+        public virtual int OfficeDeadlineHours => global::Services.NasbNiro.Office.OfficeClock.StopLimitHours;
+
         public override int Station => 5;
         public override string AgentCode => AgentCodes.Eng;
 
