@@ -1,0 +1,6 @@
+﻿docType,title,discipline,required,tender,units,clientSubmittal,clause,note
+DWG,نقشه مونتاژ,مکانیک,1,1,"Qc;Production",0,,
+DATASHEET,برگه اطلاعات,مکانیک,1,0,,0,,
+BOM,فهرست مواد,تولید,0,0,"Production;Planning",0,,
+OPC,چارت مسیر ساخت,تولید,0,0,,0,,
+SPEC,مشخصات ویژهٔ پروژه,مکانیک,1,0,,0,,
