@@ -50,7 +50,7 @@ namespace Services.NasbNiro.Engineering
             p.BaseCode = best?.Code;
             if (p.BaseCode != null) p.BaseRevision = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == p.BaseCode).Select(l => l.Revision).FirstOrDefaultAsync(ct);
             p.TargetRevision = await uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == target).Select(l => l.Revision).FirstOrDefaultAsync(ct);
-            p.TargetAnyList = await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Code == target, ct);
+            p.TargetAnyList = await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Code == target && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview || l.Status == EnRefStatus.Approved), ct);
             return p;
         }
 
@@ -76,12 +76,12 @@ namespace Services.NasbNiro.Engineering
                 "گزارش تفاوت استاندارد " + g.Number + " منتظر تایید مدیر مهندسی است: " + EnText.Cut(g.Summary, 150), "/engineering/standard-gaps/" + EnText.Num(g.Id), EnRoles.Manager + "," + EnRoles.Ceo, ct, null, Entities.Model.NasbNiro.Office.OfInboxKind.Approval);
         }
 
-        /// <summary>The cases (before the CEO approval) whose platform is assessed under another standard whose list does not exist in any status: the engineering agent drafts that list from the base list (ENG.REF.DRAFT).</summary>
+        /// <summary>The cases (before the CEO approval) whose platform is assessed under another standard whose list does not exist (only a Draft, UnderReview or Approved list counts; a Void or Superseded-only code is treated as absent): the engineering agent drafts that list from the base list (ENG.REF.DRAFT).</summary>
         public static async Task<List<(EnCase Case, Plan Plan)>> TargetListMissingAsync(IUnitOfWork uow, int take, CancellationToken ct)
         {
             EnCaseStatus a = EnCaseStatus.AwaitingEngConfirm, b = EnCaseStatus.AwaitingCeoApproval;
             List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (c.Status == a || c.Status == b) && c.ProposedClassification == EnClassification.Platform && c.ReferenceCode != null
-                && !uow.Set<EnReferenceList>().Any(l => !l.Deleted && l.Code == c.ReferenceCode)).OrderBy(c => c.Id).Take(200).ToListAsync(ct);
+                && !uow.Set<EnReferenceList>().Any(l => !l.Deleted && l.Code == c.ReferenceCode && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview || l.Status == EnRefStatus.Approved))).OrderBy(c => c.Id).Take(200).ToListAsync(ct);
             List<(EnCase, Plan)> result = new List<(EnCase, Plan)>();
             foreach (EnCase c in cases)
             {
