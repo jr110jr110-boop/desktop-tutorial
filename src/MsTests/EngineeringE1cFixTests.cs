@@ -160,7 +160,9 @@ namespace MsTests
             host.Write(u =>
             {
                 u.Set<EnHandover>().First(x => x.Id == h.Id).Status = EnHandoverStatus.Accepted;
-                EnWaiver w = AppHost.Add(u, new EnWaiver { Number = "EWV-T1", HandoverId = h.Id, CaseId = caseId, Reason = "آزمون", DebtHours = 24, Status = EnWaiverStatus.Approved, RequestedByUserId = 2121, RequestedAt = DateTimeOffset.Now });
+                EnWaiver w = AppHost.Add(u, new EnWaiver { Number = "EWV-T1", HandoverId = h.Id, CaseId = caseId, Reason = "آزمون", DebtHours = 24, Status = EnWaiverStatus.Approved, RequestedByUserId = 2121, RequestedAt = DateTimeOffset.Now, UsedAt = DateTimeOffset.Now });
+                u.SaveChanges();
+                u.Set<EnHandover>().First(x => x.Id == h.Id).WaiverId = w.Id;   // the order before ENG-E1f: the permit was used at the submit; such a handover keeps releasing
                 u.SaveChanges();
                 foreach (EnHandoverLine l in u.Set<EnHandoverLine>().Where(x => x.HandoverId == h.Id).ToList())
                     AppHost.Add(u, new EnDocumentDebt { WaiverId = w.Id, HandoverLineId = l.Id, CaseId = caseId, ContractId = contract, DocumentType = l.DocumentType, Title = l.Title, DueAt = DateTimeOffset.Now.AddHours(20), Status = l.DocumentType == "DWG" ? EnDebtStatus.Settled : EnDebtStatus.Open });

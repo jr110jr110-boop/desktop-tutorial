@@ -267,6 +267,8 @@ namespace MsTests
             AppHost host = Started("e1bwaiver");
             (int contract, int caseId) = await NewDesign(host);
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));   // ENG-E1f: the permit is asked only after the PMO accepted
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             EnWaiverDto w = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, DebtHours = 48, Reason = "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده" }, Ct)));
             Assert.IsTrue(w.MissingLines.Count > 0);
             Assert.AreEqual(w.MissingSnapshot.Count, w.MissingLines.Count);

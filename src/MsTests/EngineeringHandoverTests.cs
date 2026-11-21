@@ -118,57 +118,38 @@ namespace MsTests
             Assert.AreEqual(1, h.Round);
             Assert.AreEqual(2, h.MissingRequiredCount);
             Assert.IsNotNull(h.LockMessage);
+            StringAssert.StartsWith(h.IncompleteNotice, "این بسته ناقص است");
+            StringAssert.Contains(h.IncompleteNotice, "رفت‌وبرگشت با PMO ادامه دارد");
             Refused(await Act(host, Eng1, "draft", d => d.CaseId = caseId), "تحویل باز");
-            // the lock: the manager cannot submit and the button says why
-            h = Ok(await Get(host, Mgr1, h.Id));
-            Assert.IsFalse(h.CanSubmit);
-            StringAssert.Contains(h.SubmitBlockedReason, "قفل");
-            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), "قفل");
-            Refused(await Act(host, Eng1, "submit", d => d.Id = h.Id));
-
-            // the waiver request: the manager only, a real reason, a future date within the maximum
+            // ENG-E1f: an INCOMPLETE package may go to the PMO (no lock on the submit); the CEO is not asked during the rounds
+            const string reasonText = "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده";
             DateTimeOffset due = DateTimeOffset.Now.AddHours(72);   // exactly the ceiling is accepted
-            Refused(await Request(host, Eng1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
-            Refused(await Request(host, Mgr1, h.Id, "کوتاه", due), "50");
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(-1)), "ساعت");
-            Refused(await Request(host, Mgr1, h.Id, new string((char)0x645, 49), due), "50");   // 49 characters
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(73)), "72");
-            EnWaiverDto w = Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
-            StringAssert.StartsWith(w.Number, "EWV-");
-            Assert.AreEqual(2, w.MissingLines.Count);
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due), "مجوز اضطرار باز");
-            // only the CEO decides, and still the lock holds until then
-            Refused(await Decide(host, Mgr2, w.Id, "approve"), "مدیرعامل");
-            Refused(await Act(host, Mgr1, "submit", d => d.Id = h.Id), "قفل");
-            Refused(await Decide(host, Ceo, w.Id, "reject", "کوتاه"), "15");
-            Refused(await Decide(host, Ceo, w.Id, "maybe"), "نامعتبر");
-            w = Ok(await Decide(host, Ceo, w.Id, "approve"));
-            Assert.AreEqual((int)EnWaiverStatus.Approved, w.Status);
-            Refused(await Decide(host, Ceo, w.Id, "approve"), "در انتظار");
-
-            // a document that was missing at the request and is missing now is covered; a line that gets lost afterwards is not
-            int dwg = Deliverable(host, contract, "DWG");
-            SetState(host, dwg, PcIssueState.FirstIssue);
-            Assert.IsTrue(Ok(await Get(host, Mgr1, h.Id)).CanSubmit, "the same missing set is covered");
-            Ok(await Act(host, Eng1, "refresh", d => d.Id = h.Id));
-            Assert.AreEqual(2, Ok(await Get(host, Mgr1, h.Id)).MissingRequiredCount);
-
+            h = Ok(await Get(host, Mgr1, h.Id));
+            Assert.IsTrue(h.CanSubmit, h.SubmitBlockedReason);
+            Assert.IsFalse(h.CanRequestWaiver);
+            StringAssert.Contains(h.RequestWaiverBlockedReason, "پس از پایان رفت‌وبرگشت");
+            Refused(await Act(host, Eng1, "submit", d => d.Id = h.Id));
+            Refused(await Request(host, Mgr1, h.Id, reasonText, due), "پس از پایان رفت‌وبرگشت");   // no permit in the draft
             EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
             Assert.AreEqual((int)EnHandoverStatus.Submitted, s.Status);
             Assert.IsFalse(s.Complete);
-            Assert.AreEqual(2, s.Debts.Count);
-            Assert.IsTrue(s.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now.AddMinutes(-10), 72) && d.DueAt <= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 72)));   // 72 OFFICE hours counted from the approval
+            Assert.AreEqual(2, s.MissingRequiredCount);
+            Assert.AreEqual(0, s.Debts.Count, "no debt before the release");
+            Assert.IsNull(s.WaiverId);
+            Assert.IsNotNull(s.IncompleteNotice);
             Assert.AreEqual((int)EnCaseStatus.HandedOver, Ok(await GetCase(host, Mgr1, caseId)).Status);
-            // the waiver is spent: a new handover round needs a new one
-            Refused(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", due));
+            Refused(await Request(host, Mgr1, h.Id, reasonText, due), "پس از پایان رفت‌وبرگشت");   // no permit while the PMO still reviews
+            Assert.IsFalse(Ok(await Get(host, Mgr1, h.Id)).CanRequestWaiver);
+            Assert.IsTrue(Ok(await Get(host, Pmo1, h.Id)).CanAccept, "the PMO may accept an incomplete package");
 
-            // the PMO side: not the commercial, not the submitter; the return needs a reason and voids the debts of the round
+            // the PMO side: not the commercial, not the submitter; the return needs a reason
             Refused(await Act(host, Comm1, "accept", d => d.Id = h.Id));
             Refused(await Act(host, Mgr1, "accept", d => d.Id = h.Id));
             Refused(await Act(host, Pmo1, "return", d => { d.Id = h.Id; d.Note = "کوتاه"; }), "15");
             EnHandoverDto r = Ok(await Act(host, Pmo1, "return", d => { d.Id = h.Id; d.Note = "نقشه‌های اجرایی هنوز کامل نیست"; }));
             Assert.AreEqual((int)EnHandoverStatus.Returned, r.Status);
-            Assert.IsTrue(Ok(await Get(host, Mgr1, h.Id)).Debts.All(d => d.Status == (int)EnDebtStatus.Void));
+            Refused(await Request(host, Mgr1, h.Id, reasonText, due), "پس از پایان رفت‌وبرگشت");
+            Assert.AreEqual(0, host.Read(u => u.Set<EnWaiver>().Count()), "a PMO return and the next round never involve the CEO");
             EnHandoverDto r2 = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
             Assert.AreEqual(2, r2.Round);
             // ENG-E1e: the new round carries the PMO's return of the previous round (number, who, when, reason); the first round carries none
@@ -179,30 +160,51 @@ namespace MsTests
             Assert.IsFalse(string.IsNullOrWhiteSpace(r2.PreviousReturnAtText));
             Assert.AreEqual(h.Number, Ok(await Get(host, Mgr1, r2.Id)).PreviousReturnNumber);
 
-            // round two: the drawing now exists (approved with a file), the datasheet does not
-            SetState(host, dwg, PcIssueState.Approved);
+            // round two: the drawing now exists (approved with a file), the datasheet does not; the package still goes to the PMO and is accepted incomplete
+            Deliverable(host, contract, "DWG");
             Ok(await Act(host, Eng1, "refresh", d => d.Id = r2.Id));
             r2 = Ok(await Get(host, Mgr1, r2.Id));
             Assert.AreEqual(1, r2.MissingRequiredCount);
-            EnWaiverDto w2 = Ok(await Request(host, Mgr1, r2.Id, "مدرک برگه داده تا پایان هفته از تامین‌کننده می‌رسد", due));
+            Assert.AreEqual(0, Ok(await Act(host, Mgr1, "submit", d => d.Id = r2.Id)).Debts.Count);
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = r2.Id));
+            Assert.AreEqual(0, host.Read(u => u.Set<EnWaiver>().Count()), "still no CEO request");
+
+            // the permit is asked ONCE, now: the manager only, a real reason, a future date within the maximum
+            Assert.IsTrue(Ok(await Get(host, Mgr1, r2.Id)).CanRequestWaiver);
+            Refused(await Request(host, Eng1, r2.Id, reasonText, due));
+            Refused(await Request(host, Mgr1, r2.Id, "کوتاه", due), "50");
+            Refused(await Request(host, Mgr1, r2.Id, reasonText, DateTimeOffset.Now.AddHours(-1)), "ساعت");
+            Refused(await Request(host, Mgr1, r2.Id, new string((char)0x645, 49), due), "50");   // 49 characters
+            Refused(await Request(host, Mgr1, r2.Id, reasonText, DateTimeOffset.Now.AddHours(73)), "72");
+            EnWaiverDto w2 = Ok(await Request(host, Mgr1, r2.Id, reasonText, due));
+            StringAssert.StartsWith(w2.Number, "EWV-");
             Assert.AreEqual(1, w2.MissingLines.Count);
-            Ok(await Decide(host, Ceo, w2.Id, "approve"));
-            // the drawing is withdrawn after the approval: the snapshot no longer covers the missing set
-            SetState(host, dwg, PcIssueState.FirstIssue);
-            Refused(await Act(host, Mgr1, "submit", d => d.Id = r2.Id), "پوشش");
-            SetState(host, dwg, PcIssueState.Approved);
-            s = Ok(await Act(host, Mgr1, "submit", d => d.Id = r2.Id));
-            Assert.AreEqual(1, s.Debts.Count);
+            Refused(await Request(host, Mgr1, r2.Id, reasonText, due), "مجوز اضطرار باز");
+            // the release stays locked until the CEO approves; only the CEO decides
+            Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ به اجرا قفل است");
+            EnHandoverDto locked = Ok(await Get(host, Pmo2, r2.Id));
+            Assert.IsFalse(locked.CanRelease);
+            StringAssert.Contains(locked.ReleaseBlockedReason, "ابلاغ به اجرا قفل است");
+            Refused(await Decide(host, Mgr2, w2.Id, "approve"), "مدیرعامل");
+            Refused(await Decide(host, Ceo, w2.Id, "reject", "کوتاه"), "15");
+            Refused(await Decide(host, Ceo, w2.Id, "maybe"), "نامعتبر");
+            Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ به اجرا قفل است");
+            w2 = Ok(await Decide(host, Ceo, w2.Id, "approve"));
+            Assert.AreEqual((int)EnWaiverStatus.Approved, w2.Status);
+            Refused(await Decide(host, Ceo, w2.Id, "approve"), "در انتظار");
 
             // accept and release: the releaser did not submit or prepare; only the PMO releases
-            Ok(await Act(host, Pmo1, "accept", d => d.Id = r2.Id));
-            Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ ممکن نیست");   // the distribution rows are not built yet
+            Refused(await Act(host, Pmo2, "release", d => d.Id = r2.Id), "ابلاغ ممکن نیست");   // the lock is open now, but the distribution rows are not built yet
             Refused(await Act(host, Eng1, "draft-distribution", d => d.Id = r2.Id), "PMO");   // the notices to the units never go from engineering
             Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = r2.Id));
             Refused(await Act(host, Eng1, "release", d => d.Id = r2.Id));
             Refused(await Act(host, Mgr1, "release", d => d.Id = r2.Id));
             EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = r2.Id));
             Assert.AreEqual((int)EnHandoverStatus.Released, rel.Status);
+            Assert.AreEqual(1, rel.Debts.Count, "the permit is spent at the release: the missing document becomes a debt");
+            Assert.IsTrue(rel.Debts.All(d => d.Status == (int)EnDebtStatus.Open && d.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now.AddMinutes(-10), 72) && d.DueAt <= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 72)));   // 72 OFFICE hours counted from the approval
+            Assert.IsTrue(rel.Waiver.Used);
+            Assert.IsTrue(rel.Distribution.Any(d => d.ScopeNote.Contains("هنوز نرسیده، مهلت تا")), "the notice shows the deadline of the debt created in the same release: " + string.Join(" || ", rel.Distribution.Select(d => d.ScopeNote)));
             Assert.AreEqual((int)EnCaseStatus.Released, Ok(await GetCase(host, Mgr1, caseId)).Status);
             Assert.IsNull(await host.As(Eng1, async p => await EnGates.InstantiateRefusalAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), contract, Ct)));
             (controlled, passed, _) = await host.As(Eng1, async p => await EnGates.ProductionReleaseAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), contract, Ct));
@@ -233,7 +235,9 @@ namespace MsTests
         {
             AppHost host = Started("ho9");
             (int contract, int caseId) = await NewDesign(host);
-            EnHandoverDto h = Ok(await Act(host, Mgr1, "draft", d => d.CaseId = caseId));
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));   // ENG-E1f: the permit is asked only after the PMO accepted the (incomplete) package
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             Ok(await Request(host, Mgr1, h.Id, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(24)));
             host.Write(u => { foreach (EnWaiver w in u.Set<EnWaiver>().ToList()) { w.RequestedAt = DateTimeOffset.Now.AddDays(-30); } u.SaveChanges(); }, Seeder);
             ClaimsPrincipal seat = await SeatAsync(host);
@@ -296,8 +300,9 @@ namespace MsTests
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = c.Id));
             h = Ok(await Get(host, Mgr1, h.Id));
-            Assert.IsFalse(h.CanSubmit);
+            Assert.IsTrue(h.CanSubmit, "ENG-E1f: an unconfirmed dossier no longer blocks the sending to the PMO");
             StringAssert.Contains(h.LockMessage, "قفل");
+            StringAssert.Contains(h.IncompleteNotice, "پروندهٔ پلتفرم");
             // the legacy contract has no case and passes both chokepoints
             int old = Contract(host, DateTimeOffset.Now.AddDays(-30));
             Assert.IsNull(await host.As(Eng1, async p => await EnGates.InstantiateRefusalAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), old, Ct)));
@@ -455,28 +460,46 @@ namespace MsTests
             Assert.AreEqual(1, draft.Count);
             Assert.IsTrue((await Run("ENG.HANDOVER.DRAFT", draft[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done);
             Assert.AreEqual(0, (await Discover("ENG.HANDOVER.DRAFT")).Count, "an open handover is not drafted again");
+            // ENG-E1f: the draft is incomplete; it still goes to the PMO (the submit gate is open) and the CEO is not asked during the rounds
             Assert.AreEqual(1, (await Discover("ENG.HANDOVER.COMPLETE")).Count);
-            Assert.AreEqual(0, (await Discover("ENG.HANDOVER.SUBMIT")).Count);
+            Assert.AreEqual(1, (await Discover("ENG.HANDOVER.SUBMIT")).Count);
+            StringAssert.Contains((await Discover("ENG.HANDOVER.SUBMIT"))[0].Summary, "ناقص");
             Assert.AreEqual(0, (await Discover("ENG.DEBT.SETTLE")).Count);
             Assert.AreEqual(0, (await Discover("ENG.DIST.NOTIFY")).Count);
             int handover = host.Read(u => u.Set<EnHandover>().Single().Id);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = handover));
+            Assert.AreEqual(0, (await Discover("ENG.HANDOVER.SUBMIT")).Count);
+            Assert.AreEqual(0, (await Discover("ENG.HANDOVER.COMPLETE")).Count, "no permit gate while the PMO still reviews");
+            Assert.AreEqual(0, (await Discover("ENG.WAIVER.DECIDE")).Count);
+            var accept = await Discover("ENG.HANDOVER.ACCEPT");
+            Assert.AreEqual(1, accept.Count);
+            StringAssert.Contains(accept[0].Summary, "ناقص");
+            Assert.AreEqual(0, (await Discover("ENG.DEBT.SUPPLY")).Count, "no debt before the release");
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = handover));
+            // accepted and still incomplete: the manager's permit gate appears, the PMO's release gate says why it waits
+            var ask = await Discover("ENG.HANDOVER.COMPLETE");
+            Assert.AreEqual(1, ask.Count);
+            StringAssert.Contains(ask[0].Summary, "مجوز اضطرار");
+            var wait = await Discover("ENG.HANDOVER.RELEASE");
+            Assert.AreEqual(1, wait.Count);
+            StringAssert.Contains(wait[0].Summary, "قفل");
             Ok(await Request(host, Mgr1, handover, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(24)));
+            Assert.AreEqual(0, (await Discover("ENG.HANDOVER.COMPLETE")).Count, "the permit is asked once");
             Assert.AreEqual(1, (await Discover("ENG.WAIVER.DECIDE")).Count);
             int waiver = host.Read(u => u.Set<EnWaiver>().Single().Id);
+            Refused(await Act(host, Pmo2, "release", d => d.Id = handover), "ابلاغ به اجرا قفل است");
             Ok(await Decide(host, Ceo, waiver, "approve"));
             Assert.AreEqual(0, (await Discover("ENG.WAIVER.DECIDE")).Count);
-            Assert.AreEqual(1, (await Discover("ENG.HANDOVER.SUBMIT")).Count);
-            Ok(await Act(host, Mgr1, "submit", d => d.Id = handover));
-            Assert.AreEqual(1, (await Discover("ENG.HANDOVER.ACCEPT")).Count);
-            Assert.AreEqual(2, (await Discover("ENG.DEBT.SUPPLY")).Count);
-            Ok(await Act(host, Pmo1, "accept", d => d.Id = handover));
             var distDraft = await Discover("ENG.DIST.DRAFT");
             Assert.AreEqual(1, distDraft.Count);
             Assert.IsTrue((await Run("ENG.DIST.DRAFT", distDraft[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done);
             Assert.AreEqual(0, (await Discover("ENG.DIST.DRAFT")).Count, "the rows are built once");
             Assert.AreEqual(0, (await Discover("ENG.DIST.NOTIFY")).Count, "nothing is notified before the release");
-            Assert.AreEqual(1, (await Discover("ENG.HANDOVER.RELEASE")).Count);
+            var open = await Discover("ENG.HANDOVER.RELEASE");
+            Assert.AreEqual(1, open.Count);
+            Assert.IsFalse(open[0].Summary.Contains("قفل"), "the permit is approved: the gate no longer says it waits");
             Ok(await Act(host, Pmo2, "release", d => d.Id = handover));
+            Assert.AreEqual(2, (await Discover("ENG.DEBT.SUPPLY")).Count, "the debts exist from the release");
             var notify = await Discover("ENG.DIST.NOTIFY");
             Assert.AreEqual(1, notify.Count);
             Assert.IsTrue((await Run("ENG.DIST.NOTIFY", notify[0])).Outcome == Services.NasbNiro.Agents.AgentStepOutcome.Done);
@@ -595,6 +618,9 @@ namespace MsTests
             AppHost host = Started("fixhours");
             (int contract, int caseId) = await NewDesign(host);
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Refused(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = 72 }, Ct)), "پس از پایان رفت‌وبرگشت");   // ENG-E1f: not in the draft
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             Func<int, Task<Common.Results.ResponseDto<EnWaiverDto>>> ask = hours => host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = hours }, Ct));
             Refused(await ask(0), "ساعت");
             Refused(await ask(73), "72");
@@ -621,10 +647,13 @@ namespace MsTests
             Deliverable(host, contract, "DWG"); Deliverable(host, contract, "DATASHEET");
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
             Assert.AreEqual(2, h.MissingRequiredCount, "the BOM and the OPC line of the system are missing");
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = 48 }, Ct)));
             int waiver = host.Read(u => u.Set<EnWaiver>().Single().Id);
             Ok(await Decide(host, Ceo, waiver, "approve"));
-            EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            EnHandoverDto s = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
             Assert.AreEqual(2, s.Debts.Count);
             Assert.AreEqual(0, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))), "nothing is settled without the proof");
             host.Write(u =>
@@ -665,9 +694,12 @@ namespace MsTests
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", x => x.CaseId = c.Id));
             Assert.AreEqual(0, h.MissingRequiredCount, "no line is missing: only the dossier confirmation locks the handover");
             StringAssert.Contains(h.LockMessage, "قفل");
+            Ok(await Act(host, Mgr1, "submit", x => x.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", x => x.Id = h.Id));   // the PMO accepts the package with an unconfirmed dossier; only the release is locked
             Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = LongReason, DebtHours = 24 }, Ct)));
             Ok(await Decide(host, Ceo, host.Read(u => u.Set<EnWaiver>().Single().Id), "approve"));
-            EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", x => x.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", x => x.Id = h.Id));
+            EnHandoverDto s = Ok(await Act(host, Pmo2, "release", x => x.Id = h.Id));
             EnDebtDto debt = s.Debts.Single();
             Assert.AreEqual(EnDebtTypes.DossierConfirm, debt.DocumentType);
             Assert.IsNull(debt.HandoverLineId);

@@ -323,7 +323,7 @@ namespace Services.NasbNiro.Engineering
             string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
             List<int> lineIds = h.Lines.Select(l => l.Id).ToList();
             var debts = (await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(x => !x.Deleted && x.HandoverLineId.HasValue && lineIds.Contains(x.HandoverLineId.Value)).Select(x => new { Line = x.HandoverLineId.Value, x.Status, x.DueAt }).ToListAsync(ct));
-            var pending = _uow.Set<EnDocumentDebt>().Local.Where(x => x.Id == 0 && x.HandoverLine != null && lineIds.Contains(x.HandoverLine.Id)).Select(x => new { Line = x.HandoverLine.Id, x.Status, x.DueAt });   // the debts of the release in this same save (not stored yet)
+            var pending = _uow.Set<EnDocumentDebt>().Local.Where(x => !x.Deleted && x.HandoverLine != null && x.HandoverLine.Id != 0 && lineIds.Contains(x.HandoverLine.Id)).Select(x => new { Line = x.HandoverLine.Id, x.Status, x.DueAt }).ToList();   // the debts of the release in this same save (not stored yet); a duplicate of a stored one changes nothing below
             debts = debts.Concat(pending).ToList();
             Dictionary<int, DateTimeOffset> dueByLine = debts.Where(x => x.Status == EnDebtStatus.Open).GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Min(x => x.DueAt));
             HashSet<int> arrived = new HashSet<int>(debts.Where(x => x.Status == EnDebtStatus.Settled).Select(x => x.Line).Except(dueByLine.Keys));

@@ -47,7 +47,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task M13_A_Submitted_Handover_Is_Not_Accepted_Or_Released_After_The_Platform_Dossier_Lost_Its_Confirmation()
+        public async Task M13_A_Submitted_Handover_Is_Accepted_But_Not_Released_After_The_Platform_Dossier_Lost_Its_Confirmation()
         {
             AppHost host = Started("b2stale");
             (int contract, int caseId) = await NewDesign(host);
@@ -64,26 +64,35 @@ namespace MsTests
                 c.ClassificationHash = Services.NasbNiro.Engineering.EnCaseRules.ClassHash(c);
                 u.SaveChanges();
             }, Seeder);
-            Refused(await Act(host, Pmo1, "accept", d => d.Id = h.Id), "کهنه");
-            EnHandoverDto shown = Ok(await host.As(Pmo1, p => p.GetRequiredService<IEnHandoverService>().GetHandoverAsync(h.Id, Ct)));
-            Assert.IsFalse(shown.CanAccept);
-            // a waiver that covered the dossier keeps the snapshot valid
-            host.Write(u => { u.Set<EnHandover>().First(x => x.Id == h.Id).WaiverId = 1; u.SaveChanges(); }, Seeder);
+            // ENG-E1f: the PMO may accept (the content it reviewed); the release to execution is the locked step
+            Assert.IsTrue(Ok(await host.As(Pmo1, p => p.GetRequiredService<IEnHandoverService>().GetHandoverAsync(h.Id, Ct))).CanAccept);
             Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            EnHandoverDto shown = Ok(await host.As(Pmo2, p => p.GetRequiredService<IEnHandoverService>().GetHandoverAsync(h.Id, Ct)));
+            Assert.IsFalse(shown.CanRelease);
+            StringAssert.Contains(shown.ReleaseBlockedReason, "ابلاغ به اجرا قفل است");
+            Assert.IsFalse(shown.Complete, "completeness is read live: the dossier lost its confirmation");
+            Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), "ابلاغ به اجرا قفل است");
+            // a permit that covered the dossier (the order before ENG-E1f: used at the submit) keeps the release open
+            host.Write(u => { u.Set<EnHandover>().First(x => x.Id == h.Id).WaiverId = 1; u.SaveChanges(); }, Seeder);
+            Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
         }
 
         [TestMethod]
-        public async Task M5_A_Debt_Of_A_Line_That_The_Submit_Added_Points_To_That_Line()
+        public async Task M5_A_Debt_Of_A_Line_That_The_Submit_Added_Points_To_That_Line_When_The_Release_Creates_It()
         {
             AppHost host = Started("b2debt");
             (int contract, int caseId) = await NewDesign(host);
             EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            // the draft lost a line row (as if the source appeared later): the submit refreshes the lines and adds it with no Id yet
+            host.Write(u => { EnHandoverLine gone = u.Set<EnHandoverLine>().First(l => l.HandoverId == h.Id && l.DocumentType == "DWG"); u.Set<EnHandoverLine>().Remove(gone); u.SaveChanges(); }, Seeder);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
             Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().RequestWaiverAsync(new EnWaiverRequestDto { HandoverId = h.Id, Reason = "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DebtHours = 24 }, Ct)));
             int waiver = host.Read(u => u.Set<EnWaiver>().Single().Id);
             Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = waiver, Decision = "approve" }, Ct)));
-            // the draft lost a line row (as if the source appeared later): the submit refreshes the lines and adds it with no Id yet
-            host.Write(u => { EnHandoverLine gone = u.Set<EnHandoverLine>().First(l => l.HandoverId == h.Id && l.DocumentType == "DWG"); u.Set<EnHandoverLine>().Remove(gone); u.SaveChanges(); }, Seeder);
-            EnHandoverDto s = Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            EnHandoverDto s = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
             Assert.AreEqual(2, s.Debts.Count);
             var lineIds = host.Read(u => u.Set<EnHandoverLine>().Where(l => l.HandoverId == h.Id).Select(l => l.Id).ToList());
             var debtLines = host.Read(u => u.Set<EnDocumentDebt>().Select(d => d.HandoverLineId).ToList());
