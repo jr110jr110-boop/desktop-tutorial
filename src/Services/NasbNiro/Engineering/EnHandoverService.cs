@@ -404,7 +404,7 @@ namespace Services.NasbNiro.Engineering
             DateTimeOffset now = DateTimeOffset.Now;
             DateTimeOffset today = DateTimeOffset.Now;
             List<int> caseIdsForReturns = rows.Where(r => r.Round > 1).Select(r => r.CaseId).Distinct().ToList();
-            List<EnHandover> returnedRounds = caseIdsForReturns.Count == 0 ? new List<EnHandover>() : await _uow.Set<EnHandover>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnHandoverStatus.Returned && caseIdsForReturns.Contains(x.CaseId)).ToListAsync(ct);   // the PMO's returns of the earlier rounds
+            List<EnHandover> returnedRounds = caseIdsForReturns.Count == 0 ? new List<EnHandover>() : await _uow.Set<EnHandover>().AsNoTracking().Where(x => !x.Deleted && x.Status != EnHandoverStatus.Void && caseIdsForReturns.Contains(x.CaseId)).ToListAsync(ct);   // the non-void earlier rounds (the one right before a round decides whether the return box shows)
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmitConfirmedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }).Concat(returnedRounds.Select(x => x.ReturnedByUserId)), ct);
             int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
             List<int> caseIds = rows.Select(r => r.CaseId).Distinct().ToList(), hids = rows.Select(r => r.Id).ToList(), contractIds = rows.Select(r => r.ContractId).Distinct().ToList();
@@ -421,7 +421,8 @@ namespace Services.NasbNiro.Engineering
             foreach (EnHandover h in rows)
             {
                 EnCase c = cases[h.CaseId];
-                EnHandover previous = returnedRounds.Where(x => x.CaseId == h.CaseId && x.Round < h.Round).OrderByDescending(x => x.Round).ThenByDescending(x => x.Id).FirstOrDefault();   // the round before this one, when the PMO returned it
+                EnHandover previous = returnedRounds.Where(x => x.CaseId == h.CaseId && x.Round < h.Round).OrderByDescending(x => x.Round).ThenByDescending(x => x.Id).FirstOrDefault();   // the round immediately before this one among the non-void rounds of the case
+                if (previous != null && previous.Status != EnHandoverStatus.Returned) previous = null;   // the box shows only when THAT round was returned by the PMO
                 List<EnDistribution> hRows = dist.Where(x => x.HandoverId == h.Id).ToList();   // already loaded for the whole page: the two flags cost no query per row
                 LockState ls = await LockAsync(h, c, ct);
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
