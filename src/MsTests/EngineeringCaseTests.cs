@@ -129,6 +129,7 @@ namespace MsTests
             Refused(await CaseAct(host, Mgr2, c.Id, "release-tender"), "شخص دیگری");
             Refused(await CaseAct(host, Eng1, c.Id, "release-tender"));
             Refused(await CaseAct(host, seat, c.Id, "release-tender"));
+            await ApprovedMdl(host, c.Id);
             c = Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
             Assert.AreEqual((int)EnCaseStatus.TenderIssued, c.Status);
             Assert.IsFalse(c.TenderStale);
@@ -160,6 +161,7 @@ namespace MsTests
             StringAssert.Contains(c.PlatformWarning, "مدرک BOM");
             c = Ok(await CaseAct(host, seat, c.Id, "draft-tender"));
             Assert.AreEqual(1, c.TenderDocumentCount, "idempotent");
+            await ApprovedMdl(host, c.Id);
             c = Ok(await CaseAct(host, Mgr2, c.Id, "release-tender"));                         // a platform needs no minimum
             Assert.AreEqual((int)EnCaseStatus.TenderIssued, c.Status);
         }
@@ -228,6 +230,7 @@ namespace MsTests
             int package = Ok(await GetCase(host, Eng1, c.Id)).TenderPackageId.Value;
             Ok(await host.As(Eng2, p => p.GetRequiredService<IEdmsService>().SaveTenderDocumentAsync(new PcTenderDocumentSaveDto { PackageId = package, Title = "فهرست اجزا", DocumentType = "CONCEPT" }, Ct)));
             Ok(await CaseAct(host, Eng2, c.Id, "save-concept", d => d.ConceptNote = "اجزای اصلی تعریف شده و ابعاد پوسته فرض شده است"));
+            await ApprovedMdl(host, c.Id);
             Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
             var approved = await host.As(Ceo, p => p.GetRequiredService<ISlProposalService>().ProposalActionAsync(new SlProposalActionDto { Id = proposal, Action = "approve" }, Ct));
             Assert.IsTrue(approved.Success, approved.Message);

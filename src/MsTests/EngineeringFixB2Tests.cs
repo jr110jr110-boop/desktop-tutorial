@@ -134,6 +134,7 @@ namespace MsTests
             Assert.AreEqual(1, c.TenderDocumentCount);
             Refused(await CaseAct(host, Mgr1, c.Id, "release-tender"), "شخص دیگری");
             Assert.IsFalse(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            await ApprovedMdl(host, c.Id);
             c = Ok(await CaseAct(host, Mgr2, c.Id, "release-tender"));
             Assert.AreEqual((int)EnCaseStatus.TenderIssued, c.Status);
         }

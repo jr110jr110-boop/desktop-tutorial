@@ -52,6 +52,7 @@ namespace MsTests
             c = Ok(await Add(host, Mgr2, c, File(host, 2102), "فهرست اجزای طرح"));
             c = Ok(await CaseAct(host, Eng1, c.Id, "save-concept", d => d.ConceptNote = "اجزای اصلی تعریف شده و ابعاد پوسته فرض شده است"));
             Refused(await CaseAct(host, Mgr2, c.Id, "release-tender"), "شخص دیگری");
+            await ApprovedMdl(host, c.Id);
             c = Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
             Assert.AreEqual((int)EnCaseStatus.TenderIssued, c.Status);
             Assert.IsFalse(c.CanAddTenderDocument);

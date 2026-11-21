@@ -120,6 +120,19 @@ namespace Services.NasbNiro.Engineering
             foreach (int? u in suppliers) if (u.HasValue && !seats.Contains(u.Value)) makers.Add(u.Value);
         }
 
+        /// <summary>The files of the project MDLs of a case (the system adds the approved one to the tender package at the release).</summary>
+        private async Task<List<Guid?>> MdlFilesAsync(int caseId, CancellationToken ct) =>
+            await _uow.Set<EnProjectMdl>().AsNoTracking().Where(m => !m.Deleted && m.CaseId == caseId && m.IssuedDocumentId != null).Select(m => m.IssuedDocumentId).ToListAsync(ct);
+
+        /// <summary>Adds the issued file of the approved project MDL to the tender package through the tender service (the same structure as add-tender-document), once; null = it is in the package now, otherwise the Persian refusal.</summary>
+        private async Task<string> AddProjectMdlDocumentAsync(EnCase c, EnProjectMdl mdl, CancellationToken ct)
+        {
+            if (!mdl.IssuedDocumentId.HasValue) return "فایل فهرست مدارک پروژه ساخته نشده است؛ مدیر مهندسی فهرست را دوباره تایید کند.";
+            if (await _uow.Set<PcTenderDocument>().AsNoTracking().AnyAsync(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted && d.DocumentId == mdl.IssuedDocumentId.Value, ct)) return null;
+            ResponseDto<PcTenderPackageDto> added = await _edms.SaveTenderDocumentAsync(new PcTenderDocumentSaveDto { PackageId = c.TenderPackageId.Value, Title = "فهرست مدارک پروژه (MDL) — ویرایش " + EnText.Num(mdl.Revision), DocumentType = "MDL", Revision = EnText.Num(mdl.Revision).PadLeft(2, '0'), DocumentId = mdl.IssuedDocumentId }, ct);
+            return added.Success ? null : added.Message;
+        }
+
         private static string ReleaseReason(EnCase c, Who w, int docs, HashSet<int> docMakers) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.TenderPreparation ? "فقط پرونده در مرحلهٔ تهیهٔ بسته فنی ابلاغ می‌شود."
             : !c.TenderPackageId.HasValue ? "بستهٔ فنی هنوز ساخته نشده است."
@@ -183,7 +196,8 @@ namespace Services.NasbNiro.Engineering
                     var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).OrderBy(d => d.Id).Select(d => new { d.CreatorUserId, d.IssuedByUserId, d.DocumentId, d.Title, d.Revision, d.IssuedAt }).ToListAsync(ct);
                     docs = pd.Count;
                     tenderDocs = pd.Select(d => new EnTenderDocumentDto { DocumentId = d.DocumentId, Title = d.Title, Revision = d.Revision, IssuedAtText = EnText.Stamp(d.IssuedAt), AddedByAgent = seats.Contains(d.CreatorUserId) }).ToList();
-                    foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
+                    List<Guid?> mdlFiles = await MdlFilesAsync(c.Id, ct);   // the file of the project MDL is added by the system at the release: whoever releases is not its maker
+                    foreach (var d in pd.Where(d => !mdlFiles.Contains(d.DocumentId))) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
                     await AddDossierSuppliersAsync(makers, c, pd.Where(d => d.DocumentId.HasValue).Select(d => d.DocumentId.Value).ToList(), seats, ct);
                     stale = c.Status == EnCaseStatus.TenderIssued && c.TenderHash != await EnCaseRules.TenderHashAsync(_uow, c, ct);
                 }
@@ -201,7 +215,8 @@ namespace Services.NasbNiro.Engineering
                 string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
                 string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id), registered.TryGetValue((c.Id, c.ReferenceCode ?? string.Empty), out string regNo) ? regNo : null);
                 risks.TryGetValue(c.Id, out EnRiskRow risk);
-                string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
+                string mdlLock = (await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct)).Refusal;   // the same check the release action runs
+                string release = ReleaseReason(c, w, docs, makers) ?? mdlLock, charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
                     Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), StandardNotice = NoticeAhead(c) && !EnReferenceRules.IsApproved(approvedMdl, c.ReferenceCode) ? EnReferenceRules.StandardNoticeText(c.ReferenceCode) : null, CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
@@ -519,14 +534,32 @@ namespace Services.NasbNiro.Engineering
                     {
                         int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
                         var pd = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted).Select(d => new { d.CreatorUserId, d.IssuedByUserId, d.DocumentId }).ToListAsync(ct);
-                        foreach (var d in pd) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
+                        List<Guid?> mdlFiles = await MdlFilesAsync(c.Id, ct);
+                        foreach (var d in pd.Where(d => !mdlFiles.Contains(d.DocumentId))) { if (!seats.Contains(d.CreatorUserId)) makers.Add(d.CreatorUserId); if (d.IssuedByUserId.HasValue && !seats.Contains(d.IssuedByUserId.Value)) makers.Add(d.IssuedByUserId.Value); }
                         await AddDossierSuppliersAsync(makers, c, pd.Where(d => d.DocumentId.HasValue).Select(d => d.DocumentId.Value).ToList(), seats, ct);
                     }
                     why = ReleaseReason(c, w, docs, makers);
                     if (why == null && c.Kind == EnCaseKind.Turbine) why = await EnDecision.RefusalAsync(_uow, c, ct);   // an approval whose standard-gap report went stale does not release a tender package
+                    EnProjectMdlRules.LockResult mdlLock = why == null ? await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct) : null;   // employer rule 20: an approved project MDL, or the CEO's permit for a tender without it
+                    if (why == null) why = mdlLock.Refusal;
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
+                    string releaseNote = "تعداد مدارک بسته: " + EnText.Num(docs);
+                    if (mdlLock.Mdl != null)
+                    {
+                        // the approved MDL file is a part of the tender documents (once: a re-release after a re-validation finds it already in the package)
+                        why = await AddProjectMdlDocumentAsync(c, mdlLock.Mdl, ct);
+                        if (why != null) return EnText.Bad<EnCaseDto>(why);
+                        docs = await _uow.Set<PcTenderDocument>().AsNoTracking().CountAsync(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted, ct);
+                        releaseNote = "تعداد مدارک بسته: " + EnText.Num(docs) + "؛ فهرست مدارک پروژه (MDL) " + mdlLock.Mdl.Number + " (ویرایش " + EnText.Num(mdlLock.Mdl.Revision) + ") جزو مدارک بسته است.";
+                    }
+                    else if (mdlLock.Permit != null)
+                    {
+                        releaseNote += "؛ این بسته بدون فهرست مدارک پروژه (MDL) و با مجوز مدیرعامل " + mdlLock.Permit.Number + " ابلاغ شد.";
+                        PcTenderPackage package = await _uow.Set<PcTenderPackage>().FirstOrDefaultAsync(p => p.Id == c.TenderPackageId.Value, ct);
+                        if (package != null) { string line = "بدون MDL با مجوز مدیرعامل " + mdlLock.Permit.Number; package.Note = EnText.Cut(string.IsNullOrEmpty(package.Note) ? line : package.Note + " | " + line, 1000); package.ModifyDate = now; package.ModifierUserId = Me; }
+                    }
                     c.TenderHash = await EnCaseRules.TenderHashAsync(_uow, c, ct); c.TenderReleasedByUserId = Me; c.TenderReleasedAt = now; c.Status = EnCaseStatus.TenderIssued;
-                    EnEvents.Add(_uow, c, "tender-released", Me, "تعداد مدارک بسته: " + EnText.Num(docs));
+                    EnEvents.Add(_uow, c, "tender-released", Me, releaseNote);
                     break;
                 }
                 case "award":

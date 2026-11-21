@@ -197,6 +197,8 @@ namespace MsTests
             ["EnDeviation.RequestedByUserId"] = "a request, not the decision (the manager and CEO decisions are guarded)",
             ["EnDocumentDebt.SettledByUserId"] = "the engineering agent settles a debt from the proof of the document",
             ["EnCaseEvent.UserId"] = "the actor of a history line",
+            ["EnMdlPermit.RequestedByUserId"] = "a request, not the decision (the CEO decision column is guarded; the service refuses a seat)",
+            ["EnProjectMdl.ClientApprovalRecordedByUserId"] = "data entry of the commercial side from the client's letter; the service refuses a seat",
         };
 
         [TestMethod]

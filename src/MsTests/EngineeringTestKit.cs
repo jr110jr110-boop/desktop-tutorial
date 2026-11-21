@@ -202,6 +202,31 @@ namespace MsTests
             return Ok(await CaseAct(host, Ceo, c.Id, "approve"));
         }
 
+        // ---------------------------------------------------------------- project MDL (employer rule 20)
+
+        public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlAct(AppHost host, ClaimsPrincipal who, string action, Action<EnProjectMdlActionDto> set = null)
+        {
+            EnProjectMdlActionDto dto = new EnProjectMdlActionDto { Action = action };
+            set?.Invoke(dto);
+            return host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().ActionAsync(dto, Ct));
+        }
+
+        public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlView(AppHost host, ClaimsPrincipal who, int caseId) => host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().GetByCaseAsync(caseId, Ct));
+
+        public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlUpload(AppHost host, ClaimsPrincipal who, EnProjectMdlDto mdl, string csv, string note = "حذف و افزودن مدرک برای این پروژه مطابق قرارداد", string version = null) =>
+            host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().UploadLinesAsync(mdl.Id, version ?? mdl.RowVersion, note, new byte[] { 0xEF, 0xBB, 0xBF }.Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "project-mdl.csv", Ct));
+
+        /// <summary>Since ENG-E1g the tender package of a turbine case is released only with an approved project MDL: the agent drafts it from the approved standard list, an engineer (Eng2) checks it, the manager (Mgr1) approves it.</summary>
+        public static async Task<EnProjectMdlCaseDto> ApprovedMdl(AppHost host, int caseId)
+        {
+            ClaimsPrincipal seat = await SeatAsync(host);
+            Ok(await MdlAct(host, seat, "draft", d => d.CaseId = caseId));
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng2, caseId));
+            Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            v = Ok(await MdlView(host, Mgr1, caseId));
+            return Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+        }
+
         /// <summary>The standard-gap report of a case under another standard: the agent builds it, the manager confirms it.</summary>
         public static async Task ConfirmGapIfAny(AppHost host, int caseId)
         {
