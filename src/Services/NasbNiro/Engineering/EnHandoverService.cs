@@ -403,7 +403,9 @@ namespace Services.NasbNiro.Engineering
             Who w = await WhoAsync(ct);
             DateTimeOffset now = DateTimeOffset.Now;
             DateTimeOffset today = DateTimeOffset.Now;
-            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmitConfirmedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }), ct);
+            List<int> caseIdsForReturns = rows.Where(r => r.Round > 1).Select(r => r.CaseId).Distinct().ToList();
+            List<EnHandover> returnedRounds = caseIdsForReturns.Count == 0 ? new List<EnHandover>() : await _uow.Set<EnHandover>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnHandoverStatus.Returned && caseIdsForReturns.Contains(x.CaseId)).ToListAsync(ct);   // the PMO's returns of the earlier rounds
+            Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.PreparedByUserId, r.SubmitConfirmedByUserId, r.AcceptedByUserId, r.ReturnedByUserId, r.ReleasedByUserId }).Concat(returnedRounds.Select(x => x.ReturnedByUserId)), ct);
             int[] seats = await EnActors.SeatIdsAsync(_uow, ct);
             List<int> caseIds = rows.Select(r => r.CaseId).Distinct().ToList(), hids = rows.Select(r => r.Id).ToList(), contractIds = rows.Select(r => r.ContractId).Distinct().ToList();
             Dictionary<int, EnCase> cases = await _uow.Set<EnCase>().AsNoTracking().Where(c => caseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
@@ -419,6 +421,7 @@ namespace Services.NasbNiro.Engineering
             foreach (EnHandover h in rows)
             {
                 EnCase c = cases[h.CaseId];
+                EnHandover previous = returnedRounds.Where(x => x.CaseId == h.CaseId && x.Round < h.Round).OrderByDescending(x => x.Round).ThenByDescending(x => x.Id).FirstOrDefault();   // the round before this one, when the PMO returned it
                 List<EnDistribution> hRows = dist.Where(x => x.HandoverId == h.Id).ToList();   // already loaded for the whole page: the two flags cost no query per row
                 LockState ls = await LockAsync(h, c, ct);
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
@@ -435,6 +438,7 @@ namespace Services.NasbNiro.Engineering
                     PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = h.Status == EnHandoverStatus.Draft ? EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed) : null,
                     WaiverId = h.WaiverId, WaiverNumber = h.WaiverId.HasValue && waiverNames.TryGetValue(h.WaiverId.Value, out string wn) ? wn : null,
                     SubmittedByName = names.Name(h.SubmitConfirmedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
+                    PreviousReturnNumber = previous?.Number, PreviousReturnByName = previous == null ? null : names.Name(previous.ReturnedByUserId), PreviousReturnAtText = previous == null ? null : EnText.Stamp(previous.ReturnedAt), PreviousReturnReason = previous?.ReturnReason,
                     ReturnedByName = names.Name(h.ReturnedByUserId), ReturnedAtText = EnText.Stamp(h.ReturnedAt), ReturnReason = h.ReturnReason, ReleasedByName = names.Name(h.ReleasedByUserId), ReleasedAtText = EnText.Stamp(h.ReleasedAt),
                     StandardGap = await GapSummaryAsync(c.Id, ct),
                     Note = h.Note, VoidReason = h.VoidReason, TouchedByMe = EnEditors.Has(h.EditorUserIds, Me), RowVersion = EnConcurrency.Text(h.RowVersion), Waiver = waiverDto,

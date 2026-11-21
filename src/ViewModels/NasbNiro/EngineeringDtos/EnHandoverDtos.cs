@@ -207,6 +207,12 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string SubmittedAtText { get; set; }
         public string AcceptedByName { get; set; }
         public string AcceptedAtText { get; set; }
+
+        /// <summary>The round before this one, when the PMO returned it: its number, who returned it, when (Shamsi text) and the reason. Null for the first round or when the previous round was not returned.</summary>
+        public string PreviousReturnNumber { get; set; }
+        public string PreviousReturnByName { get; set; }
+        public string PreviousReturnAtText { get; set; }
+        public string PreviousReturnReason { get; set; }
         public string ReturnedByName { get; set; }
         public string ReturnedAtText { get; set; }
         public string ReturnReason { get; set; }

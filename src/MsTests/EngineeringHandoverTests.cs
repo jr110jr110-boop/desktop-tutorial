@@ -171,6 +171,13 @@ namespace MsTests
             Assert.IsTrue(Ok(await Get(host, Mgr1, h.Id)).Debts.All(d => d.Status == (int)EnDebtStatus.Void));
             EnHandoverDto r2 = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
             Assert.AreEqual(2, r2.Round);
+            // ENG-E1e: the new round carries the PMO's return of the previous round (number, who, when, reason); the first round carries none
+            Assert.IsNull(r.PreviousReturnNumber);
+            Assert.AreEqual(h.Number, r2.PreviousReturnNumber);
+            Assert.AreEqual("نقشه‌های اجرایی هنوز کامل نیست", r2.PreviousReturnReason);
+            Assert.AreEqual(r.ReturnedByName, r2.PreviousReturnByName);   // the same name the returned round shows
+            Assert.IsFalse(string.IsNullOrWhiteSpace(r2.PreviousReturnAtText));
+            Assert.AreEqual(h.Number, Ok(await Get(host, Mgr1, r2.Id)).PreviousReturnNumber);
 
             // round two: the drawing now exists (approved with a file), the datasheet does not
             SetState(host, dwg, PcIssueState.Approved);
