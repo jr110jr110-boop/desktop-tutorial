@@ -135,6 +135,15 @@ namespace MsTests
             host.Write(u => { u.Set<EnCase>().Single(x => x.Id == newCase).ReferenceCode = "REG-OTHER"; u.SaveChanges(); }, Seeder);
             shown = Ok(await GetCase(host, Mgr1, newCase));
             Assert.IsTrue(shown.CanProposeRegistration, shown.ProposeRegistrationBlockedReason);
+            // ENG-E1e fix L5: the SERVER also accepts it for another approved standard (the list is approved through the API)
+            await ApprovedList(host, "REG-OTHER", ("DWG", true, false));
+            EnRegistrationDto other = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnRegistrationService>().ProposeAsync(new EnRegistrationProposeDto { CaseId = newCase, ProductId = product, ReferenceCode = "REG-OTHER", StandardBasis = "دیتاشیت ۱۲ بند ۴", Rationale = "این طرح برای چند پروژهٔ دیگر هم قابل استفاده است" }, Ct)));
+            Assert.AreEqual((int)EnRegStatus.Proposed, other.Status);
+            Assert.AreEqual("REG-OTHER", other.ReferenceCode);
+            // ENG-E1e fix L4: the dossier-exists refusal (a second new-design case of the same product and the already registered standard)
+            int second = Seed(host, EnClassification.New, EnCaseStatus.InEngineering);
+            ReleaseHandover(host, second, product, "REG-LIST");
+            Refused(await propose(Mgr1, second, null), "برای این محصول و استاندارد پرونده پلتفرم از پیش وجود دارد");
         }
 
         [TestMethod]
