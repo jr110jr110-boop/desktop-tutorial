@@ -30,6 +30,12 @@ namespace Services.NasbNiro.Agents.Steps
             return AgentStepResult.Done("EnHandover", r.Data.Id, r.Data.Number, doneSummary.Replace("{n}", r.Data.Number));
         }
 
+        /// <summary>A handover whose package is incomplete RIGHT NOW: a required line is missing, or the platform dossier of its case is not complete (the status read; the service also re-checks the confirmed hash).</summary>
+        protected static System.Linq.Expressions.Expression<Func<EnHandover, bool>> Incomplete(IUnitOfWork uow) =>
+            h => h.Lines.Any(l => l.Required && l.State == EnLineState.Missing)
+                || uow.Set<EnCase>().Any(c => c.Id == h.CaseId && c.Classification == EnClassification.Platform
+                    && !uow.Set<EnPlatformDossier>().Any(p => !p.Deleted && p.ProductId == c.ProductId && p.ReferenceCode == c.ReferenceCode && p.Status == EnDossierStatus.Complete));
+
         /// <summary>The open debts whose source now exists: a platform dossier line that is available, a system BOM / OPC line whose released BOM / approved routing exists, an approved project MDR row with a file of the same type and title, or the confirmed dossier of a dossier debt.</summary>
         protected static IQueryable<int> ReadyDebtIds(IUnitOfWork uow) =>
             uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open
@@ -121,7 +127,9 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.Now;
-            var rows = await uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested)
+            // only a decidable permit: its handover is Accepted (after the rounds with the PMO) and still incomplete
+            IQueryable<int> decidable = uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Accepted).Where(Incomplete(uow)).Select(h => h.Id);
+            var rows = await uow.Set<EnWaiver>().AsNoTracking().Where(w => !w.Deleted && w.Status == EnWaiverStatus.Requested && decidable.Contains(w.HandoverId))
                 .OrderBy(w => w.Id).Take(ProcStepCommon.Cap).Select(w => new { w.Id, w.Number, ContractId = uow.Set<EnHandover>().Where(h => h.Id == w.HandoverId).Select(h => (int?)h.ContractId).FirstOrDefault() }).ToListAsync(ct);
             return rows.Select(r => Item("EnWaiver", r.Id, r.Number, r.ContractId, null, $"مجوز اضطرار {r.Number} منتظر تصمیم مدیرعامل است.", EnRoles.Ceo)).ToList();
         }

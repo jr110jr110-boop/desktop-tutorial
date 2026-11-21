@@ -178,7 +178,7 @@ namespace MsTests
             host.Write(u => { u.Set<EnHandover>().First(x => x.Id == h.Id).Status = EnHandoverStatus.Void; u.SaveChanges(); }, Seeder);
             w = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().GetWaiverAsync(waiver, Ct)));
             Assert.IsFalse(w.CanDecide, "the flag and the action agree: a void handover waits for no permit");
-            Refused(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = waiver, Decision = "approve" }, Ct)), "دیگر منتظر");
+            Refused(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = waiver, Decision = "approve" }, Ct)), "پس از پذیرش PMO");
         }
     }
 }
