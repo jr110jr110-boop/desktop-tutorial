@@ -345,7 +345,7 @@ namespace Services.NasbNiro.ProductBank
                 global::Services.NasbNiro.OpsData.ReadinessGateResult ready = await _readiness.GateForBaselineAsync(wo.Id, product.Id, ct);
                 if (ready.Refusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(ready.Refusal);
             }
-            {   // ENG-E1: a controlled contract is instantiated only after the PMO accepted the engineering documents (the adopted path included: a control start earlier than the cut-over must not open it)
+            {   // ENG-E1 (ENG-E1f fix G4): a controlled contract is instantiated only after the PMO RELEASED the engineering documents to execution (the adopted path included: a control start earlier than the cut-over must not open it)
                 string engineeringRefusal = await global::Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(Uow, wo.ContractId, ct);
                 if (engineeringRefusal != null) return ResponseDtoHelper.BadRequest<PbBaselineDto>(engineeringRefusal);
             }

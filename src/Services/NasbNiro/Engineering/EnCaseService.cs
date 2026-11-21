@@ -290,7 +290,7 @@ namespace Services.NasbNiro.Engineering
             if (!inquiryId.HasValue && !contractId.HasValue) return EnText.Bad<EnGateStateDto>(EnText.InvalidData);
             EnGateResult g = inquiryId.HasValue ? await EnGates.ForInquiryAsync(_uow, inquiryId.Value, ct) : await EnGates.ForContractAsync(_uow, contractId.Value, ct);
             string reason = g.Reason;
-            if (!inquiryId.HasValue && g.Controlled) reason = await EnGates.InstantiateRefusalAsync(_uow, contractId.Value, ct);
+            if (!inquiryId.HasValue && g.Controlled) reason = await EnGates.InstantiateRefusalAsync(_uow, contractId.Value, ct);   // ENG-E1f fix G4: the work-order gate state shows the refusal of the instantiate chokepoint: it passes only when the PMO RELEASED the package
             return ResponseDtoHelper.Ok(new EnGateStateDto
             {
                 Controlled = g.Controlled, Legacy = g.Legacy, LegacyNote = g.LegacyNote, CaseId = g.Case?.Id, CaseNumber = g.Case?.Number, CaseStatus = g.Case == null ? (int?)null : (int)g.Case.Status, CaseStatusText = g.Case == null ? null : EnText.Case(g.Case.Status),

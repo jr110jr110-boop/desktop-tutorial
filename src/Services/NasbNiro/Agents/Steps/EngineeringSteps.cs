@@ -120,7 +120,7 @@ namespace Services.NasbNiro.Agents.Steps
             var product = await RepeatProducts(uow).Where(p => p.EquipmentId == equipment).OrderBy(p => p.Id).Select(p => new { p.Id, p.Code }).FirstOrDefaultAsync(ct);
             if (product == null) return AgentStepResult.Waiting("محصولی با BOM منتشرشده برای تجهیز این دستور کار نیست.");
             int contractId = await uow.Set<WorkOrder>().AsNoTracking().Where(w => w.Id == item.TargetId).Select(w => w.ContractId).FirstOrDefaultAsync(ct);
-            string held = await global::Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(uow, contractId, ct);   // ENG-E1: waits for the handover accepted by the PMO
+            string held = await global::Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(uow, contractId, ct);   // ENG-E1f fix G4: waits for the handover RELEASED to execution by the PMO
             if (held != null) return AgentStepResult.Waiting(held);
             ResponseDto<PbBaselineDto> response = await services.GetRequiredService<IPbProductService>().InstantiateAsync(new PbInstantiateDto { WorkOrderId = item.TargetId, ProductId = product.Id }, ct);
             if (!response.Success) return ProcStepCommon.Refusal(response);

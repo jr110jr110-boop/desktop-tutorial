@@ -483,5 +483,41 @@ namespace MsTests
             Ok(await Act(host, Pmo2, "release", d => d.Id = h));
             Assert.AreEqual(0, host.Read(u => u.Set<EnWaiver>().Count()));
         }
+
+        // ---------------------------------------------------------------- group 4
+
+        private static Task<string> Instantiate(AppHost host, int contract) =>
+            host.As(Eng1, p => Services.NasbNiro.Engineering.EnGates.InstantiateRefusalAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), contract, Ct));
+
+        [TestMethod]
+        public async Task G4_The_Instantiate_Chokepoint_Passes_Only_When_The_Pmo_Released_The_Package_Not_At_The_Acceptance()
+        {
+            AppHost host = Started("e1ffix_g4");
+            (int contract, int caseId) = await NewDesign(host);
+            string notOpened = "مدارک مهندسی این قرارداد هنوز از سوی PMO به اجرا ابلاغ نشده است (پرونده مهندسی ";
+            StringAssert.StartsWith(await Instantiate(host, contract), notOpened);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            StringAssert.StartsWith(await Instantiate(host, contract), notOpened);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            StringAssert.StartsWith(await Instantiate(host, contract), notOpened);
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            string accepted = await Instantiate(host, contract);
+            StringAssert.StartsWith(accepted, notOpened, "accepted is not enough any more");
+            StringAssert.EndsWith(accepted, ").");
+            // the gate state shown to the work-order screens says the same
+            ViewModels.NasbNiro.EngineeringDtos.EnGateStateDto state = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetGateStateAsync(null, contract, Ct)));
+            Assert.IsFalse(state.Passed);
+            StringAssert.StartsWith(state.BlockedReason, notOpened);
+            // an incomplete package with a requested/approved permit is still not released: still refused
+            Assert.IsNull(await AskPermit(host, h.Id));
+            StringAssert.StartsWith(await Instantiate(host, contract), notOpened);
+            int permit = host.Read(u => u.Set<EnWaiver>().Single().Id);
+            Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = permit, Decision = "approve" }, Ct)));
+            StringAssert.StartsWith(await Instantiate(host, contract), notOpened, "an approved permit alone does not open it either");
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            Assert.IsNull(await Instantiate(host, contract), "released: it passes");
+            Assert.IsTrue(Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetGateStateAsync(null, contract, Ct))).Passed);
+        }
     }
 }

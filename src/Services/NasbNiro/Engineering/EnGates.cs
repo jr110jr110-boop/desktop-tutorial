@@ -102,15 +102,15 @@ namespace Services.NasbNiro.Engineering
                 : "منشور پروژه هنوز توسط مهندسی تایید نشده است یا پس از تایید مهندسی تغییر کرده است (پرونده مهندسی " + Name(g.Case) + ").";
         }
 
-        /// <summary>The baseline of a work order from the product bank (and the first release steps) wait for the handover accepted by the PMO.</summary>
+        /// <summary>The baseline of a work order from the product bank (and the first release steps) wait for the handover RELEASED by the PMO (employer decision 1405/08/30: not at the acceptance; an incomplete package is released only when complete or with the CEO's permit). Work before the control start passes as before.</summary>
         public static async Task<string> InstantiateRefusalAsync(IUnitOfWork uow, int contractId, CancellationToken ct)
         {
             EnGateResult g = await ForContractAsync(uow, contractId, ct);
             if (!g.Controlled) return null;
-            if (g.Case == null) return "مدارک مهندسی این قرارداد هنوز از سوی PMO پذیرفته نشده است (پرونده مهندسی هنوز باز نشده است).";
+            if (g.Case == null) return "مدارک مهندسی این قرارداد هنوز از سوی PMO به اجرا ابلاغ نشده است (پرونده مهندسی هنوز باز نشده است).";
             int caseId = g.Case.Id;
-            bool ok = await uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == caseId && !h.Deleted && (h.Status == EnHandoverStatus.Accepted || h.Status == EnHandoverStatus.Released), ct);
-            return ok ? null : "مدارک مهندسی این قرارداد هنوز از سوی PMO پذیرفته نشده است (پرونده مهندسی " + Name(g.Case) + ").";
+            bool ok = await uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == caseId && !h.Deleted && h.Status == EnHandoverStatus.Released, ct);
+            return ok ? null : "مدارک مهندسی این قرارداد هنوز از سوی PMO به اجرا ابلاغ نشده است (پرونده مهندسی " + Name(g.Case) + ").";
         }
 
         /// <summary>One more item of the release check of a production order: null when passed or legacy, else (Passed=false, message). Legacy adds no item.</summary>

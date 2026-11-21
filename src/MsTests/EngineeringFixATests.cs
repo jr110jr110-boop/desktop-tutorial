@@ -64,7 +64,7 @@ namespace MsTests
             EnGateResult gate = await host.As(Eng1, p => EnGates.ForContractAsync(Uow(p), contract, Ct));
             Assert.IsTrue(gate.Controlled); Assert.IsFalse(gate.Legacy);
             Assert.IsNotNull(await host.As(Eng1, p => EnGates.CharterApproveRefusalAsync(Uow(p), contract, Ct)), "the CEO charter approval waits for the engineering case");
-            Assert.IsNotNull(await host.As(Eng1, p => EnGates.InstantiateRefusalAsync(Uow(p), contract, Ct)), "the baseline waits for the accepted handover");
+            Assert.IsNotNull(await host.As(Eng1, p => EnGates.InstantiateRefusalAsync(Uow(p), contract, Ct)), "the baseline waits for the RELEASED handover");
             (bool controlled, bool passed, _) = await host.As(Eng1, p => EnGates.ProductionReleaseAsync(Uow(p), contract, Ct));
             Assert.IsTrue(controlled); Assert.IsFalse(passed);
             Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
