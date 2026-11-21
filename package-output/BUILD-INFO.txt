@@ -1,0 +1,4 @@
+source_sha=9aab99d6027af36dd00141df7c5ac259387a66ac
+built_utc=2026-11-21T13:02:08Z
+sdk=10.0.404
+aspnetcore_runtime=Microsoft.AspNetCore.App 11.0.0 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
