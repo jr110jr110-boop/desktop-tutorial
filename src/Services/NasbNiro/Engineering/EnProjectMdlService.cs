@@ -345,7 +345,7 @@ namespace Services.NasbNiro.Engineering
             Who w = await WhoAsync(ct);
             Ctx x = await LoadAsync(c, true, ct);
             if (dto.Id.HasValue && action != "draft" && action != "request-permit" && action != "decide-permit" && action != "withdraw-permit" && (x.Live == null || x.Live.Id != dto.Id.Value)) return EnText.Bad<EnProjectMdlCaseDto>("این ویرایش از فهرست مدارک پروژه دیگر جاری نیست؛ صفحه را دوباره باز کنید.");
-            if ((action == "decide-permit" || action == "withdraw-permit") && (x.Permit == null || (dto.PermitId.HasValue && x.Permit.Id != dto.PermitId.Value))) return EnText.Bad<EnProjectMdlCaseDto>("این درخواست مجوز دیگر جاری نیست؛ صفحه را دوباره باز کنید.");
+            if ((action == "decide-permit" || action == "withdraw-permit") && x.Permit != null && dto.PermitId.HasValue && x.Permit.Id != dto.PermitId.Value) return EnText.Bad<EnProjectMdlCaseDto>("این درخواست مجوز دیگر جاری نیست؛ صفحه را دوباره باز کنید.");
             if (x.Live != null && action != "draft" && action != "request-permit" && action != "decide-permit" && action != "withdraw-permit" && !VersionOk(x.Live, dto.RowVersion)) return EnText.Bad<EnProjectMdlCaseDto>(EnText.Concurrency);
             DateTimeOffset now = DateTimeOffset.Now;
             string why;
