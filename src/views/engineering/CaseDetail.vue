@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import EnAction from "@/components/engineering/EnAction.vue";
 import EnChip from "@/components/engineering/EnChip.vue";
 import EnGapView from "@/components/engineering/EnGapView.vue";
+import EnProjectMdl from "@/components/engineering/EnProjectMdl.vue";
 import EnInfoList from "@/components/engineering/EnInfoList.vue";
 import EnPrompt from "@/components/engineering/EnPrompt.vue";
 import EnWait from "@/components/engineering/EnWait.vue";
@@ -326,6 +327,13 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
             <h4 v-if="gap" class="h6 mt-2">تفاوت استاندارد</h4>
             <EnGapView v-if="gap" :gap="gap" link @changed="load" />
             <p v-else-if="c.standardGap" class="small">{{ c.standardGap.number }}: {{ c.standardGap.summary }}</p>
+          </li>
+
+          <!-- the MDL of the project: between the classification and the tender package -->
+          <li class="en-step" data-test="en-pmdl-step">
+            <h3>فهرست مدارک پروژه (MDL)</h3>
+            <div v-if="c.projectMdlNotice" class="en-banner amber" role="status" data-test="en-pmdl-notice">{{ c.projectMdlNotice }}</div>
+            <EnProjectMdl :case-id="c.id" :case-number="c.number" @changed="load" />
           </li>
 
           <!-- 2 -->

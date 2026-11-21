@@ -1,4 +1,4 @@
-import { call, clean } from "@/api/ApiClient";
+import { call, clean, fileErrorText, http, saveBlob } from "@/api/ApiClient";
 
 // ENG-E1: the engineering module (api/v1/engineering/*; EnCaseController, EnHandoverController, EnPlatformController, EnReferenceController, EnDeviationController,
 // EnStandardGapController, EnRegistrationController, EnInfoRequestController, EnOverviewController). Every function answers [data, null] or [null, Error]; a refusal of the
@@ -108,3 +108,47 @@ export const uploadEnReferenceNew = (header: { code: string; title: string; stan
   (["code", "title", "standardSource", "note"] as const).forEach((k) => form.append(k, header[k] || ""));
   return call("post", base + "reference/lists/upload-new", form);
 };
+
+// ---- the MDL of a project in the tender and the CEO permit for a tender without it (api/v1/engineering/project-mdl/*; EnProjectMdlController)
+// The DTO of a case (EnProjectMdlCaseDto) carries applies, mdl (lines with origin / removed), history, permit and can<Action> / <action>BlockedReason for draft, draftFromFile, upload, check, return,
+// approve, void, recordClientApproval, requestPermit, decidePermit, withdrawPermit. The page only reads the flags (a missing flag is false).
+export const getEnProjectMdl = (caseId: number) => call("get", base + "project-mdl/by-case/" + caseId);
+/** Downloads the CSV of the current lines (the format of the reference upload); answers an error text, or null when the file was saved. */
+export async function downloadEnProjectMdlCsv(id: number): Promise<string | null> {
+  try {
+    const response = await http.get(base + "project-mdl/" + id + "/csv", { responseType: "blob" });
+    if ((response.headers["content-type"] || "").includes("application/json")) {
+      const json = JSON.parse(await (response.data as Blob).text());
+      return json.message || "خطا";
+    }
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(response.headers["content-disposition"] || "");
+    saveBlob(response.data, match ? decodeURIComponent(match[1]) : "MDL-" + id + ".csv");
+    return null;
+  } catch (error: any) {
+    return fileErrorText(error);
+  }
+}
+/** Drafts the project MDL from the approved standard list of the case (the agent does it too). */
+export const draftEnProjectMdl = (caseId: number) => call("post", base + "project-mdl/draft", { caseId });
+/** A Draft created from a CSV file (the reference format) when the case has no approved standard list: multipart caseId, file, note (at least 15 characters). */
+export const draftEnProjectMdlFromFile = (caseId: number, note: string, file: File) => {
+  const form = new FormData();
+  form.append("caseId", String(caseId));
+  form.append("file", file);
+  form.append("note", note || "");
+  return call("post", base + "project-mdl/draft-from-file", form);
+};
+/** Replaces the lines of a Draft / Checked project MDL with a CSV file (multipart file, note of at least 15 characters, rowVersion). */
+export const uploadEnProjectMdlLines = (id: number, rowVersion: string, note: string, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("note", note || "");
+  form.append("rowVersion", rowVersion || "");
+  return call("post", base + "project-mdl/" + id + "/upload-lines", form);
+};
+/** action: check | approve | return | void | record-client-approval. body: { reason (return, void, at least 15), letterRef + documentId (record-client-approval), note, rowVersion }. */
+export const postEnProjectMdlAction = (id: number, action: string, body: any = {}) => call("post", base + "project-mdl/" + id + "/" + action, body);
+/** The permit «tender without MDL»: request { caseId, reason (at least 50) }; decide { caseId, approve, note (at least 15 for a rejection) }; withdraw { caseId, note }. */
+export const requestEnMdlPermit = (caseId: number, reason: string) => call("post", base + "project-mdl/request-permit", { caseId, reason });
+export const decideEnMdlPermit = (caseId: number, approve: boolean, note: string) => call("post", base + "project-mdl/decide-permit", { caseId, approve, note });
+export const withdrawEnMdlPermit = (caseId: number, note: string) => call("post", base + "project-mdl/withdraw-permit", { caseId, note });

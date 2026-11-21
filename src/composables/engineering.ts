@@ -27,6 +27,8 @@ export const EnRoles = {
   commercial: list("SALES,COMMERCIAL"),
   pmo: list("PMO"),
   pmoSide: list("PMO,PROJECTMANAGER"),
+  /** Reads the project MDL of a case (EnProjectMdlController): engineering, the CEO, the PMO side, commercial (the list goes to the client through them), the DCC and the auditor. */
+  mdlReaders: list("ENGINEERING,ENGINEER,CEO,PMO,PROJECTMANAGER,SALES,COMMERCIAL,DCC,AUDITOR"),
   /** Every list, detail and the overview of the module (EnRoles.Readers). */
   readers: list("ENGINEERING,ENGINEER,PMO,CEO,PROJECTMANAGER,PLANNING,SALES,COMMERCIAL,DCC,QA,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,WAREHOUSE,WHSUPERVISOR,AUDITOR"),
   /** The questions to the PMO: the six units and engineering (EnUnits.UnitRoles) and the PMO, the CEO and the auditor. */
@@ -92,6 +94,7 @@ export const gapStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: 
 export const gapKinds: Record<number, string> = { 0: "بدون تغییر", 1: "افزوده", 2: "حذف‌شده", 3: "تغییر الزام" };
 export const gapKindKeys: Record<number, string> = { 0: "Same", 1: "Added", 2: "Removed", 3: "RequiredChanged" };
 export const regStatuses: Record<number, string> = { 0: "درخواست‌شده", 1: "تاییدشده", 2: "ردشده", 3: "ابطال‌شده" };
+export const mdlStatuses: Record<number, string> = { 0: "پیش‌نویس", 1: "بررسی‌شده", 2: "تاییدشده", 3: "ابطال‌شده" };
 export const infoStatuses: Record<number, string> = { 0: "باز", 1: "پاسخ‌داده‌شده", 2: "بسته", 3: "پس‌گرفته‌شده" };
 
 /** Colour of a status chip: "ok" | "warn" | "bad" | "info". */
@@ -120,6 +123,10 @@ export function chipOf(group: string, status: number | null | undefined): string
       return s === 1 ? "ok" : s === 2 ? "bad" : "warn";
     case "reg":
       return s === 1 ? "ok" : s === 2 ? "bad" : s === 0 ? "warn" : "info";
+    case "mdl":
+      return s === 2 ? "ok" : s === 1 ? "warn" : s === 3 ? "bad" : "info";
+    case "permit":
+      return s === 1 ? "ok" : s === 2 || s === 3 ? "bad" : s === 0 ? "warn" : "info";
     case "dist":
       return s === 1 ? "ok" : "warn";
     case "info":
@@ -280,6 +287,10 @@ export const eventKinds: Record<string, string> = {
   awarded: "پرونده برنده شد", closed: "پرونده بسته شد", cancelled: "پرونده لغو شد", "handover-drafted": "پیش‌نویس تحویل ساخته شد", "handover-submitted": "تحویل به PMO ارسال شد",
   "handover-accepted": "PMO تحویل را پذیرفت", "handover-returned": "PMO تحویل را برگرداند", "handover-released": "تحویل منتشر شد", "handover-void": "تحویل باطل شد",
   "distribution-drafted": "ابلاغ واحدها آماده شد", "distribution-note-edited": "یادداشت دامنه واحد ویرایش شد", "info-request-void": "پرسش واحد پس گرفته شد", "platform-registered": "پلتفرم ثبت شد",
+  "project-mdl-drafted": "پیش‌نویس فهرست مدارک پروژه ساخته شد", "project-mdl-uploaded": "ردیف‌های فهرست مدارک پروژه از فایل جایگزین شد", "project-mdl-checked": "فهرست مدارک پروژه بررسی شد",
+  "project-mdl-returned": "فهرست مدارک پروژه برگشت خورد", "project-mdl-approved": "فهرست مدارک پروژه تایید شد", "project-mdl-void": "فهرست مدارک پروژه باطل شد",
+  "project-mdl-client-approved": "تایید کارفرما برای فهرست مدارک پروژه ثبت شد", "project-mdl-client-corrected": "تایید کارفرما برای فهرست مدارک پروژه اصلاح شد",
+  "mdl-permit-requested": "مجوز مناقصه بدون MDL درخواست شد", "mdl-permit-approved": "مجوز مناقصه بدون MDL تایید شد", "mdl-permit-rejected": "مجوز مناقصه بدون MDL رد شد", "mdl-permit-withdrawn": "درخواست مجوز مناقصه بدون MDL پس گرفته شد",
 };
 
 /** Uploads a file through the documents API and answers its id (or the error). */
