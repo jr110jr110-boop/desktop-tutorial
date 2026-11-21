@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// An emergency permit of the lock of the release to execution (asked once by the manager after the PMO accepted an incomplete package): the reason, the missing lines, the debt period in hours (1..72, counted from the CEO's approval; the deadline date-time exists only after the
-// approval), who asked and for how long it has waited. The CEO decides (approve, optionally lowering the hours, or reject with a note); the buttons follow the DTO flags and the server's refusal
+// An emergency permit of the lock of the release to execution (asked once by the manager after the PMO accepted an incomplete package): the reason, the missing lines, the debt period in hours (1..72, counted from the release to execution; the deadline date-time exists only after the
+// release), who asked and for how long it has waited. The CEO decides (approve, optionally lowering the hours, or reject with a note); the buttons follow the DTO flags and the server's refusal
 // is written inside the dialog.
 import { computed } from "vue";
 import EnAction from "@/components/engineering/EnAction.vue";
@@ -24,7 +24,7 @@ const missing = computed<{ docType: string; title: string }[]>(() =>
 function approve() {
   d.ask({
     title: "تایید مجوز اضطرار",
-    hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت اداری. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است. فقط می‌توانید ساعت‌ها را کمتر کنید، بیشتر از ساعت درخواست‌شده نمی‌شود.",
+    hint: "مهلت تأمین مدرک از لحظهٔ ابلاغ به اجرا شمرده می‌شود (نه از لحظهٔ تایید)؛ حداکثر ۷۲ ساعت اداری. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است. فقط می‌توانید ساعت‌ها را کمتر کنید، بیشتر از ساعت درخواست‌شده نمی‌شود.",
     fields: [
       { key: "hours", label: "مهلت تأمین مدرک (ساعت اداری)", type: "number", required: true, lo: 1, hi: Math.min(72, props.waiver.debtHours || 72), value: props.waiver.debtHours || 72 },
       { key: "n", label: "یادداشت (اختیاری)", type: "textarea", max: 2000 },
@@ -54,8 +54,9 @@ function reject() {
     <EnWait v-if="waiver.status === 0" :hours="waiver.waitingHours" text="مجوز اضطرار منتظر تصمیم مدیرعامل است" />
     <dl class="en-kv">
       <dt>دلیل</dt><dd class="en-pre">{{ waiver.reason }}</dd>
-      <dt>مدت مهلت</dt><dd data-test="en-waiver-hours">{{ faNum(waiver.debtHours, 0) }} ساعت اداری از لحظهٔ تایید مدیرعامل</dd>
+      <dt>مدت مهلت</dt><dd data-test="en-waiver-hours">{{ faNum(waiver.debtHours, 0) }} ساعت اداری از لحظهٔ ابلاغ به اجرا</dd>
       <dt v-if="waiver.status === 1 && waiver.debtDueAt">مهلت تأمین مدرک</dt><dd v-if="waiver.status === 1 && waiver.debtDueAt" data-test="en-waiver-due">{{ stamp(waiver.debtDueAt) }}</dd>
+      <dt v-if="waiver.status === 1 && !waiver.used && !waiver.debtDueAt">مهلت تأمین مدرک</dt><dd v-if="waiver.status === 1 && !waiver.used && !waiver.debtDueAt">تاریخ مهلت در لحظهٔ ابلاغ به اجرا معلوم می‌شود</dd>
       <dt>مدارک کم</dt>
       <dd>
         <span v-if="!missing.length">—</span>

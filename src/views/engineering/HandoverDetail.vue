@@ -13,7 +13,7 @@ import { fail } from "@/composables/inventory";
 import { hasRole } from "@/composables/roles";
 
 // A handover of the engineering documents to the PMO. LOCK-B: while the required documents are missing the submit is refused and the server's reason is written in the red banner.
-// An emergency permit (reason of at least 50 characters, a period of 1..72 hours counted from the CEO's approval) is decided by the CEO. The PMO accepts, returns or releases; the units acknowledge their notice.
+// An emergency permit (reason of at least 50 characters, a period of 1..72 hours counted from the release to execution) is decided by the CEO. The PMO accepts, returns or releases; the units acknowledge their notice.
 const route = useRoute();
 const id = computed(() => Number(route.params.id));
 const h = ref<any>(null);
@@ -62,7 +62,7 @@ function waiverDialog() {
     hint: "این درخواست فقط یک‌بار و پس از پذیرش PMO ثبت می‌شود؛ مدیرعامل تصمیم می‌گیرد و فقط می‌تواند ساعت‌ها را کمتر کند. بدهی مدارک هنگام ابلاغ به اجرا ثبت می‌شود. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است.",
     fields: [
       { key: "reason", label: "دلیل اضطرار", type: "textarea", required: true, min: 50, max: 2000 },
-      { key: "hours", label: "مهلت تأمین مدرک (ساعت اداری)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت اداری" },
+      { key: "hours", label: "مهلت تأمین مدرک (ساعت اداری)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ ابلاغ به اجرا شمرده می‌شود؛ حداکثر ۷۲ ساعت اداری" },
     ],
     run: (v) => requestEnWaiver({ handoverId: id.value, reason: v.reason, debtHours: v.hours }),
     okText: "درخواست مجوز اضطرار برای مدیرعامل ثبت شد.",

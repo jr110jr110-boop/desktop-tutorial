@@ -65,7 +65,7 @@ export const getEnHandover = (id: number) => call("get", base + "handovers/" + i
 export const postEnHandoverAction = (body: any) => call("post", base + "handovers/action", body);
 export const getEnWaivers = (q: EnQuery) => call("get", base + "waivers", undefined, clean(q));
 export const getEnWaiver = (id: number) => call("get", base + "waivers/" + id);
-/** body: { handoverId, reason (min 50), debtHours (whole hours 1..72, counted from the CEO's approval) } */
+/** body: { handoverId, reason (min 50), debtHours (whole hours 1..72, counted from the release to execution) } */
 export const requestEnWaiver = (body: any) => call("post", base + "waivers/request", body);
 /** body: { id, decision: approve|reject, note, debtHours (optional; the CEO may only lower it), rowVersion } */
 export const decideEnWaiver = (body: any) => call("post", base + "waivers/decide", body);
