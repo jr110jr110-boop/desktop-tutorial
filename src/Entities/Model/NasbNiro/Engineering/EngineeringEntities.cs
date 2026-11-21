@@ -34,6 +34,17 @@ namespace Entities.Model.NasbNiro.Engineering
 
     public enum EnDebtStatus { Open = 0, Settled = 1, Void = 2 }
 
+    /// <summary>The MDL of ONE project (employer rule 20): Draft: the engineering agent drafted it from the approved standard list of the company (or an engineer replaced its lines from a file);
+    /// Checked: an engineering expert checked it; Approved: the engineering manager approved it (bound to the content hash), it goes to the client through commercial as a part of the tender documents;
+    /// Void: withdrawn (a new revision may follow).</summary>
+    public enum EnProjectMdlStatus { Draft = 0, Checked = 1, Approved = 2, Void = 3 }
+
+    /// <summary>Standard: the line comes from the standard list of the company; Project: added for this project only.</summary>
+    public enum EnProjectMdlLineOrigin { Standard = 0, Project = 1 }
+
+    /// <summary>The CEO's permit to send the tender documents of a special project WITHOUT a project MDL (requested by the engineering manager with a reason).</summary>
+    public enum EnMdlPermitStatus { Requested = 0, Approved = 1, Rejected = 2, Void = 3 }
+
     /// <summary>Qa..Planning are the six distribution units; Engineering is an ASKING unit only (it asks the PMO, it never receives a distribution row and never appears in a document unit list).</summary>
     public enum EnUnit { Qa = 1, Qc = 2, Production = 3, Procurement = 4, Warehouse = 5, Planning = 6, Engineering = 7 }
 
@@ -352,6 +363,85 @@ namespace Entities.Model.NasbNiro.Engineering
     }
 
     /// <summary>The emergency waiver of the handover lock: approved by the CEO personally, for one handover and only for the missing set of its snapshot.</summary>
+    /// <summary>The MDL of one project (case): the list of the documents the CLIENT gets for this project. It starts from the approved standard list (MDL) of the company for the standard of the case;
+    /// lines may be removed or added for the project. The MDR of the company is another thing: it is never reduced.</summary>
+    public class EnProjectMdl : BaseEntity
+    {
+        public string Number { get; set; }
+        public int CaseId { get; set; }
+
+        /// <summary>1, 2, ... per case; only one live (not void) revision per case.</summary>
+        public int Revision { get; set; }
+        public EnProjectMdlStatus Status { get; set; }
+
+        /// <summary>The standard list the lines were drafted from.</summary>
+        public int? BasedOnListId { get; set; }
+        public string BasedOnCode { get; set; }
+        public int BasedOnRevision { get; set; }
+
+        /// <summary>The uploaded file (CSV) the lines were last replaced from by a person (input data enters by a file, never typed); null while the lines are the agent's draft.</summary>
+        public Guid? SourceDocumentId { get; set; }
+        public string SourceFileName { get; set; }
+
+        /// <summary>Why the lines differ from the standard list (required when a person replaces the lines).</summary>
+        public string ChangeNote { get; set; }
+
+        public int? CheckedByUserId { get; set; }
+        public DateTimeOffset? CheckedAt { get; set; }
+        public int? ApprovedByUserId { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+
+        /// <summary>The hash of the lines the manager approved: a later change of the lines makes the approval stale.</summary>
+        public string ApprovedHash { get; set; }
+
+        /// <summary>The file of the approved list that goes into the tender package (generated at the approval).</summary>
+        public Guid? IssuedDocumentId { get; set; }
+
+        /// <summary>The client's approval, recorded by commercial from the client's letter.</summary>
+        public DateTimeOffset? ClientApprovedAt { get; set; }
+        public string ClientApprovalRef { get; set; }
+        public Guid? ClientApprovalDocumentId { get; set; }
+        public int? ClientApprovalRecordedByUserId { get; set; }
+
+        public string VoidReason { get; set; }
+
+        public ICollection<EnProjectMdlLine> Lines { get; set; } = new List<EnProjectMdlLine>();
+    }
+
+    public class EnProjectMdlLine : BaseEntity
+    {
+        public int ProjectMdlId { get; set; }
+        public EnProjectMdl ProjectMdl { get; set; }
+        public int Seq { get; set; }
+        public string DocumentType { get; set; }
+        public string Discipline { get; set; }
+        public string Title { get; set; }
+        public bool Required { get; set; }
+        public bool TenderStage { get; set; }
+        public bool ClientSubmittal { get; set; }
+        public string StandardClause { get; set; }
+        public string Units { get; set; }
+        public string Note { get; set; }
+        public EnProjectMdlLineOrigin Origin { get; set; }
+
+        /// <summary>A line of the standard list that this project does not hand to the client: kept and marked, never deleted.</summary>
+        public bool Removed { get; set; }
+    }
+
+    /// <summary>The CEO's permit to release the tender package of a special project without a project MDL.</summary>
+    public class EnMdlPermit : BaseEntity
+    {
+        public string Number { get; set; }
+        public int CaseId { get; set; }
+        public string Reason { get; set; }
+        public EnMdlPermitStatus Status { get; set; }
+        public int RequestedByUserId { get; set; }
+        public DateTimeOffset RequestedAt { get; set; }
+        public int? DecidedByUserId { get; set; }
+        public DateTimeOffset? DecidedAt { get; set; }
+        public string DecisionNote { get; set; }
+    }
+
     public class EnWaiver : BaseEntity
     {
         public string Number { get; set; }

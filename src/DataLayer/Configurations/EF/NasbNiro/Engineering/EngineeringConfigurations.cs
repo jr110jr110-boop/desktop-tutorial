@@ -171,6 +171,46 @@ namespace DataLayer.Configurations.EF.NasbNiro.Engineering
                 b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.NoAction);
             });
 
+            builder.Entity<EnProjectMdl>(b =>
+            {
+                b.ToTable("EnProjectMdls");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.BasedOnCode).HasMaxLength(60);
+                b.Property(x => x.SourceFileName).HasMaxLength(260);
+                b.Property(x => x.ChangeNote).HasMaxLength(2000);
+                b.Property(x => x.ApprovedHash).HasMaxLength(64);
+                b.Property(x => x.ClientApprovalRef).HasMaxLength(100);
+                b.Property(x => x.VoidReason).HasMaxLength(1000);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                b.HasIndex(x => new { x.CaseId, x.Revision }).IsUnique().HasFilter(NotDeleted);
+                // one live (draft, checked or approved) project MDL per case
+                b.HasIndex(x => x.CaseId).IsUnique().HasFilter("[Status] IN (0, 1, 2) AND [Deleted] = 0").HasDatabaseName("UX_EnProjectMdls_OneLive");
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.Restrict);
+                b.HasMany(x => x.Lines).WithOne(x => x.ProjectMdl).HasForeignKey(x => x.ProjectMdlId).OnDelete(DeleteBehavior.Cascade);
+            });
+            builder.Entity<EnProjectMdlLine>(b =>
+            {
+                b.ToTable("EnProjectMdlLines");
+                b.Property(x => x.DocumentType).HasMaxLength(100).IsRequired();
+                b.Property(x => x.Discipline).HasMaxLength(100);
+                b.Property(x => x.Title).HasMaxLength(300).IsRequired();
+                b.Property(x => x.StandardClause).HasMaxLength(300);
+                b.Property(x => x.Units).HasMaxLength(120);
+                b.Property(x => x.Note).HasMaxLength(500);
+                b.HasIndex(x => new { x.ProjectMdlId, x.Seq });
+            });
+            builder.Entity<EnMdlPermit>(b =>
+            {
+                b.ToTable("EnMdlPermits");
+                b.Property(x => x.Number).HasMaxLength(50).IsRequired();
+                b.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
+                b.Property(x => x.DecisionNote).HasMaxLength(1000);
+                b.HasIndex(x => x.Number).IsUnique().HasFilter(NotDeleted);
+                // one live (requested or approved) permit per case
+                b.HasIndex(x => x.CaseId).IsUnique().HasFilter("[Status] IN (0, 1) AND [Deleted] = 0").HasDatabaseName("UX_EnMdlPermits_OneLive");
+                b.HasOne<EnCase>().WithMany().HasForeignKey(x => x.CaseId).OnDelete(DeleteBehavior.Restrict);
+            });
+
             builder.Entity<EnDocumentDebt>(b =>
             {
                 b.ToTable("EnDocumentDebts");

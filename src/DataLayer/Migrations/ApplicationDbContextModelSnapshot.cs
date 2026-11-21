@@ -7875,6 +7875,75 @@ namespace DataLayer.Migrations
                     b.ToTable("EnInfoRequests", (string)null);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnMdlPermit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnMdlPermits_OneLive")
+                        .HasFilter("[Status] IN (0, 1) AND [Deleted] = 0");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnMdlPermits", (string)null);
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDocument", b =>
                 {
                     b.Property<int>("Id")
@@ -8148,6 +8217,195 @@ namespace DataLayer.Migrations
                     b.HasIndex("ProductId", "ReferenceCode", "Status");
 
                     b.ToTable("EnPlatformRegistrations", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnProjectMdl", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ApprovedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("BasedOnCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int?>("BasedOnListId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("BasedOnRevision")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ChangeNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("CheckedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ClientApprovalDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ClientApprovalRecordedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClientApprovalRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("ClientApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("IssuedDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SourceDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EnProjectMdls_OneLive")
+                        .HasFilter("[Status] IN (0, 1, 2) AND [Deleted] = 0");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.HasIndex("CaseId", "Revision")
+                        .IsUnique()
+                        .HasFilter("[Deleted] = 0");
+
+                    b.ToTable("EnProjectMdls", (string)null);
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnProjectMdlLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ClientSubmittal")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("CreateDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Discipline")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ModifierUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ModifyDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Origin")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectMdlId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Removed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("Required")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StandardClause")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("TenderStage")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Units")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectMdlId", "Seq");
+
+                    b.ToTable("EnProjectMdlLines", (string)null);
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceLine", b =>
@@ -43770,6 +44028,15 @@ namespace DataLayer.Migrations
                         .OnDelete(DeleteBehavior.NoAction);
                 });
 
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnMdlPermit", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDocument", b =>
                 {
                     b.HasOne("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", "Dossier")
@@ -43807,6 +44074,26 @@ namespace DataLayer.Migrations
                         .HasForeignKey("CaseId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnProjectMdl", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnCase", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnProjectMdlLine", b =>
+                {
+                    b.HasOne("Entities.Model.NasbNiro.Engineering.EnProjectMdl", "ProjectMdl")
+                        .WithMany("Lines")
+                        .HasForeignKey("ProjectMdlId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProjectMdl");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceLine", b =>
@@ -50304,6 +50591,11 @@ namespace DataLayer.Migrations
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnPlatformDossier", b =>
                 {
                     b.Navigation("Documents");
+                });
+
+            modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnProjectMdl", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Entities.Model.NasbNiro.Engineering.EnReferenceList", b =>
