@@ -58,6 +58,8 @@ namespace Services.NasbNiro.Engineering
         public const int StandardGap = 856;
         public const int InfoRequest = 857;
         public const int PlatformRegistration = 858;
+        public const int ProjectMdl = 859;
+        public const int MdlPermit = 860;
 
         /// <summary>For example "ENG-1405-0012": the Shamsi year and a sequence of the year.</summary>
         public static async Task<string> NextAsync(IUnitOfWork uow, int kind, string prefix, DateTime date, CancellationToken ct)

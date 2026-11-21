@@ -130,6 +130,7 @@ namespace Services.Services
             ["EnHandoverLine"] = "ردیف تحویل مدارک مهندسی",
             ["EnPlatformDocument"] = "مدرک پرونده پلتفرم",
             ["EnPlatformDossier"] = "پروندهٔ مدارک پلتفرم (دیتاشیت اصلی)",
+            ["EnProjectMdl"] = "فهرست مدارک پروژه (MDL) (فایل منبع، فایل تاییدشده، نامهٔ تایید کارفرما)",
             ["EnReferenceList"] = "فهرست مدارک مرجع (MDL) (فایل منبع)",
             ["Inquiry"] = "استعلام",
             ["InventoryDocument"] = "سند انبار",
