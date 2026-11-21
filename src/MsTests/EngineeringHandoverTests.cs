@@ -613,7 +613,7 @@ namespace MsTests
         }
 
         [TestMethod]
-        public async Task The_Waiver_Deadline_Is_In_Hours_Counts_From_The_Approval_And_The_Ceo_May_Only_Lower_It()
+        public async Task The_Waiver_Deadline_Is_In_Hours_Counts_From_The_Release_And_The_Ceo_May_Only_Lower_It()
         {
             AppHost host = Started("fixhours");
             (int contract, int caseId) = await NewDesign(host);
@@ -632,9 +632,16 @@ namespace MsTests
             Refused(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 73 }, Ct)), "کوتاه‌تر");   // raising is refused
             EnWaiverDto done = Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = w.Id, Decision = "approve", DebtHours = 24 }, Ct)));
             Assert.AreEqual(24, done.DebtHours);
-            Assert.IsTrue(done.DebtDueAt >= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now.AddMinutes(-10), 24) && done.DebtDueAt <= Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 24), "approval time + 24 OFFICE hours, never already in the past");
-            Assert.IsTrue(done.DebtDueAt > DateTimeOffset.Now, "never already in the past");
-            Assert.IsTrue(Math.Abs((done.DebtDueAt.Value - Services.NasbNiro.Office.OfficeClock.Add(DateTimeOffset.Now, 24)).TotalSeconds) < 30, "DebtDueAt == OfficeClock.Add(approvedAt, hours) within seconds");
+            Assert.IsNull(done.DebtDueAt, "the approval no longer starts the clock: no instant before the release");
+            // ENG-E1f fix G2: the clock starts at the release to execution; the approved 24 office hours are kept
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            DateTimeOffset before = DateTimeOffset.Now.AddMinutes(-1);
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            DateTimeOffset after = DateTimeOffset.Now.AddMinutes(1);
+            EnDebtDto first = rel.Debts[0];
+            Assert.IsTrue(first.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(before, 24) && first.DueAt <= Services.NasbNiro.Office.OfficeClock.Add(after, 24), "release time + 24 OFFICE hours");
+            Assert.IsTrue(first.DueAt > DateTimeOffset.Now, "never already in the past");
+            Assert.IsTrue(Math.Abs((rel.Waiver.DebtDueAt.Value - first.DueAt).TotalSeconds) < 1, "the waiver shows the same instant after the release");
         }
 
         [TestMethod]

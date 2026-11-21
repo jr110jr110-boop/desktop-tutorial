@@ -641,7 +641,7 @@ namespace Services.NasbNiro.Engineering
             Dictionary<string, decimal> settings = await QualitySettingKeys.LoadAsync(_uow, ct);
             int maxHours = Math.Min(72, (int)settings[EnSettingKeys.WaiverMaxDebtHours]);   // the ceiling of the employer is 72 hours, whatever the setting says
             DateTimeOffset now = DateTimeOffset.Now;
-            int hours = dto.DebtHours;   // the deadline counts from the CEO's approval, so a request that waits long never comes out already overdue
+            int hours = dto.DebtHours;   // the deadline counts from the release to execution (the debts are created there), so no wait before it can make a debt overdue at birth
             if (hours < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک را به ساعت اداری (دست‌کم ۱ ساعت اداری؛ ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه) بنویسید.");
             if (hours > maxHours) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک بیش از " + EnText.Num(maxHours) + " ساعت اداری نمی‌شود (سقف ۷۲ ساعت اداری).");
             EnWaiver waiver = new EnWaiver
@@ -693,7 +693,7 @@ namespace Services.NasbNiro.Engineering
                     if (dto.DebtHours.Value < 1) return EnText.Bad<EnWaiverDto>("مهلت تسویهٔ بدهی مدارک دست‌کم ۱ ساعت اداری است.");
                     hours = dto.DebtHours.Value;
                 }
-                waiver.DebtHours = hours; waiver.DebtDueAt = OfficeClock.Add(now, hours);   // counted from the approval, in OFFICE hours (employer rule 14)
+                waiver.DebtHours = hours;   // the approved number of OFFICE hours (employer rule 14); the clock starts at the release to execution, not at the approval, so DebtDueAt stays empty until then
             }
             waiver.ModifyDate = now; waiver.ModifierUserId = Me;
             try { await _uow.SaveChangesAsync(ct); }
@@ -851,12 +851,14 @@ namespace Services.NasbNiro.Engineering
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
                     if (rls.Locked && !h.WaiverId.HasValue)
                     {
-                        // the CEO's permit opens the lock now: the missing documents become debts with the deadline counted from the approval
+                        // the CEO's permit opens the lock now: the missing documents become debts and the deadline counts from THIS release instant (office hours), so a debt is never born overdue
                         h.WaiverId = permit.Id; permit.UsedAt = now; permit.ModifyDate = now; permit.ModifierUserId = Me;
+                        DateTimeOffset debtDue = OfficeClock.Add(now, permit.DebtHours);   // an old-order permit that already carried a fixed instant is recomputed too
+                        permit.DebtDueAt = debtDue;
                         foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = permit.DebtDueAt ?? OfficeClock.Add(now, permit.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = debtDue, Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                         if (rls.DossierUnconfirmed)   // the permit also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = permit.DebtDueAt ?? OfficeClock.Add(now, permit.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = debtDue, Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
                     }
                     voidedPermits = await VoidRequestedPermitsAsync(h.Id, rls.Locked ? VoidNoteLeftAccepted : VoidNoteComplete, now, ct);   // a request left behind is moot once the package is released
                     h.Status = EnHandoverStatus.Released; h.ReleasedByUserId = Me; h.ReleasedAt = now; c.Status = EnCaseStatus.Released;
@@ -947,6 +949,8 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- debts
 
+        public const string DebtVoidNotApplicable = "بند مدرک با انحراف تاییدشدهٔ مدیرعامل غیرقابل‌اجرا اعلام شد؛ مدرکی دیگر بدهکار نیست.";
+
         public async Task<ResponseDto<int>> SettleDebtsAsync(CancellationToken ct)
         {
             if (!_user.IsInRole(EnRoles.Writers)) return EnText.Bad<int>(EnText.NotAllowed);
@@ -965,7 +969,15 @@ namespace Services.NasbNiro.Engineering
                     continue;
                 }
                 EnHandoverLine line = await _uow.Set<EnHandoverLine>().AsNoTracking().FirstOrDefaultAsync(l => l.Id == d.HandoverLineId.Value, ct);
-                if (line == null || !await EnHandoverRules.DebtSourceReadyAsync(_uow, d, line, ct)) continue;
+                if (line == null) continue;
+                if (line.PlatformDocumentId.HasValue && await _uow.Set<EnPlatformDocument>().AsNoTracking().AnyAsync(x => x.Id == line.PlatformDocumentId.Value && x.State == EnLineState.NotApplicable, ct))
+                {
+                    // the line became "not applicable" through an approved deviation: the document is no longer owed, so the debt closes here (void with a note), never staying open forever
+                    d.Status = EnDebtStatus.Void; d.VoidReason = DebtVoidNotApplicable; d.ModifyDate = now; d.ModifierUserId = Me;
+                    settled++;
+                    continue;
+                }
+                if (!await EnHandoverRules.DebtSourceReadyAsync(_uow, d, line, ct)) continue;
                 Guid? file = null;
                 if (line.LinkPath != null) { }   // a system line has no file: the released BOM / approved routing is the proof
                 else if (line.PlatformDocumentId.HasValue) file = await _uow.Set<EnPlatformDocument>().AsNoTracking().Where(x => x.Id == line.PlatformDocumentId.Value).Select(x => x.DocumentId).FirstOrDefaultAsync(ct);

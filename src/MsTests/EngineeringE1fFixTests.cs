@@ -239,5 +239,105 @@ namespace MsTests
             Ok(await Act(host, Mgr1, "refresh", d => d.Id = h));
             Assert.AreEqual(1, host.Read(u => u.Set<EnWaiver>().Count(w => w.Status == EnWaiverStatus.Void)));
         }
+
+        // ---------------------------------------------------------------- group 2
+
+        private static async Task ApprovePermit(AppHost host, int handover, int hours = 24)
+        {
+            Assert.IsNull(await AskPermit(host, handover, Reason, hours));
+            int permit = host.Read(u => u.Set<EnWaiver>().OrderByDescending(x => x.Id).First().Id);
+            Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = permit, Decision = "approve" }, Ct)));
+        }
+
+        [TestMethod]
+        public async Task G2_The_Debt_Deadline_Counts_From_The_Release_Not_From_The_Approval_So_A_Late_Release_Never_Makes_A_Debt_Overdue_At_Birth()
+        {
+            AppHost host = Started("e1ffix_g2late");
+            (int contract, int caseId, int h) = await Accepted(host);
+            await ApprovePermit(host, h, 24);
+            EnWaiverDto approved = await Waiver(host, Ceo, host.Read(u => u.Set<EnWaiver>().Single().Id));
+            Assert.AreEqual(24, approved.DebtHours, "the approved office hours are kept");
+            Assert.IsNull(approved.DebtDueAt, "the approval no longer starts the clock");
+            // the approval is long ago when the PMO releases
+            host.Write(u => { EnWaiver w = u.Set<EnWaiver>().Single(); w.RequestedAt = DateTimeOffset.Now.AddDays(-12); w.DecidedAt = DateTimeOffset.Now.AddDays(-10); u.SaveChanges(); }, Seeder);
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h));
+            DateTimeOffset before = DateTimeOffset.Now.AddMinutes(-2);
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = h));
+            DateTimeOffset after = DateTimeOffset.Now.AddMinutes(2);
+            Assert.AreEqual(2, rel.Debts.Count);
+            Assert.IsTrue(rel.Debts.All(d => d.DueAt > DateTimeOffset.Now), "no debt is born overdue");
+            Assert.IsTrue(rel.Debts.All(d => !d.Overdue));
+            Assert.IsTrue(rel.Debts.All(d => d.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(before, 24) && d.DueAt <= Services.NasbNiro.Office.OfficeClock.Add(after, 24)), "24 office hours from the release");
+            Assert.AreEqual(rel.Debts[0].DueAt, rel.Waiver.DebtDueAt, "the waiver shows the deadline after the release");
+            // the unit notice shows the deadline that is still ahead
+            string notice = rel.Distribution.Select(x => x.ScopeNote).First(t => t.Contains("هنوز نرسیده، مهلت تا"));
+            StringAssert.Contains(notice, EnText.Stamp(rel.Debts[0].DueAt));
+            Assert.AreEqual(0, (await Discover(host, "ENG.DEBT.SUPPLY")).Count(i => i.Summary.Contains("از سررسید گذشته")));
+            Assert.AreEqual(0, (await host.As(Ceo, p => Services.NasbNiro.Engineering.EnRisk.OverdueDebtsAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct))).Count);
+        }
+
+        [TestMethod]
+        public async Task G2_An_Old_Order_Permit_With_A_Fixed_Past_Instant_Is_Recomputed_From_The_Release()
+        {
+            AppHost host = Started("e1ffix_g2old");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            host.Write(u =>
+            {
+                var lines = u.Set<EnHandoverLine>().Where(l => l.HandoverId == h.Id).ToList();
+                string snapshot = JsonSerializer.Serialize(new EnHandoverRules.Snapshot { Lines = EnHandoverRules.MissingKeys(lines), DossierUnconfirmed = false });
+                AppHost.Add(u, new EnWaiver { Number = "EWV-OLD2", HandoverId = h.Id, CaseId = caseId, Reason = Reason, DebtHours = 12, DebtDueAt = DateTimeOffset.Now.AddDays(-5), MissingSnapshot = snapshot, Status = EnWaiverStatus.Approved, RequestedByUserId = 2101, RequestedAt = DateTimeOffset.Now.AddDays(-6), DecidedByUserId = 2121, DecidedAt = DateTimeOffset.Now.AddDays(-5) });
+                u.SaveChanges();
+            }, Seeder);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            DateTimeOffset before = DateTimeOffset.Now.AddMinutes(-2);
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            Assert.AreEqual(2, rel.Debts.Count);
+            Assert.IsTrue(rel.Debts.All(d => d.DueAt > DateTimeOffset.Now && d.DueAt >= Services.NasbNiro.Office.OfficeClock.Add(before, 12)), "12 office hours from the release, not the old fixed instant");
+            Assert.IsTrue(rel.Waiver.DebtDueAt > DateTimeOffset.Now);
+        }
+
+        [TestMethod]
+        public async Task G2_A_Debt_Whose_Line_Became_Not_Applicable_Is_Voided_By_The_Settle_Code_With_A_Note()
+        {
+            AppHost host = Started("e1ffix_g2na");
+            await ApprovedList(host, "VDDR-P", ("DWG", true, false));
+            int product = Product(host);
+            Ok(await Dossier(host, Eng1, product, "assess", code: "VDDR-P"));   // the drawing line stays missing
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbBomHeader { ProductId = product, Code = "BOM-N", AssemblyPartNumber = "SYS", Title = "BOM", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released });
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbOpcRouting { ProductId = product, PartNumber = "SYS", Title = "OPC", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                u.SaveChanges();
+            }, Seeder);
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", x => x.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", x => { x.Classification = 1; x.ProductId = product; x.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-P"));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", x => x.CaseId = c.Id));
+            Assert.AreEqual(1, h.MissingRequiredCount);
+            Ok(await Act(host, Mgr1, "submit", x => x.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", x => x.Id = h.Id));
+            await ApprovePermit(host, h.Id, 24);
+            Ok(await Act(host, Pmo1, "draft-distribution", x => x.Id = h.Id));
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", x => x.Id = h.Id));
+            Assert.AreEqual(2, rel.Debts.Count, "the drawing line and the dossier confirmation");
+            Assert.AreEqual(2, (await Discover(host, "ENG.DEBT.SUPPLY")).Count);
+            // an approved deviation makes the drawing line not applicable (the deviation code sets the state of the dossier line)
+            host.Write(u => { var d = u.Set<EnPlatformDocument>().Single(x => x.DocumentType == "DWG"); d.State = EnLineState.NotApplicable; d.NotApplicableReason = "بند با انحراف تاییدشده غیرقابل‌اجرا شد"; u.SaveChanges(); }, Seeder);
+            Assert.AreEqual(1, (await Discover(host, "ENG.DEBT.SETTLE")).Count, "the agent finds the debt that can close");
+            Assert.AreEqual(1, (await Discover(host, "ENG.DEBT.SUPPLY")).Count, "it is no longer an open demand on the engineers");
+            Assert.AreEqual(1, Ok(await host.As(Eng1, p => p.GetRequiredService<IEnHandoverService>().SettleDebtsAsync(Ct))));
+            List<EnDocumentDebt> debts = host.Read(u => u.Set<EnDocumentDebt>().OrderBy(x => x.Id).ToList());
+            EnDocumentDebt dwg = debts.Single(x => x.DocumentType == "DWG");
+            Assert.AreEqual(EnDebtStatus.Void, dwg.Status);
+            Assert.AreEqual(EnHandoverService.DebtVoidNotApplicable, dwg.VoidReason);
+            Assert.AreEqual(EnDebtStatus.Open, debts.Single(x => x.DocumentType == EnDebtTypes.DossierConfirm).Status, "the dossier confirmation is still owed");
+            Assert.AreEqual(0, (await Discover(host, "ENG.DEBT.SETTLE")).Count);
+        }
     }
 }

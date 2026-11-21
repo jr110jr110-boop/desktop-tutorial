@@ -36,13 +36,13 @@ namespace Services.NasbNiro.Agents.Steps
                 || uow.Set<EnCase>().Any(c => c.Id == h.CaseId && c.Classification == EnClassification.Platform
                     && !uow.Set<EnPlatformDossier>().Any(p => !p.Deleted && p.ProductId == c.ProductId && p.ReferenceCode == c.ReferenceCode && p.Status == EnDossierStatus.Complete));
 
-        /// <summary>The open debts whose source now exists: a platform dossier line that is available, a system BOM / OPC line whose released BOM / approved routing exists, an approved project MDR row with a file of the same type and title, or the confirmed dossier of a dossier debt.</summary>
+        /// <summary>The open debts that can close now: a platform dossier line that is available (or was declared not applicable by an approved deviation: the debt is voided with a note), a system BOM / OPC line whose released BOM / approved routing exists, an approved project MDR row with a file of the same type and title, or the confirmed dossier of a dossier debt.</summary>
         protected static IQueryable<int> ReadyDebtIds(IUnitOfWork uow) =>
             uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open
                 && ((d.HandoverLineId == null && d.DocumentType == EnDebtTypes.DossierConfirm
                         && uow.Set<EnCase>().Any(c => c.Id == d.CaseId && uow.Set<EnPlatformDossier>().Any(p => !p.Deleted && p.ProductId == c.ProductId && p.ReferenceCode == c.ReferenceCode && p.Status == EnDossierStatus.Complete)))
                     || (d.HandoverLineId != null && uow.Set<EnHandoverLine>().Any(l => l.Id == d.HandoverLineId
-                        && ((l.PlatformDocumentId != null && uow.Set<EnPlatformDocument>().Any(p => p.Id == l.PlatformDocumentId && p.State == EnLineState.Available && (p.DocumentId != null || p.SystemProven)))
+                        && ((l.PlatformDocumentId != null && uow.Set<EnPlatformDocument>().Any(p => p.Id == l.PlatformDocumentId && ((p.State == EnLineState.Available && (p.DocumentId != null || p.SystemProven)) || p.State == EnLineState.NotApplicable)))
                             || (l.PlatformDocumentId == null && l.LinkPath != null
                                 && ((l.DocumentType == EnDocTypes.Bom && uow.Set<PbBomHeader>().Any(b => !b.Deleted && b.ProductId == d.ProductId && b.Status == PbBomStatus.Released))
                                     || (l.DocumentType == EnDocTypes.Opc && uow.Set<PbOpcRouting>().Any(o => !o.Deleted && o.ProductId == d.ProductId && o.Status == PbRoutingStatus.Approved)
@@ -149,7 +149,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             IQueryable<int> ready = ReadyDebtIds(uow);
             var rows = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => ready.Contains(d.Id)).OrderBy(d => d.Id).Take(ProcStepCommon.Cap).Select(d => new { d.Id, d.Title, d.ContractId }).ToListAsync(ct);
-            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, $"مدرک «{r.Title}» که بدهی مجوز اضطرار بود اکنون موجود است و بدهی قابل تسویه است.")).ToList();
+            return rows.Select(r => Item("EnDocumentDebt", r.Id, r.Title, r.ContractId, null, $"مدرک «{r.Title}» که بدهی مجوز اضطرار بود اکنون موجود است (یا بند آن با انحراف تاییدشده غیرقابل‌اجرا شده) و بدهی بسته می‌شود.")).ToList();
         }
 
         public override async Task<AgentStepResult> RunAsync(AgentWorkItem item, IServiceProvider services, CancellationToken ct)
@@ -158,6 +158,7 @@ namespace Services.NasbNiro.Agents.Steps
             if (!r.Success) return ProcStepCommon.Refusal(r);
             IUnitOfWork uow = services.GetRequiredService<IUnitOfWork>();
             EnDebtStatus status = await uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => d.Id == item.TargetId).Select(d => d.Status).FirstOrDefaultAsync(ct);
+            if (status == EnDebtStatus.Void) return AgentStepResult.Done("EnDocumentDebt", item.TargetId, item.TargetNumber, $"ایجنت مهندسی بدهی مدرک «{item.TargetNumber}» را بست: بند آن با انحراف تاییدشدهٔ مدیرعامل غیرقابل‌اجرا شده است.");
             if (status != EnDebtStatus.Settled) return AgentStepResult.Waiting("بدهی هنوز منبع مدرک ندارد.");
             return AgentStepResult.Done("EnDocumentDebt", item.TargetId, item.TargetNumber, $"ایجنت مهندسی بدهی مدرک «{item.TargetNumber}» را از روی مدرک رسیده تسویه کرد.");
         }
