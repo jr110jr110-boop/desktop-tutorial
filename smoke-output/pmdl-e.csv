@@ -1,0 +1,4 @@
+docType,title,discipline,required,tender,units,clientSubmittal,clause,note
+DWG,نقشهٔ قطعه یدکی,مکانیک,1,1,,1,,
+CERT,گواهی مواد قطعه,مواد,1,0,Qa;Qc,0,,
+DATA,برگهٔ داده قطعه,مکانیک,0,1,,0,,
