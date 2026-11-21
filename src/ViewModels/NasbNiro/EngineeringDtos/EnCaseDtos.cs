@@ -138,6 +138,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
         /// <summary>Standing warning while no approved MDL exists for the standard of the case (null when one exists).</summary>
         public string StandardNotice { get; set; }
+
+        /// <summary>Employer rule 20: a turbine case in the tender preparation without an approved project MDL (and without the CEO's permit for a tender without one); null when nothing is needed.</summary>
+        public string ProjectMdlNotice { get; set; }
         public bool CanSetStandard { get; set; }
         public string SetStandardBlockedReason { get; set; }
 

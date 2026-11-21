@@ -238,6 +238,7 @@ namespace Services.NasbNiro.Engineering
                     CanApprove = approve == null, ApproveBlockedReason = approve, CanReturn = ret == null, ReturnBlockedReason = ret, CanReclassify = reclass == null, ReclassifyBlockedReason = reclass,
                     CanSaveConcept = concept == null, SaveConceptBlockedReason = concept, CanReleaseTender = release == null, ReleaseTenderBlockedReason = release, CanCharterReview = charterR == null, CharterReviewBlockedReason = charterR,
                     CanCancel = cancel == null, CancelBlockedReason = cancel,
+                    ProjectMdlNotice = mdlLock == null ? null : EnProjectMdlRules.NoticeText,
                     CanAddTenderDocument = addDoc == null, AddTenderDocumentBlockedReason = addDoc, TenderDocuments = tenderDocs,
                     DocumentRisk = risk?.Summary(), DocumentRiskAwarded = risk != null && risk.Awarded,
                     CanProposeRegistration = proposeReg == null, ProposeRegistrationBlockedReason = proposeReg,
