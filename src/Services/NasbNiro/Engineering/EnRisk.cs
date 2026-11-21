@@ -86,7 +86,7 @@ namespace Services.NasbNiro.Engineering
         /// <summary>The warning of the case page: the reason, the count only when documents are really missing, then the fixed advice.</summary>
         public string Warning(string code) =>
             Reason(code) + (Word == EnDossierWord.MissingDocuments ? " (" + EnText.Num(Missing) + " مدرک الزامی کم است)" : string.Empty)
-            + "؛ این فقط هشدار است و بسته فنی مناقصه را متوقف نمی‌کند، اما تحویل مدارک به PMO بدون آن بسته می‌ماند.";
+            + "؛ این فقط هشدار است و بسته فنی مناقصه را متوقف نمی‌کند، اما بستهٔ تحویل مدارک بدون آن ناقص به PMO می‌رسد و ابلاغ آن به اجرا فقط با مجوز اضطرار مدیرعامل (پس از پذیرش PMO) ممکن است.";
     }
 
     /// <summary>The document risk of the controlled cases, computed from the records (nothing is stored). A case is at risk while a platform dossier of its standard is not confirmed Complete, its draft handover misses required documents, or its standard has no Approved reference list. Legacy records have no case and so no risk.</summary>
@@ -230,6 +230,10 @@ namespace Services.NasbNiro.Engineering
                 {
                     int draft = await uow.Set<EnHandoverLine>().AsNoTracking().CountAsync(l => l.Handover.CaseId == c.Id && !l.Handover.Deleted && l.Handover.Status == EnHandoverStatus.Draft && l.Required && l.State == EnLineState.Missing, ct);
                     if (draft > 0) { row.Reasons.Add("تحویل مدارک پیش‌نویس مدرک الزامی کم دارد"); missing = Math.Max(missing, draft); }
+                    // an incomplete package already with the PMO (rounds or accepted) stays a risk until released, unless an approved permit covers it
+                    int sent = await uow.Set<EnHandoverLine>().AsNoTracking().CountAsync(l => l.Handover.CaseId == c.Id && !l.Handover.Deleted && (l.Handover.Status == EnHandoverStatus.Submitted || l.Handover.Status == EnHandoverStatus.Accepted) && l.Required && l.State == EnLineState.Missing
+                        && !uow.Set<EnWaiver>().Any(w => w.HandoverId == l.HandoverId && !w.Deleted && w.Status == EnWaiverStatus.Approved), ct);
+                    if (sent > 0) { row.Reasons.Add("بستهٔ ناقص تحویل مدارک نزد PMO است؛ ابلاغ به اجرا قفل است تا مدارک کامل شود یا مدیرعامل مجوز اضطرار بدهد"); missing = Math.Max(missing, sent); }
                 }
                 if (!string.IsNullOrWhiteSpace(c.ReferenceCode) && !approved.Contains(c.ReferenceCode)) row.Reasons.Add("برای استاندارد " + c.ReferenceCode + " فهرست MDL تاییدشده‌ای نیست");
                 if (row.Reasons.Count == 0) continue;

@@ -146,12 +146,26 @@ namespace Services.NasbNiro.Engineering
             return null;
         }
 
-        public static string LockMessage(int missing, bool dossierUnconfirmed)
+        /// <summary>The counts text shared by every message about an incomplete package (null when complete).</summary>
+        public static string IncompleteBody(int missing, bool dossierUnconfirmed)
         {
             if (missing <= 0 && !dossierUnconfirmed) return null;
-            string body = missing > 0 ? EnText.Num(missing) + " مدرک الزامی هنوز موجود نیست" + (dossierUnconfirmed ? " و پروندهٔ پلتفرم هنوز توسط مدیر مهندسی تایید نشده است" : string.Empty)
+            return missing > 0 ? EnText.Num(missing) + " مدرک الزامی هنوز موجود نیست" + (dossierUnconfirmed ? " و پروندهٔ پلتفرم هنوز توسط مدیر مهندسی تایید نشده است" : string.Empty)
                 : "پروندهٔ پلتفرم هنوز کامل و تایید نشده است";
-            return "تحویل مدارک به PMO قفل است: " + body + ". فقط مجوز اضطرار تاییدشده توسط مدیرعامل این قفل را باز می‌کند.";
+        }
+
+        /// <summary>The lock sits at the release to execution (never at the sending to the PMO): the PMO release is refused with this text while the package is incomplete and no approved emergency permit exists.</summary>
+        public static string LockMessage(int missing, bool dossierUnconfirmed)
+        {
+            string body = IncompleteBody(missing, dossierUnconfirmed);
+            return body == null ? null : "ابلاغ به اجرا قفل است: " + body + ". پس از پذیرش PMO، مدیر مهندسی مجوز اضطرار می‌خواهد و فقط مدیرعامل تصمیم می‌گیرد.";
+        }
+
+        /// <summary>The notice of an incomplete package during the rounds with the PMO (null when complete).</summary>
+        public static string IncompleteNotice(int missing, bool dossierUnconfirmed)
+        {
+            string body = IncompleteBody(missing, dossierUnconfirmed);
+            return body == null ? null : "این بسته ناقص است: " + body + ". رفت‌وبرگشت با PMO ادامه دارد؛ ابلاغ به اجرا فقط با مدارک کامل یا مجوز اضطرار مدیرعامل ممکن است.";
         }
 
         /// <summary>The same rule <see cref="SourcesAsync"/> uses: the BOM line is available with a Released BOM of the product, the OPC line with an Approved routing and none in Draft or UnderReview.</summary>
@@ -251,22 +265,32 @@ namespace Services.NasbNiro.Engineering
         private static string RefreshReason(EnHandover h, Who w) =>
             !w.Writer ? EnText.NotAllowed : h.Status != EnHandoverStatus.Draft ? "فقط پیش‌نویس از منابع تازه می‌شود." : null;
 
-        private static string SubmitReason(EnHandover h, Who w, LockState ls, EnWaiver waiver, DateTimeOffset now)
+        /// <summary>The engineering manager sends the package to the PMO for review: complete or not (the CEO is never asked during the rounds; the lock sits at the release to execution).</summary>
+        private static string SubmitReason(EnHandover h, Who w)
         {
             if (!w.Manager) return EnText.NotAllowed;
             if (w.Seat) return EnText.AiNever;
             if (h.Status != EnHandoverStatus.Draft) return "فقط پیش‌نویس تحویل به PMO ارسال می‌شود.";
             if (h.PreparedByUserId == w.Me) return EnText.SameUser + " مدیری که پیش‌نویس را آماده کرده آن را ارسال نمی‌کند.";
-            if (!ls.Locked) return null;
-            string message = EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed);
-            if (waiver == null || waiver.Status != EnWaiverStatus.Approved) return message;
-            string coverage = EnHandoverRules.Coverage(EnHandoverRules.Parse(waiver.MissingSnapshot), ls.Keys, ls.DossierUnconfirmed);
-            return coverage == null ? null : message + " " + coverage;
+            return null;
         }
 
+        public const string PermitOnlyAfterAccept = "مجوز اضطرار فقط پس از پایان رفت‌وبرگشت مدارک با PMO (پذیرش PMO) درخواست می‌شود؛ در طول رفت‌وبرگشت از مدیرعامل تاییدی گرفته نمی‌شود.";
+
+        /// <summary>The emergency permit is asked once, by the engineering manager, only after the PMO accepted the content and only while the package is still incomplete.</summary>
         private static string WaiverRequestReason(EnHandover h, Who w, LockState ls, EnWaiver live) =>
-            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Draft ? "مجوز اضطرار فقط برای پیش‌نویس تحویل درخواست می‌شود." : !ls.Locked ? "قفل تحویل باز است؛ مجوز اضطرار لازم نیست."
+            !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? PermitOnlyAfterAccept : !ls.Locked ? "بسته کامل است و ابلاغ به اجرا قفل نیست؛ مجوز اضطرار لازم نیست."
             : live != null ? "برای این تحویل مجوز اضطرار باز (درخواست‌شده یا تاییدشده) وجود دارد." : null;
+
+        /// <summary>The lock of the release to execution: an incomplete package is released only with an APPROVED permit that still covers the missing set (a permit of the old order was already used at the submit: h.WaiverId). The one check of the release action and its flag.</summary>
+        private static string ReleaseLockReason(EnHandover h, LockState ls, EnWaiver approved)
+        {
+            if (!ls.Locked || h.WaiverId.HasValue) return null;
+            string message = EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed);
+            if (approved == null) return message;
+            string coverage = EnHandoverRules.Coverage(EnHandoverRules.Parse(approved.MissingSnapshot), ls.Keys, ls.DossierUnconfirmed);
+            return coverage == null ? null : message + " " + coverage;
+        }
 
         private async Task<string> PmoReasonAsync(EnHandover h, Who w, bool needPmoOnly, CancellationToken ct)
         {
@@ -278,26 +302,17 @@ namespace Services.NasbNiro.Engineering
         }
 
         private async Task<string> AcceptReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
-            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmitConfirmedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
+            await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده پذیرفته می‌شود." : h.SubmitConfirmedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
 
         /// <summary>The decision of the case (both signatures, the stored hashes) is re-checked inside the same call; one refusal message.</summary>
         private async Task<string> DecisionAsync(EnHandover h, CancellationToken ct) =>
             await EnDecision.RefusalAsync(_uow, await _uow.Set<EnCase>().AsNoTracking().FirstAsync(x => x.Id == h.CaseId, ct), ct);
 
-        /// <summary>The platform dossier was complete and confirmed when the handover was submitted; if it was returned since, the stale snapshot is neither accepted nor released (unless a CEO waiver covered the dossier).</summary>
-        private async Task<string> DossierStillConfirmedAsync(EnHandover h, CancellationToken ct)
-        {
-            if (h.WaiverId.HasValue) return null;
-            EnCase c = await _uow.Set<EnCase>().AsNoTracking().FirstAsync(x => x.Id == h.CaseId, ct);
-            if (c.Classification != EnClassification.Platform) return null;
-            bool complete = c.ProductId.HasValue && await EnPlatformRules.IsCompleteAsync(_uow, c.ProductId.Value, c.ReferenceCode, ct);
-            return complete ? null : "پروندهٔ مدارک پلتفرم دیگر کامل و تأییدشده نیست (پس از ارسال تحویل برگشت خورده است)؛ تحویل ارسال‌شده کهنه است. تحویل را برگردانید تا پس از تأیید دوبارهٔ پرونده، دور تازه‌ای ارسال شود.";
-        }
-
         private async Task<string> ReturnReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, false, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Submitted ? "فقط تحویل ارسال‌شده برگشت می‌خورد." : null);
 
-        private async Task<string> ReleaseReasonAsync(EnHandover h, Who w, CancellationToken ct) => await ReleaseBaseReasonAsync(h, w, ct) ?? await DistributionNotReadyAsync(h, ct);
+        /// <summary>The one check of the release action and its flag: the person and the state, then the completeness lock (permit), then the distribution rows.</summary>
+        private async Task<string> ReleaseReasonAsync(EnHandover h, Who w, LockState ls, EnWaiver approved, CancellationToken ct) => await ReleaseBaseReasonAsync(h, w, ct) ?? ReleaseLockReason(h, ls, approved) ?? await DistributionNotReadyAsync(h, ct);
 
         /// <summary>
         /// The notice text of every unit from the CURRENT state of the documents: a line with an open debt shows the earliest deadline, a line whose debt is settled counts as arrived (even when the line flag still says missing),
@@ -308,6 +323,8 @@ namespace Services.NasbNiro.Engineering
             string contractCode = await _uow.Set<Entities.Model.NasbNiro.Contracts.ContractEntity>().AsNoTracking().Where(k => k.Id == h.ContractId).Select(k => k.Code).FirstOrDefaultAsync(ct);
             List<int> lineIds = h.Lines.Select(l => l.Id).ToList();
             var debts = (await _uow.Set<EnDocumentDebt>().AsNoTracking().Where(x => !x.Deleted && x.HandoverLineId.HasValue && lineIds.Contains(x.HandoverLineId.Value)).Select(x => new { Line = x.HandoverLineId.Value, x.Status, x.DueAt }).ToListAsync(ct));
+            var pending = _uow.Set<EnDocumentDebt>().Local.Where(x => x.Id == 0 && x.HandoverLine != null && lineIds.Contains(x.HandoverLine.Id)).Select(x => new { Line = x.HandoverLine.Id, x.Status, x.DueAt });   // the debts of the release in this same save (not stored yet)
+            debts = debts.Concat(pending).ToList();
             Dictionary<int, DateTimeOffset> dueByLine = debts.Where(x => x.Status == EnDebtStatus.Open).GroupBy(x => x.Line).ToDictionary(g => g.Key, g => g.Min(x => x.DueAt));
             HashSet<int> arrived = new HashSet<int>(debts.Where(x => x.Status == EnDebtStatus.Settled).Select(x => x.Line).Except(dueByLine.Keys));
             Dictionary<EnUnit, (string, int)> result = new Dictionary<EnUnit, (string, int)>();
@@ -328,7 +345,7 @@ namespace Services.NasbNiro.Engineering
 
         private async Task<string> ReleaseBaseReasonAsync(EnHandover h, Who w, CancellationToken ct) =>
             await PmoReasonAsync(h, w, true, ct) ?? (w.Seat ? EnText.AiNever : h.Status != EnHandoverStatus.Accepted ? "فقط تحویل پذیرفته‌شده ابلاغ می‌شود."
-                : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct) ?? await DossierStillConfirmedAsync(h, ct));
+                : h.SubmitConfirmedByUserId == w.Me || EnEditors.Has(h.EditorUserIds, w.Me) || h.PreparedByUserId == w.Me ? EnText.SameUser : await DecisionAsync(h, ct));
 
         /// <summary>The one check behind both the draft-distribution action and its button flag (PMO or the AG-INIT seat, accepted handover, no rows yet). It reads the rows it is given, so a list loads them for all its handovers in one query.</summary>
         private static string DraftDistributionReason(EnHandover h, Who w, IReadOnlyCollection<EnDistribution> rows) =>
@@ -352,9 +369,11 @@ namespace Services.NasbNiro.Engineering
         private static string EditScopeReason(EnDistribution d, EnHandoverStatus handover, Who w) =>
             !w.Pmo ? EnText.NotAllowed + " (یادداشت ابلاغ واحد را PMO ویرایش می‌کند)" : w.Seat ? EnText.AiNever : handover != EnHandoverStatus.Accepted || d.Status != EnDistStatus.Draft ? "یادداشت ابلاغ فقط تا پیش از ابلاغ تحویل (وضعیت پذیرفته‌شده) ویرایش می‌شود." : null;
 
-        private static string DecideReason(EnWaiver w, Who who, DateTimeOffset now) =>
+        /// <summary>The one check of the CEO decision and its flag. The handover must still wait for the permit: Accepted (the new order) or Draft (a request of the old order).</summary>
+        private static string DecideReason(EnWaiver w, Who who, EnHandoverStatus handover) =>
             !who.Ceo ? EnText.NotAllowed + " (تایید مجوز اضطرار فقط با مدیرعامل است)" : who.Seat ? EnText.AiNever : w.Status != EnWaiverStatus.Requested ? "فقط درخواست مجوز اضطرار در انتظار تصمیم تصمیم‌گیری می‌شود."
-            : w.RequestedByUserId == who.Me ? EnText.SameUser : null;
+            : w.RequestedByUserId == who.Me ? EnText.SameUser
+            : handover != EnHandoverStatus.Accepted && handover != EnHandoverStatus.Draft ? "تحویل مربوط دیگر منتظر این مجوز نیست (برگشت، ابطال یا ابلاغ شده است)؛ برای آن مجوز اضطرار تصمیم‌گیری نمی‌شود." : null;
 
         // ---------------------------------------------------------------- read
 
@@ -373,13 +392,14 @@ namespace Services.NasbNiro.Engineering
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, rows.SelectMany(r => new int?[] { r.RequestedByUserId, r.DecidedByUserId }), ct);
             List<int> hids = rows.Select(r => r.HandoverId).Distinct().ToList();
             Dictionary<int, string> hn = await _uow.Set<EnHandover>().AsNoTracking().Where(h => hids.Contains(h.Id)).ToDictionaryAsync(h => h.Id, h => h.Number, ct);
+            Dictionary<int, EnHandoverStatus> hs = await _uow.Set<EnHandover>().AsNoTracking().Where(h => hids.Contains(h.Id)).ToDictionaryAsync(h => h.Id, h => h.Status, ct);
             List<int> cids = rows.Select(r => r.CaseId).Distinct().ToList();
             Dictionary<int, string> cn = await _uow.Set<EnCase>().AsNoTracking().Where(c => cids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Number, ct);
             List<EnWaiverDto> result = new List<EnWaiverDto>();
             foreach (EnWaiver w in rows)
             {
                 EnHandoverRules.Snapshot snap = EnHandoverRules.Parse(w.MissingSnapshot);
-                string decide = DecideReason(w, who, now), coverage = null;
+                string decide = hs.TryGetValue(w.HandoverId, out EnHandoverStatus hst) ? DecideReason(w, who, hst) : EnText.NotAllowed, coverage = null;
                 if (w.Status == EnWaiverStatus.Approved && w.UsedAt == null)
                 {
                     EnHandover h = await _uow.Set<EnHandover>().AsNoTracking().Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == w.HandoverId, ct);
@@ -426,17 +446,19 @@ namespace Services.NasbNiro.Engineering
                 List<EnDistribution> hRows = dist.Where(x => x.HandoverId == h.Id).ToList();   // already loaded for the whole page: the two flags cost no query per row
                 LockState ls = await LockAsync(h, c, ct);
                 EnWaiver live = waivers.Where(x => x.HandoverId == h.Id && x.Status != EnWaiverStatus.Rejected && x.Status != EnWaiverStatus.Void).OrderByDescending(x => x.Id).FirstOrDefault();
-                string submit = SubmitReason(h, w, ls, live, now), request = WaiverRequestReason(h, w, ls, live != null && live.UsedAt == null ? live : null);
+                string submit = SubmitReason(h, w), request = WaiverRequestReason(h, w, ls, live != null && live.UsedAt == null ? live : null);
+                EnWaiver approvedUnused = waivers.Where(x => x.HandoverId == h.Id && x.Status == EnWaiverStatus.Approved && x.UsedAt == null).OrderBy(x => x.Id).FirstOrDefault();
+                bool openState = h.Status == EnHandoverStatus.Draft || h.Status == EnHandoverStatus.Submitted || h.Status == EnHandoverStatus.Accepted;   // the lines are frozen after the draft but the dossier is read live: completeness is live while the package is in the rounds
                 if (submit == null && h.Status == EnHandoverStatus.Draft) submit = await EnDecision.RefusalAsync(_uow, c, ct);
-                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ct), voidR = VoidReasonOf(h, w), draftDist = DraftDistributionReason(h, w, hRows), distribute = DistributeReason(h, w, hRows);
+                string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ls, approvedUnused, ct), voidR = VoidReasonOf(h, w), draftDist = DraftDistributionReason(h, w, hRows), distribute = DistributeReason(h, w, hRows);
                 EnWaiver shown = waivers.Where(x => x.HandoverId == h.Id || x.Id == h.WaiverId).OrderByDescending(x => x.Id).FirstOrDefault();
                 EnWaiverDto waiverDto = shown == null ? null : (await WaiverDtosAsync(new List<EnWaiver> { shown }, ct))[0];
                 result.Add(new EnHandoverDto
                 {
                     Id = h.Id, Number = h.Number, CaseId = h.CaseId, CaseNumber = c.Number, ContractId = h.ContractId, ContractCode = contracts.TryGetValue(h.ContractId, out string cc) ? cc : null, Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification),
                     Round = h.Round, Status = (int)h.Status, StatusText = EnText.Handover(h.Status), PreparedByName = names.Name(h.PreparedByUserId), PreparedByAgent = seats.Contains(h.PreparedByUserId),
-                    Complete = h.Status == EnHandoverStatus.Draft ? !ls.Locked : h.Complete, MissingRequiredCount = h.Status == EnHandoverStatus.Draft ? ls.Missing : h.MissingRequiredCount, RequiredCount = h.Lines.Count(l => l.Required),
-                    PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = h.Status == EnHandoverStatus.Draft ? EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed) : null,
+                    Complete = openState ? !ls.Locked : h.Complete, MissingRequiredCount = openState ? ls.Missing : h.MissingRequiredCount, RequiredCount = h.Lines.Count(l => l.Required),
+                    PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = openState && !h.WaiverId.HasValue ? EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed) : null, IncompleteNotice = openState ? EnHandoverRules.IncompleteNotice(ls.Missing, ls.DossierUnconfirmed) : null,
                     WaiverId = h.WaiverId, WaiverNumber = h.WaiverId.HasValue && waiverNames.TryGetValue(h.WaiverId.Value, out string wn) ? wn : null,
                     SubmittedByName = names.Name(h.SubmitConfirmedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
                     PreviousReturnNumber = previous?.Number, PreviousReturnByName = previous == null ? null : names.Name(previous.ReturnedByUserId), PreviousReturnAtText = previous == null ? null : EnText.Stamp(previous.ReturnedAt), PreviousReturnReason = previous?.ReturnReason,
@@ -585,12 +607,11 @@ namespace Services.NasbNiro.Engineering
             if (waiver == null) return EnText.NotFound<EnWaiverDto>("مجوز اضطرار پیدا نشد.");
             if (!EnConcurrency.Apply(_uow, waiver, dto.RowVersion)) return EnText.Bad<EnWaiverDto>(EnText.InvalidData);
             DateTimeOffset now = DateTimeOffset.Now;
-            string why = DecideReason(waiver, who, now);
+            EnHandoverStatus handoverStatus = await _uow.Set<EnHandover>().AsNoTracking().Where(x => x.Id == waiver.HandoverId).Select(x => x.Status).FirstAsync(ct);
+            string why = DecideReason(waiver, who, handoverStatus);
             string note = EnText.Clean(dto.Note);
             if (why == null && decision == "reject") why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل رد");
             why ??= EnText.Over(note, 1000, "توضیح");
-            if (why == null && await _uow.Set<EnHandover>().AsNoTracking().Where(x => x.Id == waiver.HandoverId).Select(x => x.Status).FirstAsync(ct) != EnHandoverStatus.Draft)
-                why = "تحویل مربوط دیگر پیش‌نویس نیست (ابطال یا ارسال شده است)؛ برای آن مجوز اضطرار تصمیم‌گیری نمی‌شود.";
             if (why != null) return EnText.Bad<EnWaiverDto>(why);
             waiver.Status = decision == "approve" ? EnWaiverStatus.Approved : EnWaiverStatus.Rejected; waiver.DecidedByUserId = Me; waiver.DecidedAt = now; waiver.DecisionNote = note;
             if (decision == "approve")
@@ -696,20 +717,12 @@ namespace Services.NasbNiro.Engineering
                 {
                     await RefreshLinesAsync(h, c, ct);
                     LockState ls = await LockAsync(h, c, ct);
-                    EnWaiver waiver = await _uow.Set<EnWaiver>().FirstOrDefaultAsync(x => x.HandoverId == h.Id && !x.Deleted && x.Status == EnWaiverStatus.Approved && x.UsedAt == null, ct);
-                    why = SubmitReason(h, w, ls, waiver, now) ?? await EnDecision.RefusalAsync(_uow, c, ct);   // the CEO's classification approval must be in force right now
+                    why = SubmitReason(h, w) ?? await EnDecision.RefusalAsync(_uow, c, ct);   // the CEO's classification approval must be in force right now
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
+                    // an incomplete package goes to the PMO too: the rounds with the PMO need no CEO; the lock sits at the release to execution
                     h.Status = EnHandoverStatus.Submitted; h.SubmitConfirmedByUserId = Me; h.SubmittedAt = now; h.MissingRequiredCount = ls.Missing; h.Complete = !ls.Locked; h.ContentHash = EnHandoverRules.LineHash(h.Lines);
-                    if (ls.Locked)
-                    {
-                        h.WaiverId = waiver.Id; waiver.UsedAt = now; waiver.ModifyDate = now; waiver.ModifierUserId = Me;
-                        foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = waiver.DebtDueAt ?? OfficeClock.Add(now, waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                        if (ls.DossierUnconfirmed)   // the waiver also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
-                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = waiver.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = waiver.DebtDueAt ?? OfficeClock.Add(now, waiver.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
-                    }
                     c.Status = EnCaseStatus.HandedOver;
-                    EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " با مجوز اضطرار " + waiver.Number : string.Empty));
+                    EnEvents.Add(_uow, c, "handover-submitted", Me, h.Number + (ls.Locked ? " (بستهٔ ناقص برای بررسی PMO)" : string.Empty));
                     break;
                 }
                 case "accept":
@@ -726,8 +739,21 @@ namespace Services.NasbNiro.Engineering
                     EnEvents.Add(_uow, c, "handover-returned", Me, note);
                     break;
                 case "release":
-                    why = await ReleaseReasonAsync(h, w, ct);
+                {
+                    LockState rls = await LockAsync(h, c, ct);
+                    bool permitOld = h.WaiverId.HasValue;   // a permit of the old order was already used at the submit
+                    EnWaiver permit = await _uow.Set<EnWaiver>().Where(x => x.HandoverId == h.Id && !x.Deleted && x.Status == EnWaiverStatus.Approved && x.UsedAt == null).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+                    why = await ReleaseReasonAsync(h, w, rls, permit, ct);
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);
+                    if (rls.Locked && !h.WaiverId.HasValue)
+                    {
+                        // the CEO's permit opens the lock now: the missing documents become debts with the deadline counted from the approval
+                        h.WaiverId = permit.Id; permit.UsedAt = now; permit.ModifyDate = now; permit.ModifierUserId = Me;
+                        foreach (EnHandoverLine l in h.Lines.Where(l => l.Required && l.State == EnLineState.Missing))
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLine = l, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = l.DocumentType, Title = l.Title, DueAt = permit.DebtDueAt ?? OfficeClock.Add(now, permit.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                        if (rls.DossierUnconfirmed)   // the permit also covered an unconfirmed platform dossier: that obligation is tracked until the manager confirms it
+                            _uow.Set<EnDocumentDebt>().Add(new EnDocumentDebt { WaiverId = permit.Id, HandoverLineId = null, CaseId = c.Id, ContractId = h.ContractId, ProductId = c.ProductId, DocumentType = EnDebtTypes.DossierConfirm, Title = EnDebtTypes.DossierConfirmTitle, DueAt = permit.DebtDueAt ?? OfficeClock.Add(now, permit.DebtHours), Status = EnDebtStatus.Open, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me });
+                    }
                     h.Status = EnHandoverStatus.Released; h.ReleasedByUserId = Me; h.ReleasedAt = now; c.Status = EnCaseStatus.Released;
                     {
                         // the last moment the draft texts can change: a text the PMO did not edit is rebuilt from the documents as they are now (the debts may have settled since the draft); an edited text is never touched
@@ -738,8 +764,9 @@ namespace Services.NasbNiro.Engineering
                             if (!edits.Any(e => e.Note == EnText.Unit(row.Unit) && e.At >= row.CreateDate) && fresh.TryGetValue(row.Unit, out var f)) { row.ScopeNote = f.Text; row.DocumentCount = f.Count; }
                     }
                     foreach (EnDistribution row in await _uow.Set<EnDistribution>().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct)) { row.Status = EnDistStatus.Notified; row.NotifiedAt = now; row.ModifyDate = now; row.ModifierUserId = Me; }   // the notice texts are frozen; ENG.DIST.NOTIFY sends them
-                    EnEvents.Add(_uow, c, "handover-released", Me, h.Number);
+                    EnEvents.Add(_uow, c, "handover-released", Me, h.Number + (rls.Locked && !permitOld ? " با مجوز اضطرار " + permit.Number : string.Empty));
                     break;
+                }
                 case "void":
                     why = VoidReasonOf(h, w) ?? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل ابطال");
                     if (why != null) return EnText.Bad<EnHandoverDto>(why);

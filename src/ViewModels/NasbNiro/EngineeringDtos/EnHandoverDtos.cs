@@ -199,8 +199,11 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public int RequiredCount { get; set; }
         public bool PlatformDossierConfirmed { get; set; }
 
-        /// <summary>The one Persian message of the lock: how many documents are missing and that only a CEO emergency waiver opens it. Empty when the lock is open.</summary>
+        /// <summary>The one Persian message of the lock of the release to execution (the PMO release, never the sending to the PMO): how many documents are missing and that only a CEO emergency permit, asked after the PMO accepted, opens it. Empty when the package is complete or out of the rounds.</summary>
         public string LockMessage { get; set; }
+
+        /// <summary>«این بسته ناقص است: …» while the package is in the rounds with the PMO (draft, submitted, accepted) and incomplete; null when complete.</summary>
+        public string IncompleteNotice { get; set; }
         public int? WaiverId { get; set; }
         public string WaiverNumber { get; set; }
         public string SubmittedByName { get; set; }
