@@ -91,6 +91,12 @@ namespace MsTests
             return Ok(await RefAction(host, Mgr1, d.Id, "approve"));
         }
 
+        /// <summary>Since ENG-E1e the CEO approves a case only when the MDL of its standard is approved: makes sure an approved list exists for the code.</summary>
+        public static async Task EnsureMdl(AppHost host, string code)
+        {
+            if (!host.Read(u => u.Set<EnReferenceList>().Any(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code))) await ApprovedList(host, code);
+        }
+
         public static int Product(AppHost host, string code = "99.11.00.000.2", bool active = true)
         {
             int id = 0;
@@ -187,6 +193,7 @@ namespace MsTests
         {
             if (platform && productId.HasValue && !host.Read(u => u.Set<EnPlatformDossier>().Any(d => d.ProductId == productId.Value && !d.Deleted)))   // a product is a platform only with a dossier: the engineers record the standard of its original data sheet
                 { Guid ds = File(host, 2111); Ok(await host.As(Eng1, p => p.GetRequiredService<IEnPlatformService>().DossierActionAsync(new EnDossierActionDto { ProductId = productId.Value, Action = "native-standard", StandardAttachmentId = ds, ReferenceCode = code, StandardBasis = "دیتاشیت پروژهٔ نمونه، بند ۴" }, Ct))); }
+            await EnsureMdl(host, code);
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = inquiry));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = platform ? 1 : 2; d.ProductId = productId; d.Basis = "مبنای آزمون برای تعیین نوع پرونده"; }));
             Ok(await SetStandard(host, Eng1, c.Id, code));

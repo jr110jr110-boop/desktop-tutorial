@@ -92,11 +92,12 @@ namespace Services.NasbNiro.Engineering
             : c.Status == EnCaseStatus.AwaitingCeoApproval ? (w.Ceo ? (w.Seat ? EnText.AiNever : null) : EnText.NotAllowed)
             : "فقط پروندهٔ منتظر تایید برگشت می‌خورد.";
 
-        private static string ApproveReason(EnCase c, Who w, string gap = null) =>
+        private static string ApproveReason(EnCase c, Who w, string gap = null, bool mdlApproved = true) =>
             !w.Ceo ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingCeoApproval ? "فقط پروندهٔ منتظر تصویب مدیرعامل تصویب می‌شود."
             : EnEditors.Touched(0, c.EditorUserIds, w.Me) || c.ProposedByUserId == w.Me || c.EngConfirmedByUserId == w.Me ? EnText.SameUser
             : string.IsNullOrWhiteSpace(c.ReferenceCode) ? StandardMissingText
-            : c.ClassificationHash != EnCaseRules.ClassHash(c) ? "محتوای پیشنهاد پس از تایید مدیر مهندسی تغییر کرده است؛ پرونده را برگردانید." : gap;
+            : c.ClassificationHash != EnCaseRules.ClassHash(c) ? "محتوای پیشنهاد پس از تایید مدیر مهندسی تغییر کرده است؛ پرونده را برگردانید."
+            : !mdlApproved ? EnReferenceRules.CeoApprovalBlockedText(c.ReferenceCode) : gap;
 
         private static string ReclassifyReason(EnCase c, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Kind != EnCaseKind.Turbine ? "برای قطعات یدکی و خدمات پس از فروش نوع‌بندی پلتفرم یا طراحی جدید وجود ندارد."
@@ -163,6 +164,7 @@ namespace Services.NasbNiro.Engineering
             HashSet<int> openProposals = (await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed && caseIds.Contains(x.CaseId)).Select(x => x.CaseId).ToListAsync(ct)).ToHashSet();
             Dictionary<int, List<EnCaseEvent>> events = withEvents ? (await _uow.Set<EnCaseEvent>().AsNoTracking().Where(e => caseIds.Contains(e.CaseId)).OrderBy(e => e.Id).ToListAsync(ct)).GroupBy(e => e.CaseId).ToDictionary(g => g.Key, g => g.ToList()) : new Dictionary<int, List<EnCaseEvent>>();
             Dictionary<int, string> eventUsers = withEvents ? await EnUsers.NamesAsync(_uow, events.Values.SelectMany(l => l).Select(e => e.UserId), ct) : new Dictionary<int, string>();
+            HashSet<string> approvedMdl = (await EnReferenceRules.ApprovedCodesAsync(_uow, ct)).ToHashSet();
             List<EnCaseDto> result = new List<EnCaseDto>();
             foreach (EnCase c in rows)
             {
@@ -188,7 +190,7 @@ namespace Services.NasbNiro.Engineering
                     incomplete = !dossierWord.Complete;
                     missing = await _uow.Set<EnPlatformDocument>().AsNoTracking().CountAsync(d => d.Dossier.ProductId == c.ProductId.Value && d.Dossier.ReferenceCode == c.ReferenceCode && !d.Dossier.Deleted && d.Required && d.State == EnLineState.Missing, ct);
                 }
-                string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
+                string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct), approvedMdl.Contains(c.ReferenceCode ?? string.Empty)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
                 string opinionR = OpinionReason(c, w);
                 string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
                 string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id));
@@ -196,7 +198,7 @@ namespace Services.NasbNiro.Engineering
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
-                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
+                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), StandardNotice = !string.IsNullOrWhiteSpace(c.ReferenceCode) && !approvedMdl.Contains(c.ReferenceCode) ? EnReferenceRules.StandardNoticeText(c.ReferenceCode) : null, CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
                     CustomerName = inq != null && customers.TryGetValue(inq.CustomerId, out string cn) ? cn : con?.Employer, CustomerRequirementNote = c.CustomerRequirementNote, Status = (int)c.Status, StatusText = EnText.Case(c.Status),
                     Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification), ProductId = c.ProductId, ProductCode = c.ProductId.HasValue && products.TryGetValue(c.ProductId.Value, out string pc) ? pc : null,
                     PlatformWithChanges = c.PlatformWithChanges, ChangeNote = c.ChangeNote,
@@ -440,7 +442,7 @@ namespace Services.NasbNiro.Engineering
                     break;
                 case "approve":
                 {
-                    why = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct));
+                    why = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct), !string.IsNullOrWhiteSpace(c.ReferenceCode) && await _uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == c.ReferenceCode, ct));
                     if (why == null && c.ProposedClassification == EnClassification.Platform) why = await ProductProblemAsync(c.ProposedProductId, EnClassification.Platform);
                     if (why != null) return EnText.Bad<EnCaseDto>(why);
                     c.ApprovedGapHash = (await EnGaps.LiveAsync(_uow, c.Id, ct))?.ContentHash;

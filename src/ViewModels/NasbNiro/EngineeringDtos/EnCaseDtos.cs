@@ -134,6 +134,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string StandardEvidence { get; set; }
         public Guid? StandardAttachmentId { get; set; }
         public bool StandardMissing { get; set; }
+
+        /// <summary>Standing warning while no approved MDL exists for the standard of the case (null when one exists).</summary>
+        public string StandardNotice { get; set; }
         public bool CanSetStandard { get; set; }
         public string SetStandardBlockedReason { get; set; }
 

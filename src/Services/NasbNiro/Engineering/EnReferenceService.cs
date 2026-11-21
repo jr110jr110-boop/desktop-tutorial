@@ -38,6 +38,14 @@ namespace Services.NasbNiro.Engineering
             !string.IsNullOrEmpty(code) && await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code == code, ct) ? null
             : "استاندارد «" + code + "» فهرست MDL تاییدشده ندارد؛ استاندارد را از فهرست استانداردهای تاییدشده انتخاب کنید (در صورت نبود، ابتدا فهرست آن ساخته و تایید شود).";
 
+        /// <summary>The refusal text of the CEO's approval of a case: the MDL of its standard is not approved (shared by the action and the DTO flag, so they never disagree).</summary>
+        public static string CeoApprovalBlockedText(string code) =>
+            "تایید مدیرعامل بسته است: فهرست مدارک مرجع (MDL) استاندارد «" + code + "» هنوز تایید نشده است. ابتدا مدیر مهندسی فهرست MDL این استاندارد را تایید کند.";
+
+        /// <summary>The standing notice of the case page while the MDL of its standard is not approved.</summary>
+        public static string StandardNoticeText(string code) =>
+            "برای استاندارد «" + code + "» فهرست MDL تاییدشده‌ای نیست؛ تا تایید آن، تایید مدیرعامل روی این پرونده بسته است.";
+
         /// <summary>The Codes (standard bases, e.g. API 611 and API 612) that have an approved list right now; one approved list per Code.</summary>
         public static Task<List<string>> ApprovedCodesAsync(IUnitOfWork uow, CancellationToken ct) =>
             uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => l.Code).Distinct().OrderBy(c => c).ToListAsync(ct);

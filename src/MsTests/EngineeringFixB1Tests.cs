@@ -70,6 +70,7 @@ namespace MsTests
             await ApprovedList(host, "RISK-OK", ("DWG", true, false));
             EnCaseDto ok = await ApprovedCase(host, Inquiry(host, number: "INQ-B1-A"), false, code: "RISK-OK");
             EnCaseDto risky = await ApprovedCase(host, Inquiry(host, number: "INQ-B1-B"), false, code: "RISK-NONE");
+            host.Write(u => { foreach (var l in u.Set<EnReferenceList>().Where(l => l.Code == "RISK-NONE").ToList()) l.Status = EnRefStatus.Draft; u.SaveChanges(); });   // approved only to pass the CEO gate; the risk is a standard whose list is not approved
             Assert.IsNull(Ok(await GetCase(host, Eng1, ok.Id)).DocumentRisk);
             EnCaseDto r = Ok(await GetCase(host, Eng1, risky.Id));
             StringAssert.Contains(r.DocumentRisk, "فهرست MDL تاییدشده");

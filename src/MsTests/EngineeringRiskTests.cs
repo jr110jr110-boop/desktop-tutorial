@@ -96,7 +96,9 @@ namespace MsTests
             Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست"; }));
             Ok(await SetStandard(host, Eng1, c.Id, "NO-LIST-STD"));
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            await EnsureMdl(host, "NO-LIST-STD");   // the CEO needs the approved list; it is withdrawn afterwards (the risk: an approved case whose standard has no approved list any more)
             Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            host.Write(u => { foreach (var l in u.Set<EnReferenceList>().Where(l => l.Code == "NO-LIST-STD").ToList()) l.Status = EnRefStatus.Draft; u.SaveChanges(); });
             List<AgentWorkItem> watch = await Discover(host, seat, "ENG.RISK.WATCH");
             Assert.AreEqual(1, watch.Count);
             StringAssert.Contains(watch[0].Summary, "NO-LIST-STD");

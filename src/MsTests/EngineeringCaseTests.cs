@@ -96,6 +96,7 @@ namespace MsTests
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست"; }));
             Ok(await SetStandard(host, Eng1, c.Id, "VDDR-TEST"));
+            await EnsureMdl(host, "VDDR-TEST");
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             Assert.AreEqual((int)EnCaseStatus.Awarded, c.Status);
@@ -255,6 +256,7 @@ namespace MsTests
             EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.ContractId = contract));
             c = Ok(await CaseAct(host, Eng1, c.Id, "propose", d => { d.Classification = 2; d.Basis = "هیچ محصولی مطابق نیست" ; }));
             Ok(await SetStandard(host, Eng1, c.Id, "VDDR-TEST"));
+            await EnsureMdl(host, "VDDR-TEST");
             Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
             Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             Refused(await CaseAct(host, Mgr1, c.Id, "charter-confirm"), "منشور پروژه هنوز ثبت نشده");

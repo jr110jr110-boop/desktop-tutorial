@@ -147,6 +147,7 @@ namespace MsTests
             Assert.AreEqual((int)EnCaseStatus.AwaitingEngConfirm, c.Status);
             Assert.IsNull(c.CeoApprovedByName, "the CEO approval is void");
             c = Ok(await CaseAct(host, Mgr2, c.Id, "confirm"));
+            await EnsureMdl(host, "API-612");
             c = Ok(await CaseAct(host, Ceo, c.Id, "approve"));
             Assert.AreEqual("API-612", c.ReferenceCode);
         }
