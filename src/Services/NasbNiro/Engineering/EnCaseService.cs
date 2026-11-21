@@ -164,6 +164,7 @@ namespace Services.NasbNiro.Engineering
             HashSet<int> openProposals = (await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Proposed && caseIds.Contains(x.CaseId)).Select(x => x.CaseId).ToListAsync(ct)).ToHashSet();
             Dictionary<int, List<EnCaseEvent>> events = withEvents ? (await _uow.Set<EnCaseEvent>().AsNoTracking().Where(e => caseIds.Contains(e.CaseId)).OrderBy(e => e.Id).ToListAsync(ct)).GroupBy(e => e.CaseId).ToDictionary(g => g.Key, g => g.ToList()) : new Dictionary<int, List<EnCaseEvent>>();
             Dictionary<int, string> eventUsers = withEvents ? await EnUsers.NamesAsync(_uow, events.Values.SelectMany(l => l).Select(e => e.UserId), ct) : new Dictionary<int, string>();
+            Dictionary<(int, string), string> registered = (await _uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Approved && caseIds.Contains(x.CaseId)).OrderBy(x => x.Id).Select(x => new { x.CaseId, x.ReferenceCode, x.Number }).ToListAsync(ct)).GroupBy(x => (x.CaseId, x.ReferenceCode)).ToDictionary(g => g.Key, g => g.First().Number);
             HashSet<string> approvedMdl = (await EnReferenceRules.ApprovedCodesAsync(_uow, ct)).ToHashSet();
             List<EnCaseDto> result = new List<EnCaseDto>();
             foreach (EnCase c in rows)
@@ -193,7 +194,7 @@ namespace Services.NasbNiro.Engineering
                 string propose = ProposeReason(c, w), change = ChangeReason(c, w), confirm = ConfirmReason(c, w), approve = ApproveReason(c, w, await EnGaps.ApproveRefusalAsync(_uow, c, ct), approvedMdl.Contains(c.ReferenceCode ?? string.Empty)), ret = ReturnReasonOf(c, w), reclass = ReclassifyReason(c, w), concept = ConceptReason(c, w);
                 string opinionR = OpinionReason(c, w);
                 string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
-                string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id));
+                string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id), registered.TryGetValue((c.Id, c.ReferenceCode ?? string.Empty), out string regNo) ? regNo : null);
                 risks.TryGetValue(c.Id, out EnRiskRow risk);
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto

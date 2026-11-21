@@ -98,23 +98,30 @@ namespace Services.NasbNiro.Engineering
                 "پیشنهاد ثبت طرح جدید به عنوان پلتفرم (" + r.Number + ", استاندارد " + r.ReferenceCode + ") منتظر تصمیم مدیرعامل است.", "/engineering/platform-registrations/" + EnText.Num(r.Id), EnRoles.Ceo, ct, null, OfInboxKind.Task);
 
         /// <summary>Why the case cannot take a registration proposal at all (null = it can): it is a New design that reached engineering, the PMO released its handover, it has a standard and no other proposal of the case waits. The case page flag and the service use this one predicate.</summary>
-        internal static string CaseProblem(EnCase c, bool releasedHandover, bool otherOpenProposal) =>
+        internal static string CaseProblem(EnCase c, bool releasedHandover, bool otherOpenProposal, string approvedNumber = null) =>
             c.Kind != EnCaseKind.Turbine || c.Classification != EnClassification.New ? "فقط پروندهٔ طرح جدید می‌تواند پلتفرم شود."
+            // an approved registration of this case under the same standard exists: proposing again is refused (another standard stays possible)
+            : approvedNumber != null ? "این طراحی قبلاً با همین استاندارد به‌عنوان پلتفرم ثبت شده است (" + approvedNumber + ")."
             // only after the PMO released the handover of the case: the documents of the design exist and were handed over
             : !releasedHandover ? "ثبت پلتفرم فقط پس از ابلاغ تحویل مدارک این پرونده (تحویل ابلاغ‌شده توسط PMO) ممکن است."
             : string.IsNullOrWhiteSpace(c.ReferenceCode) ? "استاندارد پروژهٔ این پرونده هنوز ثبت نشده است."
             : otherOpenProposal ? "پیشنهاد بازی برای این پرونده منتظر تصمیم مدیرعامل است." : null;
 
+        /// <summary>The number of the approved registration of the case under this standard code (null when there is none).</summary>
+        internal static async Task<string> ApprovedNumberAsync(IUnitOfWork uow, int caseId, string code, CancellationToken ct) =>
+            string.IsNullOrWhiteSpace(code) ? null : await uow.Set<EnPlatformRegistration>().AsNoTracking().Where(x => !x.Deleted && x.Status == EnRegStatus.Approved && x.CaseId == caseId && x.ReferenceCode == code).OrderBy(x => x.Id).Select(x => x.Number).FirstOrDefaultAsync(ct);
+
         internal static async Task<string> CaseProblemAsync(IUnitOfWork uow, EnCase c, int? exceptId, CancellationToken ct)
         {
             bool released = await uow.Set<EnHandover>().AsNoTracking().AnyAsync(h => h.CaseId == c.Id && !h.Deleted && h.Status == EnHandoverStatus.Released, ct);
             bool open = await uow.Set<EnPlatformRegistration>().AsNoTracking().AnyAsync(x => !x.Deleted && x.Status == EnRegStatus.Proposed && x.CaseId == c.Id && x.Id != (exceptId ?? 0), ct);
-            return CaseProblem(c, released, open);
+            string approved = await ApprovedNumberAsync(uow, c.Id, c.ReferenceCode, ct);
+            return CaseProblem(c, released, open, approved);
         }
 
         /// <summary>The flag of the case page: who may propose (the engineering manager, never a seat) and the case-level refusal, from the same pieces the service uses.</summary>
-        internal static string CaseProposalRefusal(EnCase c, bool manager, bool seat, bool releasedHandover, bool openProposal) =>
-            !manager ? EnText.NotAllowed + " (پیشنهاد با مدیر مهندسی است)" : seat ? EnText.AiNever : CaseProblem(c, releasedHandover, openProposal);
+        internal static string CaseProposalRefusal(EnCase c, bool manager, bool seat, bool releasedHandover, bool openProposal, string approvedNumber = null) =>
+            !manager ? EnText.NotAllowed + " (پیشنهاد با مدیر مهندسی است)" : seat ? EnText.AiNever : CaseProblem(c, releasedHandover, openProposal, approvedNumber);
 
         /// <summary>Why the content cannot be registered now (null = it can): the case problem, the product is active and belongs to the case, the standard is the case standard, the product has no dossier for it.</summary>
         private async Task<string> ContentProblemAsync(int caseId, int productId, string code, int? exceptId, CancellationToken ct)

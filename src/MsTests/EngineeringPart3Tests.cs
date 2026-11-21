@@ -125,7 +125,16 @@ namespace MsTests
             Assert.AreEqual(product, dossier.ProductId);
             Assert.AreEqual("REG-LIST", dossier.ReferenceCode);
             Refused(await decide(Ceo, "approve", null));                                                       // a decision is final
-            Refused(await propose(Mgr1, newCase, null), "از پیش وجود دارد");
+            // ENG-E1e: an approved registration of this case under the same standard: refused by the server and the button is closed with the same reason
+            string already = "این طراحی قبلاً با همین استاندارد به‌عنوان پلتفرم ثبت شده است (" + done.Number + ").";
+            Assert.AreEqual(already, Refused(await propose(Mgr1, newCase, null)));
+            EnCaseDto shown = Ok(await GetCase(host, Mgr1, newCase));
+            Assert.IsFalse(shown.CanProposeRegistration);
+            Assert.AreEqual(already, shown.ProposeRegistrationBlockedReason);
+            // under ANOTHER standard of the case it stays possible
+            host.Write(u => { u.Set<EnCase>().Single(x => x.Id == newCase).ReferenceCode = "REG-OTHER"; u.SaveChanges(); }, Seeder);
+            shown = Ok(await GetCase(host, Mgr1, newCase));
+            Assert.IsTrue(shown.CanProposeRegistration, shown.ProposeRegistrationBlockedReason);
         }
 
         [TestMethod]
