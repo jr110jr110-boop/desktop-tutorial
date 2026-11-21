@@ -69,7 +69,7 @@ function reject() {
       <dt v-if="waiver.status !== 0">پوشش</dt><dd v-if="waiver.status !== 0">{{ waiver.covers ? "همه کمبودها را می‌پوشاند" : "کمبودها را کامل نمی‌پوشاند" }}<span v-if="waiver.coverageNote"> — {{ waiver.coverageNote }}</span></dd>
       <dt v-if="waiver.decidedByName">تصمیم</dt><dd v-if="waiver.decidedByName">{{ waiver.decidedByName }}، {{ faDigits(waiver.decidedAtText || "") }}<span v-if="waiver.decisionNote"> — {{ waiver.decisionNote }}</span></dd>
     </dl>
-    <p v-if="waiver.status === 1 && !waiver.used" class="small inv-muted mb-1" data-test="en-waiver-open">مجوز تاییدشده است؛ PMO می‌تواند تحویل پذیرفته‌شده را ابلاغ کند و بدهی مدارک هنگام ابلاغ ثبت می‌شود.</p>
+    <p v-if="waiver.status === 1 && !waiver.used && waiver.covers" class="small inv-muted mb-1" data-test="en-waiver-open">مجوز تاییدشده است؛ PMO می‌تواند تحویل پذیرفته‌شده را ابلاغ کند و بدهی مدارک هنگام ابلاغ ثبت می‌شود.</p>
     <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="تایید مجوز اضطرار" variant="success" @go="approve" />
     <EnAction :can="waiver.canDecide" :reason="waiver.decideBlockedReason" :roles="EnRoles.ceo" label="رد مجوز اضطرار" variant="outline-danger" @go="reject" />
     <EnPrompt v-if="d.dlg.value" :busy="d.busy.value" :error="d.error.value" :fields="d.dlg.value.fields" :hint="d.dlg.value.hint" :title="d.dlg.value.title" @cancel="d.close" @confirm="d.confirm" />
