@@ -123,5 +123,49 @@ namespace MsTests
             Assert.AreEqual(0, (await Discover(host, seat, "ENG.PMDL.CHECK")).Count);
             Assert.AreEqual(1, (await Discover(host, seat, "ENG.PMDL.DRAFT")).Count);
         }
+
+        [TestMethod]
+        public async Task Every_Kind_Of_Tender_Has_Its_Own_Door_The_Agent_Drafts_From_A_List_And_A_Person_Creates_From_A_File_And_The_Release_Gate_Opens_Only_When_It_Can_Go()
+        {
+            AppHost host = Started("pms_kinds");
+            var seat = await SeatAsync(host);
+            await EnsureMdl(host, "SP-STD");
+            EnCaseDto withList = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, "SP-STD");
+            EnCaseDto noList = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.Service, null);
+            // the agent drafts every kind that has an approved list to draft from; the case without one is not its work
+            AgentWorkItem draft = (await Discover(host, seat, "ENG.PMDL.DRAFT")).Single();
+            Assert.AreEqual(withList.Id, draft.TargetId);
+            // the case without a list is an item of the check gate (target type EnCase) for the engineers; the case with a list is not (nothing to create from a file)
+            AgentWorkItem file = (await Discover(host, seat, "ENG.PMDL.CHECK")).Single();
+            Assert.AreEqual("EnCase", file.TargetType);
+            Assert.AreEqual(noList.Id, file.TargetId);
+            Assert.AreEqual("ENGINEERING,ENGINEER", file.GateRoles);
+            StringAssert.Contains(file.Summary, "از فایل بسازید");
+            var info = (await host.AsSystem(p => Task.FromResult(p.GetServices<IAgentStep>().Single(x => x.Code == "ENG.PMDL.CHECK").GateInfo(file)))); 
+            StringAssert.Contains(info.Link, "/cases/" + noList.Id);
+            // neither case may be released yet: the release gate (manager) is not open for them
+            Assert.AreEqual(0, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Count);
+            // the person creates the list: the file item is replaced by the usual check item of the list
+            EnProjectMdlCaseDto v = Ok(await MdlFromFile(host, Eng1, noList.Id, FileCsv));
+            AgentWorkItem check = (await Discover(host, seat, "ENG.PMDL.CHECK")).Single();
+            Assert.AreEqual("EnProjectMdl", check.TargetType);
+            Assert.AreEqual(v.Mdl.Id, check.TargetId);
+            Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            Assert.AreEqual(0, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Count, "checked is not approved");
+            v = Ok(await MdlView(host, Mgr1, noList.Id));
+            Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            AgentWorkItem release = (await Discover(host, seat, "ENG.TENDER.RELEASE")).Single();
+            Assert.AreEqual(noList.Id, release.TargetId);
+            // a stale approval (lines changed behind the back of the approval) closes the gate again
+            host.Write(u => { EnProjectMdlLine l = u.Set<EnProjectMdlLine>().First(x => x.ProjectMdlId == v.Mdl.Id); l.Title = l.Title + " تغییر"; u.SaveChanges(); }, Seeder);
+            Assert.AreEqual(0, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Count);
+            // the other case goes out by the CEO's permit: the gate opens with an approved permit (not with a requested one)
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = withList.Id; d.Reason = PermitReason; }));
+            Assert.AreEqual(0, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Count);
+            int permit = Ok(await MdlView(host, Mgr1, withList.Id)).Permit.Id;
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = withList.Id; d.PermitId = permit; d.Approve = true; }));
+            Assert.AreEqual(withList.Id, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Single().TargetId);
+            Assert.AreEqual(0, (await Discover(host, seat, "ENG.PMDL.DRAFT")).Count, "an approved permit stops the draft");
+        }
     }
 }

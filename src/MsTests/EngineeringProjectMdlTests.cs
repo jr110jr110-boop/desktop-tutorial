@@ -24,6 +24,7 @@ namespace MsTests
         private const string Head = "docType,title,discipline,required,tender,units,clientSubmittal,clause,note\n";
         private const string PermitReason = "پروژهٔ خاص با مهلت کوتاه کارفرما؛ فهرست مدارک پروژه همزمان با اسناد مناقصه آماده نمی‌شود و مدیرعامل باید تصمیم بگیرد";
         private const string LockText = "انتشار بستهٔ فنی مناقصه بسته است: فهرست مدارک پروژه (MDL) هنوز توسط مدیر مهندسی تایید نشده است. در پروژهٔ خاص، مدیر مهندسی «مناقصه بدون MDL» را درخواست می‌کند و فقط مدیرعامل تصمیم می‌گیرد.";
+        private const string NoticeFromFile = "فهرست مدارک پروژه (MDL) را از فایل بسازید یا برای مناقصه بدون MDL از مدیرعامل مجوز بگیرید.";
         private const string NoticeText = "بستهٔ فنی مناقصه تا تایید فهرست مدارک پروژه (MDL) منتشر نمی‌شود.";
 
         /// <summary>The standard list of the tests: BOM, OPC, DWG, NOTE (titles «مدرک BOM», ...).</summary>
@@ -569,10 +570,10 @@ namespace MsTests
             Assert.IsTrue(Ok(await MdlView(host2, Mgr2, c2.Id)).CanWithdrawPermit);
         }
 
-        // ------------------------------------------------------------------------------------------ scope
+        // ------------------------------------------------------------------------------------------ scope (every kind of tender)
 
         [TestMethod]
-        public async Task A_Case_That_Is_Not_A_Turbine_Needs_No_Project_Mdl_And_The_Notice_Is_Only_For_The_Tender_Preparation()
+        public async Task The_Scope_Is_Every_Case_That_Has_A_Tender_Package_And_A_Direct_Contract_Needs_Nothing()
         {
             AppHost host = Started("pm_scope");
             EnCaseDto open = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host)));
@@ -581,15 +582,188 @@ namespace MsTests
             Assert.IsFalse(v.Applies);
             Assert.IsNotNull(v.NotApplicableText);
             EnCaseDto spare = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, type: Entities.Model.NasbNiro.Sales.SlProductType.SpareParts)));
-            Assert.IsFalse(Ok(await MdlView(host, Eng1, spare.Id)).Applies);
-            StringAssert.Contains(Refused(await MdlAct(host, Eng1, "draft", d => d.CaseId = spare.Id)), "توربین");
+            Assert.IsFalse(Ok(await MdlView(host, Eng1, spare.Id)).Applies, "a spare-parts case that is not in the tender preparation yet");
             Assert.IsNull(spare.ProjectMdlNotice);
+            // spare parts and service in the tender preparation: it applies, whatever the kind
+            EnCaseDto sp = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, null);
+            EnCaseDto sv = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.Service, null);
+            Assert.IsTrue(Ok(await MdlView(host, Eng1, sp.Id)).Applies);
+            Assert.IsTrue(Ok(await MdlView(host, Eng1, sv.Id)).Applies);
+            // a direct contract never has a tender package: nothing is needed, whatever the status
+            Assert.IsFalse(EnProjectMdlRules.Applies(new EnCase { Status = EnCaseStatus.Awarded, Kind = EnCaseKind.SpareParts }));
+            Assert.IsTrue(EnProjectMdlRules.Applies(new EnCase { Status = EnCaseStatus.Awarded, Kind = EnCaseKind.SpareParts, InquiryId = 5 }));
+            Assert.IsNotNull(EnProjectMdlRules.AppliesText(new EnCase { Status = EnCaseStatus.InEngineering, Kind = EnCaseKind.Service }));
+            Assert.IsNull(host.AsSystem(async p => (await EnProjectMdlRules.ReleaseLockAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), new EnCase { Id = 9999, Status = EnCaseStatus.Awarded, Kind = EnCaseKind.Service }, Ct)).Refusal).GetAwaiter().GetResult());
             // a released case before this change: not affected (the lock is only for the tender preparation)
             EnCaseDto c = await Releasable(host);
             host.Write(u => { EnCase row = u.Set<EnCase>().Single(x => x.Id == c.Id); row.Status = EnCaseStatus.TenderIssued; u.SaveChanges(); }, Seeder);
             Assert.IsNull(Ok(await GetCase(host, Mgr1, c.Id)).ProjectMdlNotice);
             Assert.IsTrue(Ok(await MdlView(host, Eng1, c.Id)).Applies);
             Assert.IsNull(Ok(await MdlView(host, Eng1, c.Id)).ReleaseLockText);
+        }
+
+        [TestMethod]
+        public async Task A_Spare_Parts_And_A_Service_Release_Is_Locked_Without_An_Mdl_Or_A_Permit_And_Passes_With_Either()
+        {
+            AppHost host = Started("pm_kinds");
+            // spare parts without any standard: the lock, the notice that says what to do, the flags
+            EnCaseDto sp = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, null);
+            StringAssert.Contains(Refused(await CaseAct(host, Mgr1, sp.Id, "release-tender")), "فهرست مدارک پروژه (MDL)");
+            EnCaseDto view = Ok(await GetCase(host, Mgr1, sp.Id));
+            Assert.AreEqual(NoticeFromFile, view.ProjectMdlNotice);
+            Assert.IsFalse(view.CanReleaseTender);
+            Assert.AreEqual((int)EnCaseStatus.TenderPreparation, view.Status);
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng1, sp.Id));
+            Assert.IsFalse(v.CanDraft);
+            StringAssert.Contains(v.DraftBlockedReason, "از فایل");
+            Assert.IsTrue(v.CanDraftFromFile);
+            Assert.IsFalse(v.HasStandardList);
+            Assert.IsTrue(Ok(await MdlView(host, Mgr1, sp.Id)).CanRequestPermit, "the CEO's permit is the other way out, for any kind");
+            // the agent does not draft (no list to start from)
+            Refused(await MdlAct(host, await SeatAsync(host), "draft", d => d.CaseId = sp.Id), "فایل");
+            // the file path: create, check, approve, release; the file joins the package once
+            v = Ok(await MdlFromFile(host, Eng1, sp.Id, FileCsv));
+            Assert.AreEqual(NoticeText, Ok(await GetCase(host, Mgr1, sp.Id)).ProjectMdlNotice, "once a list exists the notice is the usual one");
+            Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            StringAssert.Contains(Refused(await CaseAct(host, Mgr1, sp.Id, "release-tender")), "فهرست مدارک پروژه (MDL)");   // checked is not approved
+            v = Ok(await MdlView(host, Mgr1, sp.Id));
+            v = Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            Assert.AreEqual(3, v.Mdl.LineCount);
+            Assert.IsNull(Ok(await GetCase(host, Mgr1, sp.Id)).ProjectMdlNotice);
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr1, sp.Id, "release-tender")).Status);
+            Assert.AreEqual(1, host.Read(u => u.Set<PcTenderDocument>().Count(d => d.PackageId == sp.TenderPackageId.Value && !d.Deleted && d.DocumentType == "MDL")));
+            // service with the CEO's permit: requested and rejected permits do not open the release, an approved one does and the package says so
+            EnCaseDto sv = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.Service, null);
+            Refused(await CaseAct(host, Mgr2, sv.Id, "release-tender"), "فهرست مدارک پروژه (MDL)");
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = sv.Id; d.Reason = PermitReason; }));
+            Refused(await CaseAct(host, Mgr2, sv.Id, "release-tender"), "فهرست مدارک پروژه (MDL)");
+            int permit = Ok(await MdlView(host, Mgr1, sv.Id)).Permit.Id;
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = sv.Id; d.PermitId = permit; d.Approve = false; d.Note = "رد برای آزمون؛ فهرست باید ساخته شود"; }));
+            Refused(await CaseAct(host, Mgr2, sv.Id, "release-tender"), "فهرست مدارک پروژه (MDL)");
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = sv.Id; d.Reason = PermitReason; }));
+            permit = Ok(await MdlView(host, Mgr1, sv.Id)).Permit.Id;
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = sv.Id; d.PermitId = permit; d.Approve = true; }));
+            Assert.IsNull(Ok(await GetCase(host, Mgr2, sv.Id)).ProjectMdlNotice);
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr2, sv.Id, "release-tender")).Status);
+            StringAssert.Contains(host.Read(u => u.Set<EnCaseEvent>().Single(e => e.CaseId == sv.Id && e.Kind == "tender-released").Note), "بدون فهرست مدارک پروژه");
+            Assert.AreEqual(0, host.Read(u => u.Set<PcTenderDocument>().Count(d => d.PackageId == sv.TenderPackageId.Value && !d.Deleted && d.DocumentType == "MDL")));
+            // a spare-parts case WITH an approved standard list: the agent drafts from it (the same as a turbine)
+            await EnsureMdl(host, "SP-STD");
+            EnCaseDto sp2 = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, "SP-STD");
+            v = Ok(await MdlView(host, Eng1, sp2.Id));
+            Assert.IsTrue(v.CanDraft);
+            Assert.IsTrue(v.HasStandardList);
+            Assert.AreEqual(NoticeText, Ok(await GetCase(host, Mgr1, sp2.Id)).ProjectMdlNotice);
+            Assert.AreEqual(4, (await Draft(host, sp2.Id)).Mdl.StandardKeptCount);
+            await ApprovedMdlFinish(host, sp2.Id);
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr1, sp2.Id, "release-tender")).Status);
+        }
+
+        private static async Task ApprovedMdlFinish(AppHost host, int caseId)
+        {
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng2, caseId));
+            Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            v = Ok(await MdlView(host, Mgr1, caseId));
+            Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+        }
+
+        // ------------------------------------------------------------------------------------------ draft from a file
+
+        [TestMethod]
+        public async Task Draft_From_File_Is_For_A_Person_When_There_Is_No_Approved_Standard_List_And_Every_Line_Is_A_Project_Line()
+        {
+            AppHost host = Started("pm_file");
+            EnCaseDto sp = await OtherKindCase(host, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, "NO-LIST-STD");   // a standard code that has no approved list
+            // roles: a person who writes engineering; not sales, not a stranger, not the agent seat
+            Refused(await MdlFromFile(host, Sales1, sp.Id, FileCsv));
+            Refused(await MdlFromFile(host, Nobody, sp.Id, FileCsv));
+            StringAssert.Contains(Refused(await MdlFromFile(host, await SeatAsync(host), sp.Id, FileCsv)), "هوش مصنوعی");
+            Assert.IsFalse(Ok(await MdlView(host, Sales1, sp.Id)).CanDraftFromFile);
+            Assert.IsTrue(Ok(await MdlView(host, Eng1, sp.Id)).CanDraftFromFile);
+            // the file and the note are checked
+            Refused(await MdlFromFile(host, Eng1, sp.Id, FileCsv, "کوتاه"), "یادداشت");
+            Refused(await MdlFromFile(host, Eng1, sp.Id, "a,b\r\n1,2\r\n"), "سرستون");
+            Refused(await MdlFromFile(host, Eng1, sp.Id, Head.Replace("\n", "\r\n")), "ردیف");
+            Refused(await MdlFromFile(host, Eng1, 987654, FileCsv));
+            Assert.IsNull(Ok(await MdlView(host, Eng1, sp.Id)).Mdl, "a refusal leaves nothing");
+            Assert.AreEqual(0, host.Read(u => u.Set<EnProjectMdl>().Count(m => m.CaseId == sp.Id)));
+            // created: every line a project line, no standard list, the file stored
+            EnProjectMdlCaseDto v = Ok(await MdlFromFile(host, Eng1, sp.Id, FileCsv));
+            Assert.AreEqual((int)EnProjectMdlStatus.Draft, v.Mdl.Status);
+            Assert.AreEqual(1, v.Mdl.Revision);
+            StringAssert.StartsWith(v.Mdl.Number, "PMDL-");
+            Assert.IsNull(v.Mdl.BasedOnListId);
+            Assert.IsNull(v.Mdl.BasedOnCode);
+            Assert.AreEqual(3, v.Mdl.Lines.Count);
+            Assert.IsTrue(v.Mdl.Lines.All(l => l.Origin == 1 && !l.Removed && l.OriginText == "افزوده برای پروژه"));
+            Assert.AreEqual(0, v.Mdl.StandardKeptCount);
+            Assert.AreEqual(0, v.Mdl.RemovedCount);
+            Assert.AreEqual(3, v.Mdl.AddedCount);
+            Assert.AreEqual("project-mdl.csv", v.Mdl.SourceFileName);
+            Assert.IsNotNull(v.Mdl.SourceDocumentId);
+            CollectionAssert.AreEqual(new[] { "DWG", "CERT", "DATA" }, v.Mdl.Lines.Select(l => l.DocumentType).ToArray());
+            Assert.AreEqual("Qa,Qc", v.Mdl.Lines[1].Units);
+            Assert.IsTrue(v.Mdl.Lines[0].ClientSubmittal && v.Mdl.Lines[0].TenderStage && v.Mdl.Lines[0].Required);
+            Assert.AreEqual("فهرست مدارک پروژه مطابق درخواست کارفرما از فایل ساخته شد", v.Mdl.ChangeNote);
+            Assert.AreEqual(1, CaseEvents(host, sp.Id, "project-mdl-drafted"));
+            Assert.IsTrue(v.CanCheck);
+            Assert.IsFalse(v.CanDraftFromFile);
+            // one live list per case
+            StringAssert.Contains(Refused(await MdlFromFile(host, Eng1, sp.Id, FileCsv)), v.Mdl.Number);
+            // upload-lines on such a list replaces every line (nothing of the standard to keep); a project line that the file no longer has is hidden
+            string two = Head.Replace("\n", "\r\n") + "DWG,نقشهٔ قطعه یدکی,مکانیک,1,1,,1,,\r\nTEST,گزارش آزمون قطعه,کیفیت,1,0,,0,,\r\n";
+            v = Ok(await MdlUpload(host, Eng1, v.Mdl, two));
+            Assert.AreEqual(2, v.Mdl.Lines.Count);
+            Assert.AreEqual(2, v.Mdl.LineCount);
+            Assert.AreEqual(2, v.Mdl.AddedCount);
+            Assert.AreEqual(0, v.Mdl.StandardKeptCount);
+            Assert.AreEqual(0, v.Mdl.RemovedCount);
+            Assert.IsTrue(v.Mdl.Lines.All(l => l.Origin == 1));
+            CollectionAssert.AreEqual(new[] { "DWG", "TEST" }, v.Mdl.Lines.Select(l => l.DocumentType).ToArray());
+            // check, approve: the approved list is bound to these lines; the CSV is the issued file
+            v = Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            v = Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            Assert.IsFalse(v.Mdl.ApprovalStale);
+            Assert.AreEqual("MDL-" + sp.Number + "-R1.csv", v.Mdl.IssuedFileName);
+            string csv = System.Text.Encoding.UTF8.GetString(await StoredAsync(host, v.Mdl.IssuedDocumentId.Value));
+            StringAssert.Contains(csv, "TEST,");
+            Assert.IsFalse(csv.Contains("CERT,"));
+            // a void lets a new draft from a file follow (revision 2)
+            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست باید با فایل دیگری ساخته شود"; }));
+            v = Ok(await MdlFromFile(host, Eng1, sp.Id, FileCsv));
+            Assert.AreEqual(2, v.Mdl.Revision);
+            Assert.AreEqual(1, v.History.Count(h => h.Status == (int)EnProjectMdlStatus.Void));
+        }
+
+        [TestMethod]
+        public async Task Draft_From_File_Is_Refused_When_An_Approved_Standard_List_Exists_Or_A_Permit_Was_Approved_Or_The_Case_Is_Not_In_The_Tender_Preparation()
+        {
+            AppHost host = Started("pm_file2");
+            // a turbine case whose standard has an approved list: draft from the standard, then change the lines by a file
+            EnCaseDto c = await NewCase(host);
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng1, c.Id));
+            Assert.IsFalse(v.CanDraftFromFile);
+            Assert.IsTrue(v.HasStandardList);
+            string why = Refused(await MdlFromFile(host, Eng1, c.Id, FileCsv));
+            StringAssert.Contains(why, "فهرست استاندارد");
+            StringAssert.Contains(why, "با فایل تغییر دهید");
+            Assert.AreEqual(why, v.DraftFromFileBlockedReason);
+            Assert.AreEqual(0, host.Read(u => u.Set<EnProjectMdl>().Count(m => m.CaseId == c.Id)));
+            // a case with no standard code at all is the same as one without a list (a turbine too)
+            host.Write(u => { u.Set<EnCase>().Single(k => k.Id == c.Id).ReferenceCode = null; u.SaveChanges(); }, Seeder);
+            Assert.IsTrue(Ok(await MdlView(host, Eng1, c.Id)).CanDraftFromFile);
+            Assert.AreEqual(NoticeFromFile, Ok(await GetCase(host, Mgr1, c.Id)).ProjectMdlNotice);
+            // an approved permit: no list is made
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; }));
+            int permit = Ok(await MdlView(host, Mgr1, c.Id)).Permit.Id;
+            Assert.IsTrue(Ok(await MdlView(host, Eng1, c.Id)).CanDraftFromFile, "a requested permit does not stop it");
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Approve = true; }));
+            Refused(await MdlFromFile(host, Eng1, c.Id, FileCsv), "مجوز");
+            Assert.IsFalse(Ok(await MdlView(host, Eng1, c.Id)).CanDraftFromFile);
+            // not in the tender preparation
+            EnCaseDto open = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, type: Entities.Model.NasbNiro.Sales.SlProductType.SpareParts)));
+            Refused(await MdlFromFile(host, Eng1, open.Id, FileCsv), "مرحلهٔ تهیهٔ بستهٔ فنی");
+            Assert.IsFalse(Ok(await MdlView(host, Eng1, open.Id)).CanDraftFromFile);
         }
     }
 }

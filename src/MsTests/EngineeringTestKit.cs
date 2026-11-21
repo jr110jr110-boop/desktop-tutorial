@@ -216,6 +216,29 @@ namespace MsTests
         public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlUpload(AppHost host, ClaimsPrincipal who, EnProjectMdlDto mdl, string csv, string note = "حذف و افزودن مدرک برای این پروژه مطابق قرارداد", string version = null) =>
             host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().UploadLinesAsync(mdl.Id, version ?? mdl.RowVersion, note, new byte[] { 0xEF, 0xBB, 0xBF }.Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "project-mdl.csv", Ct));
 
+        public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlFromFile(AppHost host, ClaimsPrincipal who, int caseId, string csv, string note = "فهرست مدارک پروژه مطابق درخواست کارفرما از فایل ساخته شد") =>
+            host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().DraftFromFileAsync(caseId, note, new byte[] { 0xEF, 0xBB, 0xBF }.Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "project-mdl.csv", Ct));
+
+        /// <summary>Since ENG-E1g (every kind of tender) the tender package of a case is released only with an approved project MDL: the agent drafts it from the approved standard list, or an engineer creates it from a file when there is no list; Eng2 checks, Mgr1 approves.</summary>
+        public static async Task<EnProjectMdlCaseDto> ApprovedMdlFromFile(AppHost host, int caseId, string fileCsv)
+        {
+            Ok(await MdlFromFile(host, Eng1, caseId, fileCsv));
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng2, caseId));
+            Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            v = Ok(await MdlView(host, Mgr1, caseId));
+            return Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+        }
+
+        /// <summary>A spare-parts or service case in the tender preparation with its tender package made, under a standard code that may have no approved list (<paramref name="code"/> null = no standard at all); the opinion is stored directly (the long confirmation flow is tested elsewhere).</summary>
+        public static async Task<EnCaseDto> OtherKindCase(AppHost host, SlProductType type, string code)
+        {
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, SlInquiryStatus.Bidding, type)));
+            host.Write(u => { EnCase x = u.Set<EnCase>().Single(k => k.Id == c.Id); x.Status = EnCaseStatus.TenderPreparation; x.ReferenceCode = code; x.OpinionText = "رای فنی کامل برای تامین قطعات یدکی مطابق نقشه‌های موجود"; u.SaveChanges(); }, Seeder);
+            return Ok(await CaseAct(host, await SeatAsync(host), c.Id, "draft-tender"));
+        }
+
+        public const string FileCsv = "docType,title,discipline,required,tender,units,clientSubmittal,clause,note\r\nDWG,نقشهٔ قطعه یدکی,مکانیک,1,1,,1,,\r\nCERT,گواهی مواد قطعه,مواد,1,0,Qa;Qc,0,,\r\nDATA,برگهٔ داده قطعه,مکانیک,0,1,,0,,\r\n";
+
         /// <summary>Since ENG-E1g the tender package of a turbine case is released only with an approved project MDL: the agent drafts it from the approved standard list, an engineer (Eng2) checks it, the manager (Mgr1) approves it.</summary>
         public static async Task<EnProjectMdlCaseDto> ApprovedMdl(AppHost host, int caseId)
         {

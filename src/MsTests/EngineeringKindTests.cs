@@ -47,6 +47,8 @@ namespace MsTests
             Refused(await CaseAct(host, Mgr1, c.Id, "reclassify", d => d.Note = "دلیل تغییر نوع پرونده"), "نوع‌بندی");
             var seat = await SeatAsync(host);
             c = Ok(await CaseAct(host, seat, c.Id, "draft-tender"));
+            Refused(await CaseAct(host, Mgr1, c.Id, "release-tender"), "فهرست مدارک پروژه (MDL)");   // ENG-E1g: every kind of tender needs an approved project MDL (or the CEO's permit)
+            await ApprovedMdl(host, c.Id);                                                         // its standard has an approved list: the agent drafts from it
             c = Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));                            // documents are optional for spare parts
             Assert.AreEqual((int)EnCaseStatus.TenderIssued, c.Status);
             Assert.IsNull(await host.As(Eng1, p => EnGates.ProposalApproveRefusalAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), inquiry, Ct)));
