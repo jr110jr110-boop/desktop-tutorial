@@ -362,7 +362,6 @@ namespace Entities.Model.NasbNiro.Engineering
         public string Note { get; set; }
     }
 
-    /// <summary>The emergency waiver of the handover lock: approved by the CEO personally, for one handover and only for the missing set of its snapshot.</summary>
     /// <summary>The MDL of one project (case): the list of the documents the CLIENT gets for this project. It starts from the approved standard list (MDL) of the company for the standard of the case;
     /// lines may be removed or added for the project. The MDR of the company is another thing: it is never reduced.</summary>
     public class EnProjectMdl : BaseEntity
@@ -442,6 +441,7 @@ namespace Entities.Model.NasbNiro.Engineering
         public string DecisionNote { get; set; }
     }
 
+    /// <summary>The emergency waiver of the handover lock: approved by the CEO personally, for one handover and only for the missing set of its snapshot.</summary>
     public class EnWaiver : BaseEntity
     {
         public string Number { get; set; }

@@ -39,7 +39,7 @@ namespace Services.NasbNiro.Engineering
 
         private static string Cell(string s)
         {
-            s ??= string.Empty;
+            s = EnReferenceCsv.Neutralise(s ?? string.Empty);
             return s.IndexOfAny(new[] { ',', ';', '"', '\n', '\r' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
         }
 
@@ -168,7 +168,7 @@ namespace Services.NasbNiro.Engineering
     /// </summary>
     public class EnProjectMdlService : IEnProjectMdlService
     {
-        private const string Readers = "ENGINEERING,ENGINEER,CEO,PMO,PROJECTMANAGER,SALES,COMMERCIAL,DCC,AUDITOR";
+        private const string Readers = EnRoles.MdlReaders;
 
         private readonly IUnitOfWork _uow;
         private readonly IInventoryUserContext _user;
@@ -276,7 +276,7 @@ namespace Services.NasbNiro.Engineering
         private static string RecordClientReason(Ctx x, Who w) =>
             !w.Commercial ? EnText.NotAllowed : w.Seat ? EnText.AiNever
             : x.Live == null || x.Live.Status != EnProjectMdlStatus.Approved ? "فقط برای فهرست تاییدشدهٔ مدیر مهندسی تایید کارفرما ثبت می‌شود."
-            : !EnCaseRules.TenderPassed(x.Case.Status) ? "بستهٔ فنی مناقصه هنوز منتشر نشده است؛ پس از انتشار، فهرست به کارفرما می‌رسد و تایید او ثبت می‌شود." : null;
+            : !EnCaseRules.TenderPassed(x.Case.Status) || x.Case.TenderReleasedAt == null ? "بستهٔ فنی مناقصه هنوز منتشر نشده است؛ پس از انتشار، فهرست به کارفرما می‌رسد و تایید او ثبت می‌شود." : null;
 
         private static string RequestPermitReason(Ctx x, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever

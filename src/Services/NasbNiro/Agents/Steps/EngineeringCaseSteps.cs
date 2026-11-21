@@ -311,7 +311,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.TenderPackageId != null && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)
                     && (c.Classification == EnClassification.Platform || (c.Kind != EnCaseKind.Turbine && c.OpinionText != null) || (c.ConceptNote != null && uow.Set<PcTenderDocument>().Any(t => t.PackageId == c.TenderPackageId && !t.Deleted))))
-                .OrderBy(c => c.Id).ToListAsync(ct);
+                .OrderBy(c => c.Id).Take(ProcStepCommon.Cap * 5).ToListAsync(ct);
             // employer rule 20 (every kind of tender): the gate opens only when the release is possible as far as the project MDL is concerned (an approved list whose hash holds, or the CEO's permit): the same check the release action runs,
             // so the 72 office hour alarm names the work that is really waiting (the MDL check, the approval or the permit have their own gates)
             List<AgentWorkItem> items = new List<AgentWorkItem>();

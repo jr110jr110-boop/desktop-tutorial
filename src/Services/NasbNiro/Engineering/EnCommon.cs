@@ -45,6 +45,9 @@ namespace Services.NasbNiro.Engineering
         public const string RefApprovers = "ENGINEERING,CEO";
 
         /// <summary>The units that receive the documents of a released handover, and the people of engineering, the PMO and the commercial side who work with the case.</summary>
+        /// <summary>Who reads the project MDL (the API and its three files): need-to-know is narrower than <see cref="Readers"/>.</summary>
+        public const string MdlReaders = "ENGINEERING,ENGINEER,CEO,PMO,PROJECTMANAGER,SALES,COMMERCIAL,DCC,AUDITOR";
+
         public const string Readers = "ENGINEERING,ENGINEER,PMO,CEO,PROJECTMANAGER,PLANNING,SALES,COMMERCIAL,DCC,QA,QC,PRODUCTIONMANAGER,SHOPSUPERVISOR,CONSTRUCTION,WAREHOUSE,WHSUPERVISOR,AUDITOR";
     }
 

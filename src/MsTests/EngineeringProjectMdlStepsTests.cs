@@ -70,7 +70,7 @@ namespace MsTests
             AgentWorkItem check = (await Discover(host, seat, "ENG.PMDL.CHECK")).Single();
             Assert.AreEqual("ENGINEERING,ENGINEER", check.GateRoles);
             EnProjectMdlCaseDto v = Ok(await MdlView(host, Eng1, c.Id));
-            Assert.AreEqual(v.Mdl.Id, check.TargetId);
+            Assert.AreEqual(v.CaseId, check.TargetId);
             // the second run of the same item is refused by the service (a live list exists)
             Assert.AreNotEqual(AgentStepOutcome.Done, (await Run(host, seat, "ENG.PMDL.DRAFT", draft)).Outcome);
             // check -> approve gate (manager roles only)
@@ -85,7 +85,7 @@ namespace MsTests
             Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));
             AgentWorkItem client = (await Discover(host, seat, "ENG.PMDL.CLIENT")).Single();
             Assert.AreEqual("SALES,COMMERCIAL", client.GateRoles);
-            Assert.AreEqual(v.Mdl.Id, client.TargetId);
+            Assert.AreEqual(v.CaseId, client.TargetId);
             Ok(await MdlAct(host, Comm1, "record-client-approval", d => { d.Id = v.Mdl.Id; d.LetterRef = "نامهٔ ۱۲۳"; d.DocumentId = File(host, 2132); }));
             Assert.AreEqual(0, (await Discover(host, seat, "ENG.PMDL.CLIENT")).Count, "recorded: nothing left");
         }
@@ -148,8 +148,8 @@ namespace MsTests
             // the person creates the list: the file item is replaced by the usual check item of the list
             EnProjectMdlCaseDto v = Ok(await MdlFromFile(host, Eng1, noList.Id, FileCsv));
             AgentWorkItem check = (await Discover(host, seat, "ENG.PMDL.CHECK")).Single();
-            Assert.AreEqual("EnProjectMdl", check.TargetType);
-            Assert.AreEqual(v.Mdl.Id, check.TargetId);
+            Assert.AreEqual("EnCase", check.TargetType);
+            Assert.AreEqual(v.CaseId, check.TargetId);
             Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
             Assert.AreEqual(0, (await Discover(host, seat, "ENG.TENDER.RELEASE")).Count, "checked is not approved");
             v = Ok(await MdlView(host, Mgr1, noList.Id));

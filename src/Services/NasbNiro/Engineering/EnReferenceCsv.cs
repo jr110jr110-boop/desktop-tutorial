@@ -87,6 +87,12 @@ namespace Services.NasbNiro.Engineering
             return result;
         }
 
+        /// <summary>A generated file neutralises a cell that starts with = + - @ tab or CR by one leading apostrophe (a spreadsheet would run it as a formula); the reader strips that single apostrophe, so a downloaded file read back gives the original text.</summary>
+        public static string Plain(string s) => s != null && s.Length >= 2 && s[0] == '\'' && ("=+-@\t\r".IndexOf(s[1]) >= 0 || (s[1] == '\'' && s.Length > 2 && "=+-@\t\r".IndexOf(s[2]) >= 0)) ? s.Substring(1) : s;
+
+        /// <summary>The generator side of <see cref="Plain"/>.</summary>
+        public static string Neutralise(string s) => !string.IsNullOrEmpty(s) && ("=+-@\t\r".IndexOf(s[0]) >= 0 || (s[0] == '\'' && s.Length > 1 && "=+-@\t\r".IndexOf(s[1]) >= 0)) ? "'" + s : s;
+
         /// <summary>The lines of the file, or the Persian refusal (row numbered, at most <see cref="MaxErrorsShown"/> shown).</summary>
         public static string Parse(byte[] bytes, out List<EnReferenceLineDto> lines, out Columns columns)
         {
@@ -123,7 +129,7 @@ namespace Services.NasbNiro.Engineering
             {
                 string at = "ردیف " + EnText.Num(line) + ": ";
                 if (c.Count != head.Count) { errors.Add(at + "تعداد ستون‌ها باید " + Fa(head.Count) + " باشد، " + Fa(c.Count) + " ستون دیده شد (متنی که جداکننده یا ویرگول دارد را داخل گیومه بگذارید)."); continue; }
-                string type = c[0].Trim(), title = c[1].Trim(), discipline = c[2].Trim();
+                string type = Plain(c[0].Trim()), title = Plain(c[1].Trim()), discipline = Plain(c[2].Trim());
                 int before = errors.Count;
                 if (type.Length == 0) errors.Add(at + "نوع مدرک (docType) خالی است.");
                 else if (type.Length > 100) errors.Add(at + "نوع مدرک بیش از ۱۰۰ نویسه است.");
@@ -135,7 +141,7 @@ namespace Services.NasbNiro.Engineering
                 if (tender == null) errors.Add(at + "مقدار ستون tender باید «بله»، «خیر»، 1 یا 0 باشد (در فایل «" + c[4].Trim() + "»).");
                 bool client = iClient >= 0 && Flag(c[iClient], false) == true;
                 if (iClient >= 0 && Flag(c[iClient], false) == null) errors.Add(at + "مقدار ستون clientSubmittal باید «بله»، «خیر»، 1 یا 0 باشد (در فایل «" + c[iClient].Trim() + "»).");
-                string clause = iClause >= 0 ? c[iClause].Trim() : null, noteText = iNote >= 0 ? c[iNote].Trim() : null;
+                string clause = iClause >= 0 ? Plain(c[iClause].Trim()) : null, noteText = iNote >= 0 ? Plain(c[iNote].Trim()) : null;
                 if (clause != null && clause.Length > 300) errors.Add(at + "بند استاندارد (clause) بیش از ۳۰۰ نویسه است.");
                 if (noteText != null && noteText.Length > 500) errors.Add(at + "توضیح (note) بیش از ۵۰۰ نویسه است.");
                 string units = null;

@@ -128,6 +128,13 @@ namespace Services.NasbNiro.Engineering
         private async Task<string> AddProjectMdlDocumentAsync(EnCase c, EnProjectMdl mdl, CancellationToken ct)
         {
             if (!mdl.IssuedDocumentId.HasValue) return "فایل فهرست مدارک پروژه ساخته نشده است؛ مدیر مهندسی فهرست را دوباره تایید کند.";
+            // the MDL document of an older revision (voided after a revalidation) leaves the package through the EDMS void of a tender document (no physical delete): the package ends with exactly one MDL document
+            List<int> older = await _uow.Set<PcTenderDocument>().AsNoTracking().Where(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted && d.DocumentType == "MDL" && d.DocumentId != mdl.IssuedDocumentId.Value).Select(d => d.Id).ToListAsync(ct);
+            foreach (int oldId in older)
+            {
+                ResponseDto<PcTenderPackageDto> gone = await _edms.TenderActionAsync(new PcTenderActionDto { Id = c.TenderPackageId.Value, Action = "void", DocumentId = oldId, Reason = "فهرست مدارک پروژه با ویرایش " + EnText.Num(mdl.Revision) + " جایگزین شد" }, ct);
+                if (!gone.Success) return gone.Message;
+            }
             if (await _uow.Set<PcTenderDocument>().AsNoTracking().AnyAsync(d => d.PackageId == c.TenderPackageId.Value && !d.Deleted && d.DocumentId == mdl.IssuedDocumentId.Value, ct)) return null;
             ResponseDto<PcTenderPackageDto> added = await _edms.SaveTenderDocumentAsync(new PcTenderDocumentSaveDto { PackageId = c.TenderPackageId.Value, Title = "فهرست مدارک پروژه (MDL) — ویرایش " + EnText.Num(mdl.Revision), DocumentType = "MDL", Revision = EnText.Num(mdl.Revision).PadLeft(2, '0'), DocumentId = mdl.IssuedDocumentId }, ct);
             return added.Success ? null : added.Message;

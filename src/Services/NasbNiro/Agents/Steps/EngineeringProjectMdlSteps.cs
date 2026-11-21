@@ -94,12 +94,12 @@ namespace Services.NasbNiro.Agents.Steps
             var rows = await uow.Set<EnProjectMdl>().AsNoTracking().Where(m => !m.Deleted && m.Status == EnProjectMdlStatus.Draft && m.Lines.Any(l => !l.Deleted && !l.Removed)
                     && uow.Set<EnCase>().Any(c => c.Id == m.CaseId && !c.Deleted && c.Status == EnCaseStatus.TenderPreparation))
                 .OrderBy(m => m.Id).Take(ProcStepCommon.Cap).Select(m => new { m.Id, m.Number, m.CaseId, m.Revision, CaseNumber = uow.Set<EnCase>().Where(c => c.Id == m.CaseId).Select(c => c.Number).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnProjectMdl", r.Id, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) منتظر بررسی کارشناس مهندسی است؛ ردیف‌ها فقط با فایل تغییر می‌کند.", EnRoles.Writers)).ToList();
+            return rows.Select(r => Item("EnCase", r.CaseId, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) منتظر بررسی کارشناس مهندسی است؛ ردیف‌ها فقط با فایل تغییر می‌کند.", EnRoles.Writers)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => item.TargetType == "EnCase"
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => item.Summary != null && item.Summary.Contains("از فایل بسازید")
             ? new AgentGateInfo { Roles = EnRoles.Writers, Link = CaseLink(item.TargetId), Title = "ساخت فهرست مدارک پروژه از فایل برای پروندهٔ " + item.TargetNumber }
-            : new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/cases", Title = "بررسی فهرست مدارک پروژه " + item.TargetNumber };
+            : new AgentGateInfo { Roles = EnRoles.Writers, Link = CaseLink(item.TargetId), Title = "بررسی فهرست مدارک پروژه " + item.TargetNumber };
     }
 
     /// <summary>ENG.PMDL.APPROVE (HumanGate): the engineering manager (not the checker) approves a Checked list or returns it.</summary>
@@ -115,10 +115,10 @@ namespace Services.NasbNiro.Agents.Steps
             var rows = await uow.Set<EnProjectMdl>().AsNoTracking().Where(m => !m.Deleted && m.Status == EnProjectMdlStatus.Checked
                     && uow.Set<EnCase>().Any(c => c.Id == m.CaseId && !c.Deleted && c.Status == EnCaseStatus.TenderPreparation))
                 .OrderBy(m => m.Id).Take(ProcStepCommon.Cap).Select(m => new { m.Id, m.Number, m.CaseId, m.Revision, CaseNumber = uow.Set<EnCase>().Where(c => c.Id == m.CaseId).Select(c => c.Number).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnProjectMdl", r.Id, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) بررسی شده و منتظر تایید مدیر مهندسی است؛ بستهٔ فنی مناقصه تا تایید آن منتشر نمی‌شود.", EnRoles.Manager)).ToList();
+            return rows.Select(r => Item("EnCase", r.CaseId, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) بررسی شده و منتظر تایید مدیر مهندسی است؛ بستهٔ فنی مناقصه تا تایید آن منتشر نمی‌شود.", EnRoles.Manager)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = Root + "/cases", Title = "تایید فهرست مدارک پروژه " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = CaseLink(item.TargetId), Title = "تایید فهرست مدارک پروژه " + item.TargetNumber };
     }
 
     /// <summary>ENG.PMDL.PERMIT.DECIDE (HumanGate): the CEO alone decides a requested "tender without MDL" permit (not its requester).</summary>
@@ -134,10 +134,10 @@ namespace Services.NasbNiro.Agents.Steps
             var rows = await uow.Set<EnMdlPermit>().AsNoTracking().Where(p => !p.Deleted && p.Status == EnMdlPermitStatus.Requested
                     && uow.Set<EnCase>().Any(c => c.Id == p.CaseId && !c.Deleted && c.Status == EnCaseStatus.TenderPreparation))
                 .OrderBy(p => p.Id).Take(ProcStepCommon.Cap).Select(p => new { p.Id, p.Number, p.CaseId, CaseNumber = uow.Set<EnCase>().Where(c => c.Id == p.CaseId).Select(c => c.Number).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnMdlPermit", r.Id, r.Number, null, null, $"مدیر مهندسی برای پروندهٔ {r.CaseNumber} مجوز «مناقصه بدون MDL» ({r.Number}) خواسته و فقط مدیرعامل تصمیم می‌گیرد.", EnRoles.Ceo)).ToList();
+            return rows.Select(r => Item("EnCase", r.CaseId, r.Number, null, null, $"مدیر مهندسی برای پروندهٔ {r.CaseNumber} مجوز «مناقصه بدون MDL» ({r.Number}) خواسته و فقط مدیرعامل تصمیم می‌گیرد.", EnRoles.Ceo)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = Root + "/cases", Title = "تصمیم دربارهٔ مجوز مناقصه بدون MDL " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = CaseLink(item.TargetId), Title = "تصمیم دربارهٔ مجوز مناقصه بدون MDL " + item.TargetNumber };
     }
 
     /// <summary>ENG.PMDL.CLIENT (Input): the approved list went to the client with the released tender package; commercial records the client's approval (letter reference and the letter as a file). Open while it is not recorded.</summary>
@@ -154,9 +154,9 @@ namespace Services.NasbNiro.Agents.Steps
                     && uow.Set<EnCase>().Any(c => c.Id == m.CaseId && !c.Deleted && c.TenderPackageId != null
                         && (c.Status == EnCaseStatus.TenderIssued || c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering || c.Status == EnCaseStatus.HandedOver || c.Status == EnCaseStatus.Accepted || c.Status == EnCaseStatus.Released)))
                 .OrderBy(m => m.Id).Take(ProcStepCommon.Cap).Select(m => new { m.Id, m.Number, m.CaseId, m.Revision, CaseNumber = uow.Set<EnCase>().Where(c => c.Id == m.CaseId).Select(c => c.Number).FirstOrDefault() }).ToListAsync(ct);
-            return rows.Select(r => Item("EnProjectMdl", r.Id, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) با بستهٔ فنی به کارفرما رسیده؛ تایید کارفرما (شمارهٔ نامه و فایل نامه) را ثبت کنید.", EnRoles.Commercial)).ToList();
+            return rows.Select(r => Item("EnCase", r.CaseId, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) با بستهٔ فنی به کارفرما رسیده؛ تایید کارفرما (شمارهٔ نامه و فایل نامه) را ثبت کنید.", EnRoles.Commercial)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Commercial, Link = Root + "/cases", Title = "ثبت تایید کارفرما بر فهرست مدارک پروژه " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Commercial, Link = CaseLink(item.TargetId), Title = "ثبت تایید کارفرما بر فهرست مدارک پروژه " + item.TargetNumber };
     }
 }

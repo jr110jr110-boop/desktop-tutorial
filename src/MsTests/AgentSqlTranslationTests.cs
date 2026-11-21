@@ -266,7 +266,7 @@ namespace MsTests
                 IUnitOfWork uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var problems = new List<string>();
                 Services.NasbNiro.Engineering.EnControl.Probe = true;
-                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN", "ENG.DIST.DRAFT", "ENG.DIST.NOTIFY", "ENG.DIST.ACK", "ENG.INFO.ANSWER", "ENG.PLATFORM.REGISTER", "ENG.PLATFORM.STANDARD", "ENG.REF.DRAFT", "ENG.PLATFORM.ASSESS", "ENG.PLATFORM.COMPLETE", "ENG.PLATFORM.CONFIRM", "ENG.PMDL.DRAFT", "ENG.PMDL.CHECK", "ENG.PMDL.APPROVE", "ENG.PMDL.PERMIT.DECIDE", "ENG.PMDL.CLIENT" })
+                foreach (string code in new[] { "ENG.OPINION.INPUT", "ENG.CASE.OPEN", "ENG.DIST.DRAFT", "ENG.DIST.NOTIFY", "ENG.DIST.ACK", "ENG.INFO.ANSWER", "ENG.PLATFORM.REGISTER", "ENG.PLATFORM.STANDARD", "ENG.REF.DRAFT", "ENG.PLATFORM.ASSESS", "ENG.PLATFORM.COMPLETE", "ENG.PLATFORM.CONFIRM", "ENG.PMDL.DRAFT", "ENG.PMDL.CHECK", "ENG.PMDL.APPROVE", "ENG.PMDL.PERMIT.DECIDE", "ENG.PMDL.CLIENT", "ENG.TENDER.RELEASE" })
                 {
                     IAgentStep step = scope.ServiceProvider.GetServices<IAgentStep>().Single(x => x.Code == code);
                     try { step.DiscoverAsync(uow, DateTime.Today, CancellationToken.None).GetAwaiter().GetResult(); }
