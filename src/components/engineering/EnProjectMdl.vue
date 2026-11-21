@@ -59,7 +59,7 @@ const draftFromFileDialog = () =>
     hint: "برای این پرونده فهرست استاندارد تاییدشده‌ای نیست؛ همهٔ ردیف‌ها «افزوده برای پروژه» ثبت می‌شوند. " + csvHint,
     fields: [
       { key: "file", label: "فایل فهرست (CSV)", type: "file", required: true },
-      { key: "note", label: "دلیل ساخت از فایل (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 },
+      { key: "note", label: "دلیل ساخت از فایل (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 2000 },
     ],
     run: (v) => draftEnProjectMdlFromFile(props.caseId, v.note, v.file),
     okText: "پیش‌نویس فهرست مدارک پروژه از فایل ساخته شد.",
@@ -70,7 +70,7 @@ const uploadDialog = () =>
     hint: "همهٔ ردیف‌های فهرست با ردیف‌های فایل جایگزین می‌شود: ردیف استاندارد که در فایل نباشد «برای این پروژه حذف شده» می‌ماند و ردیف تازه «افزوده برای پروژه» می‌شود. پس از جایگزینی، فهرست دوباره پیش‌نویس است و باید دوباره بررسی شود. " + csvHint,
     fields: [
       { key: "file", label: "فایل فهرست (CSV)", type: "file", required: true },
-      { key: "note", label: "دلیل جایگزینی (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 },
+      { key: "note", label: "دلیل جایگزینی (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 2000 },
     ],
     run: (v) => uploadEnProjectMdlLines(m.value.id, m.value.rowVersion, v.note, v.file),
     okText: "ردیف‌های فهرست از فایل جایگزین شد.",
@@ -79,7 +79,7 @@ const returnDialog = () =>
   dlg.ask({
     title: "برگشت فهرست مدارک پروژه",
     hint: "فهرست به پیش‌نویس برمی‌گردد و کارشناس باید دوباره آن را بررسی کند.",
-    fields: [{ key: "reason", label: "دلیل برگشت (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 2000 }],
+    fields: [{ key: "reason", label: "دلیل برگشت (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 }],
     run: (v) => act("return", { reason: v.reason }),
     okText: "فهرست برگشت داده شد.",
   });
@@ -87,7 +87,7 @@ const voidDialog = () =>
   dlg.ask({
     title: "ابطال فهرست مدارک پروژه",
     hint: "پس از ابطال می‌توان پیش‌نویس تازه ساخت. فهرست باطل‌شده حذف نمی‌شود و در تاریخچه می‌ماند.",
-    fields: [{ key: "reason", label: "دلیل ابطال (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 2000 }],
+    fields: [{ key: "reason", label: "دلیل ابطال (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 }],
     run: (v) => act("void", { reason: v.reason }),
     okText: "فهرست باطل شد.",
   });
@@ -119,12 +119,22 @@ const permitRequestDialog = () =>
 const permitRejectDialog = () =>
   dlg.ask({
     title: "رد مجوز مناقصه بدون MDL",
-    fields: [{ key: "note", label: "دلیل رد (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 2000 }],
-    run: (v) => decideEnMdlPermit(props.caseId, false, v.note),
+    fields: [{ key: "note", label: "دلیل رد (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 }],
+    run: (v) => decideEnMdlPermit(props.caseId, permit.value.id, false, v.note),
     okText: "مجوز رد شد.",
   });
-const permitApprove = () => runEn(() => decideEnMdlPermit(props.caseId, true, ""), "مجوز تایید شد.", reload);
-const permitWithdraw = () => runEn(() => withdrawEnMdlPermit(props.caseId, ""), "درخواست مجوز پس گرفته شد.", reload);
+const permitApprove = () => runEn(() => decideEnMdlPermit(props.caseId, permit.value.id, true, ""), "مجوز تایید شد.", reload);
+// an approved permit that a new decision of the case made stale is withdrawn with a reason (at least 15); a requested one with one click
+const permitIsApproved = computed(() => permit.value?.status === 1);
+const permitWithdrawDialog = () =>
+  dlg.ask({
+    title: "پس‌گرفتن مجوز مناقصه بدون MDL",
+    hint: "این مجوز پیش از آخرین تصمیم پرونده داده شده و دیگر بستهٔ فنی را باز نمی‌کند. پس از پس‌گرفتن می‌توانید مجوز تازه بخواهید یا فهرست مدارک پروژه را بسازید.",
+    fields: [{ key: "note", label: "دلیل پس‌گرفتن (حداقل ۱۵ نویسه)", type: "textarea", required: true, min: 15, max: 1000 }],
+    run: (v) => withdrawEnMdlPermit(props.caseId, permit.value.id, v.note),
+    okText: "مجوز پس گرفته شد.",
+  });
+const permitWithdraw = () => (permitIsApproved.value ? permitWithdrawDialog() : runEn(() => withdrawEnMdlPermit(props.caseId, permit.value.id, ""), "درخواست مجوز پس گرفته شد.", reload));
 const draft = () => runEn(() => draftEnProjectMdl(props.caseId), "پیش‌نویس فهرست مدارک پروژه ساخته شد.", reload);
 const simple = (action: string, okText: string) => runEn(() => act(action), okText, reload);
 </script>
@@ -142,7 +152,7 @@ const simple = (action: string, okText: string) => runEn(() => act(action), okTe
           <strong>{{ faDigits(m.number) }}</strong>
           <span class="small">ویرایش {{ num(m.revision) }}</span>
           <EnChip :status="m.status" :text="m.statusText || mdlStatuses[m.status]" group="mdl" />
-          <span v-if="m.approvalStale" class="inv-badge bad">تایید با محتوای فعلی نمی‌خواند</span>
+          <span v-if="m.approvalStale" class="inv-badge bad">تایید با محتوا یا تصمیم فعلی پرونده نمی‌خواند</span>
         </div>
         <dl class="en-kv">
           <dt>فهرست استاندارد مبنا</dt>
@@ -214,6 +224,7 @@ const simple = (action: string, okText: string) => runEn(() => act(action), okTe
         <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
           <strong>مجوز مناقصه بدون MDL {{ faDigits(permit.number) }}</strong>
           <EnChip :status="permit.status" :text="permit.statusText" group="permit" />
+          <span v-if="permit.approvalStale" class="inv-badge bad">پیش از آخرین تصمیم پرونده تایید شده است</span>
         </div>
         <dl class="en-kv small">
           <dt>درخواست‌کننده</dt><dd>{{ permit.requestedByName || "—" }} {{ faDigits(permit.requestedAtText || "") }}</dd>
@@ -222,7 +233,7 @@ const simple = (action: string, okText: string) => runEn(() => act(action), okTe
         </dl>
         <EnAction :can="d.canDecidePermit" :reason="d.decidePermitBlockedReason" :roles="EnRoles.ceo" :confirm="`مجوز مناقصه بدون MDL برای پروندهٔ ${label} تایید شود؟ بستهٔ فنی مناقصه بدون فهرست مدارک پروژه منتشر خواهد شد.`" label="تایید مجوز" variant="success" @go="permitApprove" />
         <EnAction :can="d.canDecidePermit" :reason="d.decidePermitBlockedReason" :roles="EnRoles.ceo" label="رد مجوز" variant="outline-danger" @go="permitRejectDialog" />
-        <EnAction :can="d.canWithdrawPermit" :reason="d.withdrawPermitBlockedReason" :roles="EnRoles.manager" :confirm="`درخواست مجوز مناقصه بدون MDL برای پروندهٔ ${label} پس گرفته شود؟`" label="پس‌گرفتن درخواست" variant="outline-secondary" @go="permitWithdraw" />
+        <EnAction :can="d.canWithdrawPermit" :reason="d.withdrawPermitBlockedReason" :roles="EnRoles.manager" :confirm="permitIsApproved ? undefined : `درخواست مجوز مناقصه بدون MDL برای پروندهٔ ${label} پس گرفته شود؟`" :label="permitIsApproved ? 'پس‌گرفتن مجوز' : 'پس‌گرفتن درخواست'" variant="outline-secondary" @go="permitWithdraw" />
       </div>
 
       <EnAction :can="d.canDraft" :reason="d.draftBlockedReason" :roles="EnRoles.writers" :confirm="`پیش‌نویس فهرست مدارک پروژهٔ ${label} از فهرست استاندارد تاییدشده ساخته شود؟`" label="ساخت پیش‌نویس از فهرست استاندارد" variant="outline-primary" @go="draft" />

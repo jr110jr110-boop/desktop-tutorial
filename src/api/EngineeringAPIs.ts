@@ -148,7 +148,7 @@ export const uploadEnProjectMdlLines = (id: number, rowVersion: string, note: st
 };
 /** action: check | approve | return | void | record-client-approval. body: { reason (return, void, at least 15), letterRef + documentId (record-client-approval), note, rowVersion }. */
 export const postEnProjectMdlAction = (id: number, action: string, body: any = {}) => call("post", base + "project-mdl/" + id + "/" + action, body);
-/** The permit «tender without MDL»: request { caseId, reason (at least 50) }; decide { caseId, approve, note (at least 15 for a rejection) }; withdraw { caseId, note }. */
+/** The permit «tender without MDL»: request { caseId, reason (at least 50) }; decide { caseId, permitId (required: the permit the user saw), approve, note (at least 15 for a rejection) }; withdraw { caseId, permitId, note (at least 15 for an approved permit that a new decision made stale) }. */
 export const requestEnMdlPermit = (caseId: number, reason: string) => call("post", base + "project-mdl/request-permit", { caseId, reason });
-export const decideEnMdlPermit = (caseId: number, approve: boolean, note: string) => call("post", base + "project-mdl/decide-permit", { caseId, approve, note });
-export const withdrawEnMdlPermit = (caseId: number, note: string) => call("post", base + "project-mdl/withdraw-permit", { caseId, note });
+export const decideEnMdlPermit = (caseId: number, permitId: number, approve: boolean, note: string) => call("post", base + "project-mdl/decide-permit", { caseId, permitId, approve, note });
+export const withdrawEnMdlPermit = (caseId: number, permitId: number, note: string) => call("post", base + "project-mdl/withdraw-permit", { caseId, permitId, note });

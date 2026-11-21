@@ -53,6 +53,13 @@ const caseBase = { id: 12, kind: 1, kindText: "توربین", number: "ENG-1405-
   tenderDocuments: [], documentRisk: null, documentRiskAwarded: false, canAskClarification: true,
   ...flags(["Propose", "Change", "Confirm", "Approve", "Return", "Reclassify", "SaveConcept", "ReleaseTender", "CharterReview", "Cancel", "SetStandard", "SaveOpinion", "AddTenderDocument", "ProposeRegistration"]),
   addTenderDocumentBlockedReason: "پرونده در مرحلهٔ تهیه بسته فنی مناقصه نیست.", proposeRegistrationBlockedReason: "برای پیشنهاد ثبت، تحویل مدارک باید منتشر شده باشد." };
+// the project MDL of a case (EnProjectMdlCaseDto): a Checked list made from the standard (3 kept, 1 removed, 1 added), the manager's approve button enabled
+const pmdlLine = (id, seq, type, title, origin, removed) => ({ id, seq, documentType: type, discipline: "مکانیک", title, required: true, tenderStage: true, clientSubmittal: false, standardClause: null, units: null, note: null, origin, originText: origin === 1 ? "افزوده برای پروژه" : "از فهرست استاندارد", removed });
+const pmdl = { caseId: 12, caseNumber: "ENG-1405-0012", applies: true, notApplicableText: null, hasStandardList: true, releaseLockText: "انتشار بستهٔ فنی مناقصه بسته است: فهرست مدارک پروژه (MDL) هنوز توسط مدیر مهندسی تایید نشده است.", history: [], permit: null,
+  mdl: { id: 5, number: "PMDL-1405-0005", caseId: 12, revision: 1, status: 1, statusText: "بررسی‌شدهٔ کارشناس", basedOnListId: 3, basedOnCode: "API 611", basedOnRevision: 2, sourceDocumentId: null, sourceFileName: "project-mdl.csv", changeNote: "حذف یک مدرک و افزودن یک مدرک مطابق قرارداد", checkedByName: "کارشناس مهندسی", checkedAtText: "1405/08/30 10:00", approvedByName: null, approvalStale: false, issuedDocumentId: null, clientApprovedAt: null,
+    standardKeptCount: 3, removedCount: 1, addedCount: 1, lineCount: 4, rowVersion: "639000000000000000",
+    lines: [pmdlLine(1, 1, "DWG", "نقشهٔ کلی", 0, false), pmdlLine(2, 2, "BOM", "فهرست اجزا", 0, false), pmdlLine(3, 3, "RPT", "گزارش تست", 0, false), pmdlLine(4, 4, "SPEC", "مشخصات ویژهٔ پروژه", 1, false), pmdlLine(5, 5, "CERT", "گواهی مواد", 0, true)] },
+  ...flags(["Draft", "DraftFromFile", "Upload", "Check", "Return", "Void", "RecordClientApproval", "RequestPermit", "DecidePermit", "WithdrawPermit"]), canApprove: true, approveBlockedReason: null };
 const gapDto = { id: 3, number: "GAP-1405-0003", caseId: 12, caseNumber: "ENG-1405-0012", baseCode: "API 612", targetCode: "API 611", baseRevision: 2, targetRevision: 1, status: 0, statusText: "پیش‌نویس", addedCount: 2, removedCount: 0, requiredChangedCount: 1, reusableCount: 9,
   summary: "۲ مدرک افزوده و ۱ مدرک تغییر الزام نسبت به استاندارد پلتفرم", engineeringImpactNote: null, rowVersion: "BBBB", ...flags(["Confirm"]),
   lines: [{ seq: 1, kind: 1, kindText: "افزوده", documentType: "DWG", discipline: "مکانیک", title: "نقشه محفظه یاتاقان جدید", baseRequired: false, targetRequired: true }, { seq: 2, kind: 1, kindText: "افزوده", documentType: "CALC", discipline: "مکانیک", title: "محاسبه ارتعاش پیچشی", baseRequired: false, targetRequired: true },
@@ -105,6 +112,7 @@ function answer(path, method, body) {
   if (path === "engineering/cases") return page([caseBase, { ...caseBase, id: 13, number: "ENG-1405-0013", title: "قطعه یدکی پمپ", kind: 2, kindText: "قطعه یدکی", status: 4, statusText: "تهیه بسته فنی مناقصه", classificationText: "پلتفرم (توربین ساخته‌شده)", platformIncomplete: false, documentRisk: "۲ مدرک الزامی کم است و ۴ روز به موعد مانده است.", documentRiskAwarded: false }, { ...caseBase, id: 14, number: "ENG-1405-0014", title: "توربین بخار پروژه برنده", status: 7, statusText: "در مهندسی", documentRisk: "۳ مدرک الزامی کم است.", documentRiskAwarded: true }]);
   if (m(/^engineering\/cases\/\d+$/)) return caseBase;
   if (m(/charter-view$/)) return { caseId: 12, caseNumber: caseBase.number, charterExists: true, overview: "کلیات پروژه نمونه", scopeDescription: "تامین و نصب توربین", requirements: "مطابق دیتاشیت", priceNotice: "قیمت‌ها در این نما نیست." };
+  if (m(/^engineering\/project-mdl\/by-case\/\d+$/)) return pmdl;
   if (path === "engineering/clarifications") return page([clar]);
   if (m(/^engineering\/clarifications\/\d+$/)) return clar;
   if (path === "engineering/handovers") return page([handover]);
