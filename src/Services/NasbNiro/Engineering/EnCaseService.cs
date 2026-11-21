@@ -92,6 +92,11 @@ namespace Services.NasbNiro.Engineering
             : c.Status == EnCaseStatus.AwaitingCeoApproval ? (w.Ceo ? (w.Seat ? EnText.AiNever : null) : EnText.NotAllowed)
             : "فقط پروندهٔ منتظر تایید برگشت می‌خورد.";
 
+        /// <summary>True while the CEO's approval is still ahead: a turbine case (spare parts and service never pass the CEO), not yet approved, not closed or cancelled, with a standard code.</summary>
+        private static bool NoticeAhead(EnCase c) =>
+            c.Kind == EnCaseKind.Turbine && c.CeoApprovedAt == null && !string.IsNullOrWhiteSpace(c.ReferenceCode)
+            && (c.Status == EnCaseStatus.Classifying || c.Status == EnCaseStatus.AwaitingEngConfirm || c.Status == EnCaseStatus.AwaitingCeoApproval);
+
         private static string ApproveReason(EnCase c, Who w, string gap = null, bool mdlApproved = true) =>
             !w.Ceo ? EnText.NotAllowed : w.Seat ? EnText.AiNever : c.Status != EnCaseStatus.AwaitingCeoApproval ? "فقط پروندهٔ منتظر تصویب مدیرعامل تصویب می‌شود."
             : EnEditors.Touched(0, c.EditorUserIds, w.Me) || c.ProposedByUserId == w.Me || c.EngConfirmedByUserId == w.Me ? EnText.SameUser
@@ -199,7 +204,7 @@ namespace Services.NasbNiro.Engineering
                 string release = ReleaseReason(c, w, docs, makers), charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
-                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), StandardNotice = !string.IsNullOrWhiteSpace(c.ReferenceCode) && !EnReferenceRules.IsApproved(approvedMdl, c.ReferenceCode) ? EnReferenceRules.StandardNoticeText(c.ReferenceCode) : null, CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
+                    Id = c.Id, Kind = (int)c.Kind, KindText = EnText.Kind(c.Kind), OpinionText = c.OpinionText, OpinionByName = names.Name(c.OpinionByUserId), OpinionAtText = EnText.Stamp(c.OpinionAt), HandoverListCode = c.HandoverListCode, CanSaveOpinion = opinionR == null, SaveOpinionBlockedReason = opinionR, ReferenceCode = c.ReferenceCode, StandardEvidence = c.StandardEvidence, StandardAttachmentId = c.StandardDocumentId, StandardMissing = string.IsNullOrWhiteSpace(c.ReferenceCode), StandardNotice = NoticeAhead(c) && !EnReferenceRules.IsApproved(approvedMdl, c.ReferenceCode) ? EnReferenceRules.StandardNoticeText(c.ReferenceCode) : null, CanSetStandard = setStd == null, SetStandardBlockedReason = setStd, Number = c.Number, Title = c.Title, InquiryId = c.InquiryId, InquiryNumber = inq?.Number, InquiryStatus = inq == null ? (int?)null : (int)inq.Status, ContractId = c.ContractId, ContractCode = con?.Code,
                     CustomerName = inq != null && customers.TryGetValue(inq.CustomerId, out string cn) ? cn : con?.Employer, CustomerRequirementNote = c.CustomerRequirementNote, Status = (int)c.Status, StatusText = EnText.Case(c.Status),
                     Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification), ProductId = c.ProductId, ProductCode = c.ProductId.HasValue && products.TryGetValue(c.ProductId.Value, out string pc) ? pc : null,
                     PlatformWithChanges = c.PlatformWithChanges, ChangeNote = c.ChangeNote,
