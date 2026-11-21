@@ -214,7 +214,7 @@ const simple = (action: string, okText: string) => runEn(() => act(action), okTe
         <EnAction :can="d.canUpload" :reason="d.uploadBlockedReason" :roles="EnRoles.writers" label="جایگزینی ردیف‌ها از فایل" variant="outline-primary" @go="uploadDialog" />
         <EnAction :can="d.canCheck" :reason="d.checkBlockedReason" :roles="EnRoles.writers" :confirm="`فهرست مدارک پروژهٔ ${label} بررسی و تایید کارشناس شود؟ پس از آن مدیر مهندسی می‌تواند آن را تایید کند.`" label="تایید بررسی کارشناس" variant="success" @go="simple('check', 'بررسی کارشناس ثبت شد.')" />
         <EnAction :can="d.canReturn" :reason="d.returnBlockedReason" :roles="EnRoles.manager" label="برگشت" variant="outline-danger" @go="returnDialog" />
-        <EnAction :can="d.canApprove" :reason="d.approveBlockedReason" :roles="EnRoles.manager" :confirm="`فهرست مدارک پروژهٔ ${label} تایید مدیر مهندسی شود؟ فایل فهرست تاییدشده ساخته می‌شود و همراه بستهٔ فنی مناقصه برای کارفرما می‌رود.`" label="تایید مدیر مهندسی" variant="success" @go="simple('approve', 'فهرست مدارک پروژه تایید شد.')" />
+        <EnAction :can="d.canApprove" :reason="d.approveBlockedReason" :roles="EnRoles.manager" :confirm="`فهرست مدارک پروژهٔ ${label} تایید مدیر مهندسی شود؟ فایل فهرست تاییدشده ساخته می‌شود و همراه بستهٔ فنی مناقصه برای کارفرما می‌رود.`" label="تایید MDL (مدیر مهندسی)" variant="success" @go="simple('approve', 'فهرست مدارک پروژه تایید شد.')" />
         <EnAction :can="d.canVoid" :reason="d.voidBlockedReason" :roles="EnRoles.manager" label="ابطال" variant="outline-danger" @go="voidDialog" />
         <EnAction :can="d.canRecordClientApproval" :reason="d.recordClientApprovalBlockedReason" :roles="EnRoles.commercial" label="ثبت تایید کارفرما" variant="outline-primary" @go="clientDialog" />
       </div>
