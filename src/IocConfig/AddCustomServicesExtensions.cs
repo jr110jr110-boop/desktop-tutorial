@@ -353,6 +353,7 @@ namespace IocConfig
             Services.NasbNiro.Agents.Steps.SepidarOutboxSteps.AddSepidarOutboxSteps(services);
             Services.NasbNiro.Agents.Steps.EngineeringSteps.AddEngineeringSteps(services);
             Services.NasbNiro.Agents.Steps.EngineeringFlowSteps.AddEngineeringFlowSteps(services);   // ENG-E1
+            Services.NasbNiro.Agents.Steps.EngineeringProjectMdlSteps.AddEngineeringProjectMdlSteps(services);   // ENG-E1g
             Services.NasbNiro.Agents.Steps.SalesSteps.AddSalesSteps(services);
             Services.NasbNiro.Agents.Steps.ServiceSteps.AddServiceSteps(services);
             Services.NasbNiro.Agents.AgentStationProbes.AddAgentStationProbes(services);

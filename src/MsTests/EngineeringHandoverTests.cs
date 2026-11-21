@@ -362,13 +362,13 @@ namespace MsTests
         {
             AppHost host = new AppHost("EnCat_" + Guid.NewGuid().ToString("N"));
             List<Services.NasbNiro.Agents.IAgentStep> steps = host.AsSystem(p => Task.FromResult(p.GetServices<Services.NasbNiro.Agents.IAgentStep>().Where(s => s is Services.NasbNiro.Agents.Steps.EnStep).ToList())).GetAwaiter().GetResult();
-            Assert.AreEqual(43, steps.Count);
+            Assert.AreEqual(48, steps.Count);
             Assert.IsTrue(steps.All(s => s.AgentCode == (s.Code == "ENG.STANDARD.GAP" ? "AG-MASTER" : s.Code == "ENG.DIST.DRAFT" || s.Code == "ENG.DIST.NOTIFY" ? "AG-INIT" : "AG-ENG") && s.Code.StartsWith("ENG.") && s.Code.Length <= 60), "the main agent owns the standard-gap report, the project-initiation agent (PMO side) the two distribution steps, the engineering agent every other step");
-            Assert.AreEqual(16, steps.Count(s => s.Station == 1));
+            Assert.AreEqual(21, steps.Count(s => s.Station == 1));
             Assert.AreEqual(1, steps.Count(s => s.Station == 3));
             Assert.AreEqual(26, steps.Count(s => s.Station == 5));
-            Assert.AreEqual(14, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
-            Assert.AreEqual(43, steps.Select(s => s.Code).Distinct().Count());
+            Assert.AreEqual(15, steps.Count(s => s.Kind == Entities.Model.NasbNiro.Agents.AgentStepKind.Agent));
+            Assert.AreEqual(48, steps.Select(s => s.Code).Distinct().Count());
         }
 
         [TestMethod]
