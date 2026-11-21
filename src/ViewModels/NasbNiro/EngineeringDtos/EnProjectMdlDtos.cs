@@ -120,6 +120,13 @@ namespace ViewModels.NasbNiro.EngineeringDtos
 
         public bool CanDraft { get; set; }
         public string DraftBlockedReason { get; set; }
+
+        /// <summary>A person may create the list from a file only when there is no approved standard list to draft from.</summary>
+        public bool CanDraftFromFile { get; set; }
+        public string DraftFromFileBlockedReason { get; set; }
+
+        /// <summary>True when the case's standard has an approved standard list (the agent drafts from it).</summary>
+        public bool HasStandardList { get; set; }
         public bool CanUpload { get; set; }
         public string UploadBlockedReason { get; set; }
         public bool CanCheck { get; set; }

@@ -215,7 +215,7 @@ namespace Services.NasbNiro.Engineering
                 string addDoc = AddTenderDocumentReason(c, w, inq?.Status);
                 string proposeReg = EnRegistrationService.CaseProposalRefusal(c, w.Manager, w.Seat, releasedHandovers.Contains(c.Id), openProposals.Contains(c.Id), registered.TryGetValue((c.Id, c.ReferenceCode ?? string.Empty), out string regNo) ? regNo : null);
                 risks.TryGetValue(c.Id, out EnRiskRow risk);
-                string mdlLock = (await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct)).Refusal;   // the same check the release action runs
+                EnProjectMdlRules.LockResult mdlResult = await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct); string mdlLock = mdlResult.Refusal;   // the same check the release action runs
                 string release = ReleaseReason(c, w, docs, makers) ?? mdlLock, charterR = CharterReason(c, w, charter), cancel = CancelReason(c, w, con?.Status), setStd = StandardReason(c, w);
                 EnCaseDto dto = new EnCaseDto
                 {
@@ -238,7 +238,7 @@ namespace Services.NasbNiro.Engineering
                     CanApprove = approve == null, ApproveBlockedReason = approve, CanReturn = ret == null, ReturnBlockedReason = ret, CanReclassify = reclass == null, ReclassifyBlockedReason = reclass,
                     CanSaveConcept = concept == null, SaveConceptBlockedReason = concept, CanReleaseTender = release == null, ReleaseTenderBlockedReason = release, CanCharterReview = charterR == null, CharterReviewBlockedReason = charterR,
                     CanCancel = cancel == null, CancelBlockedReason = cancel,
-                    ProjectMdlNotice = mdlLock == null ? null : EnProjectMdlRules.NoticeText,
+                    ProjectMdlNotice = mdlLock == null ? null : mdlResult.Notice,
                     CanAddTenderDocument = addDoc == null, AddTenderDocumentBlockedReason = addDoc, TenderDocuments = tenderDocs,
                     DocumentRisk = risk?.Summary(), DocumentRiskAwarded = risk != null && risk.Awarded,
                     CanProposeRegistration = proposeReg == null, ProposeRegistrationBlockedReason = proposeReg,

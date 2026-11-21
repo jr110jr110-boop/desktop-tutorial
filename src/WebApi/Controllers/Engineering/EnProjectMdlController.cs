@@ -48,18 +48,35 @@ namespace WebApi.Controllers
         [HttpPost("draft")]
         public Task<IActionResult> DraftAsync([FromBody] EnProjectMdlActionDto dto, CancellationToken ct) => RunAsync("draft", dto, ct);
 
+        private static async Task<(byte[] Bytes, string Error)> ReadCsvAsync(IFormFile file, CancellationToken ct)
+        {
+            if (file == null || file.Length == 0) return (null, "فایل را انتخاب کنید.");
+            string extension = System.IO.Path.GetExtension(file.FileName ?? string.Empty).ToLowerInvariant();
+            if (extension != ".csv" && extension != ".txt") return (null, "فقط فایل CSV پذیرفته می‌شود (در اکسل: Save As ← CSV UTF-8)؛ فایل «" + (file.FileName ?? string.Empty) + "» از نوع دیگری است.");
+            if (file.Length > EnReferenceCsv.MaxBytes) return (null, "فایل بیش از ۵۰۰ کیلوبایت است.");
+            using System.IO.MemoryStream ms = new System.IO.MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            return (ms.ToArray(), null);
+        }
+
         /// <summary>Replaces the lines from a CSV file (multipart: file, note of at least 15 characters, rowVersion).</summary>
         [HttpPost("{id:int}/upload-lines")]
         [RequestSizeLimit(1_048_576)]
         public async Task<IActionResult> UploadLinesAsync(int id, [FromForm] string rowVersion, [FromForm] string note, IFormFile file, CancellationToken ct)
         {
-            if (file == null || file.Length == 0) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnProjectMdlCaseDto>("فایل را انتخاب کنید."));
-            string extension = System.IO.Path.GetExtension(file.FileName ?? string.Empty).ToLowerInvariant();
-            if (extension != ".csv" && extension != ".txt") return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnProjectMdlCaseDto>("فقط فایل CSV پذیرفته می‌شود (در اکسل: Save As ← CSV UTF-8)؛ فایل «" + (file.FileName ?? string.Empty) + "» از نوع دیگری است."));
-            if (file.Length > EnReferenceCsv.MaxBytes) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnProjectMdlCaseDto>("فایل بیش از ۵۰۰ کیلوبایت است."));
-            using System.IO.MemoryStream ms = new System.IO.MemoryStream();
-            await file.CopyToAsync(ms, ct);
-            return Ok(await _service.UploadLinesAsync(id, rowVersion, note, ms.ToArray(), file.FileName, ct));
+            (byte[] bytes, string error) = await ReadCsvAsync(file, ct);
+            if (error != null) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnProjectMdlCaseDto>(error));
+            return Ok(await _service.UploadLinesAsync(id, rowVersion, note, bytes, file.FileName, ct));
+        }
+
+        /// <summary>An engineer creates the project MDL from a CSV file when the case has no approved standard list (multipart: caseId, file, note of at least 15 characters).</summary>
+        [HttpPost("draft-from-file")]
+        [RequestSizeLimit(1_048_576)]
+        public async Task<IActionResult> DraftFromFileAsync([FromForm] int caseId, [FromForm] string note, IFormFile file, CancellationToken ct)
+        {
+            (byte[] bytes, string error) = await ReadCsvAsync(file, ct);
+            if (error != null) return Ok(Common.Results.ResponseDtoHelper.BadRequest<EnProjectMdlCaseDto>(error));
+            return Ok(await _service.DraftFromFileAsync(caseId, note, bytes, file.FileName, ct));
         }
 
         [HttpPost("{id:int}/check")]

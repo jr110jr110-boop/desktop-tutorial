@@ -20,6 +20,7 @@ namespace Services.NasbNiro.Engineering
     {
         public const string LockText = "انتشار بستهٔ فنی مناقصه بسته است: فهرست مدارک پروژه (MDL) هنوز توسط مدیر مهندسی تایید نشده است. در پروژهٔ خاص، مدیر مهندسی «مناقصه بدون MDL» را درخواست می‌کند و فقط مدیرعامل تصمیم می‌گیرد.";
         public const string NoticeText = "بستهٔ فنی مناقصه تا تایید فهرست مدارک پروژه (MDL) منتشر نمی‌شود.";
+        public const string NoticeFromFileText = "فهرست مدارک پروژه (MDL) را از فایل بسازید یا برای مناقصه بدون MDL از مدیرعامل مجوز بگیرید.";
         public const string CsvHeader = "docType,title,discipline,required,tender,units,clientSubmittal,clause,note";
 
         /// <summary>The lines that exist (never deleted).</summary>
@@ -72,25 +73,41 @@ namespace Services.NasbNiro.Engineering
             return all.FirstOrDefault(p => p.Status == EnMdlPermitStatus.Approved || p.Status == EnMdlPermitStatus.Requested) ?? all.FirstOrDefault();
         }
 
-        /// <summary>The outcome of the release lock: <see cref="Refusal"/> is null when the tender package may go; with an approved list <see cref="Mdl"/> is the list whose file joins the package, with a permit <see cref="Permit"/> is the CEO's permit.</summary>
+        /// <summary>The scope (employer, every kind of tender): a case that has, or had, a tender package (turbine, spare parts, service). A direct-contract case never has one and needs nothing.</summary>
+        public static bool Applies(EnCase c) => c.Status == EnCaseStatus.TenderPreparation || (EnCaseRules.TenderPassed(c.Status) && (c.InquiryId.HasValue || c.TenderPackageId.HasValue));
+
+        public static string AppliesText(EnCase c) =>
+            Applies(c) ? null
+            : EnCaseRules.TenderPassed(c.Status) ? "این پرونده بستهٔ فنی مناقصه ندارد (قرارداد مستقیم)؛ فهرست مدارک پروژه برای آن لازم نیست."
+            : "فهرست مدارک پروژه از مرحلهٔ تهیهٔ بستهٔ فنی مناقصه لازم است.";
+
+        /// <summary>The approved standard list of the case's standard (the start of an agent draft); null when the case has no standard code or its standard has no approved list.</summary>
+        public static Task<EnReferenceList> StandardAsync(IUnitOfWork uow, EnCase c, bool track, CancellationToken ct) =>
+            string.IsNullOrWhiteSpace(c.ReferenceCode) ? Task.FromResult<EnReferenceList>(null) : EnReferenceRules.CurrentAsync(uow, track, ct, EnReferenceRules.NormCode(c.ReferenceCode));
+
+        /// <summary>The outcome of the release lock: <see cref="Refusal"/> is null when the tender package may go; with an approved list <see cref="Mdl"/> is the list whose file joins the package, with a permit <see cref="Permit"/> is the CEO's permit. <see cref="Notice"/> is what the case page tells the engineer while it is locked.</summary>
         public sealed class LockResult
         {
             public string Refusal;
+            public string Notice;
             public EnProjectMdl Mdl;
             public EnMdlPermit Permit;
         }
 
         /// <summary>
-        /// The lock of the tender package release (turbine cases still in the tender preparation only; spare parts, service and later statuses are not locked): open when the case has an APPROVED project MDL whose approved hash
+        /// The lock of the tender package release (EVERY kind of case while it is still in the tender preparation; later statuses are not locked): open when the case has an APPROVED project MDL whose approved hash
         /// still equals the hash of its lines, or an APPROVED "without MDL" permit.
         /// </summary>
         public static async Task<LockResult> ReleaseLockAsync(IUnitOfWork uow, EnCase c, CancellationToken ct)
         {
-            if (c.Kind != EnCaseKind.Turbine || c.Status != EnCaseStatus.TenderPreparation) return new LockResult();
+            if (c.Status != EnCaseStatus.TenderPreparation) return new LockResult();
             EnProjectMdl m = await LiveAsync(uow, c.Id, false, ct);
             if (m != null && m.Status == EnProjectMdlStatus.Approved && !string.IsNullOrEmpty(m.ApprovedHash) && m.ApprovedHash == HashOf(m)) return new LockResult { Mdl = m };
             EnMdlPermit p = await uow.Set<EnMdlPermit>().AsNoTracking().Where(x => !x.Deleted && x.CaseId == c.Id && x.Status == EnMdlPermitStatus.Approved).OrderByDescending(x => x.Id).FirstOrDefaultAsync(ct);
-            return p != null ? new LockResult { Permit = p } : new LockResult { Refusal = LockText };
+            if (p != null) return new LockResult { Permit = p };
+            // nothing to start from (no live list, no approved standard list): a person creates it from a file
+            string notice = m == null && await StandardAsync(uow, c, false, ct) == null ? NoticeFromFileText : NoticeText;
+            return new LockResult { Refusal = LockText, Notice = notice };
         }
     }
 
@@ -104,6 +121,9 @@ namespace Services.NasbNiro.Engineering
 
         /// <summary>draft, check, return, approve, void, record-client-approval, request-permit, decide-permit, withdraw-permit (see <see cref="EnProjectMdlActionDto"/>); the answer is the case view after the action.</summary>
         Task<ResponseDto<EnProjectMdlCaseDto>> ActionAsync(EnProjectMdlActionDto dto, CancellationToken ct);
+
+        /// <summary>A person creates the project MDL of a case that has no approved standard list to start from: every line of the file is a project line.</summary>
+        Task<ResponseDto<EnProjectMdlCaseDto>> DraftFromFileAsync(int caseId, string note, byte[] file, string fileName, CancellationToken ct);
 
         /// <summary>Replaces the lines of a Draft or Checked revision with the lines of a CSV file (a person only); the file is kept as evidence.</summary>
         Task<ResponseDto<EnProjectMdlCaseDto>> UploadLinesAsync(int id, string rowVersion, string note, byte[] file, string fileName, CancellationToken ct);
@@ -159,26 +179,31 @@ namespace Services.NasbNiro.Engineering
 
         // ---------------------------------------------------------------- the rules (one predicate for the button and the action)
 
-        private static bool Applies(EnCase c) => c.Kind == EnCaseKind.Turbine && (c.Status == EnCaseStatus.TenderPreparation || EnCaseRules.TenderPassed(c.Status));
+        private static bool Applies(EnCase c) => EnProjectMdlRules.Applies(c);
 
-        private static string AppliesText(EnCase c) =>
-            c.Kind != EnCaseKind.Turbine ? "فهرست مدارک پروژه فقط برای پروندهٔ توربین لازم است؛ قطعات یدکی و خدمات پس از فروش آن را ندارند."
-            : Applies(c) ? null : "فهرست مدارک پروژه از مرحلهٔ تهیهٔ بستهٔ فنی مناقصه لازم است.";
+        private static string AppliesText(EnCase c) => EnProjectMdlRules.AppliesText(c);
 
         private const string TenderPreparationOnly = "فهرست مدارک پروژه فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه (پیش از ابلاغ بسته) تغییر می‌کند.";
 
         private static string DraftReason(Ctx x, Who w) =>
             !w.Writer ? EnText.NotAllowed
-            : x.Case.Kind != EnCaseKind.Turbine ? AppliesText(x.Case)
             : x.Case.Status != EnCaseStatus.TenderPreparation ? "فهرست مدارک پروژه فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه ساخته می‌شود."
-            : string.IsNullOrWhiteSpace(x.Case.ReferenceCode) ? "استاندارد پروژه هنوز ثبت نشده است؛ فهرست پروژه از فهرست MDL تاییدشدهٔ استاندارد ساخته می‌شود."
-            : x.Standard == null ? "فهرست MDL تاییدشده‌ای برای استاندارد «" + x.Case.ReferenceCode + "» نیست؛ ابتدا مدیر مهندسی آن را تایید کند."
+            : string.IsNullOrWhiteSpace(x.Case.ReferenceCode) ? "استاندارد پروژه ثبت نشده است؛ فهرست پروژه از فهرست MDL تاییدشدهٔ استاندارد ساخته می‌شود. بدون استاندارد، کارشناس فهرست را از فایل بسازد."
+            : x.Standard == null ? "فهرست MDL تاییدشده‌ای برای استاندارد «" + x.Case.ReferenceCode + "» نیست؛ ایجنت پیش‌نویس نمی‌سازد و کارشناس فهرست را از فایل بسازد."
             : x.Live != null ? "برای این پرونده فهرست مدارک پروژهٔ در جریان (" + x.Live.Number + "، " + EnText.Num(x.Live.Revision) + ") وجود دارد؛ همان را ادامه دهید یا ابطال کنید."
             : x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود." : null;
 
+        /// <summary>A person creates the project MDL from a file only when there is no approved standard list to draft from (otherwise: draft from the standard, then change the lines by a file).</summary>
+        private static string DraftFromFileReason(Ctx x, Who w) =>
+            !w.Writer ? EnText.NotAllowed : w.Seat ? EnText.AiNever
+            : x.Case.Status != EnCaseStatus.TenderPreparation ? "فهرست مدارک پروژه فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه ساخته می‌شود."
+            : x.Live != null ? "برای این پرونده فهرست مدارک پروژهٔ در جریان (" + x.Live.Number + "، " + EnText.Num(x.Live.Revision) + ") وجود دارد؛ همان را با فایل تغییر دهید یا ابطال کنید."
+            : x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود."
+            : x.Standard != null ? "برای استاندارد «" + x.Case.ReferenceCode + "» فهرست MDL تاییدشده هست؛ پیش‌نویس را از فهرست استاندارد بسازید (ایجنت یا کارشناس) و سپس ردیف‌ها را با فایل تغییر دهید." : null;
+
         private static string UploadReason(Ctx x, Who w) =>
             !w.Writer ? EnText.NotAllowed : w.Seat ? EnText.AiNever
-            : x.Live == null ? "فهرست مدارک پروژه‌ای برای تغییر نیست؛ ابتدا ایجنت مهندسی پیش‌نویس را بسازد."
+            : x.Live == null ? "فهرست مدارک پروژه‌ای برای تغییر نیست؛ ابتدا پیش‌نویس ساخته شود (ایجنت از فهرست استاندارد، یا کارشناس از فایل)."
             : x.Live.Status != EnProjectMdlStatus.Draft && x.Live.Status != EnProjectMdlStatus.Checked ? "فقط فهرست پیش‌نویس یا بررسی‌شده با فایل جایگزین می‌شود؛ فهرست تاییدشده را باید مدیر مهندسی ابطال کند."
             : x.Case.Status != EnCaseStatus.TenderPreparation ? TenderPreparationOnly : null;
 
@@ -213,7 +238,6 @@ namespace Services.NasbNiro.Engineering
 
         private static string RequestPermitReason(Ctx x, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever
-            : x.Case.Kind != EnCaseKind.Turbine ? AppliesText(x.Case)
             : x.Case.Status != EnCaseStatus.TenderPreparation ? "مجوز «مناقصه بدون MDL» فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه درخواست می‌شود."
             : x.Live != null && x.Live.Status == EnProjectMdlStatus.Approved ? "فهرست مدارک پروژه تایید شده است؛ نیازی به مجوز نیست."
             : x.Permit != null && (x.Permit.Status == EnMdlPermitStatus.Requested || x.Permit.Status == EnMdlPermitStatus.Approved) ? "برای این پرونده مجوز «مناقصه بدون MDL» (" + x.Permit.Number + ") در جریان یا تاییدشده است." : null;
@@ -268,7 +292,7 @@ namespace Services.NasbNiro.Engineering
         {
             Who w = await WhoAsync(ct);
             Ctx x = await LoadAsync(c, false, ct);
-            string draft = DraftReason(x, w), upload = UploadReason(x, w), check = CheckReason(x, w), ret = ReturnReasonOf(x, w), approve = ApproveReason(x, w), voidR = VoidReasonOf(x, w), client = RecordClientReason(x, w), reqPermit = RequestPermitReason(x, w), decide = DecidePermitReason(x, w), withdraw = WithdrawPermitReason(x, w);
+            string draft = DraftReason(x, w), draftFile = DraftFromFileReason(x, w), upload = UploadReason(x, w), check = CheckReason(x, w), ret = ReturnReasonOf(x, w), approve = ApproveReason(x, w), voidR = VoidReasonOf(x, w), client = RecordClientReason(x, w), reqPermit = RequestPermitReason(x, w), decide = DecidePermitReason(x, w), withdraw = WithdrawPermitReason(x, w);
             List<EnProjectMdl> others = await _uow.Set<EnProjectMdl>().AsNoTracking().Include(m => m.Lines).Where(m => !m.Deleted && m.CaseId == c.Id).OrderByDescending(m => m.Revision).ToListAsync(ct);
             Dictionary<int, string> names = await EnUsers.NamesAsync(_uow, others.SelectMany(m => new int?[] { m.CheckedByUserId, m.ApprovedByUserId, m.ClientApprovalRecordedByUserId }).Concat(new int?[] { x.Permit?.RequestedByUserId, x.Permit?.DecidedByUserId }), ct);
             EnProjectMdlCaseDto dto = new EnProjectMdlCaseDto
@@ -282,7 +306,7 @@ namespace Services.NasbNiro.Engineering
                     RequestedAtText = EnText.Stamp(x.Permit.RequestedAt), DecidedByName = names.Name(x.Permit.DecidedByUserId), DecidedAtText = EnText.Stamp(x.Permit.DecidedAt), DecisionNote = x.Permit.DecisionNote,
                 },
                 ReleaseLockText = (await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct)).Refusal,
-                CanDraft = draft == null, DraftBlockedReason = draft, CanUpload = upload == null, UploadBlockedReason = upload, CanCheck = check == null, CheckBlockedReason = check, CanReturn = ret == null, ReturnBlockedReason = ret,
+                CanDraft = draft == null, DraftBlockedReason = draft, CanDraftFromFile = draftFile == null, DraftFromFileBlockedReason = draftFile, HasStandardList = x.Standard != null, CanUpload = upload == null, UploadBlockedReason = upload, CanCheck = check == null, CheckBlockedReason = check, CanReturn = ret == null, ReturnBlockedReason = ret,
                 CanApprove = approve == null, ApproveBlockedReason = approve, CanVoid = voidR == null, VoidBlockedReason = voidR, CanRecordClientApproval = client == null, RecordClientApprovalBlockedReason = client,
                 CanRequestPermit = reqPermit == null, RequestPermitBlockedReason = reqPermit, CanDecidePermit = decide == null, DecidePermitBlockedReason = decide, CanWithdrawPermit = withdraw == null, WithdrawPermitBlockedReason = withdraw,
             };
@@ -459,6 +483,41 @@ namespace Services.NasbNiro.Engineering
         }
 
         private void Touch(EnProjectMdl m, DateTimeOffset now) { m.ModifyDate = now; m.ModifierUserId = Me; }
+
+        public async Task<ResponseDto<EnProjectMdlCaseDto>> DraftFromFileAsync(int caseId, string note, byte[] file, string fileName, CancellationToken ct)
+        {
+            EnCase c = await _uow.Set<EnCase>().FirstOrDefaultAsync(k => k.Id == caseId && !k.Deleted, ct);
+            if (c == null) return EnText.NotFound<EnProjectMdlCaseDto>(EnText.NotFoundCase);
+            Who w = await WhoAsync(ct);
+            Ctx x = await LoadAsync(c, true, ct);
+            string why = DraftFromFileReason(x, w);
+            if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
+            string reason = EnText.Clean(note);
+            why = EnText.ReasonShort(reason, EnRules.ReasonMin, "یادداشت (منبع و چرایی فهرست پروژه)") ?? EnText.Over(reason, 2000, "یادداشت");
+            if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
+            string problem = EnReferenceCsv.Parse(file, out List<EnReferenceLineDto> lines, out EnReferenceCsv.Columns _);
+            if (problem != null) return EnText.Bad<EnProjectMdlCaseDto>(problem);
+            if (lines.Count == 0) return EnText.Bad<EnProjectMdlCaseDto>("دست‌کم یک ردیف باید در فهرست بماند.");
+            (Guid? docId, string docName) = await StoreAsync(file, fileName, "فایل فهرست مدارک پروژه (MDL) " + c.Number, "project-mdl.csv");   // saves the unit of work: nothing is changed yet
+            DateTimeOffset now = DateTimeOffset.Now;
+            int revision = (await _uow.Set<EnProjectMdl>().Where(m => m.CaseId == c.Id).Select(m => (int?)m.Revision).MaxAsync(ct) ?? 0) + 1;
+            EnProjectMdl mdl = new EnProjectMdl
+            {
+                CaseId = c.Id, Revision = revision, Status = EnProjectMdlStatus.Draft, BasedOnListId = null, BasedOnCode = null, BasedOnRevision = 0, SourceDocumentId = docId, SourceFileName = docName, ChangeNote = reason,
+                CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+            };
+            mdl.Number = await EnNumbers.NextAsync(_uow, EnNumbers.ProjectMdl, "PMDL", now.DateTime, ct);
+            int seq = 0;
+            foreach (EnReferenceLineDto f in lines)
+                mdl.Lines.Add(new EnProjectMdlLine
+                {
+                    Seq = ++seq, DocumentType = f.DocumentType.Trim(), Discipline = EnText.Clean(f.Discipline), Title = f.Title.Trim(), Required = f.Required, TenderStage = f.TenderStage, ClientSubmittal = f.ClientSubmittal, StandardClause = EnText.Clean(f.StandardClause), Note = EnText.Clean(f.Note),
+                    Units = EnUnits.Normalize(f.Units, out _), Origin = EnProjectMdlLineOrigin.Project, Removed = false, CreateDate = now, CreatorUserId = Me, ModifyDate = now, ModifierUserId = Me,
+                });
+            _uow.Set<EnProjectMdl>().Add(mdl);
+            EnEvents.Add(_uow, c, "project-mdl-drafted", Me, "پیش‌نویس فهرست مدارک پروژه " + mdl.Number + " (ویرایش " + EnText.Num(revision) + ") از فایل، بدون فهرست استاندارد، با " + EnText.Num(seq) + " ردیف ساخته شد: " + EnText.Cut(reason, 300));
+            return await SaveAsync(c, ct);
+        }
 
         public async Task<ResponseDto<EnProjectMdlCaseDto>> UploadLinesAsync(int id, string rowVersion, string note, byte[] file, string fileName, CancellationToken ct)
         {
