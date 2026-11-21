@@ -241,7 +241,7 @@ namespace MsTests
             Refused(await MdlAct(host, Eng2, "return", d => { d.Id = v.Mdl.Id; d.Reason = "دلیل برگشت به اندازهٔ کافی طولانی"; }));
             Refused(await MdlAct(host, seatManager, "return", d => { d.Id = v.Mdl.Id; d.Reason = "دلیل برگشت به اندازهٔ کافی طولانی"; }), "انسان");
             Refused(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "کوتاه"; }), "دلیل");
-            Assert.AreEqual((int)EnProjectMdlStatus.Draft, Ok(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "ردیف نقشه باید دوباره دیده شود"; })).Mdl.Status);
+            Assert.AreEqual((int)EnProjectMdlStatus.Draft, Ok(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "ردیف نقشه باید دوباره دیده شود"; d.RowVersion = Ver(host, c.Id); })).Mdl.Status);
             Assert.IsNull(Ok(await MdlView(host, Eng1, c.Id)).Mdl.CheckedByName);
             // a manager checks (a manager is an engineering writer); the same manager does not approve, the other one does
             chk = await Checked(host, c.Id, Mgr1);
@@ -372,7 +372,7 @@ namespace MsTests
             Refused(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "کوتاه"; }), "دلیل");
             Assert.IsTrue(Ok(await MdlView(host, Mgr1, c.Id)).CanVoid);
             Assert.IsFalse(Ok(await MdlView(host, Eng1, c.Id)).CanVoid);
-            EnProjectMdlCaseDto voided = Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست استاندارد بازنگری شد و پیش‌نویس کهنه است"; }));
+            EnProjectMdlCaseDto voided = Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست استاندارد بازنگری شد و پیش‌نویس کهنه است"; d.RowVersion = Ver(host, c.Id); }));
             Assert.IsNull(voided.Mdl, "no live revision");
             Assert.AreEqual(1, voided.History.Count);
             Assert.AreEqual((int)EnProjectMdlStatus.Void, voided.History[0].Status);
@@ -384,9 +384,9 @@ namespace MsTests
             Assert.AreNotEqual(v.Mdl.Number, second.Mdl.Number);
             Assert.AreEqual(2, second.History.Count);
             await Checked(host, c.Id);
-            EnProjectMdlCaseDto approved = Ok(await MdlAct(host, Mgr1, "approve", d => d.Id = second.Mdl.Id));
+            EnProjectMdlCaseDto approved = Ok(await MdlAct(host, Mgr1, "approve", d => { d.Id = second.Mdl.Id; d.RowVersion = Ver(host, c.Id); }));
             Assert.IsTrue(approved.CanVoid);
-            Assert.IsNull(Ok(await MdlAct(host, Mgr2, "void", d => { d.Id = second.Mdl.Id; d.Reason = "فهرست تاییدشده پیش از ابلاغ ابطال شد"; })).Mdl);
+            Assert.IsNull(Ok(await MdlAct(host, Mgr2, "void", d => { d.Id = second.Mdl.Id; d.Reason = "فهرست تاییدشده پیش از ابلاغ ابطال شد"; d.RowVersion = Ver(host, c.Id); })).Mdl);
             Assert.AreEqual(LockText, Refused(await CaseAct(host, Mgr1, c.Id, "release-tender")));
             Assert.AreEqual(3, (await Draft(host, c.Id)).Mdl.Revision);
         }
@@ -490,7 +490,7 @@ namespace MsTests
             EnCaseDto c = await NewCase(host);
             await Draft(host, c.Id);
             await Checked(host, c.Id);
-            Ok(await MdlAct(host, Mgr1, "approve", d => d.CaseId = c.Id));
+            Ok(await MdlAct(host, Mgr1, "approve", d => { d.CaseId = c.Id; d.RowVersion = Ver(host, c.Id); }));
             Refused(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; }), "تایید شده");
             Assert.IsFalse(Ok(await MdlView(host, Mgr1, c.Id)).CanRequestPermit);
         }
@@ -554,7 +554,7 @@ namespace MsTests
             foreach (ClaimsPrincipal who in everyone) await FlagsMatchActionsAsync(host, who, c.Id, letter);
             await Checked(host, c.Id, Mgr1);   // checked by Mgr1
             foreach (ClaimsPrincipal who in everyone) await FlagsMatchActionsAsync(host, who, c.Id, letter);
-            Ok(await MdlAct(host, Mgr2, "approve", d => d.CaseId = c.Id));   // approved, tender not released
+            Ok(await MdlAct(host, Mgr2, "approve", d => { d.CaseId = c.Id; d.RowVersion = Ver(host, c.Id); }));   // approved, tender not released
             foreach (ClaimsPrincipal who in everyone) await FlagsMatchActionsAsync(host, who, c.Id, letter);
             Ok(await CaseAct(host, Mgr1, c.Id, "release-tender"));   // released
             foreach (ClaimsPrincipal who in everyone) await FlagsMatchActionsAsync(host, who, c.Id, letter);
@@ -729,7 +729,7 @@ namespace MsTests
             StringAssert.Contains(csv, "TEST,");
             Assert.IsFalse(csv.Contains("CERT,"));
             // a void lets a new draft from a file follow (revision 2)
-            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست باید با فایل دیگری ساخته شود"; }));
+            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست باید با فایل دیگری ساخته شود"; d.RowVersion = Ver(host, v.CaseId); }));
             v = Ok(await MdlFromFile(host, Eng1, sp.Id, FileCsv));
             Assert.AreEqual(2, v.Mdl.Revision);
             Assert.AreEqual(1, v.History.Count(h => h.Status == (int)EnProjectMdlStatus.Void));
@@ -764,6 +764,161 @@ namespace MsTests
             EnCaseDto open = Ok(await CaseAct(host, Eng1, null, "open", d => d.InquiryId = Inquiry(host, type: Entities.Model.NasbNiro.Sales.SlProductType.SpareParts)));
             Refused(await MdlFromFile(host, Eng1, open.Id, FileCsv), "مرحلهٔ تهیهٔ بستهٔ فنی");
             Assert.IsFalse(Ok(await MdlView(host, Eng1, open.Id)).CanDraftFromFile);
+        }
+
+        // ------------------------------------------------------------------------------------------ fix round: an approval never outlives a new decision
+
+        private const string StaleText = "فهرست مدارک پروژه (MDL) یا مجوز پیش از آخرین تصمیم پرونده تایید شده است؛ آن را باطل و دوباره تهیه کنید.";
+
+        /// <summary>The manager sends the case back and the new decision round ends again in the tender preparation.</summary>
+        private static async Task ReDecide(AppHost host, int caseId)
+        {
+            Ok(await CaseAct(host, Mgr2, caseId, "reclassify", d => d.Note = "دلیل تغییر نوع پرونده برای آزمون"));
+            Ok(await CaseAct(host, Mgr1, caseId, "confirm"));
+            await ConfirmGapIfAny(host, caseId);
+            Ok(await CaseAct(host, Ceo, caseId, "approve"));
+            Assert.AreEqual((int)EnCaseStatus.TenderPreparation, Ok(await GetCase(host, Mgr1, caseId)).Status);
+        }
+
+        [TestMethod]
+        public async Task An_Approved_Project_Mdl_Does_Not_Survive_A_New_Decision_Of_The_Case_And_Can_Be_Voided_And_Redrafted()
+        {
+            AppHost host = Started("pm_stale_mdl");
+            EnCaseDto c = await Releasable(host);
+            EnProjectMdlCaseDto ap = await ApprovedMdl(host, c.Id);
+            Assert.IsFalse(ap.Mdl.ApprovalStale);
+            Assert.IsTrue(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            await ReDecide(host, c.Id);
+            // the old approval is still Approved with a matching hash, but it was given before the latest decision
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Mgr1, c.Id));
+            Assert.AreEqual((int)EnProjectMdlStatus.Approved, v.Mdl.Status);
+            Assert.IsTrue(v.Mdl.ApprovalStale);
+            Assert.AreEqual(StaleText, v.ReleaseLockText);
+            EnCaseDto asMgr = Ok(await GetCase(host, Mgr1, c.Id));
+            Assert.IsFalse(asMgr.CanReleaseTender);
+            Assert.AreEqual(StaleText, asMgr.ReleaseTenderBlockedReason);
+            Assert.AreEqual(StaleText, asMgr.ProjectMdlNotice);
+            Assert.AreEqual(StaleText, Refused(await CaseAct(host, Mgr1, c.Id, "release-tender")));
+            // nothing was voided automatically; the manager voids and the agent drafts again, which is checked, approved and releases
+            Assert.IsTrue(v.CanVoid);
+            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "تصمیم پرونده تغییر کرد؛ فهرست دوباره تهیه شود"; d.RowVersion = v.Mdl.RowVersion; }));
+            EnProjectMdlCaseDto second = await ApprovedMdl(host, c.Id);
+            Assert.AreEqual(2, second.Mdl.Revision);
+            Assert.IsFalse(second.Mdl.ApprovalStale);
+            Assert.IsTrue(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr1, c.Id, "release-tender")).Status);
+        }
+
+        [TestMethod]
+        public async Task An_Approved_Project_Mdl_Made_From_Another_Standard_Than_The_Current_One_Is_Stale()
+        {
+            AppHost host = Started("pm_stale_code");
+            EnCaseDto c = await Releasable(host);
+            EnProjectMdlCaseDto ap = await ApprovedMdl(host, c.Id);
+            Assert.IsTrue(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            host.Write(u => { u.Set<EnCase>().Single(k => k.Id == c.Id).ReferenceCode = "another-std"; u.SaveChanges(); }, Seeder);
+            EnProjectMdlCaseDto other = Ok(await MdlView(host, Mgr1, c.Id));
+            Assert.IsTrue(other.Mdl.ApprovalStale);
+            Assert.AreEqual(StaleText, other.ReleaseLockText);
+            // the code is compared normalised (case and spaces do not matter)
+            host.Write(u => { u.Set<EnCase>().Single(k => k.Id == c.Id).ReferenceCode = " " + Std.ToLowerInvariant() + " "; u.SaveChanges(); }, Seeder);
+            Assert.IsFalse(Ok(await MdlView(host, Mgr1, c.Id)).Mdl.ApprovalStale);
+            Assert.IsTrue(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            // a list made from a file has no standard: only the decision time decides
+            host.Write(u => { u.Set<EnProjectMdl>().Single(m => m.Id == ap.Mdl.Id).BasedOnCode = null; u.SaveChanges(); }, Seeder);
+            Assert.IsFalse(Ok(await MdlView(host, Mgr1, c.Id)).Mdl.ApprovalStale);
+        }
+
+        [TestMethod]
+        public async Task An_Approved_Permit_Does_Not_Survive_A_New_Decision_The_Manager_Withdraws_It_With_A_Reason_And_Asks_Again()
+        {
+            AppHost host = Started("pm_stale_permit");
+            EnCaseDto c = await Releasable(host);
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; }));
+            int permit = Ok(await MdlView(host, Mgr1, c.Id)).Permit.Id;
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Approve = true; }));
+            Assert.IsTrue(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            Assert.IsFalse(Ok(await MdlView(host, Mgr1, c.Id)).Permit.ApprovalStale);
+            await ReDecide(host, c.Id);
+            EnProjectMdlCaseDto v = Ok(await MdlView(host, Mgr1, c.Id));
+            Assert.IsTrue(v.Permit.ApprovalStale);
+            Assert.AreEqual(StaleText, v.ReleaseLockText);
+            Assert.AreEqual(StaleText, Refused(await CaseAct(host, Mgr1, c.Id, "release-tender")));
+            Assert.IsFalse(Ok(await GetCase(host, Mgr1, c.Id)).CanReleaseTender);
+            // asking again needs the old one out first; the withdrawal of an approved permit needs a reason, a manager, never a seat
+            StringAssert.Contains(Refused(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; })), "پس بگیرید");
+            Assert.IsTrue(v.CanWithdrawPermit);
+            Assert.IsFalse(Ok(await MdlView(host, Eng1, c.Id)).CanWithdrawPermit);
+            Refused(await MdlAct(host, Eng1, "withdraw-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Note = "دلیل پس‌گرفتن به اندازهٔ کافی طولانی"; }));
+            Refused(await MdlAct(host, Mgr1, "withdraw-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Note = "کوتاه"; }), "دلیل");
+            Ok(await MdlAct(host, Mgr1, "withdraw-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Note = "تصمیم پرونده تغییر کرد؛ مجوز تازه لازم است"; }));
+            Assert.AreEqual(EnMdlPermitStatus.Void, host.Read(u => u.Set<EnMdlPermit>().Single(p => p.Id == permit).Status));
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; }));
+            int again = Ok(await MdlView(host, Mgr1, c.Id)).Permit.Id;
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.PermitId = again; d.Approve = true; }));
+            Assert.AreEqual((int)EnCaseStatus.TenderIssued, Ok(await CaseAct(host, Mgr1, c.Id, "release-tender")).Status);
+            // an approved permit that is NOT stale cannot be withdrawn (no longer a way to undo the CEO's decision)
+        }
+
+        [TestMethod]
+        public async Task The_Person_Who_Made_The_Lines_Does_Not_Approve_Them()
+        {
+            AppHost host = Started("pm_maker");
+            EnCaseDto c = await NewCase(host);
+            // the manager uploads the lines over the agent's draft, an engineer checks, the same manager may not approve: the other manager may
+            EnProjectMdlCaseDto v = await Draft(host, c.Id);
+            v = Ok(await MdlUpload(host, Mgr1, v.Mdl, Head + "BOM,مدرک BOM,مکانیک,1,1,,0,,\nDWG,مدرک DWG,مکانیک,1,1,,0,,\n"));
+            v = Ok(await MdlAct(host, Eng2, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            Assert.IsFalse(Ok(await MdlView(host, Mgr1, c.Id)).CanApprove);
+            string why = Refused(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }), "بارگذاری");
+            Assert.AreEqual(why, Ok(await MdlView(host, Mgr1, c.Id)).ApproveBlockedReason);
+            Assert.IsTrue(Ok(await MdlView(host, Mgr2, c.Id)).CanApprove);
+            Assert.AreEqual((int)EnProjectMdlStatus.Approved, Ok(await MdlAct(host, Mgr2, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; })).Mdl.Status);
+            // a list created from a file by the manager is the same
+            AppHost host2 = Started("pm_maker_file");
+            EnCaseDto c2 = await OtherKindCase(host2, Entities.Model.NasbNiro.Sales.SlProductType.SpareParts, null);
+            Ok(await MdlFromFile(host2, Mgr1, c2.Id, FileCsv));
+            EnProjectMdlCaseDto f = Ok(await MdlView(host2, Eng2, c2.Id));
+            f = Ok(await MdlAct(host2, Eng2, "check", d => { d.Id = f.Mdl.Id; d.RowVersion = f.Mdl.RowVersion; }));
+            Assert.IsFalse(Ok(await MdlView(host2, Mgr1, c2.Id)).CanApprove);
+            Refused(await MdlAct(host2, Mgr1, "approve", d => { d.Id = f.Mdl.Id; d.RowVersion = f.Mdl.RowVersion; }), "ساخته");
+            Assert.IsTrue(Ok(await MdlView(host2, Mgr2, c2.Id)).CanApprove);
+            Ok(await MdlAct(host2, Mgr2, "approve", d => { d.Id = f.Mdl.Id; d.RowVersion = f.Mdl.RowVersion; }));
+        }
+
+        [TestMethod]
+        public async Task A_List_Whose_Lines_Changed_After_The_Check_Is_Not_Approved()
+        {
+            AppHost host = Started("pm_race");
+            EnCaseDto c = await NewCase(host);
+            await Draft(host, c.Id);
+            EnProjectMdlCaseDto v = await Checked(host, c.Id, Eng2);
+            Assert.IsTrue(Ok(await MdlView(host, Mgr1, c.Id)).CanApprove);
+            // an upload that raced the check: a line carries a later stamp although the status says Checked
+            host.Write(u => { u.Set<EnProjectMdlLine>().Where(l => l.ProjectMdlId == v.Mdl.Id).OrderBy(l => l.Id).First().ModifyDate = DateTimeOffset.Now.AddMinutes(1); u.SaveChanges(); }, Seeder);
+            EnProjectMdlCaseDto now = Ok(await MdlView(host, Mgr1, c.Id));
+            Assert.IsFalse(now.CanApprove);
+            StringAssert.Contains(now.ApproveBlockedReason, "دوباره بررسی");
+            Assert.AreEqual(now.ApproveBlockedReason, Refused(await MdlAct(host, Mgr1, "approve", d => { d.Id = v.Mdl.Id; d.RowVersion = now.Mdl.RowVersion; })));
+            Assert.AreEqual((int)EnProjectMdlStatus.Checked, Ok(await MdlView(host, Mgr1, c.Id)).Mdl.Status);
+        }
+
+        [TestMethod]
+        public async Task A_Person_Must_Send_The_Concurrency_Token_And_The_Agent_Need_Not()
+        {
+            AppHost host = Started("pm_token");
+            EnCaseDto c = await NewCase(host);
+            EnProjectMdlCaseDto v = await Draft(host, c.Id);   // the agent: no token
+            foreach (string empty in new[] { null, "", "  " })
+                Refused(await MdlAct(host, Eng1, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = empty; }), "نسخه");
+            Refused(await MdlUpload(host, Eng1, v.Mdl, Head + "BOM,مدرک BOM,مکانیک,1,1,,0,,\n", version: ""), "نسخه");
+            Assert.AreEqual((int)EnProjectMdlStatus.Draft, Ok(await MdlView(host, Eng1, c.Id)).Mdl.Status);
+            v = Ok(await MdlAct(host, Eng1, "check", d => { d.Id = v.Mdl.Id; d.RowVersion = v.Mdl.RowVersion; }));
+            Refused(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "ردیف نقشه باید دوباره دیده شود"; }), "نسخه");
+            Refused(await MdlAct(host, Mgr2, "approve", d => d.Id = v.Mdl.Id), "نسخه");
+            Refused(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "ابطال بدون شناسهٔ نسخه ممکن نیست"; }), "نسخه");
+            Assert.AreEqual((int)EnProjectMdlStatus.Checked, Ok(await MdlView(host, Mgr1, c.Id)).Mdl.Status);
+            Assert.AreEqual((int)EnProjectMdlStatus.Draft, Ok(await MdlAct(host, Mgr1, "return", d => { d.Id = v.Mdl.Id; d.Reason = "ردیف نقشه باید دوباره دیده شود"; d.RowVersion = v.Mdl.RowVersion; })).Mdl.Status);
         }
     }
 }

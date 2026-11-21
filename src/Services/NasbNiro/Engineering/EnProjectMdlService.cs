@@ -21,6 +21,7 @@ namespace Services.NasbNiro.Engineering
         public const string LockText = "انتشار بستهٔ فنی مناقصه بسته است: فهرست مدارک پروژه (MDL) هنوز توسط مدیر مهندسی تایید نشده است. در پروژهٔ خاص، مدیر مهندسی «مناقصه بدون MDL» را درخواست می‌کند و فقط مدیرعامل تصمیم می‌گیرد.";
         public const string NoticeText = "بستهٔ فنی مناقصه تا تایید فهرست مدارک پروژه (MDL) منتشر نمی‌شود.";
         public const string NoticeFromFileText = "فهرست مدارک پروژه (MDL) را از فایل بسازید یا برای مناقصه بدون MDL از مدیرعامل مجوز بگیرید.";
+        public const string StaleText = "فهرست مدارک پروژه (MDL) یا مجوز پیش از آخرین تصمیم پرونده تایید شده است؛ آن را باطل و دوباره تهیه کنید.";
         public const string CsvHeader = "docType,title,discipline,required,tender,units,clientSubmittal,clause,note";
 
         /// <summary>The lines that exist (never deleted).</summary>
@@ -85,6 +86,27 @@ namespace Services.NasbNiro.Engineering
         public static Task<EnReferenceList> StandardAsync(IUnitOfWork uow, EnCase c, bool track, CancellationToken ct) =>
             string.IsNullOrWhiteSpace(c.ReferenceCode) ? Task.FromResult<EnReferenceList>(null) : EnReferenceRules.CurrentAsync(uow, track, ct, EnReferenceRules.NormCode(c.ReferenceCode));
 
+        /// <summary>The instant of the latest decision of the case (the CEO's approval of the current round; for a case without a CEO gate, the engineering manager's confirmation); null when the case holds none right now.</summary>
+        public static DateTimeOffset? DecisionAt(EnCase c)
+        {
+            DateTimeOffset? a = c.CeoApprovedAt, b = c.EngConfirmedAt;
+            return a.HasValue && b.HasValue ? (a.Value > b.Value ? a : b) : a ?? b;
+        }
+
+        /// <summary>An approval that does not belong to the case's current decision: the list was made from another standard than the case's current one, or it was approved before the latest decision (a changed standard or classification sends the case through the approvals again).</summary>
+        public static bool Outdated(EnProjectMdl m, EnCase c)
+        {
+            if (m.BasedOnCode != null && EnReferenceRules.NormCode(m.BasedOnCode) != EnReferenceRules.NormCode(c.ReferenceCode)) return true;
+            DateTimeOffset? d = DecisionAt(c);
+            return d.HasValue && !(m.ApprovedAt.HasValue && m.ApprovedAt.Value > d.Value);
+        }
+
+        public static bool PermitOutdated(EnMdlPermit p, EnCase c)
+        {
+            DateTimeOffset? d = DecisionAt(c);
+            return d.HasValue && !(p.DecidedAt.HasValue && p.DecidedAt.Value > d.Value);
+        }
+
         /// <summary>The outcome of the release lock: <see cref="Refusal"/> is null when the tender package may go; with an approved list <see cref="Mdl"/> is the list whose file joins the package, with a permit <see cref="Permit"/> is the CEO's permit. <see cref="Notice"/> is what the case page tells the engineer while it is locked.</summary>
         public sealed class LockResult
         {
@@ -102,9 +124,19 @@ namespace Services.NasbNiro.Engineering
         {
             if (c.Status != EnCaseStatus.TenderPreparation) return new LockResult();
             EnProjectMdl m = await LiveAsync(uow, c.Id, false, ct);
-            if (m != null && m.Status == EnProjectMdlStatus.Approved && !string.IsNullOrEmpty(m.ApprovedHash) && m.ApprovedHash == HashOf(m)) return new LockResult { Mdl = m };
+            bool staleSeen = false;
+            if (m != null && m.Status == EnProjectMdlStatus.Approved && !string.IsNullOrEmpty(m.ApprovedHash) && m.ApprovedHash == HashOf(m))
+            {
+                if (!Outdated(m, c)) return new LockResult { Mdl = m };
+                staleSeen = true;
+            }
             EnMdlPermit p = await uow.Set<EnMdlPermit>().AsNoTracking().Where(x => !x.Deleted && x.CaseId == c.Id && x.Status == EnMdlPermitStatus.Approved).OrderByDescending(x => x.Id).FirstOrDefaultAsync(ct);
-            if (p != null) return new LockResult { Permit = p };
+            if (p != null)
+            {
+                if (!PermitOutdated(p, c)) return new LockResult { Permit = p };
+                staleSeen = true;
+            }
+            if (staleSeen) return new LockResult { Refusal = StaleText, Notice = StaleText };
             // nothing to start from (no live list, no approved standard list): a person creates it from a file
             string notice = m == null && await StandardAsync(uow, c, false, ct) == null ? NoticeFromFileText : NoticeText;
             return new LockResult { Refusal = LockText, Notice = notice };
@@ -191,14 +223,19 @@ namespace Services.NasbNiro.Engineering
             : string.IsNullOrWhiteSpace(x.Case.ReferenceCode) ? "استاندارد پروژه ثبت نشده است؛ فهرست پروژه از فهرست MDL تاییدشدهٔ استاندارد ساخته می‌شود. بدون استاندارد، کارشناس فهرست را از فایل بسازد."
             : x.Standard == null ? "فهرست MDL تاییدشده‌ای برای استاندارد «" + x.Case.ReferenceCode + "» نیست؛ ایجنت پیش‌نویس نمی‌سازد و کارشناس فهرست را از فایل بسازد."
             : x.Live != null ? "برای این پرونده فهرست مدارک پروژهٔ در جریان (" + x.Live.Number + "، " + EnText.Num(x.Live.Revision) + ") وجود دارد؛ همان را ادامه دهید یا ابطال کنید."
-            : x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود." : null;
+            : FreshPermit(x) ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود." : null;
+
+        /// <summary>The CEO's permit that still belongs to the case's current decision.</summary>
+        private static bool FreshPermit(Ctx x) => x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved && !EnProjectMdlRules.PermitOutdated(x.Permit, x.Case);
+
+        private static bool StalePermit(Ctx x) => x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved && EnProjectMdlRules.PermitOutdated(x.Permit, x.Case);
 
         /// <summary>A person creates the project MDL from a file only when there is no approved standard list to draft from (otherwise: draft from the standard, then change the lines by a file).</summary>
         private static string DraftFromFileReason(Ctx x, Who w) =>
             !w.Writer ? EnText.NotAllowed : w.Seat ? EnText.AiNever
             : x.Case.Status != EnCaseStatus.TenderPreparation ? "فهرست مدارک پروژه فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه ساخته می‌شود."
             : x.Live != null ? "برای این پرونده فهرست مدارک پروژهٔ در جریان (" + x.Live.Number + "، " + EnText.Num(x.Live.Revision) + ") وجود دارد؛ همان را با فایل تغییر دهید یا ابطال کنید."
-            : x.Permit != null && x.Permit.Status == EnMdlPermitStatus.Approved ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود."
+            : FreshPermit(x) ? "مدیرعامل مجوز «مناقصه بدون MDL» داده است (" + x.Permit.Number + ")؛ فهرست پروژه ساخته نمی‌شود."
             : x.Standard != null ? "برای استاندارد «" + x.Case.ReferenceCode + "» فهرست MDL تاییدشده هست؛ پیش‌نویس را از فهرست استاندارد بسازید (ایجنت یا کارشناس) و سپس ردیف‌ها را با فایل تغییر دهید." : null;
 
         private static string UploadReason(Ctx x, Who w) =>
@@ -224,7 +261,12 @@ namespace Services.NasbNiro.Engineering
             : x.Live == null || x.Live.Status != EnProjectMdlStatus.Checked ? "فقط فهرست بررسی‌شدهٔ کارشناس تایید می‌شود."
             : x.Case.Status != EnCaseStatus.TenderPreparation ? TenderPreparationOnly
             : x.Live.CheckedByUserId == w.Me ? EnText.SameUser + " کسی که فهرست را بررسی کرده آن را تایید نمی‌کند."
+            : IsMaker(x.Live, w.Me) ? EnText.SameUser + " کسی که ردیف‌های فهرست را از فایل ساخته یا بارگذاری کرده آن را تایید نمی‌کند."
+            : x.Live.CheckedAt == null || x.Live.Lines.Any(l => l.ModifyDate > x.Live.CheckedAt.Value) ? "ردیف‌های فهرست پس از بررسی کارشناس تغییر کرده است؛ فهرست باید دوباره بررسی شود."
             : EnProjectMdlRules.Kept(x.Live).Count == 0 ? "فهرست بدون ردیف را نمی‌توان تایید کرد." : null;
+
+        /// <summary>The person who made the lines (created the list from a file or uploaded a file over it): every upload stamps all the lines with its author. An agent seat's draft carries the seat, who never approves.</summary>
+        private static bool IsMaker(EnProjectMdl m, int me) => me > 0 && m.Lines.Any(l => l.CreatorUserId == me || l.ModifierUserId == me);
 
         private static string VoidReasonOf(Ctx x, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever
@@ -239,7 +281,8 @@ namespace Services.NasbNiro.Engineering
         private static string RequestPermitReason(Ctx x, Who w) =>
             !w.Manager ? EnText.NotAllowed : w.Seat ? EnText.AiNever
             : x.Case.Status != EnCaseStatus.TenderPreparation ? "مجوز «مناقصه بدون MDL» فقط در مرحلهٔ تهیهٔ بستهٔ فنی مناقصه درخواست می‌شود."
-            : x.Live != null && x.Live.Status == EnProjectMdlStatus.Approved ? "فهرست مدارک پروژه تایید شده است؛ نیازی به مجوز نیست."
+            : x.Live != null && x.Live.Status == EnProjectMdlStatus.Approved && !EnProjectMdlRules.Outdated(x.Live, x.Case) ? "فهرست مدارک پروژه تایید شده است؛ نیازی به مجوز نیست."
+            : StalePermit(x) ? "مجوز «مناقصه بدون MDL» (" + x.Permit.Number + ") پیش از آخرین تصمیم پرونده تایید شده است؛ ابتدا آن را پس بگیرید و دوباره درخواست کنید."
             : x.Permit != null && (x.Permit.Status == EnMdlPermitStatus.Requested || x.Permit.Status == EnMdlPermitStatus.Approved) ? "برای این پرونده مجوز «مناقصه بدون MDL» (" + x.Permit.Number + ") در جریان یا تاییدشده است." : null;
 
         private static string DecidePermitReason(Ctx x, Who w) =>
@@ -250,20 +293,24 @@ namespace Services.NasbNiro.Engineering
 
         private static string WithdrawPermitReason(Ctx x, Who w) =>
             w.Seat ? EnText.AiNever
-            : x.Permit == null || x.Permit.Status != EnMdlPermitStatus.Requested ? "درخواست مجوزِ منتظر تصمیمی برای پس‌گرفتن نیست."
+            : x.Permit == null || (x.Permit.Status != EnMdlPermitStatus.Requested && !StalePermit(x)) ? "درخواست مجوزِ منتظر تصمیمی (یا مجوز تاییدشده پیش از آخرین تصمیم پرونده) برای پس‌گرفتن نیست."
+            : StalePermit(x) && !w.Manager ? EnText.NotAllowed
             : !w.Manager && x.Permit.RequestedByUserId != w.Me ? EnText.NotAllowed : null;
 
         // ---------------------------------------------------------------- read
 
         private static string Version(EnProjectMdl m) => m.ModifyDate.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        private static bool VersionOk(EnProjectMdl m, string version) => string.IsNullOrWhiteSpace(version) || version.Trim() == Version(m);
+        /// <summary>A person's action must carry the token the page was read with (an empty token is refused); the agent's calls (a seat) may omit it.</summary>
+        private static string VersionRefusal(EnProjectMdl m, string version, Who w) =>
+            string.IsNullOrWhiteSpace(version) ? (w.Seat ? null : "شناسهٔ نسخهٔ صفحه ارسال نشد؛ صفحه را دوباره باز کنید و دوباره تلاش کنید.")
+            : version.Trim() == Version(m) ? null : EnText.Concurrency;
 
         private static string StatusText(EnProjectMdlStatus s) => s switch { EnProjectMdlStatus.Draft => "پیش‌نویس", EnProjectMdlStatus.Checked => "بررسی‌شدهٔ کارشناس", EnProjectMdlStatus.Approved => "تاییدشدهٔ مدیر مهندسی", _ => "ابطال‌شده" };
 
         private static string PermitText(EnMdlPermitStatus s) => s switch { EnMdlPermitStatus.Requested => "درخواست‌شده", EnMdlPermitStatus.Approved => "تاییدشده", EnMdlPermitStatus.Rejected => "ردشده", _ => "پس‌گرفته‌شده" };
 
-        private async Task<EnProjectMdlDto> MdlDtoAsync(EnProjectMdl m, Dictionary<int, string> names, CancellationToken ct)
+        private async Task<EnProjectMdlDto> MdlDtoAsync(EnProjectMdl m, EnCase c, Dictionary<int, string> names, CancellationToken ct)
         {
             List<EnProjectMdlLine> all = EnProjectMdlRules.Active(m).OrderBy(l => l.Seq).ThenBy(l => l.Id).ToList();
             string issuedName = null;
@@ -273,7 +320,7 @@ namespace Services.NasbNiro.Engineering
                 Id = m.Id, Number = m.Number, CaseId = m.CaseId, Revision = m.Revision, Status = (int)m.Status, StatusText = StatusText(m.Status), BasedOnListId = m.BasedOnListId, BasedOnCode = m.BasedOnCode, BasedOnRevision = m.BasedOnRevision,
                 SourceDocumentId = m.SourceDocumentId, SourceFileName = m.SourceFileName, ChangeNote = m.ChangeNote,
                 CheckedByUserId = m.CheckedByUserId, CheckedByName = names.Name(m.CheckedByUserId), CheckedAtText = EnText.Stamp(m.CheckedAt), ApprovedByUserId = m.ApprovedByUserId, ApprovedByName = names.Name(m.ApprovedByUserId), ApprovedAtText = EnText.Stamp(m.ApprovedAt),
-                ApprovalStale = m.Status == EnProjectMdlStatus.Approved && m.ApprovedHash != EnProjectMdlRules.HashOf(m),
+                ApprovalStale = m.Status == EnProjectMdlStatus.Approved && (m.ApprovedHash != EnProjectMdlRules.HashOf(m) || EnProjectMdlRules.Outdated(m, c)),
                 IssuedDocumentId = m.IssuedDocumentId, IssuedFileName = issuedName,
                 ClientApprovedAt = m.ClientApprovedAt, ClientApprovedAtText = EnText.Stamp(m.ClientApprovedAt), ClientApprovalRef = m.ClientApprovalRef, ClientApprovalDocumentId = m.ClientApprovalDocumentId, ClientApprovalRecordedByName = names.Name(m.ClientApprovalRecordedByUserId),
                 VoidReason = m.VoidReason,
@@ -298,12 +345,12 @@ namespace Services.NasbNiro.Engineering
             EnProjectMdlCaseDto dto = new EnProjectMdlCaseDto
             {
                 CaseId = c.Id, CaseNumber = c.Number, Applies = Applies(c), NotApplicableText = AppliesText(c),
-                Mdl = x.Live == null ? null : await MdlDtoAsync(others.First(m => m.Id == x.Live.Id), names, ct),
+                Mdl = x.Live == null ? null : await MdlDtoAsync(others.First(m => m.Id == x.Live.Id), c, names, ct),
                 History = others.Select(m => new EnProjectMdlHistoryDto { Id = m.Id, Number = m.Number, Revision = m.Revision, Status = (int)m.Status, StatusText = StatusText(m.Status), BasedOnCode = m.BasedOnCode, BasedOnRevision = m.BasedOnRevision, ApprovedAtText = EnText.Stamp(m.ApprovedAt), VoidReason = m.VoidReason, LineCount = EnProjectMdlRules.Kept(m).Count }).ToList(),
                 Permit = x.Permit == null ? null : new EnMdlPermitDto
                 {
                     Id = x.Permit.Id, Number = x.Permit.Number, CaseId = x.Permit.CaseId, Reason = x.Permit.Reason, Status = (int)x.Permit.Status, StatusText = PermitText(x.Permit.Status), RequestedByUserId = x.Permit.RequestedByUserId, RequestedByName = names.Name(x.Permit.RequestedByUserId),
-                    RequestedAtText = EnText.Stamp(x.Permit.RequestedAt), DecidedByName = names.Name(x.Permit.DecidedByUserId), DecidedAtText = EnText.Stamp(x.Permit.DecidedAt), DecisionNote = x.Permit.DecisionNote,
+                    RequestedAtText = EnText.Stamp(x.Permit.RequestedAt), DecidedByName = names.Name(x.Permit.DecidedByUserId), DecidedAtText = EnText.Stamp(x.Permit.DecidedAt), DecisionNote = x.Permit.DecisionNote, ApprovalStale = x.Permit.Status == EnMdlPermitStatus.Approved && EnProjectMdlRules.PermitOutdated(x.Permit, c),
                 },
                 ReleaseLockText = (await EnProjectMdlRules.ReleaseLockAsync(_uow, c, ct)).Refusal,
                 CanDraft = draft == null, DraftBlockedReason = draft, CanDraftFromFile = draftFile == null, DraftFromFileBlockedReason = draftFile, HasStandardList = x.Standard != null, CanUpload = upload == null, UploadBlockedReason = upload, CanCheck = check == null, CheckBlockedReason = check, CanReturn = ret == null, ReturnBlockedReason = ret,
@@ -370,7 +417,14 @@ namespace Services.NasbNiro.Engineering
             Ctx x = await LoadAsync(c, true, ct);
             if (dto.Id.HasValue && action != "draft" && action != "request-permit" && action != "decide-permit" && action != "withdraw-permit" && (x.Live == null || x.Live.Id != dto.Id.Value)) return EnText.Bad<EnProjectMdlCaseDto>("این ویرایش از فهرست مدارک پروژه دیگر جاری نیست؛ صفحه را دوباره باز کنید.");
             if ((action == "decide-permit" || action == "withdraw-permit") && x.Permit != null && dto.PermitId.HasValue && x.Permit.Id != dto.PermitId.Value) return EnText.Bad<EnProjectMdlCaseDto>("این درخواست مجوز دیگر جاری نیست؛ صفحه را دوباره باز کنید.");
-            if (x.Live != null && action != "draft" && action != "request-permit" && action != "decide-permit" && action != "withdraw-permit" && !VersionOk(x.Live, dto.RowVersion)) return EnText.Bad<EnProjectMdlCaseDto>(EnText.Concurrency);
+            string tokenWhy = null;
+            if (x.Live != null && action != "draft" && action != "request-permit" && action != "decide-permit" && action != "withdraw-permit")
+            {
+                string stale = VersionRefusal(x.Live, dto.RowVersion, w);
+                // a token that is not the page's is refused at once; a MISSING token of a person is refused after the rules of the action (so a refusal for a role or a status keeps its own reason)
+                if (stale != null && !string.IsNullOrWhiteSpace(dto.RowVersion)) return EnText.Bad<EnProjectMdlCaseDto>(stale);
+                if (stale != null && action != "record-client-approval") tokenWhy = stale;
+            }
             DateTimeOffset now = DateTimeOffset.Now;
             string why;
             switch (action)
@@ -395,7 +449,7 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "check":
                 {
-                    why = CheckReason(x, w);
+                    why = CheckReason(x, w) ?? tokenWhy;
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
                     x.Live.Status = EnProjectMdlStatus.Checked; x.Live.CheckedByUserId = Me; x.Live.CheckedAt = now; Touch(x.Live, now);
                     EnEvents.Add(_uow, c, "project-mdl-checked", Me, "فهرست مدارک پروژه " + x.Live.Number + " توسط کارشناس بررسی شد.");
@@ -404,7 +458,7 @@ namespace Services.NasbNiro.Engineering
                 case "return":
                 {
                     string reason = EnText.Clean(dto.Reason);
-                    why = ReturnReasonOf(x, w) ?? EnText.ReasonShort(reason, EnRules.ReasonMin, "دلیل برگشت") ?? EnText.Over(reason, 1000, "دلیل برگشت");
+                    why = ReturnReasonOf(x, w) ?? EnText.ReasonShort(reason, EnRules.ReasonMin, "دلیل برگشت") ?? EnText.Over(reason, 1000, "دلیل برگشت") ?? tokenWhy;
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
                     x.Live.Status = EnProjectMdlStatus.Draft; x.Live.CheckedByUserId = null; x.Live.CheckedAt = null; Touch(x.Live, now);
                     EnEvents.Add(_uow, c, "project-mdl-returned", Me, "فهرست مدارک پروژه " + x.Live.Number + " برگشت خورد: " + reason);
@@ -412,7 +466,7 @@ namespace Services.NasbNiro.Engineering
                 }
                 case "approve":
                 {
-                    why = ApproveReason(x, w);
+                    why = ApproveReason(x, w) ?? tokenWhy;
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
                     List<EnProjectMdlLine> kept = EnProjectMdlRules.Kept(x.Live);
                     string issuedName = EnProjectMdlRules.IssuedFileName(c.Number, x.Live.Revision);
@@ -425,7 +479,7 @@ namespace Services.NasbNiro.Engineering
                 case "void":
                 {
                     string reason = EnText.Clean(dto.Reason);
-                    why = VoidReasonOf(x, w) ?? EnText.ReasonShort(reason, EnRules.ReasonMin, "دلیل ابطال") ?? EnText.Over(reason, 1000, "دلیل ابطال");
+                    why = VoidReasonOf(x, w) ?? EnText.ReasonShort(reason, EnRules.ReasonMin, "دلیل ابطال") ?? EnText.Over(reason, 1000, "دلیل ابطال") ?? tokenWhy;
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
                     x.Live.Status = EnProjectMdlStatus.Void; x.Live.VoidReason = reason; Touch(x.Live, now);
                     EnEvents.Add(_uow, c, "project-mdl-void", Me, "فهرست مدارک پروژه " + x.Live.Number + " باطل شد: " + reason);
@@ -472,10 +526,10 @@ namespace Services.NasbNiro.Engineering
                 default:   // withdraw-permit
                 {
                     string note = EnText.Clean(dto.Note);
-                    why = WithdrawPermitReason(x, w) ?? EnText.Over(note, 1000, "توضیح");
+                    why = WithdrawPermitReason(x, w) ?? (x.Permit.Status == EnMdlPermitStatus.Approved ? EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل پس‌گرفتن مجوز") : null) ?? EnText.Over(note, 1000, "توضیح");
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
                     x.Permit.Status = EnMdlPermitStatus.Void; x.Permit.DecisionNote = note; x.Permit.ModifyDate = now; x.Permit.ModifierUserId = Me;
-                    EnEvents.Add(_uow, c, "mdl-permit-withdrawn", Me, "درخواست مجوز «مناقصه بدون MDL» " + x.Permit.Number + " پس گرفته شد.");
+                    EnEvents.Add(_uow, c, "mdl-permit-withdrawn", Me, "درخواست مجوز «مناقصه بدون MDL» " + x.Permit.Number + " پس گرفته شد" + (note == null ? "." : ": " + EnText.Cut(note, 300)));
                     break;
                 }
             }
@@ -530,7 +584,8 @@ namespace Services.NasbNiro.Engineering
             string why = UploadReason(x, w);
             if (why == null && x.Live.Id != m.Id) why = "این ویرایش از فهرست مدارک پروژه دیگر جاری نیست؛ صفحه را دوباره باز کنید.";
             if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);
-            if (!VersionOk(m, rowVersion)) return EnText.Bad<EnProjectMdlCaseDto>(EnText.Concurrency);
+            string versionWhy = VersionRefusal(m, rowVersion, w);
+            if (versionWhy != null) return EnText.Bad<EnProjectMdlCaseDto>(versionWhy);
             string reason = EnText.Clean(note);
             why = EnText.ReasonShort(reason, EnRules.ReasonMin, "یادداشت تغییر (چرایی تفاوت با فهرست استاندارد)") ?? EnText.Over(reason, 2000, "یادداشت تغییر");
             if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);

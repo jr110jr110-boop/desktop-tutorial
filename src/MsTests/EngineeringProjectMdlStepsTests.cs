@@ -119,7 +119,7 @@ namespace MsTests
             AgentWorkItem item = (await Discover(host, seat, "ENG.PMDL.DRAFT")).Single();
             Assert.AreEqual(AgentStepOutcome.Done, (await Run(host, seat, "ENG.PMDL.DRAFT", item)).Outcome);
             EnProjectMdlCaseDto v = Ok(await MdlView(host, Mgr1, c.Id));
-            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست باید دوباره از فهرست استاندارد ساخته شود"; }));
+            Ok(await MdlAct(host, Mgr1, "void", d => { d.Id = v.Mdl.Id; d.Reason = "فهرست باید دوباره از فهرست استاندارد ساخته شود"; d.RowVersion = v.Mdl.RowVersion; }));
             Assert.AreEqual(0, (await Discover(host, seat, "ENG.PMDL.CHECK")).Count);
             Assert.AreEqual(1, (await Discover(host, seat, "ENG.PMDL.DRAFT")).Count);
         }

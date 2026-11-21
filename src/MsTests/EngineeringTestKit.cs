@@ -211,6 +211,9 @@ namespace MsTests
             return host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().ActionAsync(dto, Ct));
         }
 
+        /// <summary>The concurrency token a page would hold for the live (not void) project MDL of a case, read from the data directly.</summary>
+        public static string Ver(AppHost host, int caseId) => host.Read(u => u.Set<EnProjectMdl>().Where(m => m.CaseId == caseId && m.Status != EnProjectMdlStatus.Void).OrderByDescending(m => m.Revision).First().ModifyDate.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
         public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlView(AppHost host, ClaimsPrincipal who, int caseId) => host.As(who, p => p.GetRequiredService<IEnProjectMdlService>().GetByCaseAsync(caseId, Ct));
 
         public static Task<ResponseDto<EnProjectMdlCaseDto>> MdlUpload(AppHost host, ClaimsPrincipal who, EnProjectMdlDto mdl, string csv, string note = "حذف و افزودن مدرک برای این پروژه مطابق قرارداد", string version = null) =>

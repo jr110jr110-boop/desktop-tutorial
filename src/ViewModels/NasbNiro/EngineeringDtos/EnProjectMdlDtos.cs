@@ -98,6 +98,9 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public string DecidedByName { get; set; }
         public string DecidedAtText { get; set; }
         public string DecisionNote { get; set; }
+
+        /// <summary>An approved permit that was given before the latest decision of the case (changed standard or classification): it no longer opens the release.</summary>
+        public bool ApprovalStale { get; set; }
     }
 
     /// <summary>Everything the case page needs about the project MDL (GET by-case/{caseId} and the answer of every action): the live MDL, the history, the live-or-last permit and the flags with their reasons (the same checks as the actions).</summary>
