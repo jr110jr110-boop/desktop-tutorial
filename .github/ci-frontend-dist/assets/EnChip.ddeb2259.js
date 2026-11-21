@@ -1,1 +1,0 @@
-import{d as s,o as a,c as e,t as n,x as l,u as o,ir as r}from"./index.891fc657.js";const p=s({props:{group:null,status:null,text:null},setup(t){return(u,c)=>(a(),e("span",{class:l("inv-badge "+o(r)(t.group,t.status))},n(t.text||"\u2014"),3))}});export{p as _};
