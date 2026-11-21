@@ -101,6 +101,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
 
         <div v-if="h.incompleteNotice" class="en-banner amber" data-test="en-incomplete-notice">{{ h.incompleteNotice }}</div>
         <div v-if="h.lockMessage && h.status === 3" class="en-banner red" data-test="en-lock-release">{{ h.lockMessage }}</div>
+        <div v-if="h.status === 3" class="en-banner amber" data-test="en-instantiate-wait">پایه‌ریزی دستورکار از بانک محصول (BOM پروژه، مسیرهای ساخت، WBS) و آزادسازی تولید منتظر ابلاغ PMO به اجرا است؛ پذیرش PMO به‌تنهایی کافی نیست.</div>
         <div v-if="h.status === 1" class="en-banner amber" data-test="en-handover-wait">منتظر پذیرش PMO است؛ این درخواست منقضی نمی‌شود و تا تصمیم گرفته شود هشدار می‌ماند.</div>
         <div v-if="h.previousReturnNumber" class="en-banner amber" data-test="en-previous-return">دور قبل ({{ faDigits(h.previousReturnNumber) }}) را PMO برگرداند: {{ h.previousReturnReason }}<span v-if="h.previousReturnByName || h.previousReturnAtText" class="small inv-muted"> — {{ h.previousReturnByName }}<span v-if="h.previousReturnAtText"> ({{ h.previousReturnAtText }})</span></span></div>
         <div v-if="h.returnReason" class="en-banner amber">برگشت‌خورده توسط {{ h.returnedByName }}: {{ h.returnReason }}</div>
