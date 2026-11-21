@@ -7,7 +7,7 @@ import { getEnWaiver, getEnWaivers } from "@/api/EngineeringAPIs";
 import { useFocusItem, waiverStatuses } from "@/composables/engineering";
 import { usePagedList } from "@/composables/fn";
 
-// The emergency waivers of the document lock, the ones that wait for the CEO first. /engineering/waivers/:id shows that one waiver on top.
+// The emergency permits of the lock of the release to execution (asked only after the PMO accepted the package), the ones that wait for the CEO first. /engineering/waivers/:id shows that one waiver on top.
 const route = useRoute();
 const filters = ref({ Status: null as number | null });
 const list = usePagedList(getEnWaivers, filters, 25);

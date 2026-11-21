@@ -59,7 +59,7 @@ const isLink = (p: string) => typeof p === "string" && p.startsWith("/");
 function waiverDialog() {
   d.ask({
     title: "درخواست مجوز اضطرار",
-    hint: "مدیرعامل تصمیم می‌گیرد. مدیرعامل فقط می‌تواند ساعت‌ها را کمتر کند. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است.",
+    hint: "این درخواست فقط یک‌بار و پس از پذیرش PMO ثبت می‌شود؛ مدیرعامل تصمیم می‌گیرد و فقط می‌تواند ساعت‌ها را کمتر کند. بدهی مدارک هنگام ابلاغ به اجرا ثبت می‌شود. ساعت اداری: ۸ تا ۱۹، شنبه تا پنجشنبه؛ این مهلت فقط برای انسان است.",
     fields: [
       { key: "reason", label: "دلیل اضطرار", type: "textarea", required: true, min: 50, max: 2000 },
       { key: "hours", label: "مهلت تأمین مدرک (ساعت اداری)", type: "number", required: true, lo: 1, hi: 72, value: 72, hint: "مهلت تأمین مدرک از لحظهٔ تایید مدیرعامل شمرده می‌شود؛ حداکثر ۷۲ ساعت اداری" },
@@ -99,9 +99,8 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
           <span class="small inv-muted">قرارداد {{ faDigits(h.contractCode || "") }} — {{ h.classificationText }}</span>
         </div>
 
-        <div v-if="h.lockMessage" class="en-banner red" data-test="en-lock-b">
-          قفل نقطهٔ ب: {{ h.lockMessage }}
-        </div>
+        <div v-if="h.incompleteNotice" class="en-banner amber" data-test="en-incomplete-notice">{{ h.incompleteNotice }}</div>
+        <div v-if="h.lockMessage && h.status === 3" class="en-banner red" data-test="en-lock-release">{{ h.lockMessage }}</div>
         <div v-if="h.status === 1" class="en-banner amber" data-test="en-handover-wait">منتظر پذیرش PMO است؛ این درخواست منقضی نمی‌شود و تا تصمیم گرفته شود هشدار می‌ماند.</div>
         <div v-if="h.previousReturnNumber" class="en-banner amber" data-test="en-previous-return">دور قبل ({{ faDigits(h.previousReturnNumber) }}) را PMO برگرداند: {{ h.previousReturnReason }}<span v-if="h.previousReturnByName || h.previousReturnAtText" class="small inv-muted"> — {{ h.previousReturnByName }}<span v-if="h.previousReturnAtText"> ({{ h.previousReturnAtText }})</span></span></div>
         <div v-if="h.returnReason" class="en-banner amber">برگشت‌خورده توسط {{ h.returnedByName }}: {{ h.returnReason }}</div>
@@ -138,7 +137,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         </div>
 
         <div class="mb-3">
-          <EnAction :can="h.canSubmit" :reason="h.submitBlockedReason" :roles="EnRoles.writers" :confirm="`تحویل ${faDigits(h.number)} به PMO ارسال شود؟ پس از ارسال تحویل منتظر تصمیم PMO می‌ماند.`" label="ارسال به PMO" variant="primary" @go="runEn(() => act('submit'), 'تحویل به PMO ارسال شد.', load)" />
+          <EnAction :can="h.canSubmit" :reason="h.submitBlockedReason" :roles="EnRoles.writers" :confirm="h.complete ? `تحویل ${faDigits(h.number)} به PMO ارسال شود؟ پس از ارسال تحویل منتظر تصمیم PMO می‌ماند.` : 'این بسته ناقص است و برای بررسی به PMO می‌رود. ادامه می‌دهید؟'" label="ارسال به PMO" variant="primary" @go="runEn(() => act('submit'), 'تحویل به PMO ارسال شد.', load)" />
           <EnAction :can="h.canRequestWaiver" :reason="h.requestWaiverBlockedReason" :roles="EnRoles.manager" label="درخواست مجوز اضطرار" variant="outline-danger" @go="waiverDialog" />
           <EnAction :can="h.canRefresh" :reason="h.refreshBlockedReason" :roles="EnRoles.writers" :confirm="`مدارک تحویل ${faDigits(h.number)} دوباره از پروندهٔ پلتفرم خوانده شود؟ وضعیت ردیف‌ها با پرونده هم‌خوان می‌شود.`" label="بازخوانی مدارک از پرونده پلتفرم" variant="outline-secondary" @go="runEn(() => act('refresh'), 'مدارک بازخوانی شد.', load)" />
           <EnAction :can="h.canAccept" :reason="h.acceptBlockedReason" :roles="EnRoles.pmoSide" :confirm="`تحویل ${faDigits(h.number)} پذیرفته شود؟ پس از پذیرش دیگر نمی‌توان آن را برگرداند و ساخت یادداشت ابلاغ واحدها آغاز می‌شود.`" label="پذیرش" variant="success" @go="runEn(() => act('accept'), 'تحویل پذیرفته شد.', load)" />
@@ -148,7 +147,8 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
         </div>
 
         <h2 class="h6">مجوز اضطرار</h2>
-        <p v-if="!h.waiver" class="inv-muted">مجوز اضطراری درخواست نشده است.</p>
+        <p v-if="!h.waiver && !h.complete && h.status < 3" class="inv-muted" data-test="en-waiver-later">مجوز اضطرار فقط پس از پایان رفت‌وبرگشت مدارک با PMO (پذیرش PMO) درخواست می‌شود؛ در طول رفت‌وبرگشت از مدیرعامل تاییدی گرفته نمی‌شود.</p>
+        <p v-else-if="!h.waiver" class="inv-muted">مجوز اضطراری درخواست نشده است.</p>
         <EnWaiverCard v-else :waiver="h.waiver" @changed="load" />
 
         <h2 class="h6 mt-3">ابلاغ به واحدها</h2>

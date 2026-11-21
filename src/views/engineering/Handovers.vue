@@ -26,6 +26,7 @@ onMounted(list.load);
         <label class="small"><input v-model="filters.OnlyOpen" type="checkbox" /> فقط باز</label>
         <button class="btn btn-sm btn-secondary" @click="list.search">جستجو</button>
       </div>
+      <p class="small inv-muted" data-test="en-handovers-hint">بستهٔ ناقص هم برای بررسی و رفت‌وبرگشت به PMO می‌رود؛ ابلاغ به اجرا فقط با مدارک کامل یا مجوز اضطرار مدیرعامل (پس از پذیرش PMO) ممکن است.</p>
       <p v-if="list.loading.value" class="inv-muted">در حال خواندن…</p>
       <p v-else-if="!list.rows.value.length" class="inv-muted" data-test="en-empty">هنوز تحویلی ثبت نشده است؛ ایجنت مهندسی پس از برنده‌شدن پرونده، پیش‌نویس تحویل را می‌سازد.</p>
       <div v-else class="table-responsive">
@@ -37,7 +38,7 @@ onMounted(list.load);
               <td><router-link :to="enPaths.case(h.caseId)">{{ faDigits(h.caseNumber) }}</router-link></td>
               <td>{{ faDigits(h.contractCode || "") }}</td><td>{{ faNum(h.round, 0) }}</td>
               <td><EnChip :status="h.status" :text="h.statusText" group="handover" /></td>
-              <td><span :class="h.missingRequiredCount ? 'text-danger' : ''">{{ faNum(h.missingRequiredCount, 0) }} از {{ faNum(h.requiredCount, 0) }}</span></td>
+              <td><span :class="h.missingRequiredCount ? 'text-danger' : ''">{{ faNum(h.missingRequiredCount, 0) }} از {{ faNum(h.requiredCount, 0) }}</span><span v-if="h.incompleteNotice" class="inv-badge warn ms-1" :title="h.incompleteNotice">ناقص</span></td>
               <td>{{ h.waiverNumber ? faDigits(h.waiverNumber) : "—" }}</td>
             </tr>
           </tbody>

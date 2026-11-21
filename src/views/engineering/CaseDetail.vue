@@ -397,7 +397,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
             <h3>۵) تحویل مدارک به PMO</h3>
             <p v-if="!handovers.length" class="inv-muted">هنوز دور تحویلی ساخته نشده است؛ ایجنت مهندسی پیش‌نویس را می‌سازد.</p>
             <ul class="mb-2">
-              <li v-for="h in handovers" :key="h.id"><router-link :to="enPaths.handover(h.id)">دور {{ faNum(h.round, 0) }} — {{ faDigits(h.number) }}</router-link> <EnChip :status="h.status" :text="h.statusText || handoverStatuses[h.status]" group="handover" /></li>
+              <li v-for="h in handovers" :key="h.id"><router-link :to="enPaths.handover(h.id)">دور {{ faNum(h.round, 0) }} — {{ faDigits(h.number) }}</router-link> <EnChip :status="h.status" :text="h.statusText || handoverStatuses[h.status]" group="handover" /><div v-if="h.incompleteNotice" class="small text-warning-emphasis" data-test="en-case-incomplete">{{ h.incompleteNotice }}</div></li>
             </ul>
             <div v-for="r in regs" :key="r.id" class="en-box" data-test="en-reg">
               <strong>ثبت به‌عنوان پلتفرم {{ faDigits(r.number) }}</strong> <EnChip :status="r.status" :text="r.statusText" group="reg" />
