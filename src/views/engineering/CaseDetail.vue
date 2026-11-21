@@ -282,6 +282,7 @@ const cls = (done: boolean, wait = false) => ({ done, wait });
 
         <h2 class="h6">استاندارد پروژه (از دیتاشیت کارفرما)</h2>
         <div class="en-box" data-test="en-standard">
+          <div v-if="c.standardNotice" class="en-banner amber mb-2" role="status" data-test="en-standard-notice">{{ c.standardNotice }}</div>
           <div v-if="c.standardMissing" class="en-banner amber mb-2">استاندارد این پروژه هنوز از دیتاشیت کارفرما ثبت نشده است.</div>
           <dl v-else class="en-kv mb-2"><dt>کد استاندارد</dt><dd class="inv-ltr">{{ c.referenceCode }}</dd><dt>شاهد</dt><dd>{{ c.standardEvidence }}<a v-if="c.standardAttachmentId" href="#" class="ms-2" @click.prevent="downloadDoc(c.standardAttachmentId, 'datasheet')">دیدن دیتاشیت</a></dd></dl>
           <EnAction :can="c.canSetStandard" :reason="c.setStandardBlockedReason" :roles="EnRoles.standardSetters" :label="c.referenceCode ? 'تغییر استاندارد (با دلیل)' : 'ثبت از دیتاشیت'" variant="outline-primary" @go="standardDialog" />
