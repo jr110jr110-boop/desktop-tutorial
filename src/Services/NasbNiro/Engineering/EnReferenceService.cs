@@ -46,6 +46,27 @@ namespace Services.NasbNiro.Engineering
         public static string StandardNoticeText(string code) =>
             "برای استاندارد «" + code + "» فهرست MDL تاییدشده‌ای نیست؛ تا تایید آن، تایید مدیرعامل روی این پرونده بسته است.";
 
+        /// <summary>The one normalisation of a standard code (trim + upper-case invariant, the same as a case code); null for an empty code.</summary>
+        public static string NormCode(string code) => EnDossierBuilder.NormCode(code);
+
+        /// <summary>The one check "an approved MDL exists for this code": both sides normalised (trim + upper-case), so SQL Server (case-insensitive) and in-memory checks agree. Used by the approve action, the case flags, the notice and the agent gate text.</summary>
+        public static async Task<bool> HasApprovedAsync(IUnitOfWork uow, string code, CancellationToken ct)
+        {
+            string norm = NormCode(code);
+            return norm != null && await uow.Set<EnReferenceList>().AsNoTracking().AnyAsync(l => !l.Deleted && l.Status == EnRefStatus.Approved && l.Code.Trim().ToUpper() == norm, ct);
+        }
+
+        /// <summary>The approved codes of one query as a set that matches with <see cref="IsApproved"/> (normalised, ordinal on the normal form).</summary>
+        public static async Task<HashSet<string>> ApprovedSetAsync(IUnitOfWork uow, CancellationToken ct) =>
+            (await ApprovedCodesAsync(uow, ct)).Select(NormCode).Where(c => c != null).ToHashSet(StringComparer.Ordinal);
+
+        /// <summary>Set lookup with the same normalisation as <see cref="HasApprovedAsync"/>.</summary>
+        public static bool IsApproved(HashSet<string> approvedSet, string code)
+        {
+            string norm = NormCode(code);
+            return norm != null && approvedSet.Contains(norm);
+        }
+
         /// <summary>The Codes (standard bases, e.g. API 611 and API 612) that have an approved list right now; one approved list per Code.</summary>
         public static Task<List<string>> ApprovedCodesAsync(IUnitOfWork uow, CancellationToken ct) =>
             uow.Set<EnReferenceList>().AsNoTracking().Where(l => !l.Deleted && l.Status == EnRefStatus.Approved).Select(l => l.Code).Distinct().OrderBy(c => c).ToListAsync(ct);
@@ -264,11 +285,11 @@ namespace Services.NasbNiro.Engineering
                 if (!EnConcurrency.Apply(_uow, row, dto.RowVersion)) return EnText.Bad<EnReferenceListDto>(EnText.InvalidData);
                 why = EnEditors.Full(row.EditorUserIds, Me);
                 if (why != null) return EnText.Bad<EnReferenceListDto>(why);
-                if (!string.Equals(row.Code, dto.Code.Trim(), StringComparison.Ordinal)) return EnText.Bad<EnReferenceListDto>("کد فهرست پس از ساخت تغییر نمی‌کند.");
+                if (!string.Equals(EnReferenceRules.NormCode(row.Code), EnReferenceRules.NormCode(dto.Code), StringComparison.Ordinal)) return EnText.Bad<EnReferenceListDto>("کد فهرست پس از ساخت تغییر نمی‌کند.");
             }
             else
             {
-                string code = dto.Code.Trim();
+                string code = EnReferenceRules.NormCode(dto.Code);
                 if (await _uow.Set<EnReferenceList>().AnyAsync(l => !l.Deleted && l.Code == code && (l.Status == EnRefStatus.Draft || l.Status == EnRefStatus.UnderReview), ct))
                     return EnText.Bad<EnReferenceListDto>("برای این کد، فهرست باز (پیش‌نویس یا در انتظار تایید) وجود دارد؛ همان را ویرایش کنید.");
                 int revision = (await _uow.Set<EnReferenceList>().Where(l => l.Code == code).Select(l => (int?)l.Revision).MaxAsync(ct) ?? 0) + 1;

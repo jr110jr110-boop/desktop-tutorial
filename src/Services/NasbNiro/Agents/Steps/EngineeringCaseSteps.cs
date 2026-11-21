@@ -210,8 +210,8 @@ namespace Services.NasbNiro.Agents.Steps
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
             var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.AwaitingCeoApproval).OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId, c.ProposedClassification, c.ReferenceCode }).ToListAsync(ct);
-            HashSet<string> approved = (await EnReferenceRules.ApprovedCodesAsync(uow, ct)).ToHashSet();
-            return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"نوع پروندهٔ {r.Number} ({EnText.Classification(r.ProposedClassification)}) منتظر تصویب مدیرعامل است." + (string.IsNullOrWhiteSpace(r.ReferenceCode) || approved.Contains(r.ReferenceCode) ? string.Empty : " تا تایید فهرست MDL استاندارد «" + r.ReferenceCode + "» توسط مدیر مهندسی، تایید مدیرعامل بسته است."), EnRoles.Ceo)).ToList();
+            HashSet<string> approved = await EnReferenceRules.ApprovedSetAsync(uow, ct);
+            return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"نوع پروندهٔ {r.Number} ({EnText.Classification(r.ProposedClassification)}) منتظر تصویب مدیرعامل است." + (string.IsNullOrWhiteSpace(r.ReferenceCode) || EnReferenceRules.IsApproved(approved, r.ReferenceCode) ? string.Empty : " تا تایید فهرست MDL استاندارد «" + r.ReferenceCode + "» توسط مدیر مهندسی، تایید مدیرعامل بسته است."), EnRoles.Ceo)).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Ceo, Link = CaseLink(item.TargetId), Title = "تصویب نوع پروندهٔ مهندسی " + item.TargetNumber };
