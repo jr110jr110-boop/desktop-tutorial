@@ -25,6 +25,15 @@ F="$OUT/7-inventory-fail.txt"
 B="$OUT/inv-body.tmp"
 mkdir -p "$OUT"; : > "$R"; : > "$F"
 
+# ENG-E1e: the checks compare with a fixed day (TODAY below), so the run must not cross 00:00 UTC. Between 22:30 and 23:59 UTC wait for the next day first
+# (before the API starts and before any call that stores a date).
+UTC_NOW=$(date -u +%s); UTC_H=$((10#$(date -u +%H))); UTC_M=$((10#$(date -u +%M)))
+if [ $((UTC_H * 60 + UTC_M)) -ge 1350 ]; then
+  WAIT_S=$(( $(date -u -d "tomorrow 00:00:20" +%s) - UTC_NOW ))
+  echo "--- waiting $WAIT_S seconds for 00:00 UTC (the checks compare with a fixed day)" | tee -a "$R"
+  sleep "$WAIT_S"
+fi
+
 cd src/WebApi
 # Dnc__FolderRoots__0: P2 DNC, the only folder the network-folder links of the smoke may use (the "machine" folder of the DNC section is made inside it)
 Finance__AutoPost=false Dnc__FolderRoots__0="$OUT" dotnet bin/Release/net10.0/WebApi.dll > "$OUT/7-inventory-app.log" 2>&1 &

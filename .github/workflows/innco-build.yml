@@ -109,7 +109,7 @@ jobs:
     # Runs the API for real against an empty SQL Server (Linux container): 2022 and 2025 Express.
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # the SQL 2022 leg also runs the UI access crawl (a browser as every role, every menu item and page)
+    timeout-minutes: 240  # up to 90 minutes of waiting for 00:00 UTC (see the start of inventory-smoke.sh) on top of the former 120; the SQL 2022 leg also runs the UI access crawl (a browser as every role, every menu item and page)
     strategy:
       fail-fast: false
       matrix:
