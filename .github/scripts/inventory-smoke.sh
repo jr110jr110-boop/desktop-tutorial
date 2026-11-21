@@ -13725,8 +13725,9 @@ call POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"return\",\"note\":\"ن
 as "$E_MG" POST $EN/waivers/request "{\"handoverId\":$EBH,\"reason\":\"$EBRS\",\"debtHours\":48}"; nomsg "enge1 B: the emergency permit is refused for a returned handover too" "پس از پایان رفت‌وبرگشت مدارک با PMO"
 as "$CEO_TOKEN" GET $EN/overview; check "enge1 B: after the return and before round 2 the CEO still has nothing to decide" '.success and .data.waiversAwaitingCeo == 0'
 enrun
-as "$E_MG" GET "$EN/cases/$EBC"; check "enge1 B: the agent drafted round 2 after the return (the case is in engineering again)" ".success and .data.status == 7 and (.data.openHandoverId|type) == \"number\" and .data.openHandoverId != $EBH"
-EBH=$(val .data.openHandoverId)
+as "$E_MG" GET "$EN/handovers?CaseId=$EBC&Status=0&PageNumber=1&PageSize=25"; check "enge1 B: the agent drafted round 2 after the return: the list of the drafts of the case has exactly one handover, round 2, and it is not the returned round 1" ".success and .data.totalItems == 1 and .data.data[0].round == 2 and .data.data[0].id != $EBH and .data.data[0].status == 0"
+EBH=$(jq -r '.data.data[0].id' "$B")
+as "$E_MG" GET "$EN/cases/$EBC"; check "enge1 B: the case is in engineering again and its open handover is the newest round (round 2), not the returned round 1" ".success and .data.status == 7 and .data.openHandoverId == $EBH"
 as "$E_MG" GET $EN/handovers/$EBH; check "enge1 B: round 2 is a draft with the 5 lines, 4 required documents still missing, and it shows why the PMO returned round 1" '.success and .data.status == 0 and .data.round == 2 and (.data.lines|length) == 5 and .data.missingRequiredCount == 4 and .data.previousReturnNumber != null and (.data.previousReturnReason|contains("دور بعد"))'
 as "$E_MG" POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"submit\"}"; check "enge1 B: round 2 goes to the PMO still incomplete (no lock, no CEO)" '.success and .data.status == 1 and .data.complete == false and (.data.debts|length) == 0'
 call POST $EN/handovers/action "{\"id\":$EBH,\"action\":\"accept\"}"; check "enge1 B: the PMO accepts the content it reviewed although 4 documents are missing; the rounds are over" '.success and .data.status == 3 and .data.complete == false'

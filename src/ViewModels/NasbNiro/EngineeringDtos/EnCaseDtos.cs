@@ -103,6 +103,7 @@ namespace ViewModels.NasbNiro.EngineeringDtos
         public bool CharterStale { get; set; }
 
         public int OpenClarifications { get; set; }
+        /// <summary>The newest handover of the case that is still in play (draft, submitted or accepted); a returned round only when there is no newer one.</summary>
         public int? OpenHandoverId { get; set; }
         public string ClosedReason { get; set; }
         public bool TouchedByMe { get; set; }

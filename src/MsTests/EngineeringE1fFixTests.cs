@@ -519,5 +519,124 @@ namespace MsTests
             Assert.IsNull(await Instantiate(host, contract), "released: it passes");
             Assert.IsTrue(Ok(await host.As(Eng1, p => p.GetRequiredService<IEnCaseService>().GetGateStateAsync(null, contract, Ct))).Passed);
         }
+
+        // ---------------------------------------------------------------- group 5
+
+        private static void SeedPermit(AppHost host, int handover, int caseId, EnWaiverStatus status, string number, bool dossierUnconfirmed, string[] keys = null)
+        {
+            host.Write(u =>
+            {
+                var lines = u.Set<EnHandoverLine>().Where(l => l.HandoverId == handover).ToList();
+                string snapshot = JsonSerializer.Serialize(new EnHandoverRules.Snapshot { Lines = (keys ?? EnHandoverRules.MissingKeys(lines).ToArray()).ToList(), DossierUnconfirmed = dossierUnconfirmed });
+                AppHost.Add(u, new EnWaiver { Number = number, HandoverId = handover, CaseId = caseId, Reason = Reason, DebtHours = 24, MissingSnapshot = snapshot, Status = status, RequestedByUserId = 2101, RequestedAt = DateTimeOffset.Now.AddHours(-3), DecidedByUserId = status == EnWaiverStatus.Approved ? 2121 : (int?)null, DecidedAt = status == EnWaiverStatus.Approved ? DateTimeOffset.Now.AddHours(-2) : (DateTimeOffset?)null });
+                u.SaveChanges();
+            }, Seeder);
+        }
+
+        [TestMethod]
+        public async Task G5_The_Release_Refuses_A_Permit_That_No_Longer_Covers_The_Missing_Lines_And_The_Flag_Says_The_Same()
+        {
+            AppHost host = Started("e1ffix_g5cover");
+            (int contract, int caseId) = await NewDesign(host);
+            int datasheet = Deliverable(host, contract, "DATASHEET");
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(1, h.MissingRequiredCount, "only the drawing is missing");
+            // old-order data: the permit was approved in the draft for exactly that missing set
+            SeedPermit(host, h.Id, caseId, EnWaiverStatus.Approved, "EWV-COV", false);
+            // the datasheet is withdrawn after the approval and the draft is read again: a second required line is missing now
+            host.Write(u => { u.Set<Entities.Model.NasbNiro.ProjectControl.PcEngineeringDeliverable>().First(x => x.Id == datasheet).IssueState = Entities.Model.NasbNiro.ProjectControl.PcIssueState.NotIssued; u.SaveChanges(); }, Seeder);
+            EnHandoverDto r = Ok(await Act(host, Eng1, "refresh", d => d.Id = h.Id));
+            Assert.AreEqual(2, r.MissingRequiredCount);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            EnHandoverDto shown = await GetAs(host, Pmo2, h.Id);
+            Assert.IsFalse(shown.CanRelease);
+            string refused = Refused(await Act(host, Pmo2, "release", d => d.Id = h.Id), "پوشش");
+            StringAssert.Contains(refused, "مجوز اضطرار این تحویل را پوشش نمی‌دهد: 1 مدرک الزامی تازه کم شده");
+            Assert.AreEqual(shown.ReleaseBlockedReason, refused, "the flag and the action give the same text");
+            Assert.AreEqual(shown.LockMessage, refused, "and so does the lock message");
+            EnWaiverDto w = await Waiver(host, Pmo2, host.Read(u => u.Set<EnWaiver>().Single().Id));
+            Assert.IsFalse(w.Covers);
+            StringAssert.Contains(w.CoverageNote, "پوشش نمی‌دهد");
+            Assert.AreEqual(0, host.Read(u => u.Set<EnDocumentDebt>().Count()), "a refused release creates no debt");
+        }
+
+        [TestMethod]
+        public async Task G5_A_Permit_Taken_For_A_Confirmed_Dossier_Does_Not_Cover_A_Dossier_That_Lost_Its_Confirmation()
+        {
+            AppHost host = Started("e1ffix_g5dossier");
+            (int product, int caseId, int h) = await PlatformDraft(host, true);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h));
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h));
+            SeedPermit(host, h, caseId, EnWaiverStatus.Approved, "EWV-DOS", false, new string[0]);   // the snapshot says: the dossier was confirmed when the permit was asked
+            string refused = Refused(await Act(host, Pmo2, "release", d => d.Id = h), "پوشش");
+            StringAssert.Contains(refused, "تایید پروندهٔ پلتفرم پس از درخواست باطل شده است");
+            Assert.AreEqual(refused, (await GetAs(host, Pmo2, h)).ReleaseBlockedReason);
+            // a permit that knew about the unconfirmed dossier covers it
+            host.Write(u => { u.Set<EnWaiver>().Single().MissingSnapshot = JsonSerializer.Serialize(new EnHandoverRules.Snapshot { DossierUnconfirmed = true }); u.SaveChanges(); }, Seeder);
+            EnHandoverDto rel = Ok(await Act(host, Pmo2, "release", d => d.Id = h));
+            Assert.AreEqual(1, rel.Debts.Count, "only the dossier confirmation is owed");
+            Assert.AreEqual(EnDebtTypes.DossierConfirm, rel.Debts[0].DocumentType);
+        }
+
+        [TestMethod]
+        public async Task G5_Leftover_Permits_A_Void_Or_A_Return_Voids_Requested_And_A_Complete_Release_Never_Touches_An_Approved_One()
+        {
+            // a void of a draft voids the Requested permit left on it
+            AppHost host = Started("e1ffix_g5left1");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            SeedPermit(host, h.Id, caseId, EnWaiverStatus.Requested, "EWV-L1", false);
+            Ok(await Act(host, Mgr1, "void", d => { d.Id = h.Id; d.Note = "پیش‌نویس باطل می‌شود چون فهرست مدارک عوض شد"; }));
+            EnWaiver left = host.Read(u => u.Set<EnWaiver>().Single());
+            Assert.AreEqual(EnWaiverStatus.Void, left.Status);
+            Assert.AreEqual("بسته از حالت پذیرفته‌شده خارج شد", left.DecisionNote);
+            Assert.IsNull(left.DecidedByUserId);
+
+            // a PMO return voids it too
+            AppHost host2 = Started("e1ffix_g5left2");
+            (int contract2, int caseId2) = await NewDesign(host2);
+            EnHandoverDto h2 = Ok(await Act(host2, Eng1, "draft", d => d.CaseId = caseId2));
+            SeedPermit(host2, h2.Id, caseId2, EnWaiverStatus.Requested, "EWV-L2", false);
+            Ok(await Act(host2, Mgr1, "submit", d => d.Id = h2.Id));
+            Ok(await Act(host2, Pmo1, "return", d => { d.Id = h2.Id; d.Note = "نقشه‌های اجرایی هنوز کامل نیست و باید برسد"; }));
+            Assert.AreEqual(EnWaiverStatus.Void, host2.Read(u => u.Set<EnWaiver>().Single().Status));
+
+            // a complete package released with an Approved unused permit of the old order: the permit is NOT touched
+            AppHost host3 = Started("e1ffix_g5left3");
+            (int contract3, int caseId3) = await NewDesign(host3);
+            Deliverable(host3, contract3, "DWG"); Deliverable(host3, contract3, "DATASHEET");
+            EnHandoverDto h3 = Ok(await Act(host3, Eng1, "draft", d => d.CaseId = caseId3));
+            SeedPermit(host3, h3.Id, caseId3, EnWaiverStatus.Approved, "EWV-L3", false, new[] { "DWG|X" });
+            Ok(await Act(host3, Mgr1, "submit", d => d.Id = h3.Id));
+            Ok(await Act(host3, Pmo1, "accept", d => d.Id = h3.Id));
+            Ok(await Act(host3, Pmo1, "draft-distribution", d => d.Id = h3.Id));
+            EnHandoverDto rel = Ok(await Act(host3, Pmo2, "release", d => d.Id = h3.Id));
+            Assert.AreEqual(0, rel.Debts.Count);
+            EnWaiver stays = host3.Read(u => u.Set<EnWaiver>().Single());
+            Assert.AreEqual(EnWaiverStatus.Approved, stays.Status, "an approval is never voided by the system");
+            Assert.IsNull(stays.UsedAt);
+        }
+
+        [TestMethod]
+        public async Task G5_The_Open_Handover_Of_A_Case_Is_The_Newest_Round_Not_The_Returned_One()
+        {
+            AppHost host = Started("e1ffix_g5open");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto r1 = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = r1.Id));
+            Ok(await Act(host, Pmo1, "return", d => { d.Id = r1.Id; d.Note = "نقشه‌های اجرایی هنوز کامل نیست و باید برسد"; }));
+            Assert.AreEqual(r1.Id, Ok(await GetCase(host, Mgr1, caseId)).OpenHandoverId, "only a returned round exists: it is shown");
+            EnHandoverDto r2 = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.AreEqual(r2.Id, Ok(await GetCase(host, Mgr1, caseId)).OpenHandoverId, "round 2 is the open one");
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = r2.Id));
+            Assert.AreEqual(r2.Id, Ok(await GetCase(host, Mgr1, caseId)).OpenHandoverId);
+            // the list read by the smoke: the drafts of the case
+            var list = Ok(await host.As(Mgr1, p => p.GetRequiredService<IEnHandoverService>().GetHandoversAsync(new EnHandoverQuery { CaseId = caseId, Status = (int)EnHandoverStatus.Returned }, Ct)));
+            Assert.AreEqual(1, list.TotalCount);
+            Assert.AreEqual(r1.Id, list.First().Id);
+        }
     }
 }
