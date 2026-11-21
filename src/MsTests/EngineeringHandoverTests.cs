@@ -480,9 +480,8 @@ namespace MsTests
             var ask = await Discover("ENG.HANDOVER.COMPLETE");
             Assert.AreEqual(1, ask.Count);
             StringAssert.Contains(ask[0].Summary, "مجوز اضطرار");
-            var wait = await Discover("ENG.HANDOVER.RELEASE");
-            Assert.AreEqual(1, wait.Count);
-            StringAssert.Contains(wait[0].Summary, "قفل");
+            Assert.AreEqual(0, (await Discover("ENG.HANDOVER.RELEASE")).Count, "ENG-E1f fix G3: locked, so it is not the PMO's turn (the waiting work is the manager's permit request)");
+            Assert.AreEqual("ENGINEERING", ask[0].GateRoles, "the manager roles");
             Ok(await Request(host, Mgr1, handover, "دلیل کافی برای این مجوز اضطرار نوشته شده است و مدارک هنوز از تامین‌کننده نرسیده", DateTimeOffset.Now.AddHours(24)));
             Assert.AreEqual(0, (await Discover("ENG.HANDOVER.COMPLETE")).Count, "the permit is asked once");
             Assert.AreEqual(1, (await Discover("ENG.WAIVER.DECIDE")).Count);

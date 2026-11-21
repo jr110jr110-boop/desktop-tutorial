@@ -207,7 +207,8 @@ namespace Services.NasbNiro.Engineering
             // onlyCaseIds narrows the same query to the cases of one page (the case list shows the risk of exactly these rows); the rule itself is the one of the early warning
             List<int> only = onlyCaseIds == null ? null : onlyCaseIds.ToList();
             List<EnCase> cases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && (only == null || only.Contains(c.Id)) && (c.CeoApprovedAt != null || (c.Kind != EnCaseKind.Turbine && c.EngConfirmedAt != null))
-                && (c.Status == EnCaseStatus.TenderPreparation || c.Status == EnCaseStatus.TenderIssued || c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering)).OrderBy(c => c.Id).Take(500).ToListAsync(ct);
+                && (c.Status == EnCaseStatus.TenderPreparation || c.Status == EnCaseStatus.TenderIssued || c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering
+                    || c.Status == EnCaseStatus.HandedOver || c.Status == EnCaseStatus.Accepted)).OrderBy(c => c.Id).Take(500).ToListAsync(ct);   // HandedOver / Accepted: an incomplete package with the PMO stays a risk until it is released (a released case leaves)
             List<string> approved = await EnReferenceRules.ApprovedCodesAsync(uow, ct);
             List<int> contractIds = cases.Where(c => c.ContractId.HasValue).Select(c => c.ContractId.Value).ToList();
             Dictionary<int, DateTime?> delivery = (await uow.Set<PcContractTerms>().AsNoTracking().Where(t => contractIds.Contains(t.ContractId) && !t.Deleted).Select(t => new { t.ContractId, t.ContractDeliveryDate }).ToListAsync(ct))
@@ -215,9 +216,12 @@ namespace Services.NasbNiro.Engineering
             List<EnRiskRow> rows = new List<EnRiskRow>();
             foreach (EnCase c in cases)
             {
-                EnRiskRow row = new EnRiskRow { CaseId = c.Id, Number = c.Number, ContractId = c.ContractId, Awarded = c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering };
+                bool atPmo = c.Status == EnCaseStatus.HandedOver || c.Status == EnCaseStatus.Accepted;
+                EnRiskRow row = new EnRiskRow { CaseId = c.Id, Number = c.Number, ContractId = c.ContractId, Awarded = c.Status == EnCaseStatus.Awarded || c.Status == EnCaseStatus.InEngineering || atPmo };
+                // a package at the PMO that an APPROVED permit already covers is no longer a risk of the dossier (its debts are tracked instead)
+                bool permitted = atPmo && await uow.Set<EnWaiver>().AsNoTracking().AnyAsync(w => !w.Deleted && w.CaseId == c.Id && w.Status == EnWaiverStatus.Approved && uow.Set<EnHandover>().Any(h => h.Id == w.HandoverId && !h.Deleted && (h.Status == EnHandoverStatus.Submitted || h.Status == EnHandoverStatus.Accepted)), ct);
                 int missing = 0;
-                if (c.Classification == EnClassification.Platform && c.ProductId.HasValue && !string.IsNullOrWhiteSpace(c.ReferenceCode))
+                if (!permitted && c.Classification == EnClassification.Platform && c.ProductId.HasValue && !string.IsNullOrWhiteSpace(c.ReferenceCode))
                 {
                     EnDossierWording state = await EnDossierWording.LoadAsync(uow, c.ProductId.Value, c.ReferenceCode, ct);
                     if (!state.Complete)
@@ -233,7 +237,7 @@ namespace Services.NasbNiro.Engineering
                     // an incomplete package already with the PMO (rounds or accepted) stays a risk until released, unless an approved permit covers it
                     int sent = await uow.Set<EnHandoverLine>().AsNoTracking().CountAsync(l => l.Handover.CaseId == c.Id && !l.Handover.Deleted && (l.Handover.Status == EnHandoverStatus.Submitted || l.Handover.Status == EnHandoverStatus.Accepted) && l.Required && l.State == EnLineState.Missing
                         && !uow.Set<EnWaiver>().Any(w => w.HandoverId == l.HandoverId && !w.Deleted && w.Status == EnWaiverStatus.Approved), ct);
-                    if (sent > 0) { row.Reasons.Add("بستهٔ ناقص تحویل مدارک نزد PMO است؛ ابلاغ به اجرا قفل است تا مدارک کامل شود یا مدیرعامل مجوز اضطرار بدهد"); missing = Math.Max(missing, sent); }
+                    if (sent > 0 && !permitted) { row.Reasons.Add("بستهٔ ناقص تحویل مدارک نزد PMO است؛ ابلاغ به اجرا قفل است تا مدارک کامل شود یا مدیرعامل مجوز اضطرار بدهد"); missing = Math.Max(missing, sent); }
                 }
                 if (!string.IsNullOrWhiteSpace(c.ReferenceCode) && !approved.Contains(c.ReferenceCode)) row.Reasons.Add("برای استاندارد " + c.ReferenceCode + " فهرست MDL تاییدشده‌ای نیست");
                 if (row.Reasons.Count == 0) continue;

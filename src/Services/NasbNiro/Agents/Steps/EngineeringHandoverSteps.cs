@@ -36,6 +36,29 @@ namespace Services.NasbNiro.Agents.Steps
                 || uow.Set<EnCase>().Any(c => c.Id == h.CaseId && c.Classification == EnClassification.Platform
                     && !uow.Set<EnPlatformDossier>().Any(p => !p.Deleted && p.ProductId == c.ProductId && p.ReferenceCode == c.ReferenceCode && p.Status == EnDossierStatus.Complete));
 
+        /// <summary>The live state of the packages, read by the SAME rule as the service (lines + the platform dossier of the case + the approved permit): the missing count, the unconfirmed dossier and the release lock text (null = the release is possible).</summary>
+        protected sealed class PackageState
+        {
+            public int Missing;
+            public bool DossierUnconfirmed;
+            public string ReleaseLock;
+            public bool Locked => Missing > 0 || DossierUnconfirmed;
+        }
+
+        protected static async Task<Dictionary<int, PackageState>> PackageStatesAsync(IUnitOfWork uow, List<EnHandover> handovers, CancellationToken ct)
+        {
+            Dictionary<int, PackageState> result = new Dictionary<int, PackageState>();
+            foreach (EnHandover h in handovers)
+            {
+                EnCase c = await uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == h.CaseId, ct);
+                bool unconfirmed = c != null && c.Classification == EnClassification.Platform && !(c.ProductId.HasValue && await EnPlatformRules.IsCompleteAsync(uow, c.ProductId.Value, c.ReferenceCode, ct));
+                int missing = h.Lines.Count(l => l.Required && l.State == EnLineState.Missing);
+                EnWaiver approved = await uow.Set<EnWaiver>().AsNoTracking().Where(w => w.HandoverId == h.Id && !w.Deleted && w.Status == EnWaiverStatus.Approved && w.UsedAt == null).OrderBy(w => w.Id).FirstOrDefaultAsync(ct);
+                result[h.Id] = new PackageState { Missing = missing, DossierUnconfirmed = unconfirmed, ReleaseLock = EnHandoverRules.ReleaseLock(h.WaiverId.HasValue, missing, unconfirmed, EnHandoverRules.MissingKeys(h.Lines), approved?.MissingSnapshot, approved != null) };
+            }
+            return result;
+        }
+
         /// <summary>The open debts that can close now: a platform dossier line that is available (or was declared not applicable by an approved deviation: the debt is voided with a note), a system BOM / OPC line whose released BOM / approved routing exists, an approved project MDR row with a file of the same type and title, or the confirmed dossier of a dossier debt.</summary>
         protected static IQueryable<int> ReadyDebtIds(IUnitOfWork uow) =>
             uow.Set<EnDocumentDebt>().AsNoTracking().Where(d => !d.Deleted && d.Status == EnDebtStatus.Open
@@ -84,16 +107,30 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && (h.Status == EnHandoverStatus.Draft || (h.Status == EnHandoverStatus.Accepted && h.WaiverId == null
-                    && !uow.Set<EnWaiver>().Any(w => w.HandoverId == h.Id && !w.Deleted && (w.Status == EnWaiverStatus.Requested || (w.Status == EnWaiverStatus.Approved && w.UsedAt == null)))))
-                    && h.Lines.Any(l => l.Required && l.State == EnLineState.Missing))
-                .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId, h.Status, Missing = h.Lines.Count(l => l.Required && l.State == EnLineState.Missing) }).ToListAsync(ct);
-            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, r.Status == EnHandoverStatus.Accepted
-                ? $"تحویل {r.Number}: PMO محتوای رسیده را پذیرفته ولی {r.Missing} مدرک الزامی هنوز موجود نیست و ابلاغ به اجرا قفل است؛ مدیر مهندسی یک‌بار مجوز اضطرار از مدیرعامل می‌خواهد (یا مدارک را کامل می‌کند)."
-                : $"تحویل {r.Number}: {r.Missing} مدرک الزامی هنوز موجود نیست؛ بستهٔ ناقص هم برای رفت‌وبرگشت به PMO می‌رود ولی ابلاغ به اجرا فقط با مدارک کامل یا مجوز اضطرار مدیرعامل (پس از پذیرش PMO) ممکن است.")).ToList();
+            List<AgentWorkItem> items = new List<AgentWorkItem>();
+            // the draft: the engineers upload the missing documents (an incomplete package still goes to the PMO)
+            var drafts = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Draft && h.Lines.Any(l => l.Required && l.State == EnLineState.Missing))
+                .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId, Missing = h.Lines.Count(l => l.Required && l.State == EnLineState.Missing) }).ToListAsync(ct);
+            items.AddRange(drafts.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null,
+                $"تحویل {r.Number}: {r.Missing} مدرک الزامی هنوز موجود نیست؛ بستهٔ ناقص هم برای رفت‌وبرگشت به PMO می‌رود ولی ابلاغ به اجرا فقط با مدارک کامل یا مجوز اضطرار مدیرعامل (پس از پذیرش PMO) ممکن است.")));
+            // accepted and still locked, nothing asked yet: the waiting work is the engineering MANAGER's (supply the documents and refresh, confirm the dossier, or ask the permit once)
+            List<EnHandover> accepted = await uow.Set<EnHandover>().AsNoTracking().Include(h => h.Lines).Where(h => !h.Deleted && h.Status == EnHandoverStatus.Accepted && h.WaiverId == null
+                    && !uow.Set<EnWaiver>().Any(w => w.HandoverId == h.Id && !w.Deleted && (w.Status == EnWaiverStatus.Requested || (w.Status == EnWaiverStatus.Approved && w.UsedAt == null))))
+                .OrderBy(h => h.Id).Take(ProcStepCommon.Cap).ToListAsync(ct);
+            Dictionary<int, PackageState> states = await PackageStatesAsync(uow, accepted, ct);
+            foreach (EnHandover h in accepted)
+            {
+                PackageState st = states[h.Id];
+                if (!st.Locked) continue;
+                string text = st.Missing > 0
+                    ? $"تحویل {h.Number}: PMO محتوای رسیده را پذیرفته ولی {st.Missing} مدرک الزامی هنوز موجود نیست و ابلاغ به اجرا قفل است؛ مدیر مهندسی مدارک رسیده را بازخوانی می‌کند (بسته دوباره برای PMO می‌رود) یا یک‌بار مجوز اضطرار از مدیرعامل می‌خواهد (پس از رد، فقط با دلیل تازه)."
+                    : $"تحویل {h.Number}: همهٔ مدارک موجود است و فقط تایید کامل‌بودن پروندهٔ پلتفرم مانده؛ مدیر مهندسی پرونده را تایید کند تا قفل باز شود (برای این مجوز اضطرار لازم نیست).";
+                items.Add(Item("EnHandover", h.Id, h.Number, h.ContractId, null, text, EnRoles.Manager));
+            }
+            return items.Take(ProcStepCommon.Cap).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "تکمیل مدارک یا درخواست مجوز اضطرار تحویل " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = item.GateRoles ?? EnRoles.Writers, Link = HandoverLink(item.TargetId), Title = "تکمیل مدارک یا درخواست مجوز اضطرار تحویل " + item.TargetNumber };
     }
 
     /// <summary>ENG.HANDOVER.SUBMIT (HumanGate): the engineering manager sends the draft to the PMO for review, complete or not (the lock sits at the release to execution).</summary>
@@ -197,8 +234,9 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Submitted).OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId, h.Complete }).ToListAsync(ct);
-            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, r.Complete ? $"تحویل مدارک {r.Number} منتظر پذیرش است." : $"تحویل مدارک {r.Number} ناقص برای بررسی آمده و منتظر پذیرش یا برگشت PMO است؛ رفت‌وبرگشت بدون مدیرعامل است و ابلاغ به اجرا پس از پذیرش تا رسیدن مدارک یا مجوز اضطرار مدیرعامل قفل می‌ماند.", EnRoles.PmoSide)).ToList();
+            List<EnHandover> rows = await uow.Set<EnHandover>().AsNoTracking().Include(h => h.Lines).Where(h => !h.Deleted && h.Status == EnHandoverStatus.Submitted).OrderBy(h => h.Id).Take(ProcStepCommon.Cap).ToListAsync(ct);
+            Dictionary<int, PackageState> states = await PackageStatesAsync(uow, rows, ct);   // live completeness (the dossier is read now), not the value stored at the submit
+            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, !states[r.Id].Locked || r.WaiverId != null ? $"تحویل مدارک {r.Number} منتظر پذیرش است." : $"تحویل مدارک {r.Number} ناقص برای بررسی آمده و منتظر پذیرش یا برگشت PMO است؛ رفت‌وبرگشت بدون مدیرعامل است و ابلاغ به اجرا پس از پذیرش تا رسیدن مدارک یا مجوز اضطرار مدیرعامل قفل می‌ماند.", EnRoles.PmoSide)).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.PmoSide, Link = HandoverLink(item.TargetId), Title = "پذیرش تحویل مدارک " + item.TargetNumber };
@@ -214,8 +252,11 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
-            var rows = await uow.Set<EnHandover>().AsNoTracking().Where(h => !h.Deleted && h.Status == EnHandoverStatus.Accepted).OrderBy(h => h.Id).Take(ProcStepCommon.Cap).Select(h => new { h.Id, h.Number, h.ContractId, h.Complete, h.WaiverId, Permit = uow.Set<EnWaiver>().Any(w => w.HandoverId == h.Id && !w.Deleted && w.Status == EnWaiverStatus.Approved && w.UsedAt == null) }).ToListAsync(ct);
-            return rows.Select(r => Item("EnHandover", r.Id, r.Number, r.ContractId, null, r.Complete || r.WaiverId != null || r.Permit ? $"تحویل مدارک {r.Number} پذیرفته شده و منتظر ابلاغ به اجرا است." : $"تحویل مدارک {r.Number} پذیرفته شده ولی ناقص است؛ ابلاغ به اجرا قفل است تا مدارک کامل شود یا مدیرعامل مجوز اضطرار تاییدشده بدهد (مدیر مهندسی پس از پذیرش PMO یک‌بار درخواست می‌دهد).", EnRoles.Pmo)).ToList();
+            // the PMO's gate opens only when the release is POSSIBLE (complete, or an approved covering permit); while it is locked the waiting work belongs to the manager (ENG.HANDOVER.COMPLETE) or the CEO (ENG.WAIVER.DECIDE)
+            List<EnHandover> accepted = await uow.Set<EnHandover>().AsNoTracking().Include(h => h.Lines).Where(h => !h.Deleted && h.Status == EnHandoverStatus.Accepted).OrderBy(h => h.Id).Take(ProcStepCommon.Cap).ToListAsync(ct);
+            Dictionary<int, PackageState> states = await PackageStatesAsync(uow, accepted, ct);
+            return accepted.Where(h => states[h.Id].ReleaseLock == null)
+                .Select(h => Item("EnHandover", h.Id, h.Number, h.ContractId, null, $"تحویل مدارک {h.Number} پذیرفته شده و ابلاغ به اجرا ممکن است (مدارک کامل است یا مجوز اضطرار تاییدشده دارد)؛ منتظر ابلاغ PMO است.", EnRoles.Pmo)).ToList();
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Pmo, Link = HandoverLink(item.TargetId), Title = "ابلاغ مدارک " + item.TargetNumber + " به اجرا" };

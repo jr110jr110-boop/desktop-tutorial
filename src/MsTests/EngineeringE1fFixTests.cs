@@ -339,5 +339,149 @@ namespace MsTests
             Assert.AreEqual(EnDebtStatus.Open, debts.Single(x => x.DocumentType == EnDebtTypes.DossierConfirm).Status, "the dossier confirmation is still owed");
             Assert.AreEqual(0, (await Discover(host, "ENG.DEBT.SETTLE")).Count);
         }
+
+        // ---------------------------------------------------------------- group 3
+
+        private static async Task<List<EnRiskRow>> Risk(AppHost host) =>
+            await host.As(Ceo, p => EnRisk.ComputeAsync(p.GetRequiredService<DataLayer.Context.IUnitOfWork>(), Ct));
+
+        /// <summary>A platform case (dossier of standard VDDR-P with one required drawing line), its handover drafted; the drawing is supplied or not.</summary>
+        private static async Task<(int Product, int CaseId, int Handover)> PlatformDraft(AppHost host, bool supplyDrawing)
+        {
+            await ApprovedList(host, "VDDR-P", ("DWG", true, false));
+            int product = Product(host);
+            EnDossierDto d = Ok(await Dossier(host, Eng1, product, "assess", code: "VDDR-P"));
+            if (supplyDrawing) Ok(await Supply(host, Eng1, d.Lines.Single(l => l.DocumentType == "DWG").Id, File(host, 2111)));
+            host.Write(u =>
+            {
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbBomHeader { ProductId = product, Code = "BOM-G3", AssemblyPartNumber = "SYS", Title = "BOM", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbBomStatus.Released });
+                AppHost.Add(u, new Entities.Model.NasbNiro.ProductBank.PbOpcRouting { ProductId = product, PartNumber = "SYS", Title = "OPC", Revision = 1, Status = Entities.Model.NasbNiro.ProductBank.PbRoutingStatus.Approved, PreparedByUserId = 1 });
+                u.SaveChanges();
+            }, Seeder);
+            int contract = Contract(host);
+            EnCaseDto c = Ok(await CaseAct(host, Eng1, null, "open", x => x.ContractId = contract));
+            Ok(await CaseAct(host, Eng1, c.Id, "propose", x => { x.Classification = 1; x.ProductId = product; x.Basis = "توربین ساخته‌شده با همین مشخصات"; }));
+            Ok(await SetStandard(host, Eng1, c.Id, "VDDR-P"));
+            Ok(await CaseAct(host, Mgr1, c.Id, "confirm"));
+            Ok(await CaseAct(host, Ceo, c.Id, "approve"));
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", x => x.CaseId = c.Id));
+            return (product, c.Id, h.Id);
+        }
+
+        [TestMethod]
+        public async Task G3_The_Document_Risk_And_The_Early_Warning_Cover_A_Case_Whose_Incomplete_Package_Is_Submitted_Or_Accepted_Until_It_Is_Released()
+        {
+            AppHost host = Started("e1ffix_g3risk");
+            (int contract, int caseId) = await NewDesign(host);
+            EnHandoverDto h = Ok(await Act(host, Eng1, "draft", d => d.CaseId = caseId));
+            Assert.IsTrue((await Risk(host)).Any(r => r.CaseId == caseId), "draft");
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h.Id));
+            Assert.AreEqual(EnCaseStatus.HandedOver, host.Read(u => u.Set<EnCase>().Single(x => x.Id == caseId).Status));
+            EnRiskRow sub = (await Risk(host)).Single(r => r.CaseId == caseId);
+            Assert.IsTrue(sub.Awarded, "the CEO's permanent item keeps standing");
+            Assert.AreEqual(2, sub.Missing);
+            StringAssert.Contains(string.Join(" ", sub.Reasons), "نزد PMO");
+            Assert.AreEqual(1, (await Discover(host, "ENG.RISK.WATCH")).Count(i => i.TargetId == caseId), "the early warning stays open when the incomplete package is submitted");
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h.Id));
+            Assert.AreEqual(EnCaseStatus.Accepted, host.Read(u => u.Set<EnCase>().Single(x => x.Id == caseId).Status));
+            Assert.IsTrue((await Risk(host)).Single(r => r.CaseId == caseId).Awarded);
+            Assert.AreEqual(1, (await Discover(host, "ENG.RISK.WATCH")).Count(i => i.TargetId == caseId));
+            // an approved permit covers the lines: no longer a document risk; released: the case leaves
+            await ApprovePermit(host, h.Id, 24);
+            Assert.IsFalse((await Risk(host)).Any(r => r.CaseId == caseId), "covered by the approved permit (its debts are tracked instead)");
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h.Id));
+            Ok(await Act(host, Pmo2, "release", d => d.Id = h.Id));
+            Assert.IsFalse((await Risk(host)).Any(r => r.CaseId == caseId));
+        }
+
+        [TestMethod]
+        public async Task G3_A_Platform_Case_With_An_Unconfirmed_Dossier_Stays_At_Risk_While_Its_Package_Waits_At_The_Pmo()
+        {
+            AppHost host = Started("e1ffix_g3riskdoss");
+            (int product, int caseId, int h) = await PlatformDraft(host, true);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h));
+            Assert.AreEqual(EnCaseStatus.HandedOver, host.Read(u => u.Set<EnCase>().Single(x => x.Id == caseId).Status));
+            Assert.IsTrue((await Risk(host)).Any(r => r.CaseId == caseId), "submitted, only the dossier confirmation is missing");
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h));
+            Assert.IsTrue((await Risk(host)).Any(r => r.CaseId == caseId));
+            Ok(await Dossier(host, Eng1, product, "complete", code: "VDDR-P"));
+            Ok(await Dossier(host, Mgr1, product, "confirm", code: "VDDR-P"));
+            Assert.IsFalse((await Risk(host)).Any(r => r.CaseId == caseId), "complete: no risk");
+        }
+
+        [TestMethod]
+        public async Task G3_The_Lock_Message_Comes_From_The_Release_Check_And_Disappears_When_The_Ceo_Approved_The_Permit()
+        {
+            AppHost host = Started("e1ffix_g3lock");
+            (int contract, int caseId, int h) = await Accepted(host);
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h));
+            EnHandoverDto before = await GetAs(host, Pmo2, h);
+            Assert.IsFalse(before.CanRelease);
+            Assert.AreEqual(before.ReleaseBlockedReason, before.LockMessage, "the same check");
+            StringAssert.Contains(before.LockMessage, "ابلاغ به اجرا قفل است");
+            Assert.IsNull(await AskPermit(host, h));
+            Assert.IsNotNull((await GetAs(host, Pmo2, h)).LockMessage, "a request is not an approval");
+            int permit = host.Read(u => u.Set<EnWaiver>().Single().Id);
+            Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = permit, Decision = "approve" }, Ct)));
+            EnHandoverDto after = await GetAs(host, Pmo2, h);
+            Assert.IsTrue(after.CanRelease, after.ReleaseBlockedReason);
+            Assert.IsNull(after.LockMessage, "after the CEO approved the red box is gone");
+            Assert.IsNotNull(after.IncompleteNotice, "the package is still incomplete: the amber notice stays");
+        }
+
+        [TestMethod]
+        public async Task G3_The_Release_Gate_Opens_Only_When_Release_Is_Possible_And_The_Waiting_Work_Belongs_To_The_Manager_Then_The_Ceo()
+        {
+            AppHost host = Started("e1ffix_g3gates");
+            (int contract, int caseId, int h) = await Accepted(host);
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.RELEASE")).Count, "locked: the PMO cannot act");
+            List<AgentWorkItem> complete = await Discover(host, "ENG.HANDOVER.COMPLETE");
+            Assert.AreEqual(1, complete.Count);
+            Assert.AreEqual(EnRoles.Manager, complete[0].GateRoles, "the manager roles, not every engineering writer");
+            StringAssert.Contains(complete[0].Summary, "مجوز اضطرار");
+            Assert.IsNull(await AskPermit(host, h));
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.COMPLETE")).Count);
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.RELEASE")).Count, "the CEO's permit is pending: still not the PMO's turn");
+            Assert.AreEqual(1, (await Discover(host, "ENG.WAIVER.DECIDE")).Count);
+            int permit = host.Read(u => u.Set<EnWaiver>().Single().Id);
+            Ok(await host.As(Ceo, p => p.GetRequiredService<IEnHandoverService>().DecideWaiverAsync(new EnWaiverDecisionDto { Id = permit, Decision = "approve" }, Ct)));
+            List<AgentWorkItem> release = await Discover(host, "ENG.HANDOVER.RELEASE");
+            Assert.AreEqual(1, release.Count, "approved: the release is possible now");
+            Assert.AreEqual(EnRoles.Pmo, release[0].GateRoles);
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.COMPLETE")).Count);
+
+            // a complete accepted package: the release gate is open at once, no permit gate
+            AppHost host2 = Started("e1ffix_g3gates2");
+            (int contract2, int caseId2) = await NewDesign(host2);
+            Deliverable(host2, contract2, "DWG"); Deliverable(host2, contract2, "DATASHEET");
+            EnHandoverDto h2 = Ok(await Act(host2, Eng1, "draft", d => d.CaseId = caseId2));
+            Ok(await Act(host2, Mgr1, "submit", d => d.Id = h2.Id));
+            Ok(await Act(host2, Pmo1, "accept", d => d.Id = h2.Id));
+            Assert.AreEqual(1, (await Discover(host2, "ENG.HANDOVER.RELEASE")).Count);
+            Assert.AreEqual(0, (await Discover(host2, "ENG.HANDOVER.COMPLETE")).Count);
+        }
+
+        [TestMethod]
+        public async Task G3_When_Only_The_Dossier_Confirmation_Is_Missing_The_Gate_Tells_The_Manager_To_Confirm_It_And_No_Permit_Is_Needed()
+        {
+            AppHost host = Started("e1ffix_g3dossier");
+            (int product, int caseId, int h) = await PlatformDraft(host, true);
+            Ok(await Act(host, Mgr1, "submit", d => d.Id = h));
+            Ok(await Act(host, Pmo1, "accept", d => d.Id = h));
+            List<AgentWorkItem> gate = await Discover(host, "ENG.HANDOVER.COMPLETE");
+            Assert.AreEqual(1, gate.Count, "a dossier-only gap also has its gate");
+            Assert.AreEqual(EnRoles.Manager, gate[0].GateRoles);
+            StringAssert.Contains(gate[0].Summary, "تایید");
+            StringAssert.Contains(gate[0].Summary, "مجوز اضطرار لازم نیست");
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.RELEASE")).Count);
+            Ok(await Dossier(host, Eng1, product, "complete", code: "VDDR-P"));
+            Ok(await Dossier(host, Mgr1, product, "confirm", code: "VDDR-P"));
+            Assert.AreEqual(0, (await Discover(host, "ENG.HANDOVER.COMPLETE")).Count);
+            Assert.AreEqual(1, (await Discover(host, "ENG.HANDOVER.RELEASE")).Count, "the release is possible without any permit");
+            Ok(await Act(host, Pmo1, "draft-distribution", d => d.Id = h));
+            Assert.IsTrue((await GetAs(host, Pmo2, h)).CanRelease);
+            Ok(await Act(host, Pmo2, "release", d => d.Id = h));
+            Assert.AreEqual(0, host.Read(u => u.Set<EnWaiver>().Count()));
+        }
     }
 }

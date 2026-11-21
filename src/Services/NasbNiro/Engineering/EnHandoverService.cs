@@ -496,6 +496,7 @@ namespace Services.NasbNiro.Engineering
                 EnWaiver approvedUnused = waivers.Where(x => x.HandoverId == h.Id && x.Status == EnWaiverStatus.Approved && x.UsedAt == null).OrderBy(x => x.Id).FirstOrDefault();
                 bool openState = h.Status == EnHandoverStatus.Draft || h.Status == EnHandoverStatus.Submitted || h.Status == EnHandoverStatus.Accepted;   // the lines are frozen after the draft but the dossier is read live: completeness is live while the package is in the rounds
                 if (submit == null && h.Status == EnHandoverStatus.Draft) submit = await EnDecision.RefusalAsync(_uow, c, ct);
+                string release0 = ReleaseLockReason(h, ls, approvedUnused);   // the lock text is the one check of the release (an approved covering permit or a used old permit: no lock text)
                 string accept = await AcceptReasonAsync(h, w, ct), ret = await ReturnReasonAsync(h, w, ct), release = await ReleaseReasonAsync(h, w, ls, approvedUnused, ct), voidR = VoidReasonOf(h, w), draftDist = DraftDistributionReason(h, w, hRows), distribute = DistributeReason(h, w, hRows);
                 EnWaiver shown = waivers.Where(x => x.HandoverId == h.Id || x.Id == h.WaiverId).OrderByDescending(x => x.Id).FirstOrDefault();
                 EnWaiverDto waiverDto = shown == null ? null : (await WaiverDtosAsync(new List<EnWaiver> { shown }, ct))[0];
@@ -504,7 +505,7 @@ namespace Services.NasbNiro.Engineering
                     Id = h.Id, Number = h.Number, CaseId = h.CaseId, CaseNumber = c.Number, ContractId = h.ContractId, ContractCode = contracts.TryGetValue(h.ContractId, out string cc) ? cc : null, Classification = (int)c.Classification, ClassificationText = EnText.Classification(c.Classification),
                     Round = h.Round, Status = (int)h.Status, StatusText = EnText.Handover(h.Status), PreparedByName = names.Name(h.PreparedByUserId), PreparedByAgent = seats.Contains(h.PreparedByUserId),
                     Complete = openState ? !ls.Locked : h.Complete, MissingRequiredCount = openState ? ls.Missing : h.MissingRequiredCount, RequiredCount = h.Lines.Count(l => l.Required),
-                    PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = openState && !h.WaiverId.HasValue ? EnHandoverRules.LockMessage(ls.Missing, ls.DossierUnconfirmed) : null, IncompleteNotice = openState ? EnHandoverRules.IncompleteNotice(ls.Missing, ls.DossierUnconfirmed) : null,
+                    PlatformDossierConfirmed = c.Classification == EnClassification.Platform && !ls.DossierUnconfirmed, LockMessage = openState ? release0 : null, IncompleteNotice = openState ? EnHandoverRules.IncompleteNotice(ls.Missing, ls.DossierUnconfirmed) : null,
                     WaiverId = h.WaiverId, WaiverNumber = h.WaiverId.HasValue && waiverNames.TryGetValue(h.WaiverId.Value, out string wn) ? wn : null,
                     SubmittedByName = names.Name(h.SubmitConfirmedByUserId), SubmittedAtText = EnText.Stamp(h.SubmittedAt), AcceptedByName = names.Name(h.AcceptedByUserId), AcceptedAtText = EnText.Stamp(h.AcceptedAt),
                     PreviousReturnNumber = previous?.Number, PreviousReturnByName = previous == null ? null : names.Name(previous.ReturnedByUserId), PreviousReturnAtText = previous == null ? null : EnText.Stamp(previous.ReturnedAt), PreviousReturnReason = previous?.ReturnReason,
@@ -699,6 +700,7 @@ namespace Services.NasbNiro.Engineering
             try { await _uow.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return EnText.Bad<EnWaiverDto>(EnText.Concurrency); }
             await OfficeGates.SyncAsync(_notify, "EN-WAIVER-" + waiver.Id, false, "Engineering", nameof(EnWaiver), waiver.Id, "تصمیم دربارهٔ مجوز اضطرار " + waiver.Number, "/engineering/waivers/" + waiver.Id, EnRoles.Ceo, ct, null, OfInboxKind.Approval);
+            await SyncAsync(hd, ct);   // an approved permit opens the PMO's release item
             return await GetWaiverAsync(waiver.Id, ct);
         }
 
@@ -941,7 +943,15 @@ namespace Services.NasbNiro.Engineering
         {
             string link = "/engineering/handovers/" + h.Id;
             await OfficeGates.SyncAsync(_notify, "EN-HO-ACCEPT-" + h.Id, h.Status == EnHandoverStatus.Submitted, "Engineering", nameof(EnHandover), h.Id, "پذیرش تحویل مدارک مهندسی " + h.Number, link, EnRoles.PmoSide, ct, null, OfInboxKind.Approval);
-            await OfficeGates.SyncAsync(_notify, "EN-HO-RELEASE-" + h.Id, h.Status == EnHandoverStatus.Accepted, "Engineering", nameof(EnHandover), h.Id, "ابلاغ مدارک مهندسی " + h.Number + " به اجرا", link, EnRoles.Pmo, ct, null, OfInboxKind.Approval);
+            // the PMO's release item opens only while the release is possible (complete, or an approved covering permit); while locked the waiting work is the manager's or the CEO's
+            bool releasable = false;
+            if (h.Status == EnHandoverStatus.Accepted)
+            {
+                EnCase hc = await _uow.Set<EnCase>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == h.CaseId, ct);
+                EnWaiver approved = await _uow.Set<EnWaiver>().AsNoTracking().Where(x => x.HandoverId == h.Id && !x.Deleted && x.Status == EnWaiverStatus.Approved && x.UsedAt == null).OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+                releasable = hc != null && ReleaseLockReason(h, await LockAsync(h, hc, ct), approved) == null;
+            }
+            await OfficeGates.SyncAsync(_notify, "EN-HO-RELEASE-" + h.Id, releasable, "Engineering", nameof(EnHandover), h.Id, "ابلاغ مدارک مهندسی " + h.Number + " به اجرا", link, EnRoles.Pmo, ct, null, OfInboxKind.Approval);
             List<EnDistribution> rows = await _uow.Set<EnDistribution>().AsNoTracking().Where(d => d.HandoverId == h.Id && !d.Deleted).ToListAsync(ct);
             foreach (EnDistribution d in rows.Where(d => d.Status == EnDistStatus.Notified && d.NoticeSentAt.HasValue))
                 await OfficeGates.SyncAsync(_notify, "EN-DIST-" + d.Id, !d.AcknowledgedAt.HasValue, "Engineering", nameof(EnDistribution), d.Id, EnText.Cut("دریافت مدارک مهندسی " + h.Number + " (" + EnText.Unit(d.Unit) + "): " + d.ScopeNote, 280), link, d.Roles, ct, null, OfInboxKind.Task);
