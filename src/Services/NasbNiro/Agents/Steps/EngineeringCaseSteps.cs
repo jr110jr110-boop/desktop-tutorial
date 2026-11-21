@@ -311,8 +311,17 @@ namespace Services.NasbNiro.Agents.Steps
         {
             var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.TenderPackageId != null && uow.Set<SlInquiry>().Any(i => i.Id == c.InquiryId && i.Status == SlInquiryStatus.Bidding)
                     && (c.Classification == EnClassification.Platform || (c.Kind != EnCaseKind.Turbine && c.OpinionText != null) || (c.ConceptNote != null && uow.Set<PcTenderDocument>().Any(t => t.PackageId == c.TenderPackageId && !t.Deleted))))
-                .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId }).ToListAsync(ct);
-            return rows.Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"بستهٔ فنی پروندهٔ {r.Number} آمادهٔ ابلاغ به بازرگانی است.", EnRoles.Manager)).ToList();
+                .OrderBy(c => c.Id).ToListAsync(ct);
+            // employer rule 20 (every kind of tender): the gate opens only when the release is possible as far as the project MDL is concerned (an approved list whose hash holds, or the CEO's permit): the same check the release action runs,
+            // so the 72 office hour alarm names the work that is really waiting (the MDL check, the approval or the permit have their own gates)
+            List<AgentWorkItem> items = new List<AgentWorkItem>();
+            foreach (EnCase r in rows)
+            {
+                if (items.Count >= ProcStepCommon.Cap) break;
+                if ((await EnProjectMdlRules.ReleaseLockAsync(uow, r, ct)).Refusal != null) continue;
+                items.Add(Item("EnCase", r.Id, r.Number, r.ContractId, null, $"بستهٔ فنی پروندهٔ {r.Number} آمادهٔ ابلاغ به بازرگانی است.", EnRoles.Manager));
+            }
+            return items;
         }
 
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Manager, Link = CaseLink(item.TargetId), Title = "ابلاغ بستهٔ فنی مناقصه " + item.TargetNumber };

@@ -36,7 +36,7 @@ namespace Services.NasbNiro.Agents.Steps
         protected static string CaseLink(int id) => Root + "/cases/" + Id(id);
     }
 
-    /// <summary>ENG.PMDL.DRAFT (Agent): a turbine case in the tender preparation whose standard has an approved standard list and that has no live project MDL and no approved "without MDL" permit: the agent drafts the project list (the same rule as the service's draft).</summary>
+    /// <summary>ENG.PMDL.DRAFT (Agent): a case of ANY kind in the tender preparation whose standard has an approved standard list and that has no live project MDL and no approved "without MDL" permit: the agent drafts the project list (the same rule as the service's draft).</summary>
     internal sealed class EnPmdlDraftStep : EnPmdlStep
     {
         public override string Code => "ENG.PMDL.DRAFT";
@@ -48,7 +48,7 @@ namespace Services.NasbNiro.Agents.Steps
         {
             HashSet<string> approved = await EnReferenceRules.ApprovedSetAsync(uow, ct);
             if (approved.Count == 0) return new List<AgentWorkItem>();
-            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Kind == EnCaseKind.Turbine && c.Status == EnCaseStatus.TenderPreparation && c.ReferenceCode != null && c.ReferenceCode != ""
+            var rows = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation && c.ReferenceCode != null && c.ReferenceCode != ""
                     && !uow.Set<EnProjectMdl>().Any(m => m.CaseId == c.Id && !m.Deleted && m.Status != EnProjectMdlStatus.Void)
                     && !uow.Set<EnMdlPermit>().Any(p => p.CaseId == c.Id && !p.Deleted && p.Status == EnMdlPermitStatus.Approved))
                 .OrderBy(c => c.Id).Take(ProcStepCommon.Cap).Select(c => new { c.Id, c.Number, c.ContractId, c.ReferenceCode }).ToListAsync(ct);
@@ -66,7 +66,8 @@ namespace Services.NasbNiro.Agents.Steps
         public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = CaseLink(item.TargetId), Title = "پیش‌نویس فهرست مدارک پروژه " + item.TargetNumber };
     }
 
-    /// <summary>ENG.PMDL.CHECK (HumanGate): an engineering expert checks a Draft list (he may first replace its lines from a file); the agent never checks.</summary>
+    /// <summary>ENG.PMDL.CHECK (HumanGate): an engineering expert checks a Draft list (he may first replace its lines from a file); the agent never checks. It carries a second kind of item (target type EnCase): a case in the tender preparation with no
+    /// project MDL and no approved standard list to draft from (typical for spare parts and service): the expert creates the list from a file (or the manager asks the CEO for a tender without an MDL).</summary>
     internal sealed class EnPmdlCheckStep : EnPmdlStep
     {
         public override string Code => "ENG.PMDL.CHECK";
@@ -76,13 +77,29 @@ namespace Services.NasbNiro.Agents.Steps
 
         public override async Task<List<AgentWorkItem>> DiscoverAsync(IUnitOfWork uow, DateTime today, CancellationToken ct)
         {
+            List<AgentWorkItem> items = await DraftsAsync(uow, ct);
+            if (items.Count >= ProcStepCommon.Cap) return items;
+            HashSet<string> approved = await EnReferenceRules.ApprovedSetAsync(uow, ct);
+            var fileCases = await uow.Set<EnCase>().AsNoTracking().Where(c => !c.Deleted && c.Status == EnCaseStatus.TenderPreparation
+                    && !uow.Set<EnProjectMdl>().Any(m => m.CaseId == c.Id && !m.Deleted && m.Status != EnProjectMdlStatus.Void)
+                    && !uow.Set<EnMdlPermit>().Any(p => p.CaseId == c.Id && !p.Deleted && p.Status == EnMdlPermitStatus.Approved))
+                .OrderBy(c => c.Id).Select(c => new { c.Id, c.Number, c.ContractId, c.ReferenceCode }).ToListAsync(ct);   // the open tenders are few: filtered in memory so that a case with a standard list never hides one without
+            items.AddRange(fileCases.Where(r => !EnReferenceRules.IsApproved(approved, r.ReferenceCode)).Take(ProcStepCommon.Cap - items.Count)
+                .Select(r => Item("EnCase", r.Id, r.Number, r.ContractId, null, $"برای پروندهٔ {r.Number} فهرست MDL تاییدشدهٔ استاندارد برای شروع نیست؛ فهرست مدارک پروژه (MDL) را از فایل بسازید یا برای مناقصه بدون MDL از مدیرعامل مجوز بگیرید.", EnRoles.Writers)));
+            return items;
+        }
+
+        private static async Task<List<AgentWorkItem>> DraftsAsync(IUnitOfWork uow, CancellationToken ct)
+        {
             var rows = await uow.Set<EnProjectMdl>().AsNoTracking().Where(m => !m.Deleted && m.Status == EnProjectMdlStatus.Draft && m.Lines.Any(l => !l.Deleted && !l.Removed)
                     && uow.Set<EnCase>().Any(c => c.Id == m.CaseId && !c.Deleted && c.Status == EnCaseStatus.TenderPreparation))
                 .OrderBy(m => m.Id).Take(ProcStepCommon.Cap).Select(m => new { m.Id, m.Number, m.CaseId, m.Revision, CaseNumber = uow.Set<EnCase>().Where(c => c.Id == m.CaseId).Select(c => c.Number).FirstOrDefault() }).ToListAsync(ct);
             return rows.Select(r => Item("EnProjectMdl", r.Id, r.Number, null, null, $"فهرست مدارک پروژه {r.Number} (پروندهٔ {r.CaseNumber}، ویرایش {EnText.Num(r.Revision)}) منتظر بررسی کارشناس مهندسی است؛ ردیف‌ها فقط با فایل تغییر می‌کند.", EnRoles.Writers)).ToList();
         }
 
-        public override AgentGateInfo GateInfo(AgentWorkItem item) => new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/cases", Title = "بررسی فهرست مدارک پروژه " + item.TargetNumber };
+        public override AgentGateInfo GateInfo(AgentWorkItem item) => item.TargetType == "EnCase"
+            ? new AgentGateInfo { Roles = EnRoles.Writers, Link = CaseLink(item.TargetId), Title = "ساخت فهرست مدارک پروژه از فایل برای پروندهٔ " + item.TargetNumber }
+            : new AgentGateInfo { Roles = EnRoles.Writers, Link = Root + "/cases", Title = "بررسی فهرست مدارک پروژه " + item.TargetNumber };
     }
 
     /// <summary>ENG.PMDL.APPROVE (HumanGate): the engineering manager (not the checker) approves a Checked list or returns it.</summary>
