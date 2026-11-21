@@ -103,6 +103,7 @@ const ack = (x: any) => runEn(() => postEnHandoverAction({ id: id.value, distrib
           قفل نقطهٔ ب: {{ h.lockMessage }}
         </div>
         <div v-if="h.status === 1" class="en-banner amber" data-test="en-handover-wait">منتظر پذیرش PMO است؛ این درخواست منقضی نمی‌شود و تا تصمیم گرفته شود هشدار می‌ماند.</div>
+        <div v-if="h.previousReturnNumber" class="en-banner amber" data-test="en-previous-return">دور قبل ({{ faDigits(h.previousReturnNumber) }}) را PMO برگرداند: {{ h.previousReturnReason }}<span v-if="h.previousReturnByName || h.previousReturnAtText" class="small inv-muted"> — {{ h.previousReturnByName }}<span v-if="h.previousReturnAtText"> ({{ h.previousReturnAtText }})</span></span></div>
         <div v-if="h.returnReason" class="en-banner amber">برگشت‌خورده توسط {{ h.returnedByName }}: {{ h.returnReason }}</div>
         <div v-if="h.voidReason" class="en-banner red">ابطال‌شده: {{ h.voidReason }}</div>
 
