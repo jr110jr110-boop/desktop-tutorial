@@ -516,6 +516,7 @@ namespace Services.NasbNiro.Engineering
                 {
                     string note = EnText.Clean(dto.Note);
                     why = DecidePermitReason(x, w);
+                    if (why == null && !dto.PermitId.HasValue) why = "شناسهٔ درخواست مجوزی که دیده‌اید ارسال نشد؛ صفحه را دوباره باز کنید و تصمیم بگیرید.";   // the decision is bound to the permit the CEO saw
                     if (why == null && !dto.Approve) why = EnText.ReasonShort(note, EnRules.ReasonMin, "دلیل رد");
                     if (why == null) why = EnText.Over(note, 1000, "توضیح");
                     if (why != null) return EnText.Bad<EnProjectMdlCaseDto>(why);

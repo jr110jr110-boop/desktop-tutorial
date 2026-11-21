@@ -1006,5 +1006,19 @@ namespace MsTests
             Assert.IsFalse(v.CanRecordClientApproval);
             Refused(await MdlAct(host, Comm1, "record-client-approval", d => { d.Id = v.Mdl.Id; d.LetterRef = "نامهٔ ۱"; d.DocumentId = File(host, 2132); }), "منتشر نشده");
         }
+
+        [TestMethod]
+        public async Task The_Ceo_Decision_Is_Bound_To_The_Permit_He_Saw_And_Is_Refused_Without_Its_Id()
+        {
+            AppHost host = Started("pm_permit_id");
+            EnCaseDto c = await Releasable(host);
+            Ok(await MdlAct(host, Mgr1, "request-permit", d => { d.CaseId = c.Id; d.Reason = PermitReason; }));
+            int permit = Ok(await MdlView(host, Mgr1, c.Id)).Permit.Id;
+            StringAssert.Contains(Refused(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.Approve = true; })), "ارسال نشد");
+            Refused(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.PermitId = permit + 99; d.Approve = true; }), "دیگر جاری نیست");
+            Assert.AreEqual(EnMdlPermitStatus.Requested, host.Read(u => u.Set<EnMdlPermit>().Single(p => p.Id == permit).Status));
+            Ok(await MdlAct(host, Ceo, "decide-permit", d => { d.CaseId = c.Id; d.PermitId = permit; d.Approve = true; }));
+            Assert.AreEqual(EnMdlPermitStatus.Approved, host.Read(u => u.Set<EnMdlPermit>().Single(p => p.Id == permit).Status));
+        }
     }
 }
