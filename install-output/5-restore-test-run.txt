@@ -1,0 +1,15 @@
+﻿restore test task result=0
+2026-11-21 13:14:28  Restore test rt-20261121131428 starts (live database IRNNCO, scratch database IRNNCO_RESTORETEST).
+2026-11-21 13:14:28  Latest backup: IRNNCO_20261121_1314.bak.enc (18.2 MB)
+2026-11-21 13:14:29    check decrypt: OK The file-level seal is valid.
+2026-11-21 13:14:30    check restore: OK Restored into IRNNCO_RESTORETEST.
+2026-11-21 13:14:30    check migrations: OK restored 141, live 141
+2026-11-21 13:14:30    check rows:FnAuditLogs: OK backup 723, live 724
+2026-11-21 13:14:30    check rows:InvItems: OK backup 0, live 0
+2026-11-21 13:14:30    check rows:InvLots: OK backup 0, live 0
+2026-11-21 13:14:30    check rows:InvDocuments: OK backup 0, live 0
+2026-11-21 13:14:30    check rows:QaRecords: OK backup 0, live 0
+2026-11-21 13:14:31    check rows:QaMeasurements: OK backup 0, live 0
+2026-11-21 13:14:31    check rows:PcProgressEvents: OK backup 0, live 0
+2026-11-21 13:14:31    check audit-chain: OK entries 723, gaps 0, broken links 0, head 723 equals the live entry
+2026-11-21 13:14:34  Restore test rt-20261121131428: PASSED. Result: D:\INNCO\Backup\restore-test\restore-test-rt-20261121131428.json

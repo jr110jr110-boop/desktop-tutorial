@@ -1,0 +1,157 @@
+
+FullName                                                                    Length  
+--------                                                                    ------  
+D:\INNCO\app                                                                        
+D:\INNCO\Backup                                                                     
+D:\INNCO\certificates                                                               
+D:\INNCO\logs                                                                       
+D:\INNCO\tools                                                                      
+D:\INNCO\admin-seed-done.txt                                                352     
+D:\INNCO\app\cs                                                                     
+D:\INNCO\app\de                                                                     
+D:\INNCO\app\es                                                                     
+D:\INNCO\app\fr                                                                     
+D:\INNCO\app\it                                                                     
+D:\INNCO\app\ja                                                                     
+D:\INNCO\app\ko                                                                     
+D:\INNCO\app\pl                                                                     
+D:\INNCO\app\pt-BR                                                                  
+D:\INNCO\app\ru                                                                     
+D:\INNCO\app\tr                                                                     
+D:\INNCO\app\UploadedDocuments                                                      
+D:\INNCO\app\wwwroot                                                                
+D:\INNCO\app\zh-Hans                                                                
+D:\INNCO\app\zh-Hant                                                                
+D:\INNCO\app\appsettings.Development.json                                   146     
+D:\INNCO\app\appsettings.json                                               17927   
+D:\INNCO\app\appsettings.Production.json                                    1355    
+D:\INNCO\app\AutoMapper.dll                                                 286720  
+D:\INNCO\app\Azure.Core.dll                                                 438856  
+D:\INNCO\app\Azure.Identity.dll                                             365128  
+D:\INNCO\app\Common.dll                                                     37376   
+D:\INNCO\app\Common.pdb                                                     31736   
+D:\INNCO\app\DataLayer.dll                                                  26796032
+D:\INNCO\app\DataLayer.pdb                                                  4169836 
+D:\INNCO\app\DNTPersianUtils.Core.dll                                       347648  
+D:\INNCO\app\Entities.dll                                                   1371648 
+D:\INNCO\app\Entities.pdb                                                   507032  
+D:\INNCO\app\IocConfig.dll                                                  39936   
+D:\INNCO\app\IocConfig.pdb                                                  29440   
+D:\INNCO\app\Microsoft.AspNetCore.Authentication.JwtBearer.dll              52008   
+D:\INNCO\app\Microsoft.AspNetCore.Identity.EntityFrameworkCore.dll          137512  
+D:\INNCO\app\Microsoft.AspNetCore.JsonPatch.dll                             55592   
+D:\INNCO\app\Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll                    69928   
+D:\INNCO\app\Microsoft.Bcl.AsyncInterfaces.dll                              19104   
+D:\INNCO\app\Microsoft.Bcl.Cryptography.dll                                 19248   
+D:\INNCO\app\Microsoft.Data.SqlClient.dll                                   2173336 
+D:\INNCO\app\Microsoft.Data.SqlClient.SNI.dll                               566832  
+D:\INNCO\app\Microsoft.EntityFrameworkCore.Abstractions.dll                 34616   
+D:\INNCO\app\Microsoft.EntityFrameworkCore.dll                              2829152 
+D:\INNCO\app\Microsoft.EntityFrameworkCore.InMemory.dll                     240952  
+D:\INNCO\app\Microsoft.EntityFrameworkCore.Relational.dll                   2194744 
+D:\INNCO\app\Microsoft.EntityFrameworkCore.SqlServer.dll                    642400  
+D:\INNCO\app\Microsoft.Extensions.Caching.SqlServer.dll                     48424   
+D:\INNCO\app\Microsoft.Identity.Client.Broker.dll                           74040   
+D:\INNCO\app\Microsoft.Identity.Client.dll                                  1220960 
+D:\INNCO\app\Microsoft.Identity.Client.Extensions.Msal.dll                  66592   
+D:\INNCO\app\Microsoft.Identity.Client.NativeInterop.dll                    93024   
+D:\INNCO\app\Microsoft.IdentityModel.Abstractions.dll                       19256   
+D:\INNCO\app\Microsoft.IdentityModel.JsonWebTokens.dll                      172344  
+D:\INNCO\app\Microsoft.IdentityModel.Logging.dll                            38200   
+D:\INNCO\app\Microsoft.IdentityModel.Protocols.dll                          54112   
+D:\INNCO\app\Microsoft.IdentityModel.Protocols.OpenIdConnect.dll            137016  
+D:\INNCO\app\Microsoft.IdentityModel.Tokens.dll                             407392  
+D:\INNCO\app\Microsoft.OpenApi.dll                                          242232  
+D:\INNCO\app\Microsoft.SqlServer.Server.dll                                 23976   
+D:\INNCO\app\Microsoft.Win32.SystemEvents.dll                               81168   
+D:\INNCO\app\msalruntime.dll                                                3060576 
+D:\INNCO\app\Newtonsoft.Json.Bson.dll                                       97720   
+D:\INNCO\app\Newtonsoft.Json.dll                                            723368  
+D:\INNCO\app\PersianDateTime.Core.dll                                       13824   
+D:\INNCO\app\Services.dll                                                   18276352
+D:\INNCO\app\Services.pdb                                                   2299824 
+D:\INNCO\app\Swashbuckle.AspNetCore.Swagger.dll                             17920   
+D:\INNCO\app\Swashbuckle.AspNetCore.SwaggerGen.dll                          155136  
+D:\INNCO\app\Swashbuckle.AspNetCore.SwaggerUI.dll                           724480  
+D:\INNCO\app\System.ClientModel.dll                                         232520  
+D:\INNCO\app\System.Configuration.ConfigurationManager.dll                  443176  
+D:\INNCO\app\System.Drawing.Common.dll                                      422672  
+D:\INNCO\app\System.IdentityModel.Tokens.Jwt.dll                            91960   
+D:\INNCO\app\System.Linq.Dynamic.Core.dll                                   247808  
+D:\INNCO\app\System.Memory.Data.dll                                         30472   
+D:\INNCO\app\System.Private.Windows.Core.dll                                1226504 
+D:\INNCO\app\System.Private.Windows.GdiPlus.dll                             169232  
+D:\INNCO\app\System.Security.Cryptography.ProtectedData.dll                 38696   
+D:\INNCO\app\ViewModels.dll                                                 3121152 
+D:\INNCO\app\ViewModels.pdb                                                 1054504 
+D:\INNCO\app\web.config                                                     852     
+D:\INNCO\app\WebApi.deps.json                                               37542   
+D:\INNCO\app\WebApi.dll                                                     1753088 
+D:\INNCO\app\WebApi.exe                                                     162304  
+D:\INNCO\app\WebApi.pdb                                                     248692  
+D:\INNCO\app\WebApi.runtimeconfig.json                                      560     
+D:\INNCO\app\WebApi.staticwebassets.endpoints.json                          53      
+D:\INNCO\app\cs\Microsoft.Data.SqlClient.resources.dll                      257432  
+D:\INNCO\app\de\Microsoft.Data.SqlClient.resources.dll                      267160  
+D:\INNCO\app\es\Microsoft.Data.SqlClient.resources.dll                      259008  
+D:\INNCO\app\fr\Microsoft.Data.SqlClient.resources.dll                      268184  
+D:\INNCO\app\it\Microsoft.Data.SqlClient.resources.dll                      259992  
+D:\INNCO\app\ja\Microsoft.Data.SqlClient.resources.dll                      289216  
+D:\INNCO\app\ko\Microsoft.Data.SqlClient.resources.dll                      267200  
+D:\INNCO\app\pl\Microsoft.Data.SqlClient.resources.dll                      266688  
+D:\INNCO\app\pt-BR\Microsoft.Data.SqlClient.resources.dll                   254912  
+D:\INNCO\app\ru\Microsoft.Data.SqlClient.resources.dll                      344472  
+D:\INNCO\app\tr\Microsoft.Data.SqlClient.resources.dll                      250264  
+D:\INNCO\app\UploadedDocuments\ba8b70aa-56a8-438d-7da7-08df47d10261.txt     25      
+D:\INNCO\app\UploadedDocuments\old-upload.txt                               12      
+D:\INNCO\app\wwwroot\assets                                                         
+D:\INNCO\app\wwwroot\avatars                                                        
+D:\INNCO\app\wwwroot\Documents                                                      
+D:\INNCO\app\wwwroot\favicon.ico                                            118278  
+D:\INNCO\app\wwwroot\index.html                                             431     
+D:\INNCO\app\wwwroot\web.config                                             603     
+D:\INNCO\app\zh-Hans\Microsoft.Data.SqlClient.resources.dll                 225688  
+D:\INNCO\app\zh-Hant\Microsoft.Data.SqlClient.resources.dll                 229312  
+D:\INNCO\Backup\database                                                            
+D:\INNCO\Backup\files                                                               
+D:\INNCO\Backup\keys                                                                
+D:\INNCO\Backup\restore                                                             
+D:\INNCO\Backup\restore-test                                                        
+D:\INNCO\Backup\restore-work                                                        
+D:\INNCO\Backup\backup-log.txt                                              2139    
+D:\INNCO\Backup\database\log                                                        
+D:\INNCO\Backup\database\IRNNCO_20261121_1311.bak.enc                       12836936
+D:\INNCO\Backup\database\IRNNCO_20261121_1312.bak.enc                       18341960
+D:\INNCO\Backup\database\IRNNCO_20261121_1313.bak.enc                       19062856
+D:\INNCO\Backup\database\IRNNCO_20261121_1314.bak.enc                       19062856
+D:\INNCO\Backup\database\IRNNCO_before-restore_20261121_1313.bak.enc        19062856
+D:\INNCO\Backup\database\IRNNCO_pre-update_20261121_1312.bak.enc            18997320
+D:\INNCO\Backup\files\UploadedDocuments                                             
+D:\INNCO\Backup\files\wwwroot                                                       
+D:\INNCO\Backup\files\appsettings.Production.redacted.json                  1243    
+D:\INNCO\Backup\keys\audit-key.sealed.txt                                   870     
+D:\INNCO\Backup\keys\file-encryption.key.dpapi                              294     
+D:\INNCO\Backup\keys\INNCO_BackupCert.cer                                   986     
+D:\INNCO\Backup\keys\INNCO_BackupCert.pvk                                   1788    
+D:\INNCO\Backup\restore-test\restore-test-log.txt                           1145    
+D:\INNCO\Backup\restore-test\restore-test-rt-20261121131428.json            3084    
+D:\INNCO\certificates\innco-pmis.cer                                        839     
+D:\INNCO\logs\hosting-bundle.log                                            40725   
+D:\INNCO\logs\hosting-bundle_000_dotnet_hosting_options_10.0.15_win.msi.log 93040   
+D:\INNCO\logs\hosting-bundle_001_AspNetCoreModuleV2_x64.log                 178490  
+D:\INNCO\logs\hosting-bundle_002_DotNetRedistHost_x64.log                   112890  
+D:\INNCO\logs\hosting-bundle_003_DotNetRedistHost_x86.log                   110012  
+D:\INNCO\logs\hosting-bundle_004_DotNetRedistHostfxr_x64.log                101578  
+D:\INNCO\logs\hosting-bundle_005_DotNetRedistHostfxr_x86.log                98626   
+D:\INNCO\logs\install-20261121-130536.log                                   7530    
+D:\INNCO\logs\install-20261121-131213.log                                   6339    
+D:\INNCO\logs\install-20261121-131321.log                                   7473    
+D:\INNCO\logs\stdout_20261121131121_8256.log                                19631   
+D:\INNCO\logs\stdout_20261121131245_8844.log                                18897   
+D:\INNCO\logs\stdout_20261121131357_5132.log                                16447   
+D:\INNCO\tools\backup-crypto.ps1                                            12676   
+D:\INNCO\tools\backup.ps1                                                   20961   
+D:\INNCO\tools\restore-test.ps1                                             14564   
+
+
+
