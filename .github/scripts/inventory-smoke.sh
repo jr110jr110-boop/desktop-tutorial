@@ -27,9 +27,10 @@ mkdir -p "$OUT"; : > "$R"; : > "$F"
 
 # ENG-E1e: the checks compare with a fixed day (TODAY below), so the run must not cross 00:00 UTC. Between 22:30 and 23:59 UTC wait for the next day first
 # (before the API starts and before any call that stores a date).
-UTC_NOW=$(date -u +%s); UTC_H=$((10#$(date -u +%H))); UTC_M=$((10#$(date -u +%M)))
-if [ $((UTC_H * 60 + UTC_M)) -ge 1350 ]; then
-  WAIT_S=$(( $(date -u -d "tomorrow 00:00:20" +%s) - UTC_NOW ))
+UTC_NOW=$(date -u +%s)   # ONE timestamp: hour, minute and the wait all come from it (several date calls could straddle midnight)
+UTC_SOD=$((UTC_NOW % 86400))
+if [ "$UTC_SOD" -ge 81000 ]; then   # 81000 s = 22:30
+  WAIT_S=$((86400 - UTC_SOD + 20))
   echo "--- waiting $WAIT_S seconds for 00:00 UTC (the checks compare with a fixed day)" | tee -a "$R"
   sleep "$WAIT_S"
 fi
